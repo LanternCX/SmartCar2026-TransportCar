@@ -2,11 +2,12 @@ from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from filters.dual_window_regression_filter import DualWindowRegressionFilter
+from filters.lowpass_filter import LowPassFilter
 import gc
 
 # 配置项
-TICK_MS = 10
-MAX_DUTY = 5000
+TICK_MS = 5
+MAX_DUTY = 10000
 DUTY_STEP = 10
 
 # UART 调试
@@ -38,9 +39,12 @@ dual_filter = DualWindowRegressionFilter(
     tick_ms=TICK_MS,
     long_window=30,
     short_window=8,
-    combine_w=0.65,
-    input_lpf_alpha=0.3,
+    combine_w=0.65
 )
+
+# 输出低通滤波器（对回归融合后的速度做低通）
+output_lpf = LowPassFilter(alpha=0.5)
+input_lpf = LowPassFilter(alpha=0.5)
 
 now_duty = 0
 
@@ -48,7 +52,9 @@ while True:
     if pit_flag:
         led.toggle()
         raw_speed = float(encoder_1.get())
-        smooth_speed, accel, _ = dual_filter.update(raw_speed)
+        smooth_raw_speed = input_lpf.update(raw_speed)
+        fused_speed, accel, _ = dual_filter.update(smooth_raw_speed)
+        smooth_speed = output_lpf.update(fused_speed)
         uart3.write("{:.2f},{:.2f},{:.2f}\r\n".format(smooth_speed, raw_speed, accel))
         pit_flag = False
 

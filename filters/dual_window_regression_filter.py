@@ -1,6 +1,3 @@
-from .lowpass_filter import LowPassFilter
-
-
 class DualWindowRegressionFilter:
     """Dual-window linear regression smoother to reduce overshoot at corners.
 
@@ -14,15 +11,12 @@ class DualWindowRegressionFilter:
         long_window=30,
         short_window=8,
         combine_w=0.65,
-        input_lpf_alpha=0.3,
     ):
         self.tick_ms = tick_ms
         self.long_window = long_window
         self.short_window = short_window
         self.combine_w = combine_w
 
-        self.input_lpf = LowPassFilter(alpha=input_lpf_alpha) if input_lpf_alpha is not None else None
-        self.output_lpf = LowPassFilter(alpha=input_lpf_alpha)
 
         self.sample_idx = 0
 
@@ -93,15 +87,11 @@ class DualWindowRegressionFilter:
         self.s_idx = self.s_count = 0
         self.s_sum_t = self.s_sum_t2 = self.s_sum_y = self.s_sum_ty = 0.0
 
-        if self.input_lpf:
-            self.input_lpf.reset()
+        # no input low-pass to reset
 
     def update(self, raw_value):
-        # Optional input low-pass
-        if self.input_lpf:
-            value = self.input_lpf.update(raw_value)
-        else:
-            value = raw_value
+        # use raw input value
+        value = raw_value
 
         t_ms = self.sample_idx * self.tick_ms
         self.sample_idx += 1
@@ -151,5 +141,5 @@ class DualWindowRegressionFilter:
         fused_slope = slope_short * self.combine_w + slope_long * (1 - self.combine_w)
         accel = fused_slope * 1000.0  # per second
 
-        smooth_out = self.output_lpf.update(fused_speed)
-        return smooth_out, accel, fused_slope
+        # return fused regression speed directly
+        return fused_speed, accel, fused_slope
