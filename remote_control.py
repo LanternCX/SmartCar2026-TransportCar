@@ -2,12 +2,8 @@ from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
-from control.pid_math import (
-    incremental_pi,
-    clamp,
-    compute_pi_from_id,
-    reset_pi_state,
-)
+from control.pid_controller import IncrementalPIDController
+from control.pid_math import clamp, compute_pi_from_id, reset_pi_state
 from control.pid_store import load_pid_params
 import gc
 import math
@@ -44,9 +40,33 @@ motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True)
 
 wheel_states = [
-    build_wheel_state("m", encoder_m, motor_m, TICK_MS, 30, 8),
-    build_wheel_state("l", encoder_l, motor_l, TICK_MS, 30, 8),
-    build_wheel_state("r", encoder_r, motor_r, TICK_MS, 30, 8),
+    build_wheel_state(
+        "m",
+        encoder_m,
+        motor_m,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "l",
+        encoder_l,
+        motor_l,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "r",
+        encoder_r,
+        motor_r,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
 ]
 all_motors = [state["motor"] for state in wheel_states]
 
@@ -58,11 +78,19 @@ rx_buf = ""
 
 
 def pit_handler(_tick):
+    """
+    设置定时中断标志
+
+    :param _tick: 由 ticker 提供的计数（未使用）
+    """
     global pit_flag
     pit_flag = True
 
 
-def load_and_apply_pid():
+def init_pid():
+    """
+    初始化 PID 控制器参数
+    """
     meta = load_pid_params(PID_PARAM_FILE)
     hardness_from_file = meta.get("hardness")
     hardness_used = hardness_from_file or HARDNESS
@@ -78,10 +106,12 @@ def load_and_apply_pid():
         state["id_tau"] = params.get("tau")
         kp_saved = params.get("kp")
         ki_saved = params.get("ki")
+        kp_val = state.get("kp", 0.0)
+        ki_val = state.get("ki", 0.0)
         if kp_saved is not None and ki_saved is not None:
-            state["kp"], state["ki"] = kp_saved, ki_saved
+            kp_val, ki_val = kp_saved, ki_saved
         elif state["id_gain"] and state["id_tau"]:
-            state["kp"], state["ki"] = compute_pi_from_id(
+            kp_val, ki_val = compute_pi_from_id(
                 state["id_gain"],
                 state["id_tau"],
                 hardness_used,
@@ -89,10 +119,19 @@ def load_and_apply_pid():
                 KI_MAX,
                 GAIN_BOOST,
             )
+        state["kp"], state["ki"] = kp_val, ki_val
+        state["controller"].set_gains(kp_val, ki_val)
     return hardness_used
 
 
 def inverse_kinematics(vx, vy, omega):
+    """
+    逆向运动学解算
+
+    :param vx: 横向速度分量
+    :param vy: 纵向速度分量
+    :param omega: 角速度分量
+    """
     sqrt3 = math.sqrt(3)
     # m: front, l: left, r: right (与原脚本 motor_1/3/4 对应)
     vl = (vx / 3.0) + (sqrt3 / 3.0) * vy + (omega / 3.0)
@@ -111,6 +150,11 @@ def inverse_kinematics(vx, vy, omega):
 
 
 def parse_command(cmd_str):
+    """
+    解析命令字符串
+
+    :param cmd_str: 命令字符串，格式为 "vx,vy,omega" 或 "vx vy omega"
+    """
     cmd_str = cmd_str.strip()
     if not cmd_str:
         return None
@@ -134,6 +178,12 @@ def parse_command(cmd_str):
 
 
 def apply_command(cmd):
+    """
+    应用解析后的命令并设置目标速度
+
+    :param cmd: 包含 vx, vy, omega 的命令字典
+    """
+
     global target_speeds, last_cmd
     if not cmd:
         return
@@ -156,6 +206,8 @@ def apply_command(cmd):
 
 
 def print_help():
+    """打印串口帮助信息"""
+
     uart3.write("\r\n=== Three-wheel omni control ===\r\n")
     uart3.write("cmd: vx,vy,omega (ints)\r\n")
     uart3.write("range: -%d ~ %d\r\n" % (V_CMD_MAX, V_CMD_MAX))
@@ -167,7 +219,7 @@ pit1.capture_list(*[state["encoder"] for state in wheel_states])
 pit1.callback(pit_handler)
 pit1.start(TICK_MS)
 
-load_and_apply_pid()
+init_pid()
 print_help()
 uart3.write("ready\r\n")
 
@@ -191,12 +243,15 @@ while True:
                     -TARGET_SPEED_MAX,
                     TARGET_SPEED_MAX,
                 )
-                duty_cmd = incremental_pi(state, tgt, dt_s, MAX_DUTY)
+                duty_cmd = state["controller"].update(
+                    tgt, state["filtered_speed"], dt_s
+                )
+                state["duty"] = duty_cmd
                 state["motor"].duty(int(duty_cmd))
             else:
-                state["motor"].duty(0)
+                state["controller"].reset()
                 state["duty"] = 0.0
-                state["prev_err"] = 0.0
+                state["motor"].duty(0)
 
         sample = ",".join(
             "{:.2f}".format(v)

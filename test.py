@@ -2,7 +2,8 @@ from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
-from control.pid_math import incremental_pi, clamp, compute_pi_from_id
+from control.pid_controller import IncrementalPIDController
+from control.pid_math import clamp, compute_pi_from_id
 from control.pid_store import load_pid_params
 import gc
 
@@ -38,9 +39,33 @@ motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert
 
 
 wheel_states = [
-    build_wheel_state("m", encoder_m, motor_m, TICK_MS, 30, 8),
-    build_wheel_state("l", encoder_l, motor_l, TICK_MS, 30, 8),
-    build_wheel_state("r", encoder_r, motor_r, TICK_MS, 30, 8),
+    build_wheel_state(
+        "m",
+        encoder_m,
+        motor_m,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "l",
+        encoder_l,
+        motor_l,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "r",
+        encoder_r,
+        motor_r,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
 ]
 all_motors = [state["motor"] for state in wheel_states]
 
@@ -71,10 +96,12 @@ def load_and_apply_pid():
         # 优先使用文件中已有的 kp/ki；如缺失则根据辨识值重新计算
         kp_saved = params.get("kp")
         ki_saved = params.get("ki")
+        kp_val = state.get("kp", 0.0)
+        ki_val = state.get("ki", 0.0)
         if kp_saved is not None and ki_saved is not None:
-            state["kp"], state["ki"] = kp_saved, ki_saved
+            kp_val, ki_val = kp_saved, ki_saved
         elif state["id_gain"] and state["id_tau"]:
-            state["kp"], state["ki"] = compute_pi_from_id(
+            kp_val, ki_val = compute_pi_from_id(
                 state["id_gain"],
                 state["id_tau"],
                 hardness_used,
@@ -82,6 +109,8 @@ def load_and_apply_pid():
                 KI_MAX,
                 GAIN_BOOST,
             )
+        state["kp"], state["ki"] = kp_val, ki_val
+        state["controller"].set_gains(kp_val, ki_val)
     return hardness_used
 
 
@@ -111,11 +140,14 @@ while True:
                 tgt = clamp(
                     target_speeds.get(state["name"], 0.0), 0.0, TARGET_SPEED_MAX
                 )
-                duty_cmd = incremental_pi(state, tgt, dt_s, MAX_DUTY)
+                duty_cmd = state["controller"].update(
+                    tgt, state["filtered_speed"], dt_s
+                )
+                state["duty"] = duty_cmd
                 state["motor"].duty(int(duty_cmd))
             else:
+                state["controller"].reset()
                 state["duty"] = 0.0
-                state["prev_err"] = 0.0
                 state["motor"].duty(0)
 
         sample = ",".join(

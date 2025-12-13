@@ -1,8 +1,18 @@
 from filters.dual_window_regression_filter import DualWindowRegressionFilter
 from filters.lowpass_filter import LowPassFilter
+from control.pid_controller import IncrementalPIDController
 
 
-def build_wheel_state(name, encoder_obj, motor_obj, tick_ms, long_window, short_window):
+def build_wheel_state(
+    name,
+    encoder_obj,
+    motor_obj,
+    tick_ms,
+    long_window,
+    short_window,
+    pid_controller=None,
+):
+    controller = pid_controller or IncrementalPIDController()
     return {
         "name": name,
         "encoder": encoder_obj,
@@ -18,9 +28,9 @@ def build_wheel_state(name, encoder_obj, motor_obj, tick_ms, long_window, short_
         "raw_speed": 0.0,
         "filtered_speed": 0.0,
         "duty": 0.0,
+        "controller": controller,
         "kp": 0.0,
         "ki": 0.0,
-        "prev_err": 0.0,
         "id_gain": None,
         "id_tau": None,
     }

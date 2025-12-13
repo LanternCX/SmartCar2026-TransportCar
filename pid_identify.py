@@ -2,6 +2,7 @@ from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
+from control.pid_controller import IncrementalPIDController
 from control.pid_math import compute_pi_from_id, reset_pi_state
 from control.pid_store import save_pid_params
 from control.ident_tools import (
@@ -45,9 +46,33 @@ motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert
 
 
 wheel_states = [
-    build_wheel_state("m", encoder_m, motor_m, TICK_MS, 30, 8),
-    build_wheel_state("l", encoder_l, motor_l, TICK_MS, 30, 8),
-    build_wheel_state("r", encoder_r, motor_r, TICK_MS, 30, 8),
+    build_wheel_state(
+        "m",
+        encoder_m,
+        motor_m,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "l",
+        encoder_l,
+        motor_l,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
+    build_wheel_state(
+        "r",
+        encoder_r,
+        motor_r,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+    ),
 ]
 all_motors = [state["motor"] for state in wheel_states]
 
@@ -118,9 +143,11 @@ while True:
                     state["id_gain"] = g
                     state["id_tau"] = tau
                     if g and tau:
-                        state["kp"], state["ki"] = compute_pi_from_id(
+                        kp, ki = compute_pi_from_id(
                             g, tau, HARDNESS, KP_MAX, KI_MAX, GAIN_BOOST
                         )
+                        state["kp"], state["ki"] = kp, ki
+                        state["controller"].set_gains(kp, ki)
                 reset_pi_state(wheel_states)
                 identifying = False
                 save_pid_params(PID_PARAM_FILE, wheel_states, HARDNESS)

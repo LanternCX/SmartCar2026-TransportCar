@@ -16,6 +16,11 @@ def save_pid_params(path, states, hardness):
 
 
 def load_pid_params(path):
+    """
+    从路径中加载 PID 参数
+
+    :param path: Description
+    """
     meta = {"hardness": None, "params": {}}
     try:
         f = io.open(path, "r")
