@@ -40,8 +40,6 @@ def build_wheel_state(
         "filtered_speed": 0.0,
         "duty": 0.0,
         "controller": controller,
-        "kp": 0.0,
-        "ki": 0.0,
         "id_gain": None,
         "id_tau": None,
     }

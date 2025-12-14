@@ -3,27 +3,48 @@ from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController
+from control.pid_store import load_ident_params
 from control.pid_math import clamp
+from filters.spike_filter import SpikeMedianFilter
+from filters.diff_limit_filter import DiffLimitFilter
 import gc
 
 
 # 采样/控制周期 (ms)
 TICK_MS = 5
 # 占空比上限，匹配期望 2000-5000 区间
-MAX_DUTY = 5000
+MAX_DUTY = 10000
 # 默认目标速度
-TARGET_SPEEDS = {"m": 5.0, "l": 5.0, "r": 5.0}
+TARGET_SPEEDS = {"m": 0.0, "l": -5.0, "r": 5.0}
 # 目标速度安全上限
 TARGET_SPEED_MAX = 30.0
 # 参与闭环的电机
-# ACTIVE_WHEELS = ("m", "l", "r")
-ACTIVE_WHEELS = ("l",)
+ACTIVE_WHEELS = ("m", "l", "r")
+# ACTIVE_WHEELS = ("r",)
 
-SPEED_PID_MAP = {
-    "m": (600, 100, 0.00),
-    "l": (3000, 300, 0.02),
-    "r": (12.0, 0.6, 0.02),
+# 辨识参数文件
+IDENT_RESULTS_FILE = "/flash/ident_params.txt"
+
+# PID_MAP = {
+#     "m": (100, 500, 1),
+#     "l": (100, 500, 1),
+#     "r": (100, 500, 1),
+# }
+
+PID_MAP = {
+    "m": (0, 0, 0),
+    "l": (0, 0, 0),
+    "r": (0, 0, 0),
 }
+
+
+def load_ident_lookup(path):
+    """从文件加载辨识的 (gain, tau) 映射"""
+    meta = load_ident_params(path)
+    lookup = {}
+    for name, vals in meta.items():
+        lookup[name] = (vals.get("gain"), vals.get("tau"))
+    return lookup
 
 
 uart3 = UART(2)
@@ -44,35 +65,33 @@ motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False)
 
 
-wheel_states = [
-    build_wheel_state(
-        "m",
-        encoder_m,
-        motor_m,
-        TICK_MS,
-        30,
-        8,
-        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
-    ),
-    build_wheel_state(
-        "l",
-        encoder_l,
-        motor_l,
-        TICK_MS,
-        30,
-        8,
-        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
-    ),
-    build_wheel_state(
-        "r",
-        encoder_r,
-        motor_r,
-        TICK_MS,
-        30,
-        8,
-        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
-    ),
-]
+ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
+
+wheel_states = []
+for name, enc, mot in (
+    ("m", encoder_m, motor_m),
+    ("l", encoder_l, motor_l),
+    ("r", encoder_r, motor_r),
+):
+    gain_tau = ident_lookup.get(name, (None, None))
+    controller = SpeedPIDController(
+        output_limit=MAX_DUTY, plant_gain=gain_tau[0], plant_tau=gain_tau[1]
+    )
+    wheel_states.append(
+        build_wheel_state(
+            name,
+            enc,
+            mot,
+            TICK_MS,
+            30,
+            8,
+            pid_controller=controller,
+        )
+    )
+# 替换输入端滤波为中值滤波以削弱尖刺
+for state in wheel_states:
+    state["input_lpf"] = SpikeMedianFilter(window=5)
+    state["diff_filter"] = DiffLimitFilter(max_delta=5.0)
 all_motors = [state["motor"] for state in wheel_states]
 
 pit_flag = False
@@ -88,9 +107,14 @@ def pit_handler(tick):
 def init_pid():
     """初始化速度环 PID 参数"""
     for state in wheel_states:
-        kp_val, ki_val, ki2_val = SPEED_PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
+        kp_val, ki_val, ki2_val = PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
         state["kp"], state["ki"] = kp_val, ki_val
         state["controller"].set_gains(kp_val, ki_val, ki2_val)
+        # 同步辨识出的模型参数到状态，便于调试查看
+        state["id_gain"], state["id_tau"] = (
+            state["controller"].plant_gain,
+            state["controller"].plant_tau,
+        )
 
 
 pit1 = ticker(1)
@@ -109,6 +133,7 @@ while True:
             raw = float(state["encoder"].get())
             state["raw_speed"] = raw
             smooth_raw = state["input_lpf"].update(raw)
+            smooth_raw = state["diff_filter"].update(smooth_raw)
             fused_speed, _, _ = state["dual_filter"].update(smooth_raw)
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
@@ -117,7 +142,9 @@ while True:
         for state in wheel_states:
             if state["name"] in ACTIVE_WHEELS:
                 tgt = clamp(
-                    target_speeds.get(state["name"], 0.0), 0.0, TARGET_SPEED_MAX
+                    target_speeds.get(state["name"], 0.0),
+                    -TARGET_SPEED_MAX,
+                    TARGET_SPEED_MAX,
                 )
                 duty_cmd = state["controller"].update(
                     tgt, state["filtered_speed"], dt_s

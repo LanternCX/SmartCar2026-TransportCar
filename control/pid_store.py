@@ -15,6 +15,44 @@ def save_pid_params(path, states, hardness):
         f.close()
 
 
+def save_ident_params(path, states):
+    f = io.open(path, "w")
+    try:
+        for state in states:
+            gain = state.get("id_gain")
+            tau = state.get("id_tau")
+            if gain is None or tau is None:
+                continue
+            f.write("%s %.6f %.6f\n" % (state["name"], gain, tau))
+    finally:
+        f.close()
+
+
+def load_ident_params(path):
+    meta = {}
+    try:
+        f = io.open(path, "r")
+    except OSError:
+        return meta
+
+    try:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            name = parts[0]
+            gain = float(parts[1])
+            tau = float(parts[2])
+            meta[name] = {"gain": gain, "tau": tau}
+    finally:
+        f.close()
+
+    return meta
+
+
 def load_pid_params(path):
     """
     从路径中加载 PID 参数

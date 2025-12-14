@@ -71,7 +71,7 @@ def identify_wheel(samples, step_duty):
             den = sum(x * x for x in xs)
             if den > 0 and num < 0:
                 tau_est = -den / num
-                tau = max(tau_est, 0.01)
+                tau = max(tau_est, 0.001)
 
     if tau is None:
         return None, None

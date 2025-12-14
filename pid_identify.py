@@ -4,7 +4,7 @@ from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
 from control.pid_controller import IncrementalPIDController
 from control.pid_math import compute_pi_from_id, reset_pi_state
-from control.pid_store import save_pid_params
+from control.pid_store import save_pid_params, save_ident_params
 from control.ident_tools import (
     create_ident_buffers,
     push_ident_sample,
@@ -25,6 +25,7 @@ KP_MAX = 200.0  # KP 安全上限（降低防止过激）
 KI_MAX = 20000.0  # KI 安全上限（降低防止过激）
 GAIN_BOOST = 0.5  # 额外增益倍数（降低整体环路增益）
 PID_PARAM_FILE = "/flash/pid_params.txt"  # 保存位置
+IDENT_RESULTS_FILE = "/flash/ident_params.txt"  # 记录 tau/gain
 
 
 uart3 = UART(2)
@@ -123,7 +124,7 @@ while True:
                     push_ident_sample(
                         state["name"],
                         t_ms,
-                        state["filtered_speed"],
+                        state["filtered_speed"] / 3,
                         ident_samples,
                         IDENT_MAX_SAMPLES,
                     )
@@ -151,6 +152,7 @@ while True:
                 reset_pi_state(wheel_states)
                 identifying = False
                 save_pid_params(PID_PARAM_FILE, wheel_states, HARDNESS)
+                save_ident_params(IDENT_RESULTS_FILE, wheel_states)
                 uart3.write("id_done\r\n")
                 pit1.stop()
                 break
