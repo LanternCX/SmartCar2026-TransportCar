@@ -1,11 +1,11 @@
 from control.pid_math import clamp
 
 
-"""PID 控制器模块：提供增量式和位置式 PID 控制器，支持 P/I/D 三项增益。"""
+"""PID 控制器模块"""
 
 
 class PIDControllerBase:
-    """PID 控制器基类，保存输出限幅和增益参数。"""
+    """PID 控制器基类"""
 
     def __init__(self, output_limit=None):
         self.output_limit = output_limit
@@ -13,8 +13,13 @@ class PIDControllerBase:
         self.ki = 0.0
         self.kd = 0.0
 
-    def set_gains(self, kp, ki, kd=0.0):
-        """设置 PID 增益；兼容旧接口，可省略 `kd`。"""
+    def set_gains(self, kp, ki=0.0, kd=0.0):
+        """`
+        设置 PID 参数，可选微分项。
+        :param kp: 比例增益
+        :param ki: 积分增益
+        :param kd: 微分增益
+        """
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -26,10 +31,7 @@ class PIDControllerBase:
 
 
 class IncrementalPIDController(PIDControllerBase):
-    """增量式 PID 控制器（保存输出的增量更新）。
-
-    使用二阶差分近似实现 D 项增量，适合在累加输出场景下使用。
-    """
+    """增量式 PID 控制器"""
 
     def __init__(self, output_limit=None):
         super().__init__(output_limit=output_limit)
@@ -37,11 +39,16 @@ class IncrementalPIDController(PIDControllerBase):
         self.prev_error = 0.0
         self.prev_prev_error = 0.0
 
-    def update(self, target, measurement, dt_s):
-        """根据目标值和测量值以及采样间隔更新控制输出并返回当前输出。"""
+    def update(self, target, now, dt_s=1.0):
+        """
+        计算 PID 输出
+        :param target: 目标值
+        :param now: 当前值
+        :param dt_s: 时间增量
+        """
         if dt_s <= 0:
-            dt_s = 1e-6
-        err = target - measurement
+            dt_s = 1
+        err = target - now
         # P 项增量
         dp = self.kp * (err - self.prev_error)
         # I 项增量
@@ -58,26 +65,30 @@ class IncrementalPIDController(PIDControllerBase):
         return self.output
 
     def reset(self):
-        """重置控制器内部状态。"""
+        """重置控制器内部状态"""
         self.output = 0.0
         self.prev_error = 0.0
         self.prev_prev_error = 0.0
 
 
 class PositionalPIDController(PIDControllerBase):
-    """位置式 PID 控制器，输出直接由 P/I/D 求和得到。"""
+    """位置式 PID 控制器"""
 
-    def __init__(self, output_limit=None, integral_limit=None):
+    def __init__(self, output_limit=None):
         super().__init__(output_limit=output_limit)
-        self.integral_limit = integral_limit
         self.integral = 0.0
         self.prev_error = 0.0
 
-    def update(self, target, measurement, dt_s):
-        """根据目标值、测量值和采样间隔计算并返回 P+I+D 输出。"""
+    def update(self, target, now, dt_s=1.0):
+        """
+        计算 PID 输出
+        :param target: 目标值
+        :param now: 当前值
+        :param dt_s: 时间增量
+        """
         if dt_s <= 0:
-            dt_s = 1e-6
-        err = target - measurement
+            dt_s = 1
+        err = target - now
         # 积分项
         self.integral += err * dt_s
         if self.integral_limit is not None:
@@ -92,6 +103,53 @@ class PositionalPIDController(PIDControllerBase):
         return self.clamp_output(output)
 
     def reset(self):
-        """重置位置式控制器的积分及历史误差。"""
+        """重置控制器内部状态"""
         self.integral = 0.0
+        self.prev_error = 0.0
+
+
+class SpeedPIDController(PIDControllerBase):
+    """带有二次项的增量式 PI 控制器"""
+
+    def __init__(self, output_limit=None, ki2=0.0):
+        super().__init__(output_limit=output_limit)
+        self.output = 0.0
+        self.prev_error = 0.0
+        self.ki2 = ki2
+
+    def set_gains(self, kp, ki, ki2=0.0):
+        """
+        设置 PID 参数
+        :param kp: 比例增益
+        :param ki: 积分增益
+        :param ki2: 二次积分增益
+        """
+        super().set_gains(kp, ki)
+        self.ki2 = ki2
+
+    def update(self, target, now, dt_s=1.0):
+        """
+        计算 PID 输出
+        :param target: 目标值
+        :param now: 当前值
+        :param dt_s: 时间增量
+        """
+        if dt_s <= 0:
+            dt_s = 1
+        err = target - now
+        # P 项增量
+        dp = self.kp * (err - self.prev_error)
+        # I 项增量
+        di = self.ki * err * dt_s
+        # 二次项 I2 增量
+        i2 = self.ki2 * (err * err)
+
+        du = dp + di + i2
+        self.output = self.clamp_output(self.output + du)
+        self.prev_error = err
+        return self.output
+
+    def reset(self):
+        """重置控制器内部状态"""
+        self.output = 0.0
         self.prev_error = 0.0

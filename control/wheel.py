@@ -12,6 +12,17 @@ def build_wheel_state(
     short_window,
     pid_controller=None,
 ):
+    """
+    构造轮子状态
+
+    :param name: 轮子名称
+    :param encoder_obj: 编码器对象
+    :param motor_obj: 电机对象
+    :param tick_ms: 采样周期（毫秒）
+    :param long_window: 长窗口大小
+    :param short_window: 短窗口大小
+    :param pid_controller: PID 控制器对象（可选）
+    """
     controller = pid_controller or IncrementalPIDController()
     return {
         "name": name,

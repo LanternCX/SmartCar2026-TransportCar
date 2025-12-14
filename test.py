@@ -2,22 +2,28 @@ from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
-from control.pid_controller import IncrementalPIDController
-from control.pid_math import clamp, compute_pi_from_id
-from control.pid_store import load_pid_params
+from control.pid_controller import SpeedPIDController
+from control.pid_math import clamp
 import gc
 
 
-TICK_MS = 5  # 采样/控制周期 (ms)
-MAX_DUTY = 5000  # 占空比上限，匹配期望 2000-5000 区间
-TARGET_SPEEDS = {"m": 5.0, "l": 5.0, "r": 5.0}  # 默认目标速度
-TARGET_SPEED_MAX = 30.0  # 目标速度安全上限
-ACTIVE_WHEELS = ("m", "l", "r")  # 参与闭环的电机
-HARDNESS = "soft"  # 若文件无硬度则回退此值
-KP_MAX = 200.0  # 与辨识脚本一致的安全上限
-KI_MAX = 20000.0
-GAIN_BOOST = 0.5  # 与辨识脚本保持一致
-PID_PARAM_FILE = "/flash/pid_params.txt"  # PID 参数存储位置
+# 采样/控制周期 (ms)
+TICK_MS = 5
+# 占空比上限，匹配期望 2000-5000 区间
+MAX_DUTY = 5000
+# 默认目标速度
+TARGET_SPEEDS = {"m": 5.0, "l": 5.0, "r": 5.0}
+# 目标速度安全上限
+TARGET_SPEED_MAX = 30.0
+# 参与闭环的电机
+# ACTIVE_WHEELS = ("m", "l", "r")
+ACTIVE_WHEELS = ("l",)
+
+SPEED_PID_MAP = {
+    "m": (600, 100, 0.00),
+    "l": (3000, 300, 0.02),
+    "r": (12.0, 0.6, 0.02),
+}
 
 
 uart3 = UART(2)
@@ -46,7 +52,7 @@ wheel_states = [
         TICK_MS,
         30,
         8,
-        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
     ),
     build_wheel_state(
         "l",
@@ -55,7 +61,7 @@ wheel_states = [
         TICK_MS,
         30,
         8,
-        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
     ),
     build_wheel_state(
         "r",
@@ -64,7 +70,7 @@ wheel_states = [
         TICK_MS,
         30,
         8,
-        pid_controller=IncrementalPIDController(output_limit=MAX_DUTY),
+        pid_controller=SpeedPIDController(output_limit=MAX_DUTY),
     ),
 ]
 all_motors = [state["motor"] for state in wheel_states]
@@ -79,39 +85,12 @@ def pit_handler(tick):
     pit_flag = True
 
 
-def load_and_apply_pid():
-    meta = load_pid_params(PID_PARAM_FILE)
-    hardness_from_file = meta.get("hardness")
-    hardness_used = hardness_from_file or HARDNESS
-    if not meta.get("params"):
-        uart3.write("pid_file_missing\r\n")
-        return hardness_used
-
+def init_pid():
+    """初始化速度环 PID 参数"""
     for state in wheel_states:
-        params = meta["params"].get(state["name"])
-        if not params:
-            continue
-        state["id_gain"] = params.get("gain")
-        state["id_tau"] = params.get("tau")
-        # 优先使用文件中已有的 kp/ki；如缺失则根据辨识值重新计算
-        kp_saved = params.get("kp")
-        ki_saved = params.get("ki")
-        kp_val = state.get("kp", 0.0)
-        ki_val = state.get("ki", 0.0)
-        if kp_saved is not None and ki_saved is not None:
-            kp_val, ki_val = kp_saved, ki_saved
-        elif state["id_gain"] and state["id_tau"]:
-            kp_val, ki_val = compute_pi_from_id(
-                state["id_gain"],
-                state["id_tau"],
-                hardness_used,
-                KP_MAX,
-                KI_MAX,
-                GAIN_BOOST,
-            )
+        kp_val, ki_val, ki2_val = SPEED_PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
         state["kp"], state["ki"] = kp_val, ki_val
-        state["controller"].set_gains(kp_val, ki_val)
-    return hardness_used
+        state["controller"].set_gains(kp_val, ki_val, ki2_val)
 
 
 pit1 = ticker(1)
@@ -119,7 +98,7 @@ pit1.capture_list(*[state["encoder"] for state in wheel_states])
 pit1.callback(pit_handler)
 pit1.start(TICK_MS)
 
-load_and_apply_pid()
+init_pid()
 
 while True:
     if pit_flag:
