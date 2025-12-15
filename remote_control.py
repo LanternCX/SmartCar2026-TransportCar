@@ -19,18 +19,25 @@ MAX_DUTY = 10000
 V_CMD_MAX = 1e3
 # 轮速目标限幅
 TARGET_SPEED_MAX = 30.0
-# 激活的轮子
+# 启用的轮子，调试用
 ACTIVE_WHEELS = ("m", "l", "r")
-# 角速度滤波与回正控制参数
-GYRO_AXIS_Z = 5
+
+# 偏航角低通参数
 GYRO_LPF_ALPHA = 0.2
+# 角速度轴索引
+GYRO_AXIS_Z = 5
+# 偏航角 PD 控制参数
 YAW_KP = 0.01
 YAW_KD = 0.0005
+# 自动回正最大角速度
 AUTO_OMEGA_MAX = 15.0
+# 保持静止模式速度阈值
 HOLD_SPEED_EPS = 0.01
 
+# 系统辨识参数文件路径
 IDENT_RESULTS_FILE = "/flash/ident_params.txt"
 
+# 三轮 PID 表
 PID_MAP = {
     "m": (100, 500, 1),
     "l": (100, 500, 1),
@@ -39,7 +46,11 @@ PID_MAP = {
 
 
 def load_ident_lookup(path):
-    """Load gain/tau pairs derived from the identification run."""
+    """
+    从文件加载辨识的 (gain, tau) 映射
+    :param path: 文件路径
+    :return: 名称到 (gain, tau) 的映射字典
+    """
     meta = load_ident_params(path)
     lookup = {}
     for name, vals in meta.items():
@@ -47,16 +58,22 @@ def load_ident_lookup(path):
     return lookup
 
 
+# 核心板 LED
 led = Pin("C4", Pin.OUT, value=True)
+# 停止开关
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
+# 停止开关初始状态
 switch2_init = switch2.value()
 
+# 远程控制串口初始化
 uart3 = UART(2)
 uart3.init(115200)
 
-# wheel mapping: m=center, l=left, r=right
+# 后轮编码器
 encoder_m = encoder("D15", "D16", True)
+# 左轮编码器
 encoder_l = encoder("C0", "C1", True)
+# 右轮编码器
 encoder_r = encoder("C2", "C3", True)
 
 # IMU 660RAX 初始化
@@ -70,18 +87,21 @@ heading_est = 0.0
 # 目标航向角
 heading_target = 0.0
 
-# motor 1
+# 后轮
 motor_m = MOTOR_CONTROLLER(
     MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False
 )
-# motor 3
+# 左轮
 motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False)
-# motor 4
+# 右轮
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True)
 
+# 辨识参数
 ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
+# 三轮状态列表
 wheel_states = []
+# 构造三轮状态列表
 for name, enc, mot in (
     ("m", encoder_m, motor_m),
     ("l", encoder_l, motor_l),
@@ -91,28 +111,29 @@ for name, enc, mot in (
     controller = SpeedPIDController(
         output_limit=MAX_DUTY, plant_gain=gain_tau[0], plant_tau=gain_tau[1]
     )
-    wheel_states.append(
-        build_wheel_state(
-            name,
-            enc,
-            mot,
-            TICK_MS,
-            30,
-            8,
-            pid_controller=controller,
-        )
-    )
 
-for state in wheel_states:
+    state = build_wheel_state(
+        name,
+        enc,
+        mot,
+        TICK_MS,
+        30,
+        8,
+        pid_controller=controller,
+    )
     state["input_lpf"] = SpikeMedianFilter(window=5)
     state["diff_filter"] = DiffLimitFilter(max_delta=5.0)
+    wheel_states.append(state)
 
-all_motors = [state["motor"] for state in wheel_states]
-
+# 定时中断标志
 pit_flag = False
+# 定时中断计数
 tick_count = 0
+# 目标速度
 target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
+# 上次命令
 last_cmd = {"vx": 0, "vy": 0, "omega": 0}
+# 串口接收缓冲
 rx_buf = ""
 
 
@@ -215,39 +236,43 @@ def apply_command(cmd):
     )
 
 
-def print_help():
-    """打印串口帮助信息"""
-
-    uart3.write("\r\n=== Three-wheel omni control ===\r\n")
-    uart3.write("cmd: vx,vy,omega (ints)\r\n")
-    uart3.write("range: -%d ~ %d\r\n" % (V_CMD_MAX, V_CMD_MAX))
-    uart3.write("example: 500,0,0 or 0 0 300\r\n\r\n")
-
-
+# 实例化 ticker 模块（周期中断）
 pit1 = ticker(1)
+# 配置捕获编码器和 IMU 数据
 capture_items = [state["encoder"] for state in wheel_states]
 capture_items.append(imu)
+# 将各模块挂载到 ticker 的 capture_list 中
 pit1.capture_list(*capture_items)
+# 绑定 ticker 回调函数
 pit1.callback(pit_handler)
+# 以 TICK_MS 周期启动 ticker 模块
 pit1.start(TICK_MS)
 
+# 初始化 PID 控制器参数
 init_pid()
-print_help()
-uart3.write("ready\r\n")
 
 while True:
+    # 处理定时中断
     if pit_flag:
+        # 定时器中断计数
         tick_count += 1
+        # 切换 LED 状态
         led.toggle()
 
+        # 时间增量（秒）
         dt_s = TICK_MS / 1000.0
 
+        # 三轮编码器读取并滤波
         for state in wheel_states:
             raw = float(state["encoder"].get())
             state["raw_speed"] = raw
+            # 中值滤波
             smooth_raw = state["input_lpf"].update(raw)
+            # 差分限幅
             smooth_raw = state["diff_filter"].update(smooth_raw)
+            # 双窗线性回归滤波
             fused_speed, _, _ = state["dual_filter"].update(smooth_raw)
+            # 低通滤波
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
         # 角速度滤波与姿态回正控制
@@ -255,9 +280,10 @@ while True:
         yaw_rate = gyro_lpf.update(yaw_raw)
         heading_est += yaw_rate * dt_s
 
-        hold_mode = abs(last_cmd.get("omega", 0)) < HOLD_SPEED_EPS
-
+        # 处理角速度
         omega_cmd = last_cmd.get("omega", 0.0)
+        # 只有在角速度较低时才启用自动回正
+        hold_mode = abs(last_cmd.get("omega", 0)) < HOLD_SPEED_EPS
         if hold_mode:
             yaw_err = heading_target - heading_est
             omega_auto = clamp(
@@ -279,6 +305,7 @@ while True:
         target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
         target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
 
+        # 三轮速度环闭环控制
         for state in wheel_states:
             if state["name"] in ACTIVE_WHEELS:
                 tgt = clamp(
@@ -296,6 +323,7 @@ while True:
                 state["duty"] = 0.0
                 state["motor"].duty(0)
 
+        # 打印串口调试信息
         sample = ",".join(
             "{:.2f}".format(v)
             for state in wheel_states
@@ -305,6 +333,7 @@ while True:
 
         pit_flag = False
 
+    # 处理串口命令
     buf_len = uart3.any()
     if buf_len:
         try:
@@ -322,11 +351,12 @@ while True:
         except Exception as exc:
             uart3.write("ERR %s\r\n" % exc)
 
+    # 处理停止开关
     if switch2.value() != switch2_init:
         pit1.stop()
         reset_pi_state(wheel_states)
-        for motor in all_motors:
-            motor.duty(0)
+        for state in wheel_states:
+            state["motor"].duty(0)
         uart3.write("stop\r\n")
         break
 

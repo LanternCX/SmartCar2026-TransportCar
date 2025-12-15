@@ -14,18 +14,30 @@ from control.ident_tools import (
 import gc
 
 
-TICK_MS = 5  # 采样/控制周期 (ms)
-MAX_DUTY = 10000  # 占空比上限
-IDENT_STEP_DUTY = 5000  # 辨识阶跃幅值
-IDENT_DURATION_MS = 4000  # 辨识持续时间
-IDENT_MAX_SAMPLES = min(IDENT_DURATION_MS // TICK_MS + 10, 600)  # 环形缓存深度
-TARGET_WHEELS = ("m", "l", "r")  # 参与辨识的电机
-HARDNESS = "soft"  # IMC 硬度（越小越激进）
-KP_MAX = 200.0  # KP 安全上限（降低防止过激）
-KI_MAX = 20000.0  # KI 安全上限（降低防止过激）
-GAIN_BOOST = 0.5  # 额外增益倍数（降低整体环路增益）
-PID_PARAM_FILE = "/flash/pid_params.txt"  # 保存位置
-IDENT_RESULTS_FILE = "/flash/ident_params.txt"  # 记录 tau/gain
+# 采样/控制周期 (ms)
+TICK_MS = 5
+# 占空比上限
+MAX_DUTY = 10000
+# 辨识阶跃幅值
+IDENT_STEP_DUTY = 5000
+# 辨识持续时间
+IDENT_DURATION_MS = 4000
+# 环形缓存深度
+IDENT_MAX_SAMPLES = min(IDENT_DURATION_MS // TICK_MS + 10, 600)
+# 参与辨识的电机
+TARGET_WHEELS = ("m", "l", "r")
+# IMC 硬度（越小越激进）
+HARDNESS = "soft"
+# KP 安全上限（降低防止过激）
+KP_MAX = 200.0
+# KI 安全上限（降低防止过激）
+KI_MAX = 20000.0
+# 额外增益倍数（降低整体环路增益）
+GAIN_BOOST = 0.5
+# 保存位置
+PID_PARAM_FILE = "/flash/pid_params.txt"
+# 记录 tau/gain
+IDENT_RESULTS_FILE = "/flash/ident_params.txt"
 
 
 uart3 = UART(2)
