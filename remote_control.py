@@ -1,10 +1,11 @@
 from machine import Pin, UART
-from seekfree import MOTOR_CONTROLLER
+from seekfree import MOTOR_CONTROLLER, IMU660RX
 from smartcar import encoder, ticker
 from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController
 from control.pid_math import clamp, reset_pi_state
 from control.pid_store import load_ident_params
+from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 import gc
@@ -20,6 +21,13 @@ V_CMD_MAX = 1e3
 TARGET_SPEED_MAX = 30.0
 # 激活的轮子
 ACTIVE_WHEELS = ("m", "l", "r")
+# 角速度滤波与回正控制参数
+GYRO_AXIS_Z = 5
+GYRO_LPF_ALPHA = 0.2
+YAW_KP = 0.01
+YAW_KD = 0.0005
+AUTO_OMEGA_MAX = 15.0
+HOLD_SPEED_EPS = 0.01
 
 IDENT_RESULTS_FILE = "/flash/ident_params.txt"
 
@@ -50,6 +58,17 @@ uart3.init(115200)
 encoder_m = encoder("D15", "D16", True)
 encoder_l = encoder("C0", "C1", True)
 encoder_r = encoder("C2", "C3", True)
+
+# IMU 660RAX 初始化
+imu = IMU660RX()
+# IMU 数据
+imu_data = imu.get()
+# 偏航角低通
+gyro_lpf = LowPassFilter(alpha=GYRO_LPF_ALPHA, initial=0.0)
+# 估计的航向角
+heading_est = 0.0
+# 目标航向角
+heading_target = 0.0
 
 # motor 1
 motor_m = MOTOR_CONTROLLER(
@@ -84,7 +103,6 @@ for name, enc, mot in (
         )
     )
 
-# 替换输入端滤波为中值+差分限幅组合
 for state in wheel_states:
     state["input_lpf"] = SpikeMedianFilter(window=5)
     state["diff_filter"] = DiffLimitFilter(max_delta=5.0)
@@ -207,7 +225,9 @@ def print_help():
 
 
 pit1 = ticker(1)
-pit1.capture_list(*[state["encoder"] for state in wheel_states])
+capture_items = [state["encoder"] for state in wheel_states]
+capture_items.append(imu)
+pit1.capture_list(*capture_items)
 pit1.callback(pit_handler)
 pit1.start(TICK_MS)
 
@@ -220,6 +240,8 @@ while True:
         tick_count += 1
         led.toggle()
 
+        dt_s = TICK_MS / 1000.0
+
         for state in wheel_states:
             raw = float(state["encoder"].get())
             state["raw_speed"] = raw
@@ -228,7 +250,35 @@ while True:
             fused_speed, _, _ = state["dual_filter"].update(smooth_raw)
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
-        dt_s = TICK_MS / 1000.0
+        # 角速度滤波与姿态回正控制
+        yaw_raw = float(imu_data[GYRO_AXIS_Z]) if imu_data else 0.0
+        yaw_rate = gyro_lpf.update(yaw_raw)
+        heading_est += yaw_rate * dt_s
+
+        hold_mode = abs(last_cmd.get("omega", 0)) < HOLD_SPEED_EPS
+
+        omega_cmd = last_cmd.get("omega", 0.0)
+        if hold_mode:
+            yaw_err = heading_target - heading_est
+            omega_auto = clamp(
+                YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                -AUTO_OMEGA_MAX,
+                AUTO_OMEGA_MAX,
+            )
+            omega_cmd = omega_auto
+        else:
+            heading_target = heading_est
+
+        # 根据当前指令与自动回正叠加后的角速度解算目标轮速
+        vm, vl, vr = inverse_kinematics(
+            float(last_cmd.get("vx", 0.0)),
+            float(last_cmd.get("vy", 0.0)),
+            float(omega_cmd),
+        )
+        target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+
         for state in wheel_states:
             if state["name"] in ACTIVE_WHEELS:
                 tgt = clamp(
