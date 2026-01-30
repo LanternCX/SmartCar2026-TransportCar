@@ -1,283 +1,265 @@
-from typing import Any, Sequence
-
-class TSL1401:
-    """线性 CCD 阵列传感器，用于线迹跟踪。
-    
-    示例:
-        ccd = TSL1401(10)  # 每 10 个 tick 采集一次
-        ccd.set_resolution(TSL1401.RES_12BIT)
-        pit.capture_list(ccd)
-        data = ccd.get()
-    """
-    RES_8BIT: int  #: 8 位分辨率 (0-255)
-    RES_12BIT: int  #: 12 位分辨率 (0-4095)
-    def __init__(self, capture_div: int | None = None) -> None:
-        """初始化 TSL1401 CCD 传感器。
-        
-        Args:
-            capture_div: 采集分频 (每 N 个 ticker tick 更新一次)
-        """
-    def set_resolution(self, resolution: int) -> None:
-        """设置 ADC 分辨率。
-        
-        Args:
-            resolution: TSL1401.RES_8BIT 或 TSL1401.RES_12BIT
-        """
-    def capture(self) -> None:
-        """触发一次采集（通常由 ticker 管理）。"""
-    def get(self) -> list[int]:
-        """获取 CCD 阵列数据。
-        
-        Returns:
-            像素值列表 (128 个像素)
-        """
-    def read(self) -> list[int]:
-        """采集并获取 CCD 数据。
-        
-        Returns:
-            像素值列表 (128 个像素)
-        """
-    @classmethod
-    def help(cls) -> None:
-        """打印 TSL1401 的帮助信息。"""
-    def info(self) -> None:
-        """打印该 TSL1401 实例的信息。"""
-
-class DL1X:
-    """飞行时间 (ToF) 距离传感器。
-    
-    示例:
-        tof = DL1X()
-        pit.capture_list(tof)
-        distance = tof.get()
-    """
-    def __init__(self, capture_div: int | None = None) -> None:
-        """初始化 DL1X ToF 传感器。
-        
-        Args:
-            capture_div: 采集分频 (每 N 个 ticker tick 更新一次)
-        """
-    def capture(self) -> None:
-        """触发一次采集（通常由 ticker 管理）。"""
-    def get(self) -> list[int] | int | float:
-        """获取距离测量值。
-        
-        Returns:
-            距离值 (单位为 mm 或 cm，取决于硬件)
-        """
-    def read(self) -> list[int] | int | float:
-        """采集并获取距离测量值。
-        
-        Returns:
-            距离值
-        """
-    @classmethod
-    def help(cls) -> None:
-        """打印 DL1X 的帮助信息。"""
-    def info(self) -> None:
-        """打印该 DL1X 实例的信息。"""
-
-class IMU660RX:
-    """6 轴 IMU (加速度计 + 陀螺仪)。
-    
-    示例:
-        imu = IMU660RX()
-        pit.capture_list(imu)
-        data = imu.get()  # [ax, ay, az, gx, gy, gz]
-    """
-    def __init__(self, capture_div: int | None = None) -> None:
-        """初始化 IMU660RX 传感器。
-        
-        Args:
-            capture_div: 采集分频 (每 N 个 ticker tick 更新一次)
-        """
-    def capture(self) -> None:
-        """触发一次采集（通常由 ticker 管理）。"""
-    def get(self) -> list[int]:
-        """获取 IMU 数据。
-        
-        Returns:
-            [加速度_X, 加速度_Y, 加速度_Z, 角速度_X, 角速度_Y, 角速度_Z]
-        """
-    def read(self) -> list[int]:
-        """采集并获取 IMU 数据。
-        
-        Returns:
-            [加速度_X, 加速度_Y, 加速度_Z, 角速度_X, 角速度_Y, 角速度_Z]
-        """
-    @classmethod
-    def help(cls) -> None:
-        """打印 IMU660RX 的帮助信息。"""
-    def info(self) -> None:
-        """打印该 IMU660RX 实例的信息。"""
-
-class IMU963RX:
-    """9 轴 IMU (加速度计 + 陀螺仪 + 磁力计)。
-    
-    示例:
-        imu = IMU963RX()
-        pit.capture_list(imu)
-        data = imu.get()  # [ax, ay, az, gx, gy, gz, mx, my, mz]
-    """
-    def __init__(self, capture_div: int | None = None) -> None:
-        """初始化 IMU963RX 传感器。
-        
-        Args:
-            capture_div: 采集分频 (每 N 个 ticker tick 更新一次)
-        """
-    def capture(self) -> None:
-        """触发一次采集（通常由 ticker 管理）。"""
-    def get(self) -> list[int]:
-        """获取 IMU 数据。
-        
-        Returns:
-            [加速度_X, 加速度_Y, 加速度_Z, 角速度_X, 角速度_Y, 角速度_Z, 磁力_X, 磁力_Y, 磁力_Z]
-        """
-    def read(self) -> list[int]:
-        """采集并获取 IMU 数据。
-        
-        Returns:
-            [加速度_X, 加速度_Y, 加速度_Z, 角速度_X, 角速度_Y, 角速度_Z, 磁力_X, 磁力_Y, 磁力_Z]
-        """
-    @classmethod
-    def help(cls) -> None:
-        """打印 IMU963RX 的帮助信息。"""
-    def info(self) -> None:
-        """打印该 IMU963RX 实例的信息。"""
-
-class KEY_HANDLER:
-    """按键/键盘输入处理器。
-    
-    示例:
-        key = KEY_HANDLER()
-        pit.capture_list(key)
-        key_state = key.get()
-    """
-    def __init__(self, capture_div: int | None = None) -> None:
-        """初始化按键处理器。
-        
-        Args:
-            capture_div: 采集分频 (每 N 个 ticker tick 更新一次)
-        """
-    def capture(self) -> None:
-        """触发一次采集（通常由 ticker 管理）。"""
-    def get(self) -> list[int]:
-        """获取按键状态。
-        
-        Returns:
-            按键状态值
-        """
-    def read(self) -> list[int]:
-        """采集并获取按键状态。
-        
-        Returns:
-            按键状态值
-        """
-    @classmethod
-    def help(cls) -> None:
-        """打印 KEY_HANDLER 的帮助信息。"""
-    def info(self) -> None:
-        """打印该 KEY_HANDLER 实例的信息。"""
-
-class WIFI_SPI:
-    """WiFi 模块 SPI 接口。
-    
-    示例:
-        wifi = WIFI_SPI()
-        wifi.send(b"data")
-        data = wifi.recv(100)
-    """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """初始化 WiFi SPI 接口。"""
-    def send(self, buf: Sequence[int] | bytes | bytearray | str) -> None:
-        """通过 WiFi 发送数据。
-        
-        Args:
-            buf: 要发送的数据
-        """
-    def recv(self, nbytes: int) -> bytes:
-        """从 WiFi 接收数据。
-        
-        Args:
-            nbytes: 要接收的字节数
-        
-        Returns:
-            接收到的数据
-        """
-
-class WIRELESS_UART:
-    """无线 UART 模块接口。
-    
-    示例:
-        wireless = WIRELESS_UART()
-        wireless.send(b"data")
-        data = wireless.recv(100)
-    """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """初始化无线 UART 接口。"""
-    def send(self, buf: Sequence[int] | bytes | bytearray | str) -> None:
-        """通过无线发送数据。
-        
-        Args:
-            buf: 要发送的数据
-        """
-    def recv(self, nbytes: int) -> bytes:
-        """从无线接收数据。
-        
-        Args:
-            nbytes: 要接收的字节数
-        
-        Returns:
-            接收到的数据
-        """
-
-class BLDC_CONTROLLER:
-    """无刷电机控制器。
-    
-    示例:
-        motor = BLDC_CONTROLLER()
-        motor.set_speed(1000)
-    """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """初始化无刷电机控制器。"""
-    def set_speed(self, duty: int) -> None:
-        """设置电机速度。
-        
-        Args:
-            duty: 速度值 (通常为 0-1000 或 0-100)
-        """
-    def stop(self) -> None:
-        """停止电机。"""
-
-class MOTOR_CONTROLLER:
-    """直流电机控制器。
-    
-    示例:
-        motor = MOTOR_CONTROLLER()
-        motor.set_speed(500)
-    """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """初始化直流电机控制器。"""
-    def set_speed(self, duty: int) -> None:
-        """设置电机速度。
-        
-        Args:
-            duty: 速度值 (通常为 0-1000 或 0-100)
-        """
-    def stop(self) -> None:
-        """停止电机。"""
-
-# Permit additional helpers without warnings
-def __getattr__(name: str) -> Any: ...
+from typing import Any, List, Optional, Union
 
 __all__ = [
-    "TSL1401",
-    "DL1X",
+    "MOTOR_CONTROLLER",
+    "BLDC_CONTROLLER",
+    "KEY_HANDLER",
     "IMU660RX",
     "IMU963RX",
-    "KEY_HANDLER",
-    "WIFI_SPI",
+    "DL1X",
+    "TSL1401",
     "WIRELESS_UART",
-    "BLDC_CONTROLLER",
-    "MOTOR_CONTROLLER",
+    "WIFI_SPI",
 ]
+
+class MOTOR_CONTROLLER:
+    """直流电机控制器。"""
+
+    PWM_C30_DIR_C31: int
+    PWM_C28_DIR_C29: int
+    PWM_D4_DIR_D5: int
+    PWM_D6_DIR_D7: int
+    PWM_C30_PWM_C31: int
+    PWM_C28_PWM_C29: int
+    PWM_D4_PWM_D5: int
+    PWM_D6_PWM_D7: int
+
+    def __init__(
+        self, index: int, freq: int, duty: int = 0, invert: bool = False
+    ) -> None:
+        """
+        Args:
+            index: PWM 通道/引脚配置索引 (使用常量)
+            freq: PWM 频率
+            duty: 初始占空比
+            invert: 是否反转方向
+        """
+        ...
+
+    def duty(self, duty: Optional[int] = None) -> int:
+        """
+        设置或获取占空比。
+
+        Args:
+            duty: 占空比 (-10000 到 10000)
+        """
+        ...
+
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class BLDC_CONTROLLER:
+    """无刷电机控制器。"""
+
+    PWM_C25: int
+    PWM_C27: int
+
+    def __init__(self, index: int, freq: int = 50, highlevel_us: int = 1000) -> None:
+        """
+        Args:
+            index: 引脚索引
+            freq: 频率
+            highlevel_us: 高电平时间 (us)
+        """
+        ...
+
+    def highlevel_us(self, us: Optional[int] = None) -> int:
+        """设置或获取高电平时间。"""
+        ...
+
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class KEY_HANDLER:
+    """按键处理。"""
+
+    def __init__(self, period: int) -> None:
+        """
+        Args:
+            period: 扫描周期
+        """
+        ...
+
+    def capture(self) -> None:
+        """扫描按键（在定时器中调用）。"""
+        ...
+
+    def get(self) -> List[int]:
+        """
+        获取按键状态。
+        Returns: [key1_state, key2_state, ...] 0:无, 1:短按, 2:长按
+        """
+        ...
+
+    def clear(self, index: int) -> None:
+        """
+        清除按键状态。
+        Args:
+            index: 按键索引 (1-based)
+        """
+        ...
+
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class IMU660RX:
+    """6轴 IMU 传感器 (LSM6DSO)。"""
+
+    def __init__(self, capture_div: int = 1) -> None:
+        """
+        Args:
+            capture_div: 采集分频
+        """
+        ...
+
+    def capture(self) -> None:
+        """采集数据。"""
+        ...
+
+    def get(self) -> List[int]:
+        """
+        获取数据。
+        Returns: [acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z]
+        """
+        ...
+
+    def read(self) -> List[int]: ...
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class IMU963RX:
+    """9轴 IMU 传感器。"""
+
+    def __init__(self, capture_div: int = 1) -> None: ...
+    def capture(self) -> None: ...
+    def get(self) -> List[int]:
+        """
+        Returns: [acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z]
+        """
+        ...
+
+    def read(self) -> List[int]: ...
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class DL1X:
+    """ToF 测距传感器。"""
+
+    def __init__(self, capture_div: int = 1) -> None: ...
+    def capture(self) -> None: ...
+    def get(self) -> int:
+        """Returns: 距离 (mm)"""
+        ...
+
+    def read(self) -> int: ...
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class TSL1401:
+    """线性 CCD 传感器。"""
+
+    RES_8BIT: int
+    RES_12BIT: int
+
+    def __init__(self, capture_div: int = 1) -> None: ...
+    def set_resolution(self, resolution: int) -> None: ...
+    def capture(self) -> None: ...
+    def get(self, index: int) -> List[int]:
+        """
+        获取指定 CCD 通道的数据引用。
+        Args:
+            index: CCD 通道索引 [0-3]
+        Returns: 像素列表
+        """
+        ...
+
+    def read(self) -> List[int]: ...
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class WIRELESS_UART:
+    """无线串口模块。"""
+
+    CCD1_BUFFER_INDEX: int
+    CCD2_BUFFER_INDEX: int
+    CCD3_BUFFER_INDEX: int
+    CCD4_BUFFER_INDEX: int
+    CCD1_2_BUFFER_INDEX: int
+    CCD3_4_BUFFER_INDEX: int
+
+    def __init__(self, baudrate: int = 460800) -> None: ...
+    def send_str(self, s: str) -> None: ...
+    def send_oscilloscope(
+        self,
+        d1: float,
+        d2: float = 0,
+        d3: float = 0,
+        d4: float = 0,
+        d5: float = 0,
+        d6: float = 0,
+        d7: float = 0,
+        d8: float = 0,
+    ) -> None:
+        """发送虚拟示波器数据。"""
+        ...
+
+    def send_ccd_image(self, index: int) -> None: ...
+    def data_analysis(self) -> List[int]:
+        """解析接收数据。"""
+        ...
+
+    def get_data(self, index: int) -> float: ...
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
+
+class WIFI_SPI:
+    """SPI 接口 Wi-Fi 模块。"""
+
+    TCP_CONNECT: int
+    UDP_CONNECT: int
+    CCD1_BUFFER_INDEX: int
+    CCD2_BUFFER_INDEX: int
+    CCD3_BUFFER_INDEX: int
+    CCD4_BUFFER_INDEX: int
+    CCD1_2_BUFFER_INDEX: int
+    CCD3_4_BUFFER_INDEX: int
+
+    def __init__(
+        self, ssid: str, password: str, type: int, ip: str, port: str
+    ) -> None: ...
+    def send_str(self, s: str) -> None: ...
+    def send_oscilloscope(
+        self,
+        d1: float,
+        d2: float = 0,
+        d3: float = 0,
+        d4: float = 0,
+        d5: float = 0,
+        d6: float = 0,
+        d7: float = 0,
+        d8: float = 0,
+    ) -> None: ...
+    def send_ccd_image(self, index: int) -> None: ...
+    def data_analysis(self) -> List[int]: ...
+    def get_data(self, index: int) -> float:
+        """
+        获取调参数据。
+
+        Args:
+            index: 数据通道索引 [0-7]
+        Returns:
+            float: 接收到的浮点数值
+        """
+        ...
+
+    def info(self) -> None: ...
+    @staticmethod
+    def help() -> None: ...
