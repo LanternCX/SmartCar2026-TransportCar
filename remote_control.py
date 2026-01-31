@@ -8,8 +8,10 @@ from control.pid_store import load_ident_params
 from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
+from utils.quaternion import Quaternion
 import gc
 import math
+import time
 
 # 控制周期
 TICK_MS = 5
@@ -24,18 +26,23 @@ ACTIVE_WHEELS = ("m", "l", "r")
 
 # 偏航角低通参数
 GYRO_LPF_ALPHA = 0.2
+# 陀螺仪比例因子 (LSB / (deg/s))
+GYRO_SCALE = 16.384
 # 角速度轴索引
 GYRO_AXIS_Z = 5
 # 偏航角 PD 控制参数
-YAW_KP = 0.01
-YAW_KD = 0.0005
-# 自动回正最大角速度
+# 原参数对应 raw 数据，现在转为 deg，放大约 16.4 倍以保持控制力度
+YAW_KP = 0.16
+YAW_KD = 0.008
+# 自动回正最大角速度 (对应轮子速度分量)
 AUTO_OMEGA_MAX = 15.0
 # 保持静止模式速度阈值
 HOLD_SPEED_EPS = 0.01
 
 # 系统辨识参数文件路径
 IDENT_RESULTS_FILE = "/flash/ident_params.txt"
+# 陀螺仪零飘参数文件路径
+GYRO_OFFSET_FILE = "/flash/gyro_offset.txt"
 
 # 三轮 PID 表
 PID_MAP = {
@@ -84,6 +91,11 @@ imu_data = imu.get()
 gyro_lpf = LowPassFilter(alpha=GYRO_LPF_ALPHA, initial=0.0)
 # 估计的航向角
 heading_est = 0.0
+# 四元数估计姿态
+q_est = Quaternion()
+# 上次解算的 Yaw (弧度)，用于解包
+last_yaw_rad = 0.0
+
 # 目标航向角
 heading_target = 0.0
 
@@ -98,6 +110,22 @@ motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert
 
 # 辨识参数
 ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
+
+# 加载 IMU 零飘 (6轴)
+imu_offsets = [0.0] * 6
+try:
+    with open(GYRO_OFFSET_FILE, "r") as f:
+        content = f.read().strip()
+        parts = content.split(",")
+        if len(parts) == 6:
+            imu_offsets = [float(x) for x in parts]
+            print(f"Loaded IMU Offsets: {imu_offsets}")
+        else:
+            # 兼容旧的单值格式 (仅 Gyro Z)
+            imu_offsets[5] = float(content)
+            print(f"Loaded Legacy Gyro Offset: {imu_offsets[5]}")
+except (OSError, ValueError):
+    print("Gyro Offset file not found or invalid, using 0.0")
 
 # 三轮状态列表
 wheel_states = []
@@ -184,51 +212,74 @@ def parse_command(cmd_str):
     """
     解析命令字符串
 
-    :param cmd_str: 命令字符串，格式为 "vx,vy,omega" 或 "vx vy omega"
+    支持键值对格式: "dx=11, dy=-18, angle=-9.8"
     """
     cmd_str = cmd_str.strip()
     if not cmd_str:
         return None
-    parts = cmd_str.split(",") if "," in cmd_str else cmd_str.split()
-    if len(parts) < 3:
-        uart3.write("ERR need 3 vals\r\n")
-        return None
 
-    try:
-        vx = int(parts[0].strip())
-        vy = int(parts[1].strip())
-        omega = int(parts[2].strip())
-    except Exception:
-        uart3.write("ERR parse int\r\n")
-        return None
+    # 解析键值对
+    parts = cmd_str.split(",")
+    cmd = {}
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, val_str = part.split("=", 1)
+        key = key.strip().lower()
+        try:
+            val = float(val_str.strip())
+        except ValueError:
+            continue
 
-    vx = clamp(vx, -V_CMD_MAX, V_CMD_MAX)
-    vy = clamp(vy, -V_CMD_MAX, V_CMD_MAX)
-    omega = clamp(omega, -V_CMD_MAX, V_CMD_MAX)
-    return {"vx": vx, "vy": vy, "omega": omega}
+        if key in ("vx", "dx"):
+            cmd["vx"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
+        elif key in ("vy", "dy"):
+            cmd["vy"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
+        elif key in ("omega", "w"):
+            cmd["omega"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
+        elif key in ("angle", "yaw"):
+            cmd["angle"] = val
+        elif key in ("d_angle", "dyaw", "da"):
+            cmd["d_angle"] = val
+    return cmd if cmd else None
 
 
 def apply_command(cmd):
     """
     应用解析后的命令并设置目标速度
 
-    :param cmd: 包含 vx, vy, omega 的命令字典
+    :param cmd: 包含 vx, vy, omega, angle 等的命令字典
     """
-
-    global target_speeds, last_cmd
+    global target_speeds, last_cmd, heading_target
     if not cmd:
         return
+
+    # 处理相对角度：如果存在 d_angle，将其转换为绝对 angle
+    if "d_angle" in cmd:
+        # 如果当前已是位置模式（last_cmd 有 angle），基于 heading_target
+        # 如果当前是速度模式，heading_target 也会跟踪 est，所以 heading_target 一般是较好的基准
+        # 但如果是从纯速度模式切换过来，heading_target 可能刚更新为 heading_est
+        cmd["angle"] = heading_target + cmd["d_angle"]
+        # 删除 d_angle，避免混淆（虽然保留也没事，因为 we prefer 'angle'）
+        # cmd.pop("d_angle")
+
     last_cmd = cmd
-    vm, vl, vr = inverse_kinematics(cmd["vx"], cmd["vy"], cmd["omega"])
+
+    vx = cmd.get("vx", 0.0)
+    vy = cmd.get("vy", 0.0)
+    omega = cmd.get("omega", 0.0)
+
+    vm, vl, vr = inverse_kinematics(vx, vy, omega)
     target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
     target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
     target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
     uart3.write(
-        "OK vx=%d vy=%d om=%d -> m=%.1f l=%.1f r=%.1f\r\n"
+        "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
         % (
-            cmd["vx"],
-            cmd["vy"],
-            cmd["omega"],
+            vx,
+            vy,
+            omega,
+            str(cmd.get("angle")),
             target_speeds["m"],
             target_speeds["l"],
             target_speeds["r"],
@@ -251,6 +302,9 @@ pit1.start(TICK_MS)
 # 初始化 PID 控制器参数
 init_pid()
 
+# 记录上一帧的时间 (微秒)
+last_time_us = time.ticks_us()
+
 while True:
     # 处理定时中断
     if pit_flag:
@@ -259,8 +313,12 @@ while True:
         # 切换 LED 状态
         led.toggle()
 
-        # 时间增量（秒）
-        dt_s = TICK_MS / 1000.0
+        # 计算真实的时间增量 dt_s (秒)
+        # 即使循环被阻塞 (如串口打印)，积分也能保持准确
+        current_time_us = time.ticks_us()
+        dt_us = time.ticks_diff(current_time_us, last_time_us)
+        last_time_us = current_time_us
+        dt_s = dt_us / 1000000.0
 
         # 三轮编码器读取并滤波
         for state in wheel_states:
@@ -276,15 +334,77 @@ while True:
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
         # 角速度滤波与姿态回正控制
-        yaw_raw = float(imu_data[GYRO_AXIS_Z]) if imu_data else 0.0
-        yaw_rate = gyro_lpf.update(yaw_raw)
-        heading_est += yaw_rate * dt_s
+        # imu_data indices: 3=Gx, 4=Gy, 5=Gz
+        if imu_data:
+            gx_raw = float(imu_data[3]) - imu_offsets[3]
+            gy_raw = float(imu_data[4]) - imu_offsets[4]
+            # Gyro Z is index 5
+            gz_raw = float(imu_data[5]) - imu_offsets[5]
+        else:
+            gx_raw = gy_raw = gz_raw = 0.0
+
+        # Convert raw LSB to rad/s
+        # Scale is LSB / (deg/s), so val / Scale = deg/s
+        # deg/s * (pi/180) = rad/s
+        rad_scale = (math.pi / 180.0) / GYRO_SCALE
+        gx = gx_raw * rad_scale
+        gy = gy_raw * rad_scale
+        gz = gz_raw * rad_scale
+
+        # 更新四元数
+        q_est.update(gx, gy, gz, dt_s)
+
+        # 解算 Yaw 并进行解包 (Unwrap) 以获得连续角度
+        curr_yaw_rad = q_est.to_euler_yaw()
+        delta_yaw = curr_yaw_rad - last_yaw_rad
+
+        # 处理角度突变 (Wrap around PI)
+        if delta_yaw > math.pi:
+            delta_yaw -= 2.0 * math.pi
+        elif delta_yaw < -math.pi:
+            delta_yaw += 2.0 * math.pi
+
+        last_yaw_rad = curr_yaw_rad
+
+        # 为了兼容已有控制逻辑，继续使用 heading_est (deg)
+        # 且仅对 gz 进行低通滤波用于 D 项阻尼
+        yaw_rate = gyro_lpf.update(gz * (180.0 / math.pi))  # rad/s -> deg/s
+
+        heading_est += math.degrees(delta_yaw)
 
         # 处理角速度
-        omega_cmd = last_cmd.get("omega", 0.0)
-        # 只有在角速度较低时才启用自动回正
-        hold_mode = abs(last_cmd.get("omega", 0)) < HOLD_SPEED_EPS
-        if hold_mode:
+        # 优先级：Angle > Omega > Default (Hold)
+        cmd_angle = last_cmd.get("angle")
+        cmd_omega = last_cmd.get("omega")
+
+        if cmd_angle is not None:
+            # 位置模式 Position Mode
+            heading_target = cmd_angle
+            # 偏差为度
+            yaw_err = heading_target - heading_est
+
+            # 简单的 PD 控制产生角速度 omega (rad/s)
+            # KP 作用于度，KD 作用于 deg/s
+            omega_auto = YAW_KP * yaw_err - YAW_KD * yaw_rate
+            omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
+
+        elif cmd_omega is not None:
+            # 速度模式 Speed Mode
+            omega_cmd = cmd_omega
+            # 如果指令速度极低，则进入维持当前角度的 Hold 模式
+            if abs(omega_cmd) < HOLD_SPEED_EPS:
+                yaw_err = heading_target - heading_est
+                omega_auto = clamp(
+                    YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                    -AUTO_OMEGA_MAX,
+                    AUTO_OMEGA_MAX,
+                )
+                omega_cmd = omega_auto
+            else:
+                heading_target = heading_est
+        else:
+            # 默认模式 (Hold)
+            # 和速度模式 omega=0 行为一致
             yaw_err = heading_target - heading_est
             omega_auto = clamp(
                 YAW_KP * yaw_err - YAW_KD * yaw_rate,
@@ -292,8 +412,6 @@ while True:
                 AUTO_OMEGA_MAX,
             )
             omega_cmd = omega_auto
-        else:
-            heading_target = heading_est
 
         # 根据当前指令与自动回正叠加后的角速度解算目标轮速
         vm, vl, vr = inverse_kinematics(
@@ -323,13 +441,18 @@ while True:
                 state["duty"] = 0.0
                 state["motor"].duty(0)
 
-        # 打印串口调试信息
-        sample = ",".join(
-            "{:.2f}".format(v)
-            for state in wheel_states
-            for v in (state["raw_speed"], state["filtered_speed"], state["duty"])
-        )
-        uart3.write(sample + "\r\n")
+        # 打印串口调试信息 (降频发送，避免阻塞)
+        # 5ms * 20 = 100ms 刷新一次
+        if tick_count % 20 == 0:
+            sample = ",".join(
+                "{:.2f}".format(v)
+                for state in wheel_states
+                for v in (state["raw_speed"], state["filtered_speed"], state["duty"])
+            )
+            # 增加 dt 显示，用于监测循环是否超时
+            uart3.write(
+                "{:.1f}, {:.0f}".format(heading_est, dt_s * 1000) + sample + "\r\n"
+            )
 
         pit_flag = False
 
