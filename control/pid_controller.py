@@ -74,10 +74,11 @@ class IncrementalPIDController(PIDControllerBase):
 class PositionalPIDController(PIDControllerBase):
     """位置式 PID 控制器"""
 
-    def __init__(self, output_limit=None):
+    def __init__(self, output_limit=None, integral_limit=None):
         super().__init__(output_limit=output_limit)
         self.integral = 0.0
         self.prev_error = 0.0
+        self.integral_limit = integral_limit
 
     def update(self, target, now, dt_s=1.0):
         """
