@@ -9,6 +9,7 @@ from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
+from control.kinematics import OmniKinematics, Odometry
 import gc
 import math
 import time
@@ -19,8 +20,13 @@ TICK_MS = 5
 MAX_DUTY = 10000
 # 命令输入限幅
 V_CMD_MAX = 1e3
-# 轮速目标限幅
+# 轮速目标限幅 (Pulses per tick)
 TARGET_SPEED_MAX = 30.0
+# 位置控制最大速度 (m/s)
+POS_MAX_SPEED = 0.05
+# 位置控制比例系数 (Speed (m/s) / Error (m))
+POS_KP = 2.0
+
 # 启用的轮子，调试用
 ACTIVE_WHEELS = ("m", "l", "r")
 
@@ -101,6 +107,10 @@ heading_est = 0.0
 q_est = Quaternion()
 # 上次解算的 Yaw (弧度)，用于解包
 last_yaw_rad = 0.0
+
+# 运动学与里程计
+kinematics = OmniKinematics()
+odometry = Odometry()
 
 # 目标航向角
 heading_target = 0.0
@@ -225,6 +235,10 @@ def parse_command(cmd_str):
     if not cmd_str:
         return None
 
+    # 简单重置命令
+    if cmd_str == "reset":
+        return {"reset": True}
+
     # 解析键值对
     parts = cmd_str.split(",")
     cmd = {}
@@ -238,16 +252,27 @@ def parse_command(cmd_str):
         except ValueError:
             continue
 
-        if key in ("vx", "dx"):
+        if key == "vx":
             cmd["vx"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
-        elif key in ("vy", "dy"):
+        elif key == "vy":
             cmd["vy"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
+        elif key == "dx":
+            cmd["dx"] = val
+        elif key == "dy":
+            cmd["dy"] = val
         elif key in ("omega", "w"):
             cmd["omega"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
         elif key in ("angle", "yaw"):
             cmd["angle"] = val
         elif key in ("d_angle", "dyaw", "da"):
             cmd["d_angle"] = val
+        elif key == "x":
+            cmd["x"] = val
+        elif key == "y":
+            cmd["y"] = val
+        elif key == "reset":
+            cmd["reset"] = val != 0
+
     return cmd if cmd else None
 
 
@@ -257,8 +282,29 @@ def apply_command(cmd):
 
     :param cmd: 包含 vx, vy, omega, angle 等的命令字典
     """
-    global target_speeds, last_cmd, heading_target
+    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad
     if not cmd:
+        return
+
+    if cmd.get("reset"):
+        # 1. 重置里程计
+        odometry.reset()
+        # 2. 重置航向角估计
+        heading_est = 0.0
+        heading_target = 0.0
+        # 3. 重置四元数姿态
+        q_est.w, q_est.x, q_est.y, q_est.z = 1.0, 0.0, 0.0, 0.0
+        # 4. 重置解包相关的状态
+        last_yaw_rad = 0.0
+        # 5. 重置陀螺仪滤波状态
+        gyro_lpf.reset(0.0)
+        # 6. 重置 PID 控制器内部状态 (积分项)
+        reset_pi_state(wheel_states)
+
+        # 重置后清除上次的运动指令，防止车模基于旧的目标位置或速度继续运动
+        # 将上一指令设为默认停车状态
+        last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
         return
 
     # 处理相对角度：如果存在 d_angle，将其转换为绝对 angle
@@ -270,28 +316,44 @@ def apply_command(cmd):
         # 删除 d_angle，避免混淆（虽然保留也没事，因为 we prefer 'angle'）
         # cmd.pop("d_angle")
 
+    # 处理相对位移：如果存在 dx 或 dy，将其转换为绝对 x, y
+    if "dx" in cmd or "dy" in cmd:
+        cmd["x"] = odometry.x + cmd.get("dx", 0.0)
+        cmd["y"] = odometry.y + cmd.get("dy", 0.0)
+        uart3.write(
+            "Rel Move: dx=%.3f dy=%.3f -> x=%.3f y=%.3f\r\n"
+            % (cmd.get("dx", 0.0), cmd.get("dy", 0.0), cmd["x"], cmd["y"])
+        )
+
     last_cmd = cmd
 
     vx = cmd.get("vx", 0.0)
     vy = cmd.get("vy", 0.0)
     omega = cmd.get("omega", 0.0)
 
-    vm, vl, vr = inverse_kinematics(vx, vy, omega)
-    target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-    target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-    target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-    uart3.write(
-        "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
-        % (
-            vx,
-            vy,
-            omega,
-            str(cmd.get("angle")),
-            target_speeds["m"],
-            target_speeds["l"],
-            target_speeds["r"],
+    # 注意: 这里计算仅用于串口反馈当前指令转换结果，实际控制循环中会重新计算 (尤其是在位置模式下)
+    # 如果处于位置模式，这里的 vx vy 可能不是最终值
+    if "x" in cmd or "y" in cmd:
+        uart3.write("Pos Mode: x=%s, y=%s\r\n" % (str(cmd.get("x")), str(cmd.get("y"))))
+        # 清除速度指令以免干扰
+        if "vx" not in cmd:
+            last_cmd["vx"] = None
+        if "vy" not in cmd:
+            last_cmd["vy"] = None
+    else:
+        vm, vl, vr = inverse_kinematics(vx, vy, omega)
+        uart3.write(
+            "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
+            % (
+                vx,
+                vy,
+                omega,
+                str(cmd.get("angle")),
+                vm,
+                vl,
+                vr,
+            )
         )
-    )
 
 
 # 实例化 ticker 模块（周期中断）
@@ -377,10 +439,30 @@ while True:
 
         last_yaw_rad = curr_yaw_rad
 
-        # 为了兼容已有控制逻辑，继续使用 heading_est (deg)
-        # 且仅对 gz 进行低通滤波用于 D 项阻尼
-        yaw_rate = gyro_lpf.update(gz * (180.0 / math.pi))  # rad/s -> deg/s
+        # 计算角速度 (deg/s) 用于 PD 控制的 D 项
+        yaw_rate = gyro_lpf.update(gz * (180.0 / math.pi))
 
+        # 为了兼容已有控制逻辑，继续使用 heading_est (deg)
+        # 0. 获取轮速并更新里程计
+        # 注意: state["filtered_speed"] 单位为 pulses/tick
+        # 需要按照 wheel_states 顺序获取: m, l, r
+        vm_pulse = wheel_states[0]["filtered_speed"]
+        vl_pulse = wheel_states[1]["filtered_speed"]
+        vr_pulse = wheel_states[2]["filtered_speed"]
+
+        vm_mps = kinematics.velocity_pulses_to_m_s(vm_pulse, dt_s)
+        vl_mps = kinematics.velocity_pulses_to_m_s(vl_pulse, dt_s)
+        vr_mps = kinematics.velocity_pulses_to_m_s(vr_pulse, dt_s)
+
+        # 计算机器人坐标系下的速度 (m/s)
+        vx_rob_mps, vy_rob_mps, _ = kinematics.forward_kinematics(
+            vm_mps, vl_mps, vr_mps
+        )
+
+        # 更新里程计 (使用 IMU 角度)
+        odometry.update(vx_rob_mps, vy_rob_mps, math.radians(heading_est), dt_s)
+
+        # 1. 姿态控制处理 (Angle / Omega)
         heading_est += math.degrees(delta_yaw)
 
         # 处理角速度
@@ -424,10 +506,61 @@ while True:
             )
             omega_cmd = omega_auto
 
+        # 2. XY 平面运动控制 (Position / Velocity)
+        target_vx_cmd = 0.0
+        target_vy_cmd = 0.0
+
+        cmd_x = last_cmd.get("x")
+        cmd_y = last_cmd.get("y")
+
+        if cmd_x is not None or cmd_y is not None:
+            # --- 位置控制模式 ---
+            # 如果仅给定 x 或 y，另一个默认为 0
+            t_x = cmd_x if cmd_x is not None else 0.0
+            t_y = cmd_y if cmd_y is not None else 0.0
+
+            err_x = t_x - odometry.x
+            err_y = t_y - odometry.y
+
+            # P 控制计算世界坐标系速度 (m/s)
+            v_world_x = err_x * POS_KP
+            v_world_y = err_y * POS_KP
+
+            # 速度限幅
+            v_speed = math.sqrt(v_world_x * v_world_x + v_world_y * v_world_y)
+            if v_speed > POS_MAX_SPEED:
+                scale = POS_MAX_SPEED / v_speed
+                v_world_x *= scale
+                v_world_y *= scale
+
+            # 旋转到机器人坐标系
+            # Robot X (Forward), Y (Left)
+            # v_robot = R(-theta) * v_world
+            t_rad = math.radians(heading_est)
+            cos_t = math.cos(t_rad)
+            sin_t = math.sin(t_rad)
+
+            vx_rob_ctrl = v_world_x * cos_t + v_world_y * sin_t
+            vy_rob_ctrl = -v_world_x * sin_t + v_world_y * cos_t
+
+            # 转换为指令单位 (Pulses/Tick * 3) 以适配 inverse_kinematics
+            # inverse_kinematics 内部会除以 3
+            vx_pulses = kinematics.velocity_m_s_to_pulses(vx_rob_ctrl, dt_s)
+            vy_pulses = kinematics.velocity_m_s_to_pulses(vy_rob_ctrl, dt_s)
+
+            target_vx_cmd = vx_pulses * 3.0
+            target_vy_cmd = vy_pulses * 3.0
+
+        else:
+            # --- 速度控制模式 ---
+            # 直接使用指令值
+            target_vx_cmd = float(last_cmd.get("vx", 0.0))
+            target_vy_cmd = float(last_cmd.get("vy", 0.0))
+
         # 根据当前指令与自动回正叠加后的角速度解算目标轮速
         vm, vl, vr = inverse_kinematics(
-            float(last_cmd.get("vx", 0.0)),
-            float(last_cmd.get("vy", 0.0)),
+            target_vx_cmd,
+            target_vy_cmd,
             float(omega_cmd),
         )
         target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
@@ -455,10 +588,18 @@ while True:
         # 打印串口调试信息 (降频发送，避免阻塞)
         # 5ms * 20 = 100ms 刷新一次
         if tick_count % 20 == 0:
-            # 发送四元数数据到 uart6 (w, x, y, z)
+            # 发送状态数据到 uart6
+            # 格式: quat_w,x,y,z | x,y (pos) | vx,vy (robot speed m/s)
             uart6.write(
-                "{:.4f},{:.4f},{:.4f},{:.4f}\r\n".format(
-                    q_est.w, q_est.x, q_est.y, q_est.z
+                "{:.4f},{:.4f},{:.4f},{:.4f},{:.3f},{:.3f},{:.2f},{:.2f}\r\n".format(
+                    q_est.w,
+                    q_est.x,
+                    q_est.y,
+                    q_est.z,
+                    odometry.x,
+                    odometry.y,
+                    vx_rob_mps,
+                    vy_rob_mps,
                 )
             )
 
