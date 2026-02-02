@@ -75,6 +75,11 @@ switch2_init = switch2.value()
 # 远程控制串口初始化
 uart3 = UART(2)
 uart3.init(115200)
+uart3.write("System Starting...\r\n")
+
+# 数据打印串口 (用于循环内高频输出)
+uart6 = UART(5)
+uart6.init(115200)
 
 # 后轮编码器
 encoder_m = encoder("D15", "D16", True)
@@ -84,6 +89,7 @@ encoder_l = encoder("C0", "C1", True)
 encoder_r = encoder("C2", "C3", True)
 
 # IMU 660RAX 初始化
+uart3.write("Initializing IMU...\r\n")
 imu = IMU660RX()
 # IMU 数据
 imu_data = imu.get()
@@ -109,6 +115,7 @@ motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True)
 
 # 辨识参数
+uart3.write("Loading identify parameters...\r\n")
 ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
 # 加载 IMU 零飘 (6轴)
@@ -119,13 +126,13 @@ try:
         parts = content.split(",")
         if len(parts) == 6:
             imu_offsets = [float(x) for x in parts]
-            print(f"Loaded IMU Offsets: {imu_offsets}")
+            uart3.write("Loaded IMU Offsets: {}\r\n".format(imu_offsets))
         else:
             # 兼容旧的单值格式 (仅 Gyro Z)
             imu_offsets[5] = float(content)
-            print(f"Loaded Legacy Gyro Offset: {imu_offsets[5]}")
+            uart3.write("Loaded Legacy Gyro Offset: {:.4f}\r\n".format(imu_offsets[5]))
 except (OSError, ValueError):
-    print("Gyro Offset file not found or invalid, using 0.0")
+    uart3.write("Gyro Offset file not found or invalid, using 0.0\r\n")
 
 # 三轮状态列表
 wheel_states = []
@@ -288,6 +295,7 @@ def apply_command(cmd):
 
 
 # 实例化 ticker 模块（周期中断）
+uart3.write("Creating ticker...\r\n")
 pit1 = ticker(1)
 # 配置捕获编码器和 IMU 数据
 capture_items = [state["encoder"] for state in wheel_states]
@@ -296,11 +304,14 @@ capture_items.append(imu)
 pit1.capture_list(*capture_items)
 # 绑定 ticker 回调函数
 pit1.callback(pit_handler)
-# 以 TICK_MS 周期启动 ticker 模块
-pit1.start(TICK_MS)
 
 # 初始化 PID 控制器参数
 init_pid()
+
+# 以 TICK_MS 周期启动 ticker 模块
+uart3.write("Starting ticker (%d ms)...\r\n" % TICK_MS)
+pit1.start(TICK_MS)
+uart3.write("Initialization complete. Control loop started.\r\n")
 
 # 记录上一帧的时间 (微秒)
 last_time_us = time.ticks_us()
@@ -444,14 +455,11 @@ while True:
         # 打印串口调试信息 (降频发送，避免阻塞)
         # 5ms * 20 = 100ms 刷新一次
         if tick_count % 20 == 0:
-            sample = ",".join(
-                "{:.2f}".format(v)
-                for state in wheel_states
-                for v in (state["raw_speed"], state["filtered_speed"], state["duty"])
-            )
-            # 增加 dt 显示，用于监测循环是否超时
-            uart3.write(
-                "{:.1f}, {:.0f}".format(heading_est, dt_s * 1000) + sample + "\r\n"
+            # 发送四元数数据到 uart6 (w, x, y, z)
+            uart6.write(
+                "{:.4f},{:.4f},{:.4f},{:.4f}\r\n".format(
+                    q_est.w, q_est.x, q_est.y, q_est.z
+                )
             )
 
         pit_flag = False
