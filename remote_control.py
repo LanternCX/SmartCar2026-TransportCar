@@ -26,6 +26,9 @@ TARGET_SPEED_MAX = 30.0
 POS_MAX_SPEED = 0.05
 # 位置控制比例系数 (Speed (m/s) / Error (m))
 POS_KP = 2.0
+# 位置锁定容差
+POS_TOLERANCE = 0.05  # m
+ANGLE_TOLERANCE = 5.0  # deg
 
 # 启用的轮子，调试用
 ACTIVE_WHEELS = ("m", "l", "r")
@@ -178,6 +181,8 @@ tick_count = 0
 target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
 # 上次命令
 last_cmd = {"vx": 0, "vy": 0, "omega": 0}
+# 命令锁定标志
+command_lock = False
 # 串口接收缓冲
 rx_buf = ""
 
@@ -282,7 +287,7 @@ def apply_command(cmd):
 
     :param cmd: 包含 vx, vy, omega, angle 等的命令字典
     """
-    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad
+    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock
     if not cmd:
         return
 
@@ -304,7 +309,24 @@ def apply_command(cmd):
         # 重置后清除上次的运动指令，防止车模基于旧的目标位置或速度继续运动
         # 将上一指令设为默认停车状态
         last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        command_lock = False
         uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
+        return
+
+    # 检查是否为位置相关指令
+    # 只要包含位置目标或相对移动，就视为位置指令
+    is_pos_cmd = (
+        "x" in cmd
+        or "y" in cmd
+        or "dx" in cmd
+        or "dy" in cmd
+        or "angle" in cmd
+        or "d_angle" in cmd
+    )
+
+    # 如果处于锁定状态，且收到的是位置指令，则丢弃
+    if command_lock and is_pos_cmd:
+        uart3.write("Command Ignored (Locked)\r\n")
         return
 
     # 处理相对角度：如果存在 d_angle，将其转换为绝对 angle
@@ -326,6 +348,13 @@ def apply_command(cmd):
         )
 
     last_cmd = cmd
+
+    # 更新锁定状态
+    # 如果是位置指令，加锁；如果是速度指令，解锁
+    if is_pos_cmd:
+        command_lock = True
+    else:
+        command_lock = False
 
     vx = cmd.get("vx", 0.0)
     vy = cmd.get("vy", 0.0)
@@ -584,6 +613,37 @@ while True:
                 state["controller"].reset()
                 state["duty"] = 0.0
                 state["motor"].duty(0)
+
+        # 3. 检查锁定状态及目标是否达成
+        if command_lock:
+            # 检查角度误差
+            angle_ok = True
+            if last_cmd.get("angle") is not None:
+                err_angle = abs(heading_target - heading_est)
+                if err_angle > ANGLE_TOLERANCE:
+                    angle_ok = False
+
+            # 检查位置误差
+            pos_ok = True
+            if last_cmd.get("x") is not None or last_cmd.get("y") is not None:
+                # 获取位置目标
+                tx_chk = last_cmd.get("x")
+                ty_chk = last_cmd.get("y")
+                # 如果为 None 则取 0.0，与控制逻辑保持一致
+                tx_val = tx_chk if tx_chk is not None else 0.0
+                ty_val = ty_chk if ty_chk is not None else 0.0
+
+                ex_val = tx_val - odometry.x
+                ey_val = ty_val - odometry.y
+                dist_err = math.sqrt(ex_val * ex_val + ey_val * ey_val)
+
+                if dist_err > POS_TOLERANCE:
+                    pos_ok = False
+
+            # 如果所有目标都满足容差范围，则解锁
+            if angle_ok and pos_ok:
+                command_lock = False
+                # uart3.write("Target Reached. Unlocked.\r\n")
 
         # 打印串口调试信息 (降频发送，避免阻塞)
         # 5ms * 20 = 100ms 刷新一次
