@@ -315,14 +315,7 @@ def apply_command(cmd):
 
     # 检查是否为位置相关指令
     # 只要包含位置目标或相对移动，就视为位置指令
-    is_pos_cmd = (
-        "x" in cmd
-        or "y" in cmd
-        or "dx" in cmd
-        or "dy" in cmd
-        or "angle" in cmd
-        or "d_angle" in cmd
-    )
+    is_pos_cmd = "dx" in cmd or "dy" in cmd or "d_angle" in cmd
 
     # 如果处于锁定状态，且收到的是位置指令，则丢弃
     if command_lock and is_pos_cmd:
@@ -645,24 +638,6 @@ while True:
                 command_lock = False
                 # uart3.write("Target Reached. Unlocked.\r\n")
 
-        # 打印串口调试信息 (降频发送，避免阻塞)
-        # 5ms * 20 = 100ms 刷新一次
-        if tick_count % 20 == 0:
-            # 发送状态数据到 uart6
-            # 格式: quat_w,x,y,z | x,y (pos) | vx,vy (robot speed m/s)
-            uart6.write(
-                "{:.4f},{:.4f},{:.4f},{:.4f},{:.3f},{:.3f},{:.2f},{:.2f}\r\n".format(
-                    q_est.w,
-                    q_est.x,
-                    q_est.y,
-                    q_est.z,
-                    odometry.x,
-                    odometry.y,
-                    vx_rob_mps,
-                    vy_rob_mps,
-                )
-            )
-
         pit_flag = False
 
     # 处理串口命令
@@ -670,6 +645,23 @@ while True:
     if buf_len:
         try:
             rx_buf += uart3.read(buf_len).decode()
+            while True:
+                idx = rx_buf.find("\n")
+                if idx == -1:
+                    break
+                line = rx_buf[:idx].rstrip("\r")
+                rx_buf = rx_buf[idx + 1 :]
+                if not line:
+                    continue
+                uart3.write("RCV: %s\r\n" % line)
+                apply_command(parse_command(line))
+        except Exception as exc:
+            uart3.write("ERR %s\r\n" % exc)
+
+    buf_len = uart6.any()
+    if buf_len:
+        try:
+            rx_buf += uart6.read(buf_len).decode()
             while True:
                 idx = rx_buf.find("\n")
                 if idx == -1:

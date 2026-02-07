@@ -1,0 +1,133 @@
+from machine import UART
+from seekfree import IMU963RX
+from smartcar import ticker
+from utils.quaternion import Quaternion
+import math
+import time
+import gc
+
+# -------------------------------------------------------------------------
+# 配置参数 (保持与 remote_control.py 一致)
+# -------------------------------------------------------------------------
+# 控制周期 (ms)
+TICK_MS = 5
+# 陀螺仪比例因子 (LSB / (deg/s))
+GYRO_SCALE = 16.384
+# 陀螺仪零飘参数文件路径
+GYRO_OFFSET_FILE = "/flash/gyro_offset.txt"
+
+# -------------------------------------------------------------------------
+# 硬件初始化
+# -------------------------------------------------------------------------
+# UART3 用于发送数据
+uart3 = UART(2)
+uart3.init(115200)
+uart3.write("IMU Yaw Sender Starting...\r\n")
+
+# IMU 初始化
+uart3.write("Initializing IMU...\r\n")
+imu = IMU963RX()
+# 获取 IMU 数据引用
+imu_data = imu.get()
+
+# -------------------------------------------------------------------------
+# 状态变量初始化
+# -------------------------------------------------------------------------
+# 四元数估计姿态
+q_est = Quaternion()
+# 上次解算的 Yaw (弧度)，用于解包
+last_yaw_rad = 0.0
+# 估计的航向角 (累计角度，deg)
+heading_est = 0.0
+
+# -------------------------------------------------------------------------
+# 加载偏置参数
+# -------------------------------------------------------------------------
+imu_offsets = [0.0] * 6
+try:
+    with open(GYRO_OFFSET_FILE, "r") as f:
+        content = f.read().strip()
+        parts = content.split(",")
+        if len(parts) == 6:
+            imu_offsets = [float(x) for x in parts]
+            uart3.write("Loaded IMU Offsets: {}\r\n".format(imu_offsets))
+        else:
+            # 兼容旧的单值格式 (仅 Gyro Z)
+            imu_offsets[5] = float(content)
+            uart3.write("Loaded Legacy Gyro Offset: {:.4f}\r\n".format(imu_offsets[5]))
+except (OSError, ValueError):
+    uart3.write("Gyro Offset file not found or invalid, using 0.0\r\n")
+
+# -------------------------------------------------------------------------
+# 定时中断与循环控制
+# -------------------------------------------------------------------------
+pit_flag = False
+
+
+def pit_handler(_tick):
+    global pit_flag
+    pit_flag = True
+
+
+uart3.write("Creating ticker...\r\n")
+pit1 = ticker(1)
+# 将 IMU 挂载到 ticker 的 capture_list 中，实现后台自动采集
+pit1.capture_list(imu)
+pit1.callback(pit_handler)
+
+uart3.write("Starting ticker (%d ms)...\r\n" % TICK_MS)
+pit1.start(TICK_MS)
+
+# 记录上一帧的时间 (微秒)
+last_time_us = time.ticks_us()
+
+while True:
+    if pit_flag:
+        # 计算时间增量 dt (秒)
+        current_time_us = time.ticks_us()
+        dt_us = time.ticks_diff(current_time_us, last_time_us)
+        last_time_us = current_time_us
+        dt_s = dt_us / 1000000.0
+
+        # 获取陀螺仪数据并去除零飘
+        if imu_data:
+            # imu_data indices: 3=Gx, 4=Gy, 5=Gz
+            gx_raw = float(imu_data[3]) - imu_offsets[3]
+            gy_raw = float(imu_data[4]) - imu_offsets[4]
+            gz_raw = float(imu_data[5]) - imu_offsets[5]
+        else:
+            gx_raw = gy_raw = gz_raw = 0.0
+
+        # 将原始数据转换为弧度/秒 (rad/s)
+        # raw / Scale = deg/s
+        # deg/s * (pi/180) = rad/s
+        rad_scale = (math.pi / 180.0) / GYRO_SCALE
+        gx = gx_raw * rad_scale
+        gy = gy_raw * rad_scale
+        gz = gz_raw * rad_scale
+
+        # 更新四元数
+        q_est.update(gx, gy, gz, dt_s)
+
+        # 解算 Yaw 并进行解包 (Unwrap) 以获得连续角度
+        curr_yaw_rad = q_est.to_euler_yaw()
+        delta_yaw = curr_yaw_rad - last_yaw_rad
+
+        # 处理角度突变 (Wrap around PI)
+        if delta_yaw > math.pi:
+            delta_yaw -= 2.0 * math.pi
+        elif delta_yaw < -math.pi:
+            delta_yaw += 2.0 * math.pi
+
+        last_yaw_rad = curr_yaw_rad
+
+        # 累积航向角 (Degrees)
+        heading_est += math.degrees(delta_yaw)
+
+        # 通过 UART3 发送解算的偏航角
+        # 格式: "angle: xxx.xx"
+        uart3.write("angle: {:.2f}\r\n".format(heading_est))
+
+        pit_flag = False
+
+    gc.collect()
