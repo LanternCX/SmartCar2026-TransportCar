@@ -42,7 +42,12 @@ GYRO_AXIS_Z = 5
 # 偏航角 PD 控制参数
 # 原参数对应 raw 数据，现在转为 deg，放大约 16.4 倍以保持控制力度
 YAW_KP = 0.16
+YAW_KI = 0.1
 YAW_KD = 0.008
+# 积分生效范围 (deg)
+YAW_I_RANGE = 20.0
+# 积分输出限幅 (rad/s)
+YAW_I_LIMIT = 3.0
 # 自动回正最大角速度 (对应轮子速度分量)
 AUTO_OMEGA_MAX = 15.0
 # 保持静止模式速度阈值
@@ -110,6 +115,8 @@ heading_est = 0.0
 q_est = Quaternion()
 # 上次解算的 Yaw (弧度)，用于解包
 last_yaw_rad = 0.0
+# 偏航角积分项
+yaw_integral = 0.0
 
 # 运动学与里程计
 kinematics = OmniKinematics()
@@ -194,7 +201,7 @@ def pit_handler(_tick):
 
     :param _tick: 由 ticker 提供的计数（未使用）
     """
-    global pit_flag
+    global pit_flag, yaw_integral
     pit_flag = True
 
 
@@ -307,7 +314,7 @@ def apply_command(cmd):
 
     :param cmd: 包含 vx, vy, omega, angle 等的命令字典
     """
-    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock
+    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock, yaw_integral
     if not cmd:
         return
 
@@ -329,6 +336,8 @@ def apply_command(cmd):
         gyro_lpf.reset(0.0)
         # 6. 重置 PID 控制器内部状态 (积分项)
         reset_pi_state(wheel_states)
+        # 7. 重置角度环积分
+        yaw_integral = 0.0
 
         # 重置后清除上次的运动指令，防止车模基于旧的目标位置或速度继续运动
         # 将上一指令设为默认停车状态
@@ -522,9 +531,20 @@ while True:
             # 偏差为度
             yaw_err = heading_target - heading_est
 
+            # 积分控制
+            if abs(yaw_err) < YAW_I_RANGE:
+                yaw_integral += yaw_err * dt_s
+                # 积分限幅
+                i_limit_val = YAW_I_LIMIT / YAW_KI
+                yaw_integral = clamp(yaw_integral, -i_limit_val, i_limit_val)
+            else:
+                yaw_integral = 0.0
+
             # 简单的 PD 控制产生角速度 omega (rad/s)
             # KP 作用于度，KD 作用于 deg/s
-            omega_auto = YAW_KP * yaw_err - YAW_KD * yaw_rate
+            omega_auto = (
+                YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate
+            )
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
 
         elif cmd_omega is not None:
@@ -533,20 +553,36 @@ while True:
             # 如果指令速度极低，则进入维持当前角度的 Hold 模式
             if abs(omega_cmd) < HOLD_SPEED_EPS:
                 yaw_err = heading_target - heading_est
+                # Hold 模式同样启用积分
+                if abs(yaw_err) < YAW_I_RANGE:
+                    yaw_integral += yaw_err * dt_s
+                    i_limit_val = YAW_I_LIMIT / YAW_KI
+                    yaw_integral = clamp(yaw_integral, -i_limit_val, i_limit_val)
+                else:
+                    yaw_integral = 0.0
+
                 omega_auto = clamp(
-                    YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                    YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate,
                     -AUTO_OMEGA_MAX,
                     AUTO_OMEGA_MAX,
                 )
                 omega_cmd = omega_auto
             else:
                 heading_target = heading_est
+                yaw_integral = 0.0
         else:
             # 默认模式 (Hold)
             # 和速度模式 omega=0 行为一致
             yaw_err = heading_target - heading_est
+            if abs(yaw_err) < YAW_I_RANGE:
+                yaw_integral += yaw_err * dt_s
+                i_limit_val = YAW_I_LIMIT / YAW_KI
+                yaw_integral = clamp(yaw_integral, -i_limit_val, i_limit_val)
+            else:
+                yaw_integral = 0.0
+
             omega_auto = clamp(
-                YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate,
                 -AUTO_OMEGA_MAX,
                 AUTO_OMEGA_MAX,
             )
