@@ -184,7 +184,8 @@ last_cmd = {"vx": 0, "vy": 0, "omega": 0}
 # 命令锁定标志
 command_lock = False
 # 串口接收缓冲
-rx_buf = ""
+rx_buf3 = ""
+rx_buf6 = ""
 
 
 def pit_handler(_tick):
@@ -252,6 +253,12 @@ def parse_command(cmd_str):
             continue
         key, val_str = part.split("=", 1)
         key = key.strip().lower()
+
+        # 处理字符串类型参数
+        if key == "print":
+            cmd["print"] = val_str.strip()
+            continue
+
         try:
             val = float(val_str.strip())
         except ValueError:
@@ -281,6 +288,19 @@ def parse_command(cmd_str):
     return cmd if cmd else None
 
 
+def handle_query(token):
+    """
+    处理查询指令并返回信息到 uart6
+    :param token: 查询的标识符
+    """
+    token = token.strip().lower()
+    if token == "pos":
+        # 返回当前位姿: x, y, yaw
+        uart6.write("?pos=%.3f,%.3f,%.2f\r\n" % (odometry.x, odometry.y, heading_est))
+    else:
+        uart6.write("?unknown=%s\r\n" % token)
+
+
 def apply_command(cmd):
     """
     应用解析后的命令并设置目标速度
@@ -290,6 +310,10 @@ def apply_command(cmd):
     global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock
     if not cmd:
         return
+
+    # 处理打印指令
+    if "print" in cmd:
+        uart3.write("%s\r\n" % cmd["print"])
 
     if cmd.get("reset"):
         # 1. 重置里程计
@@ -310,7 +334,7 @@ def apply_command(cmd):
         # 将上一指令设为默认停车状态
         last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         command_lock = False
-        uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
+        # uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
         return
 
     # 检查是否为位置相关指令
@@ -319,7 +343,7 @@ def apply_command(cmd):
 
     # 如果处于锁定状态，且收到的是位置指令，则丢弃
     if command_lock and is_pos_cmd:
-        uart3.write("Command Ignored (Locked)\r\n")
+        # uart3.write("Command Ignored (Locked)\r\n")
         return
 
     # 处理相对角度：如果存在 d_angle，将其转换为绝对 angle
@@ -335,10 +359,10 @@ def apply_command(cmd):
     if "dx" in cmd or "dy" in cmd:
         cmd["x"] = odometry.x + cmd.get("dx", 0.0)
         cmd["y"] = odometry.y + cmd.get("dy", 0.0)
-        uart3.write(
-            "Rel Move: dx=%.3f dy=%.3f -> x=%.3f y=%.3f\r\n"
-            % (cmd.get("dx", 0.0), cmd.get("dy", 0.0), cmd["x"], cmd["y"])
-        )
+        # uart3.write(
+        #     "Rel Move: dx=%.3f dy=%.3f -> x=%.3f y=%.3f\r\n"
+        #     % (cmd.get("dx", 0.0), cmd.get("dy", 0.0), cmd["x"], cmd["y"])
+        # )
 
     last_cmd = cmd
 
@@ -356,7 +380,7 @@ def apply_command(cmd):
     # 注意: 这里计算仅用于串口反馈当前指令转换结果，实际控制循环中会重新计算 (尤其是在位置模式下)
     # 如果处于位置模式，这里的 vx vy 可能不是最终值
     if "x" in cmd or "y" in cmd:
-        uart3.write("Pos Mode: x=%s, y=%s\r\n" % (str(cmd.get("x")), str(cmd.get("y"))))
+        # uart3.write("Pos Mode: x=%s, y=%s\r\n" % (str(cmd.get("x")), str(cmd.get("y"))))
         # 清除速度指令以免干扰
         if "vx" not in cmd:
             last_cmd["vx"] = None
@@ -364,18 +388,18 @@ def apply_command(cmd):
             last_cmd["vy"] = None
     else:
         vm, vl, vr = inverse_kinematics(vx, vy, omega)
-        uart3.write(
-            "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
-            % (
-                vx,
-                vy,
-                omega,
-                str(cmd.get("angle")),
-                vm,
-                vl,
-                vr,
-            )
-        )
+        # uart3.write(
+        #     "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
+        #     % (
+        #         vx,
+        #         vy,
+        #         omega,
+        #         str(cmd.get("angle")),
+        #         vm,
+        #         vl,
+        #         vr,
+        #     )
+        # )
 
 
 # 实例化 ticker 模块（周期中断）
@@ -644,34 +668,40 @@ while True:
     buf_len = uart3.any()
     if buf_len:
         try:
-            rx_buf += uart3.read(buf_len).decode()
+            rx_buf3 += uart3.read(buf_len).decode()
             while True:
-                idx = rx_buf.find("\n")
+                idx = rx_buf3.find("\n")
                 if idx == -1:
                     break
-                line = rx_buf[:idx].rstrip("\r")
-                rx_buf = rx_buf[idx + 1 :]
+                line = rx_buf3[:idx].rstrip("\r").strip()
+                rx_buf3 = rx_buf3[idx + 1 :]
                 if not line:
                     continue
-                uart3.write("RCV: %s\r\n" % line)
-                apply_command(parse_command(line))
+                if line.startswith("?"):
+                    handle_query(line[1:])
+                else:
+                    # uart3.write("RCV: %s\r\n" % line)
+                    apply_command(parse_command(line))
         except Exception as exc:
             uart3.write("ERR %s\r\n" % exc)
 
     buf_len = uart6.any()
     if buf_len:
         try:
-            rx_buf += uart6.read(buf_len).decode()
+            rx_buf6 += uart6.read(buf_len).decode()
             while True:
-                idx = rx_buf.find("\n")
+                idx = rx_buf6.find("\n")
                 if idx == -1:
                     break
-                line = rx_buf[:idx].rstrip("\r")
-                rx_buf = rx_buf[idx + 1 :]
+                line = rx_buf6[:idx].rstrip("\r").strip()
+                rx_buf6 = rx_buf6[idx + 1 :]
                 if not line:
                     continue
-                uart3.write("RCV: %s\r\n" % line)
-                apply_command(parse_command(line))
+                if line.startswith("?"):
+                    handle_query(line[1:])
+                else:
+                    # uart3.write("RCV(6): %s\r\n" % line)
+                    apply_command(parse_command(line))
         except Exception as exc:
             uart3.write("ERR %s\r\n" % exc)
 
