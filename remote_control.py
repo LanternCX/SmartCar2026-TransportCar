@@ -42,7 +42,10 @@ GYRO_AXIS_Z = 5
 # 偏航角 PD 控制参数
 # 原参数对应 raw 数据，现在转为 deg，放大约 16.4 倍以保持控制力度
 YAW_KP = 0.16
+YAW_KI = 0.1
 YAW_KD = 0.008
+# 积分项限幅 (对应积分类似度量)
+YAW_I_MAX = 100.0
 # 自动回正最大角速度 (对应轮子速度分量)
 AUTO_OMEGA_MAX = 15.0
 # 保持静止模式速度阈值
@@ -117,6 +120,8 @@ odometry = Odometry()
 
 # 目标航向角
 heading_target = 0.0
+# 航向角积分项
+yaw_integral = 0.0
 
 # 后轮
 motor_m = MOTOR_CONTROLLER(
@@ -183,8 +188,15 @@ target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
 last_cmd = {"vx": 0, "vy": 0, "omega": 0}
 # 命令锁定标志
 command_lock = False
+# 锁定开始时间
+lock_start_time = 0
+# 仅使用后轮模式
+rear_only_mode = False
+# 上一次后轮模式
+last_rear_mode = False
 # 串口接收缓冲
-rx_buf = ""
+rx_buf3 = ""
+rx_buf6 = ""
 
 
 def pit_handler(_tick):
@@ -252,6 +264,12 @@ def parse_command(cmd_str):
             continue
         key, val_str = part.split("=", 1)
         key = key.strip().lower()
+
+        # 处理字符串类型参数
+        if key == "print":
+            cmd["print"] = val_str.strip()
+            continue
+
         try:
             val = float(val_str.strip())
         except ValueError:
@@ -259,6 +277,8 @@ def parse_command(cmd_str):
 
         if key == "vx":
             cmd["vx"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
+        elif key == "rear":
+            cmd["rear"] = val != 0
         elif key == "vy":
             cmd["vy"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
         elif key == "dx":
@@ -281,15 +301,35 @@ def parse_command(cmd_str):
     return cmd if cmd else None
 
 
+def handle_query(token):
+    """
+    处理查询指令并返回信息到 uart6
+    :param token: 查询的标识符
+    """
+    token = token.strip().lower()
+    if token == "pos":
+        # 返回当前位姿: x, y, yaw
+        uart6.write("?pos=%.3f,%.3f,%.2f\r\n" % (odometry.x, odometry.y, heading_est))
+    elif token == "lock":
+        # 返回锁定状态
+        uart6.write("?lock=%d\r\n" % (1 if command_lock else 0))
+    else:
+        uart6.write("?unknown=%s\r\n" % token)
+
+
 def apply_command(cmd):
     """
     应用解析后的命令并设置目标速度
 
     :param cmd: 包含 vx, vy, omega, angle 等的命令字典
     """
-    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock
+    global target_speeds, last_cmd, heading_target, heading_est, last_yaw_rad, command_lock, lock_start_time, rear_only_mode, last_rear_mode, yaw_integral
     if not cmd:
         return
+
+    # 处理打印指令
+    if "print" in cmd:
+        uart3.write("%s\r\n" % cmd["print"])
 
     if cmd.get("reset"):
         # 1. 重置里程计
@@ -297,6 +337,7 @@ def apply_command(cmd):
         # 2. 重置航向角估计
         heading_est = 0.0
         heading_target = 0.0
+        yaw_integral = 0.0
         # 3. 重置四元数姿态
         q_est.w, q_est.x, q_est.y, q_est.z = 1.0, 0.0, 0.0, 0.0
         # 4. 重置解包相关的状态
@@ -310,17 +351,25 @@ def apply_command(cmd):
         # 将上一指令设为默认停车状态
         last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         command_lock = False
-        uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
+        # uart3.write("Reset Position and Heading (Full State Reset). Stopping.\r\n")
         return
+
+    # 如果处于锁定状态，则丢弃
+    if command_lock:
+        # uart3.write("Command Ignored (Locked)\r\n")
+        return
+
+    rear_mode_changed = False
+    if "rear" in cmd:
+        new_mode = cmd["rear"]
+        if new_mode != rear_only_mode:
+            rear_mode_changed = True
+        rear_only_mode = new_mode
+        uart3.write("Rear Only Mode: %s\r\n" % str(rear_only_mode))
 
     # 检查是否为位置相关指令
     # 只要包含位置目标或相对移动，就视为位置指令
     is_pos_cmd = "dx" in cmd or "dy" in cmd or "d_angle" in cmd
-
-    # 如果处于锁定状态，且收到的是位置指令，则丢弃
-    if command_lock and is_pos_cmd:
-        uart3.write("Command Ignored (Locked)\r\n")
-        return
 
     # 处理相对角度：如果存在 d_angle，将其转换为绝对 angle
     if "d_angle" in cmd:
@@ -331,23 +380,43 @@ def apply_command(cmd):
         # 删除 d_angle，避免混淆（虽然保留也没事，因为 we prefer 'angle'）
         # cmd.pop("d_angle")
 
-    # 处理相对位移：如果存在 dx 或 dy，将其转换为绝对 x, y
+    # 处理相对位移：如果存在 dx 或 dy，将其从车身坐标转换为世界坐标，并叠加到绝对 x, y
     if "dx" in cmd or "dy" in cmd:
-        cmd["x"] = odometry.x + cmd.get("dx", 0.0)
-        cmd["y"] = odometry.y + cmd.get("dy", 0.0)
-        uart3.write(
-            "Rel Move: dx=%.3f dy=%.3f -> x=%.3f y=%.3f\r\n"
-            % (cmd.get("dx", 0.0), cmd.get("dy", 0.0), cmd["x"], cmd["y"])
-        )
+        dx_body = cmd.get("dx", 0.0)
+        dy_body = cmd.get("dy", 0.0)
+
+        # 使用当前航向角进行坐标变换 (Body -> World)
+        # 假设 heading_est 单位为度
+        theta_rad = math.radians(heading_est)
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+
+        # 旋转矩阵应用
+        # x_world = x_body * cos - y_body * sin
+        # y_world = x_body * sin + y_body * cos
+        dx_world = dx_body * cos_t - dy_body * sin_t
+        dy_world = dx_body * sin_t + dy_body * cos_t
+
+        cmd["x"] = odometry.x + dx_world
+        cmd["y"] = odometry.y + dy_world
+        # uart3.write(
+        #     "Rel Move (Body): dx=%.3f dy=%.3f -> World dx=%.3f dy=%.3f\r\n"
+        #     % (dx_body, dy_body, dx_world, dy_world)
+        # )
 
     last_cmd = cmd
 
     # 更新锁定状态
-    # 如果是位置指令，加锁；如果是速度指令，解锁
-    if is_pos_cmd:
-        command_lock = True
+    # 如果是位置指令或后轮模式变化，加锁；否则解锁
+    should_lock = is_pos_cmd or rear_mode_changed
+    if should_lock:
+        if not command_lock:
+            # uart3.write("Command Locked.\r\n")
+            command_lock = True
+            lock_start_time = time.ticks_ms()
     else:
         command_lock = False
+    last_rear_mode = rear_only_mode
 
     vx = cmd.get("vx", 0.0)
     vy = cmd.get("vy", 0.0)
@@ -356,7 +425,7 @@ def apply_command(cmd):
     # 注意: 这里计算仅用于串口反馈当前指令转换结果，实际控制循环中会重新计算 (尤其是在位置模式下)
     # 如果处于位置模式，这里的 vx vy 可能不是最终值
     if "x" in cmd or "y" in cmd:
-        uart3.write("Pos Mode: x=%s, y=%s\r\n" % (str(cmd.get("x")), str(cmd.get("y"))))
+        # uart3.write("Pos Mode: x=%s, y=%s\r\n" % (str(cmd.get("x")), str(cmd.get("y"))))
         # 清除速度指令以免干扰
         if "vx" not in cmd:
             last_cmd["vx"] = None
@@ -364,18 +433,18 @@ def apply_command(cmd):
             last_cmd["vy"] = None
     else:
         vm, vl, vr = inverse_kinematics(vx, vy, omega)
-        uart3.write(
-            "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
-            % (
-                vx,
-                vy,
-                omega,
-                str(cmd.get("angle")),
-                vm,
-                vl,
-                vr,
-            )
-        )
+        # uart3.write(
+        #     "OK vx=%.2f vy=%.2f om=%.2f ang=%s -> m=%.1f l=%.1f r=%.1f\r\n"
+        #     % (
+        #         vx,
+        #         vy,
+        #         omega,
+        #         str(cmd.get("angle")),
+        #         vm,
+        #         vl,
+        #         vr,
+        #     )
+        # )
 
 
 # 实例化 ticker 模块（周期中断）
@@ -498,9 +567,13 @@ while True:
             # 偏差为度
             yaw_err = heading_target - heading_est
 
-            # 简单的 PD 控制产生角速度 omega (rad/s)
+            # 积分项更新
+            yaw_integral += yaw_err * dt_s
+            yaw_integral = clamp(yaw_integral, -YAW_I_MAX, YAW_I_MAX)
+
+            # PID 控制产生角速度 omega (rad/s)
             # KP 作用于度，KD 作用于 deg/s
-            omega_auto = YAW_KP * yaw_err - YAW_KD * yaw_rate
+            omega_auto = YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
 
         elif cmd_omega is not None:
@@ -509,20 +582,27 @@ while True:
             # 如果指令速度极低，则进入维持当前角度的 Hold 模式
             if abs(omega_cmd) < HOLD_SPEED_EPS:
                 yaw_err = heading_target - heading_est
+                yaw_integral += yaw_err * dt_s
+                yaw_integral = clamp(yaw_integral, -YAW_I_MAX, YAW_I_MAX)
+
                 omega_auto = clamp(
-                    YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                    YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate,
                     -AUTO_OMEGA_MAX,
                     AUTO_OMEGA_MAX,
                 )
                 omega_cmd = omega_auto
             else:
                 heading_target = heading_est
+                yaw_integral = 0.0
         else:
             # 默认模式 (Hold)
             # 和速度模式 omega=0 行为一致
             yaw_err = heading_target - heading_est
+            yaw_integral += yaw_err * dt_s
+            yaw_integral = clamp(yaw_integral, -YAW_I_MAX, YAW_I_MAX)
+
             omega_auto = clamp(
-                YAW_KP * yaw_err - YAW_KD * yaw_rate,
+                YAW_KP * yaw_err + YAW_KI * yaw_integral - YAW_KD * yaw_rate,
                 -AUTO_OMEGA_MAX,
                 AUTO_OMEGA_MAX,
             )
@@ -585,9 +665,15 @@ while True:
             target_vy_cmd,
             float(omega_cmd),
         )
-        target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-        target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-        target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+
+        if rear_only_mode:
+            target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX) / 3
+            target_speeds["l"] = 0.0
+            target_speeds["r"] = 0.0
+        else:
+            target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+            target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+            target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
 
         # 三轮速度环闭环控制
         for state in wheel_states:
@@ -636,7 +722,21 @@ while True:
             # 如果所有目标都满足容差范围，则解锁
             if angle_ok and pos_ok:
                 command_lock = False
-                # uart3.write("Target Reached. Unlocked.\r\n")
+                # 如果处于后轮模式，任务完成后自动恢复为全向模式
+                if rear_only_mode:
+                    rear_only_mode = False
+                    uart3.write("Target Reached. Auto-revert Rear Mode: False. Stopping.\r\n")
+                    # 防止抖动：清除位置指令，切换回零速度模式
+                    last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+                    # 重置 PID 与积分项
+                    reset_pi_state(wheel_states)
+                    yaw_integral = 0.0
+                    # 同步目标航向，防止解锁瞬间回弹
+                    heading_target = heading_est
+                    # 强制电机输出 0
+                    for state in wheel_states:
+                        state["motor"].duty(0)
+                        state["duty"] = 0.0
 
         pit_flag = False
 
@@ -644,34 +744,40 @@ while True:
     buf_len = uart3.any()
     if buf_len:
         try:
-            rx_buf += uart3.read(buf_len).decode()
+            rx_buf3 += uart3.read(buf_len).decode()
             while True:
-                idx = rx_buf.find("\n")
+                idx = rx_buf3.find("\n")
                 if idx == -1:
                     break
-                line = rx_buf[:idx].rstrip("\r")
-                rx_buf = rx_buf[idx + 1 :]
+                line = rx_buf3[:idx].rstrip("\r").strip()
+                rx_buf3 = rx_buf3[idx + 1 :]
                 if not line:
                     continue
-                uart3.write("RCV: %s\r\n" % line)
-                apply_command(parse_command(line))
+                if line.startswith("?"):
+                    handle_query(line[1:])
+                else:
+                    uart3.write("RCV: %s\r\n" % line)
+                    apply_command(parse_command(line))
         except Exception as exc:
             uart3.write("ERR %s\r\n" % exc)
 
     buf_len = uart6.any()
     if buf_len:
         try:
-            rx_buf += uart6.read(buf_len).decode()
+            rx_buf6 += uart6.read(buf_len).decode()
             while True:
-                idx = rx_buf.find("\n")
+                idx = rx_buf6.find("\n")
                 if idx == -1:
                     break
-                line = rx_buf[:idx].rstrip("\r")
-                rx_buf = rx_buf[idx + 1 :]
+                line = rx_buf6[:idx].rstrip("\r").strip()
+                rx_buf6 = rx_buf6[idx + 1 :]
+                # uart3.write("RCV: %s\r\n" % line)
                 if not line:
                     continue
-                uart3.write("RCV: %s\r\n" % line)
-                apply_command(parse_command(line))
+                if line.startswith("?"):
+                    handle_query(line[1:])
+                else:
+                    apply_command(parse_command(line))
         except Exception as exc:
             uart3.write("ERR %s\r\n" % exc)
 
@@ -685,3 +791,4 @@ while True:
         break
 
     gc.collect()
+
