@@ -1,3 +1,14 @@
+"""IMU 陀螺仪零飘校准脚本.
+
+静止测量陀螺仪和加速度计的零飘偏移,保存至 /flash/gyro_offset.txt.
+用于后续在线控制中消除传感器系统误差.
+
+操作步骤:
+1. 启动脚本
+2. 平放车辆,保持绝对静止(约 20 秒)
+3. 脚本自动采集 2000 个样本并计算平均零飘
+4. 结果保存在 Flash 中,LED 持续闪烁表示完成
+"""
 from machine import Pin
 from seekfree import IMU660RX
 import time
@@ -5,7 +16,7 @@ import time
 # LED 指示灯
 led = Pin("C4", Pin.OUT, value=True)
 
-# 陀螺仪初始化
+# IMU 初始化
 imu = IMU660RX()
 GYRO_AXIS_Z = 5
 SAMPLE_COUNT = 2000
@@ -14,7 +25,7 @@ OFFSET_FILE = "/flash/gyro_offset.txt"
 
 print("=" * 40)
 print("开始IMU六轴零飘校准 (IMU 6-Axis Calibration)")
-print("请平放车辆并保持绝对静止！")
+print("请平放车辆并保持绝对静止!")
 print("KEEP THE CAR STILL AND FLAT!")
 print("=" * 40)
 
@@ -48,12 +59,12 @@ duration = (end_time - start_time) / 1000.0
 
 means = [t / SAMPLE_COUNT for t in totals]
 print("-" * 40)
-print(f"采集完成，耗时 {duration:.2f} 秒")
+print(f"采集完成,耗时 {duration:.2f} 秒")
 print("平均值 (Offsets):")
 print(f"Acc : {means[0]:.2f}, {means[1]:.2f}, {means[2]:.2f}")
 print(f"Gyro: {means[3]:.2f}, {means[4]:.2f}, {means[5]:.2f}")
 
-# 保存格式：acc_x,acc_y,acc_z,gyro_x,gyro_y,gyro_z
+# 保存格式:acc_x,acc_y,acc_z,gyro_x,gyro_y,gyro_z
 offset_str = ",".join([f"{v:.4f}" for v in means])
 
 try:
@@ -63,7 +74,7 @@ try:
 except Exception as e:
     print(f"保存文件失败: {e}")
 
-# 提示完成
+# 提示完成(持续闪烁)
 while True:
     led.toggle()
     time.sleep_ms(500)

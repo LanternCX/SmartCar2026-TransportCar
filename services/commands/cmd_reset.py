@@ -1,4 +1,4 @@
-"""reset 系统复位指令处理器：不受 command_lock 影响。"""
+"""reset 系统复位指令处理器:不受 command_lock 影响."""
 from services.command_router import router
 from control.pid_math import reset_pi_state
 
@@ -6,13 +6,13 @@ from control.pid_math import reset_pi_state
 @router.command("reset")
 def handle(ctx, value) -> None:
     """
-    全量系统复位：里程计、姿态、滤波器、PID 积分、锁定状态、暂存位移。
+    全量系统复位:里程计、姿态、滤波器、PID 积分、锁定状态、暂存位移.
 
-    本命令不受 command_lock 限制，可随时执行。
+    本命令不受 command_lock 限制,可随时执行.
 
-    参数：
-        ctx:   TransportCar 实例。
-        value: 忽略（兼容路由器接口，reset 无需数值）。
+    参数:
+        ctx:   TransportCar 实例.
+        value: 忽略(兼容路由器接口,reset 无需数值).
     """
     ctx.odometry.reset()
     ctx.heading_est = 0.0
