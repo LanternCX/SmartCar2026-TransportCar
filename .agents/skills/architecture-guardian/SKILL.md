@@ -64,14 +64,52 @@ description: Ensure high cohesion, low coupling, and maintainable architecture a
 **职责**：协调硬件和控制算法，实现业务逻辑
 
 **模块**：
-- `transport_car.py`：车模核心单例类，主控制循环
-- `commander.py`：指令解析和响应
+- `transport_car.py`：车模核心单例类，主控制循环与跨命令协调（`_finalize_route`）
+- `command_router.py`：命令路由器，装饰器注册模式，将聚合命令字符串分发到独立处理器
+- `commander.py`：指令分词器，将原始命令行拆分为 (key, val) 二元组列表
+- `commands/`：命令处理器包，**每条命令对应一个独立文件**
+
+**`services/commands/` 包结构**：
+
+```
+services/commands/
+├── __init__.py          register_commands(router) — 统一注册入口
+├── cmd_vx.py            vx 速度指令
+├── cmd_vy.py            vy 速度指令
+├── cmd_omega.py         omega/w 角速度指令
+├── cmd_x.py             x 坐标目标
+├── cmd_y.py             y 坐标目标
+├── cmd_angle.py         angle/yaw 绝对偏航角
+├── cmd_dx.py            dx 相对位移（暂存，finalize 处理）
+├── cmd_dy.py            dy 相对位移（暂存，finalize 处理）
+├── cmd_d_angle.py       d_angle/dyaw/da 相对角度增量
+├── cmd_rear.py          rear 后轮模式切换
+├── cmd_reset.py         reset 系统复位
+├── cmd_print.py         print 调试打印
+├── query_pos.py         ?pos 位置查询
+└── query_lock.py        ?lock 锁定状态查询
+```
+
+**每个命令模块约定**：
+```python
+KEYS = ("key1", "key2")          # 响应的命令 key（含别名）
+
+def handle(ctx, value) -> None:  # 命令处理器（查询签名为 handle(ctx)）
+    """中文文档字符串。"""
+    ...
+```
+
+**命令路由模式**：
+- 每条元命令（如 `vx`、`dx`、`reset`）注册到独立模块的 `handle` 函数
+- `CommandRouter.command(*keys)` 装饰器完成注册，新增命令只需新增文件 + `__init__.py` 一行
+- 跨 key 后处理（如 dx+dy→世界坐标变换）通过 `_finalize_route(dispatched)` 钩子统一处理
+- 查询指令（`?pos`、`?lock`）通过 `CommandRouter.query(*keys)` 注册，与命令接口分离
 
 **原则**：
 - 服务层是硬件层和控制层的粘合剂
 - 负责初始化、协调和生命周期管理
-- 包含状态机和模式切换逻辑
-- 最小化业务逻辑，复杂逻辑下沉到控制层
+- `transport_car.py` 只保留协调逻辑（控制循环、finalize、unlock），不含具体命令实现
+- 每个命令模块职责单一，可独立阅读和修改
 
 ## 5. Storage Layer (`storage/`)
 **职责**：处理参数的持久化

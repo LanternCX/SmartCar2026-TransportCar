@@ -1,0 +1,18 @@
+"""vx 速度指令处理器：X 方向速度（车体系）。"""
+from control.pid_math import clamp
+from config.params import V_CMD_MAX
+
+KEYS = ("vx",)
+
+
+def handle(ctx, value: float) -> None:
+    """
+    设置 X 方向速度目标（车体系，脉冲/s），锁定时忽略。
+
+    参数：
+        ctx:   TransportCar 实例。
+        value: 速度值（脉冲/s），自动限幅到 ±V_CMD_MAX。
+    """
+    if ctx.command_lock:
+        return
+    ctx.last_cmd["vx"] = clamp(value, -V_CMD_MAX, V_CMD_MAX)

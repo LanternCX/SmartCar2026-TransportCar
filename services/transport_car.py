@@ -14,7 +14,6 @@ from utils.quaternion import Quaternion
 from config.params import (
     TICK_MS,
     MAX_DUTY,
-    V_CMD_MAX,
     TARGET_SPEED_MAX,
     POS_MAX_SPEED,
     POS_KP,
@@ -38,7 +37,8 @@ from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from services.commander import parse_command, handle_query
+from services.command_router import CommandRouter
+from services.commands import register_commands
 
 
 class TransportCar:
@@ -118,7 +118,7 @@ class TransportCar:
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
-        self.last_cmd = {"vx": 0, "vy": 0, "omega": 0}
+        self.last_cmd: dict = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
         self.lock_start_time = 0
         self.rear_only_mode = False
@@ -129,8 +129,18 @@ class TransportCar:
         self.ticker = None
         self.last_time_us = time.ticks_us()
 
+        # 相对位移暂存（供 _finalize_route 使用）
+        self._pending_dx = None
+        self._pending_dy = None
+        self._pending_d_angle = None
+        self._rear_mode_changed = False
+
         # 初始化三轮 PID 增益（与旧版一致）
         self.init_pid()
+
+        # 命令路由器初始化：每条命令注册到独立处理器（services/commands/）
+        self._router = CommandRouter()
+        register_commands(self._router)
 
     # Public API -----------------------------------------------------
     def mark_tick(self, _tick=None):
@@ -465,111 +475,116 @@ class TransportCar:
                     state["duty"] = 0.0
 
     def _process_uart(self):
-        """轮询两个串口：处理查询、打印、运动/位置指令，异常回传。"""
+        """轮询两个串口：处理查询和运动指令，异常时回传错误信息。"""
         buf_len = self.uart3.any()
         if buf_len:
             try:
-                # 追加缓冲后按行解析
                 self.rx_buf3 += self.uart3.read(buf_len).decode()
                 while True:
                     idx = self.rx_buf3.find("\n")
                     if idx == -1:
                         break
                     line = self.rx_buf3[:idx].rstrip("\r").strip()
-                    self.rx_buf3 = self.rx_buf3[idx + 1 :]
+                    self.rx_buf3 = self.rx_buf3[idx + 1:]
                     if not line:
                         continue
                     if line.startswith("?"):
-                        # 查询指令
-                        handle_query(line[1:], self.odometry, self.heading_est, self.command_lock, self.uart6)
+                        self._router.handle_query(line[1:], self)
                     else:
-                        # 运动指令
                         self.uart3.write("RCV: %s\r\n" % line)
-                        self.apply_command(parse_command(line))
+                        self.apply_command(line)
             except Exception as exc:
                 self.uart3.write("ERR %s\r\n" % exc)
 
         buf_len = self.uart6.any()
         if buf_len:
             try:
-                # uart6 仅做高频数据或远端控制，解析方式相同
                 self.rx_buf6 += self.uart6.read(buf_len).decode()
                 while True:
                     idx = self.rx_buf6.find("\n")
                     if idx == -1:
                         break
                     line = self.rx_buf6[:idx].rstrip("\r").strip()
-                    self.rx_buf6 = self.rx_buf6[idx + 1 :]
+                    self.rx_buf6 = self.rx_buf6[idx + 1:]
                     if not line:
                         continue
                     if line.startswith("?"):
-                        handle_query(line[1:], self.odometry, self.heading_est, self.command_lock, self.uart6)
+                        self._router.handle_query(line[1:], self)
                     else:
-                        self.apply_command(parse_command(line))
+                        self.apply_command(line)
             except Exception as exc:
                 self.uart3.write("ERR %s\r\n" % exc)
 
     # Command handling ----------------------------------------------
-    def apply_command(self, cmd):
-        """应用解析后的命令：重置、模式切换、相对/绝对目标展开、加锁。"""
-        if not cmd:
+
+    def apply_command(self, line: str) -> None:
+        """
+        接收原始命令行字符串，交由路由器分发到各命令接口。
+
+        reset 指令优先处理（不受锁定影响）；其余指令在锁定时忽略。
+
+        参数：
+            line: 原始命令行，如 ``"vx=10,vy=5"`` 或 ``"reset"``。
+        """
+        if not line:
+            return
+        self._router.route(line, self)
+
+    def _finalize_route(self, dispatched: set) -> None:
+        """
+        路由完成后的后处理钩子：处理跨 key 计算并更新锁定状态。
+
+        职责：
+        - 将 _pending_dx / _pending_dy 转换为世界坐标绝对目标（x/y）
+        - 将 _pending_d_angle 叠加到 heading_target，写入 last_cmd["angle"]
+        - 判断是否触发 command_lock（位置/角度指令或后轮模式切换时加锁）
+
+        参数：
+            dispatched: 本次路由中成功分发的命令 key 集合。
+        """
+        # reset 命令已在 handler 中完整处理，直接返回
+        if "reset" in dispatched:
             return
 
-        if "print" in cmd:
-            # 透传打印到 uart3
-            self.uart3.write("%s\r\n" % cmd["print"])
-
-        if cmd.get("reset"):
-            # 全量复位：里程计、姿态、滤波、PID 积分
-            self.odometry.reset()
-            self.heading_est = 0.0
-            self.heading_target = 0.0
-            self.yaw_pid.reset()
-            self.yaw_integral = 0.0
-            self.q_est.w, self.q_est.x, self.q_est.y, self.q_est.z = 1.0, 0.0, 0.0, 0.0
-            self.last_yaw_rad = 0.0
-            self.gyro_lpf.reset(0.0)
-            reset_pi_state(self.wheel_states)
-            self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-            self.command_lock = False
-            return
-
-        # 若处于锁定则忽略新运动指令
         if self.command_lock:
+            # 清空本次暂存（避免残留影响下一次解锁后的指令）
+            self._pending_dx = None
+            self._pending_dy = None
+            self._pending_d_angle = None
             return
 
-        # 后轮模式切换检测
-        rear_mode_changed = False
-        if "rear" in cmd:
-            new_mode = cmd["rear"]
-            if new_mode != self.rear_only_mode:
-                rear_mode_changed = True
-            self.rear_only_mode = new_mode
-            self.uart3.write("Rear Only Mode: %s\r\n" % str(self.rear_only_mode))
+        is_pos_cmd = False
 
-        # 判断是否为位置指令（相对位移/角度）
-        is_pos_cmd = "dx" in cmd or "dy" in cmd or "d_angle" in cmd
+        # 处理相对角度增量
+        if self._pending_d_angle is not None:
+            self.last_cmd["angle"] = self.heading_target + self._pending_d_angle
+            self._pending_d_angle = None
+            is_pos_cmd = True
 
-        if "d_angle" in cmd:
-            # 相对角度叠加到当前目标角
-            cmd["angle"] = self.heading_target + cmd["d_angle"]
-
-        if "dx" in cmd or "dy" in cmd:
-            # 车体系相对位移 -> 世界系绝对目标
-            dx_body = cmd.get("dx", 0.0)
-            dy_body = cmd.get("dy", 0.0)
+        # 处理车体系相对位移 → 世界系绝对坐标
+        if self._pending_dx is not None or self._pending_dy is not None:
+            dx_body = self._pending_dx if self._pending_dx is not None else 0.0
+            dy_body = self._pending_dy if self._pending_dy is not None else 0.0
             theta_rad = math.radians(self.heading_est)
             cos_t = math.cos(theta_rad)
             sin_t = math.sin(theta_rad)
-            dx_world = dx_body * cos_t - dy_body * sin_t
-            dy_world = dx_body * sin_t + dy_body * cos_t
-            cmd["x"] = self.odometry.x + dx_world
-            cmd["y"] = self.odometry.y + dy_world
+            self.last_cmd["x"] = self.odometry.x + dx_body * cos_t - dy_body * sin_t
+            self.last_cmd["y"] = self.odometry.y + dx_body * sin_t + dy_body * cos_t
+            self.last_cmd.pop("vx", None)
+            self.last_cmd.pop("vy", None)
+            self._pending_dx = None
+            self._pending_dy = None
+            is_pos_cmd = True
 
-        # 记录为最新指令
-        self.last_cmd = cmd
+        # 判断本次是否含位置/角度指令（由绝对 x/y/angle 直接设置触发）
+        if not is_pos_cmd:
+            is_pos_cmd = ("x" in dispatched or "y" in dispatched
+                          or "angle" in dispatched or "yaw" in dispatched)
 
-        # 位置指令或后轮模式切换触发加锁
+        # 后轮模式切换触发加锁
+        rear_mode_changed = getattr(self, "_rear_mode_changed", False)
+        self._rear_mode_changed = False
+
         should_lock = is_pos_cmd or rear_mode_changed
         if should_lock:
             if not self.command_lock:
@@ -577,18 +592,12 @@ class TransportCar:
                 self.lock_start_time = time.ticks_ms()
         else:
             self.command_lock = False
+
         self.last_rear_mode = self.rear_only_mode
 
-        vx = cmd.get("vx", 0.0)
-        vy = cmd.get("vy", 0.0)
-        omega = cmd.get("omega", 0.0)
-
-        if "x" in cmd or "y" in cmd:
-            # 位置模式下，若未明确给 vx/vy 则清空速度意图
-            if "vx" not in cmd:
-                self.last_cmd["vx"] = None
-            if "vy" not in cmd:
-                self.last_cmd["vy"] = None
-        else:
-            # 速度模式下即时计算一次逆解，仅用于回显（保持与旧版行为一致）
+        # 速度模式下即时计算一次逆解（与旧版行为保持一致，仅用于回显）
+        if not is_pos_cmd:
+            vx = self.last_cmd.get("vx") or 0.0
+            vy = self.last_cmd.get("vy") or 0.0
+            omega = self.last_cmd.get("omega") or 0.0
             self._inverse_kinematics(vx, vy, omega)

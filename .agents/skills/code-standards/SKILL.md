@@ -68,6 +68,37 @@ description: Enforce SmartCar Python code style, MicroPython compatibility, arch
 - 保持控制周期稳定性；避免引入阻塞操作
 - 维护硬件驱动的线程安全性
 
+# Command Handler Registration Pattern
+
+新增命令接口时遵循以下规范：
+
+1. **每条元命令对应 `services/commands/` 下的一个独立文件**，文件约定：
+   ```python
+   # services/commands/cmd_new.py
+   KEYS = ("new_key",)          # 响应的 key（可含别名）
+
+   def handle(ctx, value: float) -> None:
+       """简短的中文文档字符串说明功能。"""
+       if ctx.command_lock:
+           return
+       ctx.last_cmd["new_key"] = value
+   ```
+
+2. **在 `services/commands/__init__.py` 的 `_CMD_HANDLERS` 列表中添加一行**：
+   ```python
+   from services.commands.cmd_new import handle as _h_new, KEYS as _k_new
+   # 在 _CMD_HANDLERS 列表添加：
+   (_k_new, _h_new),
+   ```
+
+3. **别名绑定**：`KEYS = ("omega", "w")` 即可让一个 handler 响应多个 key
+
+4. **跨 key 后处理**在 `TransportCar._finalize_route(dispatched)` 中实现，handler 仅暂存值（`ctx._pending_xxx`）
+
+5. **查询接口**（`?xxx`）放在 `services/commands/query_xxx.py`，handler 签名为 `(ctx) -> None`，注册到 `_QUERY_HANDLERS`
+
+6. **reset 类命令**不受锁定（`command_lock`）影响，在 handler 内直接执行并在 `_finalize_route` 中提前返回
+
 # Deliverables
 - 符合上述标准的更新代码
 - 测试说明（执行的命令和结果）
