@@ -1,10 +1,10 @@
 """vy 速度指令处理器：Y 方向速度（车体系）。"""
+from services.command_router import router
 from control.pid_math import clamp
 from config.params import V_CMD_MAX
 
-KEYS = ("vy",)
 
-
+@router.command("vy")
 def handle(ctx, value: float) -> None:
     """
     设置 Y 方向速度目标（车体系，脉冲/s），锁定时忽略。

@@ -92,18 +92,27 @@ services/commands/
 
 **每个命令模块约定**：
 ```python
-KEYS = ("key1", "key2")          # 响应的命令 key（含别名）
+# services/commands/cmd_new.py
+from services.command_router import router   # 导入单例路由器
 
-def handle(ctx, value) -> None:  # 命令处理器（查询签名为 handle(ctx)）
+@router.command("new_key")                   # 装饰器自动完成注册
+def handle(ctx, value: float) -> None:
     """中文文档字符串。"""
-    ...
+    if ctx.command_lock:
+        return
+    ctx.last_cmd["new_key"] = value
 ```
 
+**注意事项**：
+- 包初始化时 `_autodiscover()` 自动扫描目录，导入所有 `cmd_*` / `query_*` 文件，**不需要修改 `__init__.py`**
+- `command_router.router` 是模块级单例，所有装饰器注册到同一实例
+- `TransportCar` 通过 `import services.commands`（触发自动发现）后直接使用单例路由器
+
 **命令路由模式**：
-- 每条元命令（如 `vx`、`dx`、`reset`）注册到独立模块的 `handle` 函数
-- `CommandRouter.command(*keys)` 装饰器完成注册，新增命令只需新增文件 + `__init__.py` 一行
-- 跨 key 后处理（如 dx+dy→世界坐标变换）通过 `_finalize_route(dispatched)` 钩子统一处理
-- 查询指令（`?pos`、`?lock`）通过 `CommandRouter.query(*keys)` 注册，与命令接口分离
+- `command_router.router` 是模块级单例（在 `command_router.py` 中定义）
+- 每个命令文件 `from services.command_router import router`，用 `@router.command(...)` 直接注册
+- `services/commands/__init__.py` 的 `_autodiscover()` 自动扫描并导入 `cmd_*` / `query_*` 文件，触发装饰器
+- `transport_car.py` 通过 `import services.commands` 触发发现，然后使用单例路由器
 
 **原则**：
 - 服务层是硬件层和控制层的粘合剂

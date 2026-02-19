@@ -152,3 +152,7 @@ class CommandRouter:
         if hasattr(ctx, "uart6"):
             ctx.uart6.write("?unknown=%s\r\n" % token)
         return False
+
+
+# 模块级单例路由器：命令模块通过 @router.command() 直接注册到此实例
+router = CommandRouter()

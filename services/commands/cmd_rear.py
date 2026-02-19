@@ -1,7 +1,8 @@
 """rear 后轮模式切换指令处理器。"""
-KEYS = ("rear",)
+from services.command_router import router
 
 
+@router.command("rear")
 def handle(ctx, value: float) -> None:
     """
     切换后轮专用模式（非零为启用），锁定时忽略。

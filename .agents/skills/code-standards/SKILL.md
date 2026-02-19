@@ -70,34 +70,29 @@ description: Enforce SmartCar Python code style, MicroPython compatibility, arch
 
 # Command Handler Registration Pattern
 
-新增命令接口时遵循以下规范：
+新增命令接口时遵循以下规范（**仅需一步**）：
 
-1. **每条元命令对应 `services/commands/` 下的一个独立文件**，文件约定：
+1. **在 `services/commands/` 创建 `cmd_xxx.py`**，使用 `@router.command()` 装饰器注册：
    ```python
    # services/commands/cmd_new.py
-   KEYS = ("new_key",)          # 响应的 key（可含别名）
+   from services.command_router import router   # 单例路由器
 
+   @router.command("new_key")                   # 可传多个别名：@router.command("k1", "k2")
    def handle(ctx, value: float) -> None:
        """简短的中文文档字符串说明功能。"""
        if ctx.command_lock:
            return
        ctx.last_cmd["new_key"] = value
    ```
+   文件创建完成即自动生效，无需修改任何其他文件。
 
-2. **在 `services/commands/__init__.py` 的 `_CMD_HANDLERS` 列表中添加一行**：
-   ```python
-   from services.commands.cmd_new import handle as _h_new, KEYS as _k_new
-   # 在 _CMD_HANDLERS 列表添加：
-   (_k_new, _h_new),
-   ```
+2. **查询接口**（`?xxx`）放在 `services/commands/query_xxx.py`，使用 `@router.query("token")`，handler 签名为 `(ctx) -> None`
 
-3. **别名绑定**：`KEYS = ("omega", "w")` 即可让一个 handler 响应多个 key
+3. **跨 key 后处理**在 `TransportCar._finalize_route(dispatched)` 中实现，handler 仅暂存值（`ctx._pending_xxx`）
 
-4. **跨 key 后处理**在 `TransportCar._finalize_route(dispatched)` 中实现，handler 仅暂存值（`ctx._pending_xxx`）
+4. **reset 类命令**不受锁定（`command_lock`）影响，在 handler 内直接执行
 
-5. **查询接口**（`?xxx`）放在 `services/commands/query_xxx.py`，handler 签名为 `(ctx) -> None`，注册到 `_QUERY_HANDLERS`
-
-6. **reset 类命令**不受锁定（`command_lock`）影响，在 handler 内直接执行并在 `_finalize_route` 中提前返回
+**原理**：`services/commands/__init__.py` 的 `_autodiscover()` 自动扫描目录，导入所有 `cmd_*` / `query_*` 文件，触发每个文件顶层的 `@router` 装饰器完成注册。
 
 # Deliverables
 - 符合上述标准的更新代码

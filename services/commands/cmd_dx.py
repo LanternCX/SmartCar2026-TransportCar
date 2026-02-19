@@ -1,7 +1,8 @@
 """dx 相对位移指令处理器：车体系 X 方向位移暂存。"""
-KEYS = ("dx",)
+from services.command_router import router
 
 
+@router.command("dx")
 def handle(ctx, value: float) -> None:
     """
     暂存车体系 X 方向相对位移（m），锁定时忽略。

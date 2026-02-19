@@ -1,7 +1,8 @@
 """dy 相对位移指令处理器：车体系 Y 方向位移暂存。"""
-KEYS = ("dy",)
+from services.command_router import router
 
 
+@router.command("dy")
 def handle(ctx, value: float) -> None:
     """
     暂存车体系 Y 方向相对位移（m），锁定时忽略。

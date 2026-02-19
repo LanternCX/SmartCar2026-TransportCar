@@ -1,7 +1,8 @@
 """print 调试打印指令处理器：透传消息到 uart3。"""
-KEYS = ("print",)
+from services.command_router import router
 
 
+@router.command("print")
 def handle(ctx, value: str) -> None:
     """
     将 value 字符串透传输出到 uart3（调试用途）。

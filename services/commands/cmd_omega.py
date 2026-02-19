@@ -1,10 +1,10 @@
 """omega 角速度指令处理器，别名 w。"""
+from services.command_router import router
 from control.pid_math import clamp
 from config.params import V_CMD_MAX
 
-KEYS = ("omega", "w")
 
-
+@router.command("omega", "w")
 def handle(ctx, value: float) -> None:
     """
     设置角速度目标（度/s），锁定时忽略。

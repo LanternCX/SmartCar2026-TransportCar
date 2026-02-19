@@ -1,7 +1,8 @@
 """d_angle 相对偏航角指令处理器，别名 dyaw / da。"""
-KEYS = ("d_angle", "dyaw", "da")
+from services.command_router import router
 
 
+@router.command("d_angle", "dyaw", "da")
 def handle(ctx, value: float) -> None:
     """
     暂存相对偏航角增量（度），锁定时忽略。

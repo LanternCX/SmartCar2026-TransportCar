@@ -37,8 +37,8 @@ from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from services.command_router import CommandRouter
-from services.commands import register_commands
+from services.command_router import router as _cmd_router
+import services.commands  # noqa: 触发自动发现，所有 @router.command() 装饰器在此执行
 
 
 class TransportCar:
@@ -138,9 +138,8 @@ class TransportCar:
         # 初始化三轮 PID 增益（与旧版一致）
         self.init_pid()
 
-        # 命令路由器初始化：每条命令注册到独立处理器（services/commands/）
-        self._router = CommandRouter()
-        register_commands(self._router)
+        # 命令路由器：使用单例路由器（命令模块已通过 @router 装饰器完成注册）
+        self._router = _cmd_router
 
     # Public API -----------------------------------------------------
     def mark_tick(self, _tick=None):

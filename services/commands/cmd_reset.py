@@ -1,9 +1,9 @@
 """reset 系统复位指令处理器：不受 command_lock 影响。"""
+from services.command_router import router
 from control.pid_math import reset_pi_state
 
-KEYS = ("reset",)
 
-
+@router.command("reset")
 def handle(ctx, value) -> None:
     """
     全量系统复位：里程计、姿态、滤波器、PID 积分、锁定状态、暂存位移。
