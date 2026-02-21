@@ -3,7 +3,7 @@
 提供四元数基本操作、欧拉角转换和向量旋转等功能.
 """
 import math
-from typing import Tuple
+ 
 
 
 class Quaternion:
@@ -12,7 +12,7 @@ class Quaternion:
     四元数形式为 q = (w, x, y, z),其中 w 为标量部分.
     """
 
-    def __init__(self, w: float = 1.0, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
+    def __init__(self, w=1.0, x=0.0, y=0.0, z=0.0):
         """初始化四元数.
         
         参数:
@@ -24,7 +24,7 @@ class Quaternion:
         self.y = y
         self.z = z
 
-    def normalize(self) -> None:
+    def normalize(self):
         """将四元数归一化.
         
         副作用:
@@ -41,7 +41,7 @@ class Quaternion:
         self.y *= inv_norm
         self.z *= inv_norm
 
-    def update(self, gx: float, gy: float, gz: float, dt: float) -> None:
+    def update(self, gx, gy, gz, dt):
         """使用角速度更新四元数.
         
         四元数运动学:q_dot = 0.5 * q * omega,其中 omega = (0, gx, gy, gz).
@@ -67,7 +67,7 @@ class Quaternion:
         self.z += dq3 * dt
         self.normalize()
 
-    def to_euler_yaw(self) -> float:
+    def to_euler_yaw(self):
         """提取偏航角(绕 Z 轴旋转).
         
         返回:
@@ -79,7 +79,7 @@ class Quaternion:
             1.0 - 2.0 * (self.y * self.y + self.z * self.z),
         )
 
-    def to_euler_angles(self) -> Tuple[float, float, float]:
+    def to_euler_angles(self):
         """转换为欧拉角.
         
         使用 Z-Y-X 约定(Yaw-Pitch-Roll).
@@ -108,7 +108,7 @@ class Quaternion:
 
         return roll, pitch, yaw
 
-    def rotate(self, v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    def rotate(self, v):
         """使用四元数旋转向量.
         
         计算 v_new = q * v * q_conj.
@@ -144,7 +144,7 @@ class Quaternion:
 
         return rx, ry, rz
 
-    def rotate_inv(self, v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    def rotate_inv(self, v):
         """使用四元数的共轭(逆)旋转向量.
         
         计算 v_new = q_conj * v * q.
@@ -179,7 +179,7 @@ class Quaternion:
 
         return rx, ry, rz
 
-    def from_euler(self, roll: float, pitch: float, yaw: float) -> None:
+    def from_euler(self, roll, pitch, yaw):
         """从欧拉角初始化四元数.
         
         使用 Z-Y-X 序列(Yaw, Pitch, Roll).

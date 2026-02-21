@@ -4,10 +4,10 @@
 """
 import math
 from array import array
-from typing import Dict, List, Tuple, Optional, Any
+ 
 
 
-def create_ident_buffers(names: List[str], max_samples: int) -> Dict[str, Dict[str, Any]]:
+def create_ident_buffers(names, max_samples):
     """创建用于辨识的环形缓冲区.
     
     参数:
@@ -27,7 +27,7 @@ def create_ident_buffers(names: List[str], max_samples: int) -> Dict[str, Dict[s
     }
 
 
-def push_ident_sample(name: str, t_ms: float, val: float, buf: Dict[str, Dict[str, Any]], max_samples: Optional[int] = None) -> None:
+def push_ident_sample(name, t_ms, val, buf, max_samples=None):
     """向环形缓冲区添加采样点.
     
     参数:
@@ -48,7 +48,7 @@ def push_ident_sample(name: str, t_ms: float, val: float, buf: Dict[str, Dict[st
     slot["count"] += 1
 
 
-def get_ident_samples(name: str, buf: Dict[str, Dict[str, Any]], max_samples: Optional[int] = None) -> List[Tuple[float, float]]:
+def get_ident_samples(name, buf, max_samples=None):
     """从缓冲区读取所有采样点(有序).
     
     参数:
@@ -72,7 +72,7 @@ def get_ident_samples(name: str, buf: Dict[str, Dict[str, Any]], max_samples: Op
     return samples
 
 
-def identify_wheel(samples: List[Tuple[float, float]], step_duty: float) -> Tuple[Optional[float], Optional[float]]:
+def identify_wheel(samples, step_duty):
     """从阶跃响应曲线辨识轮子的一阶系统参数.
     
     使用尾部稳态值计算增益,并通过时间常数定义(63%上升点或对数线性拟合)

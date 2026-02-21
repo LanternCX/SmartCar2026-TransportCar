@@ -5,7 +5,7 @@ from config.params import V_CMD_MAX
 
 
 @router.command("omega", "w")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     设置角速度目标(度/s),锁定时忽略.
 

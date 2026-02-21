@@ -2,7 +2,7 @@
 import gc
 import math
 import time
-from typing import Optional
+
 from machine import Pin
 from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController, PositionalPIDController
@@ -61,7 +61,7 @@ class TransportCar:
                 break  # 检测到急停或其他致命错误
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         """初始化搬运车所有组件.
         
         完成硬件初始化、滤波器和状态变量的构造,保持所有参数与旧版一致.
@@ -139,7 +139,7 @@ class TransportCar:
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
-        self.last_cmd: dict = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
         self.lock_start_time = 0
         self.rear_only_mode = False
@@ -163,7 +163,7 @@ class TransportCar:
         self._router = _cmd_router
 
     # Public API -----------------------------------------------------
-    def mark_tick(self, _tick: Optional[int] = None) -> None:  # noqa: F841
+    def mark_tick(self, _tick=None):  # noqa: F841
         """中断处理函数:被 ticker 回调时置位标志.
         
         ticker 中断仅设置标志,耗时工作放在主循环执行.
@@ -174,7 +174,7 @@ class TransportCar:
         # ticker 中断仅设置标志,耗时工作放在主循环
         self.pit_flag = True
 
-    def set_ticker(self, ticker_obj) -> None:
+    def set_ticker(self, ticker_obj):
         """记录 ticker 实例,便于 stop 时关闭.
         
         参数:
@@ -182,7 +182,7 @@ class TransportCar:
         """
         self.ticker = ticker_obj
 
-    def step(self) -> bool:
+    def step(self):
         """单次主循环:控制、命令处理、急停检测.
         
         返回:
@@ -204,7 +204,7 @@ class TransportCar:
         gc.collect()
         return True
 
-    def stop(self) -> None:
+    def stop(self):
         """停止控制循环、清零积分、断开电机.
         
         副作用:
@@ -219,14 +219,14 @@ class TransportCar:
         self.uart3.write("stop\r\n")
 
     # Internal helpers ----------------------------------------------
-    def init_pid(self) -> None:
+    def init_pid(self):
         """按 PID_MAP 配置表初始化三轮速度环增益."""
         for state in self.wheel_states:
             kp_val, ki_val, ki2_val = PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
             state["kp"], state["ki"] = kp_val, ki_val
             state["controller"].set_gains(kp_val, ki_val, ki2_val)
 
-    def _inverse_kinematics(self, vx: float, vy: float, omega: float) -> tuple:
+    def _inverse_kinematics(self, vx, vy, omega):
         """Y 型三轮逆运动学:输入车体系速度/角速度,输出三轮目标脉冲速度.
         
         参数:
@@ -252,7 +252,7 @@ class TransportCar:
             vr *= scale
         return vm, vl, vr
 
-    def _handle_tick(self) -> None:
+    def _handle_tick(self):
         """执行单次 5ms 控制周期.
         
         包括读取编码器、更新滤波器、IMU 更新、PID 控制、运动学变换.
@@ -273,7 +273,7 @@ class TransportCar:
         self._update_attitude(dt_s)
         self._run_control(dt_s)
 
-    def _update_wheel_speeds(self) -> None:
+    def _update_wheel_speeds(self):
         """读取编码器脉冲并通过多级滤波器处理.
         
         依次执行:中值滤波(去尖刺)→ 差分限幅(限突变)→ 双窗回归(融合)→ 低通(平滑).
@@ -292,7 +292,7 @@ class TransportCar:
             # 输出端低通,得到平滑速度
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
-    def _update_attitude(self, dt_s: float) -> None:
+    def _update_attitude(self, dt_s):
         """更新 IMU 数据、四元数积分、解包偏航角、计算滤波角速度.
         
         参数:
@@ -355,7 +355,7 @@ class TransportCar:
         # 存储滤波后的角速度供姿态控制使用
         self._yaw_rate = yaw_rate
 
-    def _run_control(self, dt_s: float) -> None:
+    def _run_control(self, dt_s):
         """执行完整的控制堆栈:姿态环 + 平面运动控制 + 速度环.
         
         依次:角度/速度指令 → 目标角速度 → 车体系速度命令 → 逆运动学 → 电机占空比.
@@ -378,7 +378,7 @@ class TransportCar:
         # 4) 锁定判定与自动解锁
         self._check_unlock()
 
-    def _compute_omega_cmd(self, dt_s: float) -> float:
+    def _compute_omega_cmd(self, dt_s):
         """根据 angle/omega 指令计算目标角速度.
         
         支持三种模式:
@@ -428,7 +428,7 @@ class TransportCar:
 
         return omega_cmd
 
-    def _compute_planar_targets(self, dt_s: float) -> tuple:
+    def _compute_planar_targets(self, dt_s):
         """计算车体系目标速度,支持位置锁定和速度两种模式.
         
         位置模式:世界系 P 控制 (x, y) → 车体系速度命令.
@@ -487,7 +487,7 @@ class TransportCar:
 
         return target_vx_cmd, target_vy_cmd
 
-    def _apply_target_speeds(self, target_vx_cmd: float, target_vy_cmd: float, omega_cmd: float, dt_s: float) -> None:
+    def _apply_target_speeds(self, target_vx_cmd, target_vy_cmd, omega_cmd, dt_s):
         """逆运动学、限幅、速度环 PID,占空比分配到三轮.
         
         参数:
@@ -536,7 +536,7 @@ class TransportCar:
                 state["duty"] = 0.0
                 state["motor"].duty(0)
 
-    def _check_unlock(self) -> None:
+    def _check_unlock(self):
         """在锁定模式下检查角度/位置误差,达标时解锁.
         
         当角度误差 < ANGLE_TOLERANCE 且位置误差 < POS_TOLERANCE 时,
@@ -585,7 +585,7 @@ class TransportCar:
                     state["motor"].duty(0)
                     state["duty"] = 0.0
 
-    def _process_uart(self) -> None:
+    def _process_uart(self):
         """轮询两个串口:处理查询和运动指令.
         
         UART3:收集调试命令(来自 RTT 或其他监控工具).
@@ -635,7 +635,7 @@ class TransportCar:
 
     # Command handling ----------------------------------------------
 
-    def apply_command(self, line: str) -> None:
+    def apply_command(self, line):
         """接收并分发原始命令行字符串到各命令处理器.
         
         reset 指令优先处理(不受锁定影响);其余指令在锁定时忽略.
@@ -647,7 +647,7 @@ class TransportCar:
             return
         self._router.route(line, self)
 
-    def _finalize_route(self, dispatched: set) -> None:
+    def _finalize_route(self, dispatched):
         """在路由完成后处理跨 key 的后处理逻辑.
         
         包括相对位移(dx, dy)的世界系到车体系变换.

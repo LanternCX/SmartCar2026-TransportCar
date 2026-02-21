@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("dy")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     暂存车体系 Y 方向相对位移(m),锁定时忽略.
 

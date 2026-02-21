@@ -1,9 +1,9 @@
 """编码器工厂函数,封装引脚配置与反转设置."""
 from smartcar import encoder
-from typing import Dict, Any
+ 
 
 
-def create_encoders() -> Dict[str, Any]:
+def create_encoders():
     """创建三个编码器对象.
     
     分别对应中间(m)、左(l)、右(r)轮.所有编码器均启用反转计数.

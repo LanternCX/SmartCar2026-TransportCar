@@ -4,7 +4,7 @@
 """
 
 
-def tokenize(cmd_str: str) -> list:
+def tokenize(cmd_str):
     """
     将聚合命令字符串拆分为 (key, raw_val_str) 二元组列表.
 

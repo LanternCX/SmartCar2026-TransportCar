@@ -12,7 +12,7 @@ import os
 import sys
 
 
-def _autodiscover() -> None:
+def _autodiscover():
     """
     扫描当前包目录,自动导入所有 cmd_*.py 和 query_*.py 命令模块.
 

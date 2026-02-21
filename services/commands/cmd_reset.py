@@ -4,7 +4,7 @@ from control.pid_math import reset_pi_state
 
 
 @router.command("reset")
-def handle(ctx, value) -> None:
+def handle(ctx, value):
     """
     全量系统复位:里程计、姿态、滤波器、PID 积分、锁定状态、暂存位移.
 

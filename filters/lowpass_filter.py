@@ -2,7 +2,6 @@
 
 实现单极点 IIR 低通滤波,采用一阶递推公式.
 """
-from typing import Optional, Union
 
 
 class LowPassFilter:
@@ -13,7 +12,7 @@ class LowPassFilter:
     参数 alpha 越大,响应越快但噪声越多;alpha 越小,响应越慢但平滑.
     """
 
-    def __init__(self, alpha: float = 0.3, initial: Optional[Union[float, int]] = None) -> None:
+    def __init__(self, alpha=0.3, initial=None):
         """初始化低通滤波器.
         
         参数:
@@ -23,7 +22,7 @@ class LowPassFilter:
         self.alpha = alpha
         self.state = initial
 
-    def reset(self, value: Optional[Union[float, int]] = None) -> None:
+    def reset(self, value=None):
         """重置滤波器状态.
         
         参数:
@@ -31,7 +30,7 @@ class LowPassFilter:
         """
         self.state = value
 
-    def update(self, new_val: Union[float, int]) -> Union[float, int]:
+    def update(self, new_val):
         """更新滤波器并返回输出.
         
         参数:

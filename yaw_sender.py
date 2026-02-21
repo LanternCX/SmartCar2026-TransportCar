@@ -71,7 +71,7 @@ except (OSError, ValueError):
 pit_flag = False
 
 
-def pit_handler(_tick: int) -> None:
+def pit_handler(_tick):
     """Ticker 中断处理器:置位周期标志."""
     global pit_flag
     pit_flag = True

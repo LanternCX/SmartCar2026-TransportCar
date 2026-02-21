@@ -1,9 +1,9 @@
 """辨识参数与陀螺仪零偏的加载工具."""
 from control.pid_store import load_ident_params
-from typing import Dict, List, Callable, Optional
+ 
 
 
-def load_ident_lookup(path: str, logger: Optional[Callable[[str], None]] = None) -> Dict[str, tuple]:
+def load_ident_lookup(path, logger=None):
     """加载各轮子的系统增益和时间常数.
     
     参数:
@@ -22,7 +22,7 @@ def load_ident_lookup(path: str, logger: Optional[Callable[[str], None]] = None)
     return lookup
 
 
-def load_gyro_offsets(path: str, logger: Optional[Callable[[str], None]] = None) -> List[float]:
+def load_gyro_offsets(path, logger=None):
     """加载 IMU 六轴零偏或遗留的单轴陀螺仪零偏.
     
     支持两种格式:

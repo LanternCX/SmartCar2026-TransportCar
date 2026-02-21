@@ -108,7 +108,7 @@ identifying = True
 ident_start_tick = None
 
 
-def pit_handler(tick) -> None:
+def pit_handler(tick):
     """PIT 中断处理程序,标记进行一次控制周期.
     
     参数:

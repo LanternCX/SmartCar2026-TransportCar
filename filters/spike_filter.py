@@ -2,7 +2,6 @@
 
 用于去除速度或其他传感器数据中的突发尖峰噪声.
 """
-from typing import Union, List, Optional
 
 
 class SpikeMedianFilter:
@@ -12,7 +11,7 @@ class SpikeMedianFilter:
     去除单点离群值而保留有效的信号变化.
     """
 
-    def __init__(self, window: int = 3) -> None:
+    def __init__(self, window=3):
         """初始化尖峰中值滤波器.
         
         参数:
@@ -21,9 +20,9 @@ class SpikeMedianFilter:
         self.window = max(3, int(window) or 3)
         if self.window % 2 == 0:
             self.window += 1  # 保持窗口大小为奇数
-        self.buf: List[Union[float, int]] = []
+        self.buf = []
 
-    def reset(self, value: Optional[Union[float, int]] = None) -> None:
+    def reset(self, value=None):
         """重置滤波器缓冲区.
         
         参数:
@@ -31,7 +30,7 @@ class SpikeMedianFilter:
         """
         self.buf = [] if value is None else [value] * self.window
 
-    def update(self, new_val: Union[float, int]) -> Union[float, int]:
+    def update(self, new_val):
         """更新滤波器并返回中值.
         
         参数:

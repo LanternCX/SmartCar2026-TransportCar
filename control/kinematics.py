@@ -4,7 +4,7 @@
 世界坐标系下的位置.
 """
 import math
-from typing import Tuple
+ 
 
 
 class OmniKinematics:
@@ -14,7 +14,7 @@ class OmniKinematics:
     轮速与机器人体坐标系速度的相互转换.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         """初始化运动学参数."""
         # 轮子直径 (m)
         self.wheel_diameter = 0.060
@@ -29,7 +29,7 @@ class OmniKinematics:
         # 脉冲转米系数 (m / pulse)
         self.m_per_pulse = self.wheel_circumference / self.counts_per_rev
 
-    def pulses_to_m(self, pulses: float) -> float:
+    def pulses_to_m(self, pulses):
         """将脉冲数转换为米.
         
         参数:
@@ -40,7 +40,7 @@ class OmniKinematics:
         """
         return pulses * self.m_per_pulse
 
-    def m_to_pulses(self, meters: float) -> float:
+    def m_to_pulses(self, meters):
         """将米转换为脉冲数.
         
         参数:
@@ -51,7 +51,7 @@ class OmniKinematics:
         """
         return meters / self.m_per_pulse
 
-    def velocity_pulses_to_m_s(self, pulse_speed: float, dt_s: float) -> float:
+    def velocity_pulses_to_m_s(self, pulse_speed, dt_s):
         """将脉冲速度转换为物理速度.
         
         参数:
@@ -63,7 +63,7 @@ class OmniKinematics:
         """
         return self.pulses_to_m(pulse_speed) / dt_s
 
-    def velocity_m_s_to_pulses(self, m_s_speed: float, dt_s: float) -> float:
+    def velocity_m_s_to_pulses(self, m_s_speed, dt_s):
         """将物理速度转换为脉冲速度.
         
         参数:
@@ -75,7 +75,7 @@ class OmniKinematics:
         """
         return self.m_to_pulses(m_s_speed) * dt_s
 
-    def forward_kinematics(self, vm: float, vl: float, vr: float) -> Tuple[float, float, float]:
+    def forward_kinematics(self, vm, vl, vr):
         """前向运动学:轮速 → 机器人体坐标系速度.
         
         输入输出单位一致.
@@ -93,7 +93,7 @@ class OmniKinematics:
         omega = vl + vr + vm
         return vx, vy, omega
 
-    def inverse_kinematics(self, vx: float, vy: float, omega: float) -> Tuple[float, float, float]:
+    def inverse_kinematics(self, vx, vy, omega):
         """逆向运动学:机器人体坐标系速度 → 轮速.
         
         输入输出单位一致.
@@ -122,12 +122,12 @@ class Odometry:
     积分机器人体坐标系速度并根据朝向转换到世界坐标系.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         """初始化里程计状态."""
         self.x = 0.0
         self.y = 0.0
 
-    def update(self, vx_robot: float, vy_robot: float, theta_rad: float, dt: float) -> None:
+    def update(self, vx_robot, vy_robot, theta_rad, dt):
         """更新位置.
         
         参数:
@@ -151,7 +151,7 @@ class Odometry:
         self.x += v_world_x * dt
         self.y += v_world_y * dt
 
-    def reset(self, x: float = 0.0, y: float = 0.0) -> None:
+    def reset(self, x=0.0, y=0.0):
         """重置里程计.
         
         参数:

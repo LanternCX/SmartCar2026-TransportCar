@@ -42,7 +42,7 @@ PID_MAP = {
 }
 
 
-def load_ident_lookup(path: str) -> dict:
+def load_ident_lookup(path):
     """从文件加载辨识的 (gain, tau) 映射.
     
     参数:
@@ -110,7 +110,7 @@ tick_count = 0
 target_speeds = dict(TARGET_SPEEDS)
 
 
-def pit_handler(tick) -> None:
+def pit_handler(tick):
     """PIT 中断处理程序,标记进行一次控制周期.
     
     参数:
@@ -124,7 +124,7 @@ def pit_handler(tick) -> None:
 
 
 
-def init_pid() -> None:
+def init_pid():
     """初始化速度环 PID 参数.
     
     从 PID_MAP 读取每个轮子的增益配置,同步辨识参数以供调试显示.

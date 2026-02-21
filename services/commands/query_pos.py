@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.query("pos")
-def handle(ctx) -> None:
+def handle(ctx):
     """
     通过 uart6 回传当前位置和航向角,格式:``?pos=x,y,yaw``.
 

@@ -2,7 +2,6 @@
 
 通过长短两个滑动窗口进行线性回归,结合两者预测值来平衡平滑性与响应速度.
 """
-from typing import Tuple, List
 
 
 class DualWindowRegressionFilter:
@@ -15,11 +14,11 @@ class DualWindowRegressionFilter:
 
     def __init__(
         self,
-        tick_ms: int = 10,
-        long_window: int = 30,
-        short_window: int = 8,
-        combine_w: float = 0.65,
-    ) -> None:
+        tick_ms=10,
+        long_window=30,
+        short_window=8,
+        combine_w=0.65,
+    ):
         """初始化双窗口线性回归滤波器.
         
         参数:
@@ -57,18 +56,18 @@ class DualWindowRegressionFilter:
 
     def _update_window(
         self,
-        val: float,
-        t_ms: float,
-        buf: List[float],
-        tbuf: List[float],
-        idx: int,
-        count: int,
-        sum_t: float,
-        sum_t2: float,
-        sum_y: float,
-        sum_ty: float,
-        max_len: int,
-    ) -> Tuple[int, int, float, float, float, float]:
+        val,
+        t_ms,
+        buf,
+        tbuf,
+        idx,
+        count,
+        sum_t,
+        sum_t2,
+        sum_y,
+        sum_ty,
+        max_len,
+    ):
         """更新一个滑动窗口的统计数据.
         
         参数:
@@ -112,7 +111,7 @@ class DualWindowRegressionFilter:
         return idx, count, sum_t, sum_t2, sum_y, sum_ty
 
     @staticmethod
-    def _regression(count: int, sum_t: float, sum_t2: float, sum_y: float, sum_ty: float) -> Tuple[float, float]:
+    def _regression(count, sum_t, sum_t2, sum_y, sum_ty):
         """进行线性回归,计算斜率和截距.
         
         参数:
@@ -131,7 +130,7 @@ class DualWindowRegressionFilter:
             intercept = 0.0
         return slope, intercept
 
-    def reset(self) -> None:
+    def reset(self):
         """重置滤波器状态."""
         self.sample_idx = 0
         self.idx = self.count = 0
@@ -140,7 +139,7 @@ class DualWindowRegressionFilter:
         self.s_idx = self.s_count = 0
         self.s_sum_t = self.s_sum_t2 = self.s_sum_y = self.s_sum_ty = 0.0
 
-    def update(self, raw_value: float) -> Tuple[float, float, float]:
+    def update(self, raw_value):
         """更新滤波器并返回平滑速度、加速度、斜率.
         
         参数:

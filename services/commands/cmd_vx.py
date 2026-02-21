@@ -5,7 +5,7 @@ from config.params import V_CMD_MAX
 
 
 @router.command("vx")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     设置 X 方向速度目标(车体系,脉冲/s),锁定时忽略.
 

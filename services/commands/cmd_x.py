@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("x")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     设置绝对 X 坐标目标(m),锁定时忽略.同时清除 vx 速度意图以进入位置模式.
 

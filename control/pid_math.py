@@ -1,8 +1,8 @@
 """PID 数学工具函数."""
-from typing import List, Dict, Any, Tuple
+ 
 
 
-def hardness_factor(name: str) -> float:
+def hardness_factor(name):
     """根据硬度级别返回相应的调谐因子.
     
     参数:
@@ -22,7 +22,7 @@ def hardness_factor(name: str) -> float:
     return 2.0
 
 
-def clamp(val: float, lo: float, hi: float) -> float:
+def clamp(val, lo, hi):
     """将值限制在指定范围内.
     
     参数:
@@ -41,13 +41,13 @@ def clamp(val: float, lo: float, hi: float) -> float:
 
 
 def compute_pi_from_id(
-    gain: float,
-    tau: float,
-    hardness_name: str,
-    kp_max: float,
-    ki_max: float,
-    gain_boost: float,
-) -> Tuple[float, float]:
+    gain,
+    tau,
+    hardness_name,
+    kp_max,
+    ki_max,
+    gain_boost,
+):
     """从辨识的一阶系统参数计算 PI 增益.
     
     使用模型参数(增益、时间常数)通过硬度因子计算出合适的比例和积分增益.
@@ -69,7 +69,7 @@ def compute_pi_from_id(
     return clamp(kp, 0.0, kp_max), clamp(ki, 0.0, ki_max)
 
 
-def reset_pi_state(states: List[Dict[str, Any]]) -> None:
+def reset_pi_state(states):
     """重置所有轮子的 PID 控制器和占空比.
     
     参数:

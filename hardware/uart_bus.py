@@ -1,9 +1,8 @@
 """UART 初始化封装."""
 from machine import UART
-from typing import Any
 
 
-def create_uart3() -> Any:
+def create_uart3():
     """创建并初始化 UART3.
     
     UART3 用于数据采样和调试输出,波特率 115200.
@@ -16,7 +15,7 @@ def create_uart3() -> Any:
     return uart3
 
 
-def create_uart6() -> Any:
+def create_uart6():
     """创建并初始化 UART6.
     
     UART6 用于命令接收和查询响应,波特率 115200.

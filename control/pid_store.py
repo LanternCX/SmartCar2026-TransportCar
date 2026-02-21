@@ -3,10 +3,9 @@
 提供保存和加载 PID 参数、系统辨识结果(增益和时间常数)的函数.
 """
 import io
-from typing import Dict, List, Any, Optional
 
 
-def save_pid_params(path: str, states: List[Dict[str, Any]], hardness: str) -> None:
+def save_pid_params(path, states, hardness):
     """保存 PID 参数到文件.
     
     参数:
@@ -30,7 +29,7 @@ def save_pid_params(path: str, states: List[Dict[str, Any]], hardness: str) -> N
         f.close()
 
 
-def save_ident_params(path: str, states: List[Dict[str, Any]]) -> None:
+def save_ident_params(path, states):
     """保存系统辨识参数(增益和时间常数)到文件.
     
     参数:
@@ -52,7 +51,7 @@ def save_ident_params(path: str, states: List[Dict[str, Any]]) -> None:
         f.close()
 
 
-def load_ident_params(path: str) -> Dict[str, Dict[str, float]]:
+def load_ident_params(path):
     """从文件加载系统辨识参数.
     
     参数:
@@ -89,7 +88,7 @@ def load_ident_params(path: str) -> Dict[str, Dict[str, float]]:
     return meta
 
 
-def load_pid_params(path: str) -> Dict[str, Any]:
+def load_pid_params(path):
     """从文件加载 PID 参数.
     
     参数:

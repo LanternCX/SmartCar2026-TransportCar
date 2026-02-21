@@ -2,18 +2,18 @@
 from filters.dual_window_regression_filter import DualWindowRegressionFilter
 from filters.lowpass_filter import LowPassFilter
 from control.pid_controller import IncrementalPIDController
-from typing import Dict, Any, Optional
+ 
 
 
 def build_wheel_state(
-    name: str,
-    encoder_obj: Any,
-    motor_obj: Any,
-    tick_ms: int,
-    long_window: int,
-    short_window: int,
-    pid_controller: Optional[Any] = None,
-) -> Dict[str, Any]:
+    name,
+    encoder_obj,
+    motor_obj,
+    tick_ms,
+    long_window,
+    short_window,
+    pid_controller=None,
+):
     """构造单个轮子的状态字典.
     
     集合编码器、电机、滤波器、PID 控制器等组件到一个统一状态对象,

@@ -3,7 +3,7 @@
 实现多种 PID 变种,包括增量式 PID、位置式 PID 和带二次项的速度 PID.
 """
 from control.pid_math import clamp
-from typing import Optional
+ 
 
 
 class PIDControllerBase:
@@ -12,7 +12,7 @@ class PIDControllerBase:
     提供共同的参数设置和输出限幅功能.
     """
 
-    def __init__(self, output_limit: Optional[float] = None) -> None:
+    def __init__(self, output_limit=None):
         """初始化基本 PID 参数.
         
         参数:
@@ -23,7 +23,7 @@ class PIDControllerBase:
         self.ki = 0.0
         self.kd = 0.0
 
-    def set_gains(self, kp: float, ki: float = 0.0, kd: float = 0.0) -> None:
+    def set_gains(self, kp, ki=0.0, kd=0.0):
         """设置 PID 参数.
         
         参数:
@@ -35,7 +35,7 @@ class PIDControllerBase:
         self.ki = ki
         self.kd = kd
 
-    def clamp_output(self, value: float) -> float:
+    def clamp_output(self, value):
         """对输出进行限幅.
         
         参数:
@@ -55,7 +55,7 @@ class IncrementalPIDController(PIDControllerBase):
     输出增量:du = kp*(e - e_prev) + ki*e*dt + kd*(e - 2*e_prev + e_prev_prev) / dt
     """
 
-    def __init__(self, output_limit: Optional[float] = None) -> None:
+    def __init__(self, output_limit=None):
         """初始化增量式 PID 控制器.
         
         参数:
@@ -66,7 +66,7 @@ class IncrementalPIDController(PIDControllerBase):
         self.prev_error = 0.0
         self.prev_prev_error = 0.0
 
-    def update(self, target: float, now: float, dt_s: float = 1.0) -> float:
+    def update(self, target, now, dt_s=1.0):
         """计算 PID 输出.
         
         参数:
@@ -95,7 +95,7 @@ class IncrementalPIDController(PIDControllerBase):
         self.prev_error = err
         return self.output
 
-    def reset(self) -> None:
+    def reset(self):
         """重置控制器内部状态."""
         self.output = 0.0
         self.prev_error = 0.0
@@ -108,7 +108,7 @@ class PositionalPIDController(PIDControllerBase):
     输出:u = kp*e + ki*integral(e) + kd*de/dt
     """
 
-    def __init__(self, output_limit: Optional[float] = None, integral_limit: Optional[float] = None) -> None:
+    def __init__(self, output_limit=None, integral_limit=None):
         """初始化位置式 PID 控制器.
         
         参数:
@@ -120,7 +120,7 @@ class PositionalPIDController(PIDControllerBase):
         self.prev_error = 0.0
         self.integral_limit = integral_limit
 
-    def update(self, target: float, now: float, dt_s: float = 1.0) -> float:
+    def update(self, target, now, dt_s=1.0):
         """计算 PID 输出.
         
         参数:
@@ -147,7 +147,7 @@ class PositionalPIDController(PIDControllerBase):
         self.prev_error = err
         return self.clamp_output(output)
 
-    def reset(self) -> None:
+    def reset(self):
         """重置控制器内部状态."""
         self.integral = 0.0
         self.prev_error = 0.0
@@ -160,7 +160,7 @@ class SpeedPIDController(PIDControllerBase):
     输出:u_feedback = u_inc(增量式 PI)+ u_ff(前馈)
     """
 
-    def __init__(self, output_limit: Optional[float] = None, ki2: float = 0.0, plant_gain: Optional[float] = None, plant_tau: Optional[float] = None) -> None:
+    def __init__(self, output_limit=None, ki2=0.0, plant_gain=None, plant_tau=None):
         """初始化速度 PID 控制器.
         
         参数:
@@ -177,7 +177,7 @@ class SpeedPIDController(PIDControllerBase):
         self.plant_gain = plant_gain
         self.plant_tau = plant_tau
 
-    def set_gains(self, kp: float, ki: float, ki2: float = 0.0) -> None:
+    def set_gains(self, kp, ki, ki2=0.0):
         """设置 PID 参数.
         
         参数:
@@ -188,7 +188,7 @@ class SpeedPIDController(PIDControllerBase):
         super().set_gains(kp, ki)
         self.ki2 = ki2
 
-    def set_plant(self, gain: Optional[float] = None, tau: Optional[float] = None) -> None:
+    def set_plant(self, gain=None, tau=None):
         """设置系统辨识参数.
         
         参数:
@@ -198,7 +198,7 @@ class SpeedPIDController(PIDControllerBase):
         self.plant_gain = gain
         self.plant_tau = tau
 
-    def _feedforward(self, target: float, dt_s: float) -> float:
+    def _feedforward(self, target, dt_s):
         """计算前馈项.
         
         使用一阶系统模型进行前馈:u_ff = (r/g) + (tau/g)*(dr/dt)
@@ -217,7 +217,7 @@ class SpeedPIDController(PIDControllerBase):
         u_ff = (target + tau_term) / self.plant_gain
         return u_ff
 
-    def update(self, target: float, now: float, dt_s: float = 1.0) -> float:
+    def update(self, target, now, dt_s=1.0):
         """计算 PID 输出.
         
         参数:
@@ -248,7 +248,7 @@ class SpeedPIDController(PIDControllerBase):
         self.prev_target = target
         return total
 
-    def reset(self) -> None:
+    def reset(self):
         """重置控制器内部状态."""
         self.output = 0.0
         self.prev_error = 0.0

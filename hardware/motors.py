@@ -1,9 +1,8 @@
 """电机控制器工厂函数."""
 from seekfree import MOTOR_CONTROLLER
-from typing import Dict, Any
 
 
-def create_motors() -> Dict[str, Any]:
+def create_motors():
     """创建并配置三个电机控制器.
     
     创建中间(m)、左(l)、右(r)三个电机,配置对应的 PWM 和方向控制引脚.

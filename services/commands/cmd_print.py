@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("print")
-def handle(ctx, value: str) -> None:
+def handle(ctx, value):
     """
     将 value 字符串透传输出到 uart3(调试用途).
 

@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("angle", "yaw")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     设置绝对偏航角目标(度),锁定时忽略.
 

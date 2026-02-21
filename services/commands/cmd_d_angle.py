@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("d_angle", "dyaw", "da")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     暂存相对偏航角增量(度),锁定时忽略.
 

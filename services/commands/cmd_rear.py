@@ -3,7 +3,7 @@ from services.command_router import router
 
 
 @router.command("rear")
-def handle(ctx, value: float) -> None:
+def handle(ctx, value):
     """
     切换后轮专用模式(非零为启用),锁定时忽略.
 
