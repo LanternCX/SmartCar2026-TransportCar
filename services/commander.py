@@ -1,68 +1,35 @@
-"""指令解析与查询响应，行为与原版保持一致。"""
-import math
-from control.pid_math import clamp
-from config.params import V_CMD_MAX
+"""指令分词器:将原始命令行拆分为 (key, raw_val_str) 二元组列表.
+
+业务逻辑(类型转换、限幅、路由)已迁移至 CommandRouter 和 TransportCar.
+"""
 
 
-def parse_command(cmd_str):
+def tokenize(cmd_str):
     """
-    解析键值对命令字符串，返回字典或 None。
+    将聚合命令字符串拆分为 (key, raw_val_str) 二元组列表.
+
+    规则:
+    - 裸 "reset" 返回 [("reset", "1")]
+    - 按逗号分割,忽略不含 "=" 的片段
+    - key 转为小写,val 保留原始字符串(由调用方转换类型)
+
+    参数:
+        cmd_str: 原始命令行,如 ``"vx=10,vy=5,dx=0.3"``.
+    返回:
+        list of (key: str, val_str: str),可能为空列表.
     """
     cmd_str = cmd_str.strip()
     if not cmd_str:
-        return None
+        return []
 
     if cmd_str == "reset":
-        return {"reset": True}
+        return [("reset", "1")]
 
-    parts = cmd_str.split(",")
-    cmd = {}
-    for part in parts:
+    tokens = []
+    for part in cmd_str.split(","):
         if "=" not in part:
             continue
         key, val_str = part.split("=", 1)
-        key = key.strip().lower()
+        tokens.append((key.strip().lower(), val_str.strip()))
 
-        if key == "print":
-            cmd["print"] = val_str.strip()
-            continue
-
-        try:
-            val = float(val_str.strip())
-        except ValueError:
-            continue
-
-        if key == "vx":
-            cmd["vx"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
-        elif key == "rear":
-            cmd["rear"] = val != 0
-        elif key == "vy":
-            cmd["vy"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
-        elif key == "dx":
-            cmd["dx"] = val
-        elif key == "dy":
-            cmd["dy"] = val
-        elif key in ("omega", "w"):
-            cmd["omega"] = clamp(val, -V_CMD_MAX, V_CMD_MAX)
-        elif key in ("angle", "yaw"):
-            cmd["angle"] = val
-        elif key in ("d_angle", "dyaw", "da"):
-            cmd["d_angle"] = val
-        elif key == "x":
-            cmd["x"] = val
-        elif key == "y":
-            cmd["y"] = val
-        elif key == "reset":
-            cmd["reset"] = val != 0
-
-    return cmd if cmd else None
-
-
-def handle_query(token, odometry, heading_est, command_lock, uart6):
-    token = token.strip().lower()
-    if token == "pos":
-        uart6.write("?pos=%.3f,%.3f,%.2f\r\n" % (odometry.x, odometry.y, heading_est))
-    elif token == "lock":
-        uart6.write("?lock=%d\r\n" % (1 if command_lock else 0))
-    else:
-        uart6.write("?unknown=%s\r\n" % token)
+    return tokens

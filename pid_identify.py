@@ -1,3 +1,16 @@
+"""PID 参数系统辨识脚本.
+
+通过阶跃输入激励电机,采集速度响应,辨识一阶系统参数(增益、时间常数),
+最后计算最优 PI 增益并保存至 Flash.
+
+流程:
+1. 启动 PIT 中断(5ms 周期)
+2. 依次对三轮施加 IDENT_STEP_DUTY 占空比,持续 IDENT_DURATION_MS 毫秒
+3. 记录速度响应
+4. 对每轮进行一阶系统辨识
+5. 使用辨识结果反演计算 PI 增益
+6. 保存结果到 Flash
+"""
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
@@ -26,13 +39,13 @@ IDENT_DURATION_MS = 4000
 IDENT_MAX_SAMPLES = min(IDENT_DURATION_MS // TICK_MS + 10, 600)
 # 参与辨识的电机
 TARGET_WHEELS = ("m", "l", "r")
-# IMC 硬度（越小越激进）
+# IMC 硬度(越小越激进)
 HARDNESS = "soft"
-# KP 安全上限（降低防止过激）
+# KP 安全上限(降低防止过激)
 KP_MAX = 200.0
-# KI 安全上限（降低防止过激）
+# KI 安全上限(降低防止过激)
 KI_MAX = 20000.0
-# 额外增益倍数（降低整体环路增益）
+# 额外增益倍数(降低整体环路增益)
 GAIN_BOOST = 0.5
 # 保存位置
 PID_PARAM_FILE = "/flash/pid_params.txt"
@@ -96,6 +109,14 @@ ident_start_tick = None
 
 
 def pit_handler(tick):
+    """PIT 中断处理程序,标记进行一次控制周期.
+    
+    参数:
+        tick: 中断参数(未使用).
+    
+    副作用:
+        设置全局 pit_flag 为 True,主循环据此执行一次辨识采样周期.
+    """
     global pit_flag
     pit_flag = True
 
@@ -124,7 +145,7 @@ while True:
             if ident_start_tick is None:
                 ident_start_tick = tick_count
 
-            # 施加阶跃，采集响应
+            # 施加阶跃,采集响应
             for state in wheel_states:
                 if state["name"] in TARGET_WHEELS:
                     state["motor"].duty(IDENT_STEP_DUTY)
@@ -142,7 +163,7 @@ while True:
                     )
 
             if (t_ms - ident_start_tick * TICK_MS) >= IDENT_DURATION_MS:
-                # 辨识结束，计算参数并保存
+                # 辨识结束,计算参数并保存
                 for motor in all_motors:
                     motor.duty(0)
                 for state in wheel_states:

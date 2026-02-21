@@ -1,3 +1,10 @@
+"""偏航角发送器脚本.
+
+使用 IMU 的陀螺仪进行四元数积分,实时计算并发送车辆的偏航角.
+用于调试或外部监控系统.
+
+每个 5ms 控制周期发送一次 "angle: xxx.xx" 格式的数据到 UART3.
+"""
 from machine import UART
 from seekfree import IMU963RX
 from smartcar import ticker
@@ -35,9 +42,9 @@ imu_data = imu.get()
 # -------------------------------------------------------------------------
 # 四元数估计姿态
 q_est = Quaternion()
-# 上次解算的 Yaw (弧度)，用于解包
+# 上次解算的 Yaw (弧度),用于解包
 last_yaw_rad = 0.0
-# 估计的航向角 (累计角度，deg)
+# 估计的航向角 (累计角度,deg)
 heading_est = 0.0
 
 # -------------------------------------------------------------------------
@@ -65,13 +72,14 @@ pit_flag = False
 
 
 def pit_handler(_tick):
+    """Ticker 中断处理器:置位周期标志."""
     global pit_flag
     pit_flag = True
 
 
 uart3.write("Creating ticker...\r\n")
 pit1 = ticker(1)
-# 将 IMU 挂载到 ticker 的 capture_list 中，实现后台自动采集
+# 将 IMU 挂载到 ticker 的 capture_list 中,实现后台自动采集
 pit1.capture_list(imu)
 pit1.callback(pit_handler)
 
@@ -81,6 +89,7 @@ pit1.start(TICK_MS)
 # 记录上一帧的时间 (微秒)
 last_time_us = time.ticks_us()
 
+# 主循环:每个周期计算并发送偏航角
 while True:
     if pit_flag:
         # 计算时间增量 dt (秒)

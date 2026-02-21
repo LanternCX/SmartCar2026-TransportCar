@@ -30,6 +30,20 @@
 2. **本地调试**：不需要 Thonny 环境，可直接在 VS Code 中开发和验证
 3. **烧写设备**：修改完成后通过 Thonny 写入 RT1021
 
+### 开发规范与技能指南
+
+项目提供了完整的开发技能指南，规范代码开发、架构设计和系统集成，确保项目保持高内聚低耦合的特性。
+
+📚 **技能指南文档**：[.agents/skills/README.md](.agents/skills/README.md)
+
+**核心技能**：
+- **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
+- **[架构守护](/.agents/skills/architecture-guardian/SKILL.md)**：分层架构、模块职责、依赖规则
+- **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
+- **[硬件集成](/.agents/skills/hardware-integration/SKILL.md)**：硬件驱动、实时约束、性能优化
+
+💡 **建议**：在开发新功能或修复问题前，先查阅相关的技能指南，可以避免常见陷阱并保持代码质量。
+
 ### 通信配置
 
 | UART | 用途 | 说明 |

@@ -1,3 +1,7 @@
+"""速度环测试与调试脚本.
+
+此脚本独立于主控制系统,用于逐轮进行速度环闭环测试和参数验证.
+"""
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
@@ -12,7 +16,7 @@ import gc
 
 # 采样/控制周期 (ms)
 TICK_MS = 5
-# 占空比上限，匹配期望 2000-5000 区间
+# 占空比上限,匹配期望 2000-5000 区间
 MAX_DUTY = 10000
 # 默认目标速度
 TARGET_SPEEDS = {"m": 0.0, "l": -5.0, "r": 5.0}
@@ -39,7 +43,14 @@ PID_MAP = {
 
 
 def load_ident_lookup(path):
-    """从文件加载辨识的 (gain, tau) 映射"""
+    """从文件加载辨识的 (gain, tau) 映射.
+    
+    参数:
+        path: 辨识参数文件路径.
+    
+    返回:
+        字典 {轮子名 -> (gain, tau)}.
+    """
     meta = load_ident_params(path)
     lookup = {}
     for name, vals in meta.items():
@@ -100,17 +111,29 @@ target_speeds = dict(TARGET_SPEEDS)
 
 
 def pit_handler(tick):
+    """PIT 中断处理程序,标记进行一次控制周期.
+    
+    参数:
+        tick: 中断参数(未使用).
+    
+    副作用:
+        设置全局 pit_flag 为 True,主循环据此执行一次速度环计算.
+    """
     global pit_flag
     pit_flag = True
 
 
+
 def init_pid():
-    """初始化速度环 PID 参数"""
+    """初始化速度环 PID 参数.
+    
+    从 PID_MAP 读取每个轮子的增益配置,同步辨识参数以供调试显示.
+    """
     for state in wheel_states:
         kp_val, ki_val, ki2_val = PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
         state["kp"], state["ki"] = kp_val, ki_val
         state["controller"].set_gains(kp_val, ki_val, ki2_val)
-        # 同步辨识出的模型参数到状态，便于调试查看
+        # 同步辨识出的模型参数到状态,便于调试查看
         state["id_gain"], state["id_tau"] = (
             state["controller"].plant_gain,
             state["controller"].plant_tau,
@@ -124,11 +147,12 @@ pit1.start(TICK_MS)
 
 init_pid()
 
+# 主控制循环
 while True:
     if pit_flag:
         tick_count += 1
         led.toggle()
-        # 读取编码器并滤波
+        # 读取编码器并通过多级滤波器处理
         for state in wheel_states:
             raw = float(state["encoder"].get())
             state["raw_speed"] = raw
@@ -138,7 +162,7 @@ while True:
             state["filtered_speed"] = state["output_lpf"].update(fused_speed)
 
         dt_s = TICK_MS / 1000.0
-        # 闭环控制：PI -> 占空比
+        # 闭环控制:速度环 PI 输出占空比
         for state in wheel_states:
             if state["name"] in ACTIVE_WHEELS:
                 tgt = clamp(
@@ -156,6 +180,7 @@ while True:
                 state["duty"] = 0.0
                 state["motor"].duty(0)
 
+        # 输出采样数据用于波形分析
         sample = ",".join(
             "{:.2f}".format(v)
             for state in wheel_states
@@ -165,6 +190,7 @@ while True:
 
         pit_flag = False
 
+    # 硬件急停:检测到开关改变则停止
     if switch2.value() != state2:
         pit1.stop()
         for motor in all_motors:
