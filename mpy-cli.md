@@ -71,6 +71,8 @@ mpy-cli init
 
 `init` 会进入交互式配置向导（可扫描设备端口并选择），无需手动编辑配置文件。
 
+在 `plan/deploy` 交互模式下，如果未提供 `--port`，会自动扫描可用端口并提示选择。
+
 初始化后会生成：
 
 - `.mpy-cli.toml`
@@ -81,7 +83,7 @@ mpy-cli init
 
 ### 6) 后续重配（可选）
 
-如果你后续想修改端口、同步模式、运行目录等配置，直接执行：
+如果你后续想修改端口、同步模式、运行目录、设备上传目录等配置，直接执行：
 
 ```bash
 mpy-cli config
@@ -119,7 +121,7 @@ mpy-cli deploy --no-interactive --yes
 
 ## 在其他项目中安装为命令行工具
 
-如果你要把 `mpy-cli` 安装到另一个项目（例如 `SmartCar2026-TransportCar`）里使用，推荐在该项目自己的虚拟环境中安装：
+如果你要把 `mpy-cli` 安装到另一个项目里使用，推荐在该项目自己的虚拟环境中安装：
 
 - `TARGET_PROJECT_PATH`: 你要安装并使用 mpy-cli 的目标项目目录
 - `SOURCE_MPY_CLI_PATH`: 本地 mpy-cli 源码仓库路径（作为安装源）
@@ -141,6 +143,7 @@ mpy-cli init
 mpy-cli config
 mpy-cli plan
 mpy-cli deploy
+mpy-cli upload
 ```
 
 说明：
@@ -177,6 +180,12 @@ mpy-cli config
 - 无额外参数。
 - 进入交互式配置向导，更新 `.mpy-cli.toml`。
 
+常用配置项说明：
+
+- `device_upload_dir`：设备端上传目录前缀，留空表示设备根目录。
+- 当 `device_upload_dir = "apps/demo"` 时，本地 `main.py` 会上传到设备 `:apps/demo/main.py`。
+- `full` 模式会清空该上传目录，而不是整机设备根目录。
+
 ### `mpy-cli plan`
 
 ```bash
@@ -198,6 +207,18 @@ mpy-cli deploy [--mode {incremental,full}] [--port PORT] [--no-interactive] [--y
 - `--port`：指定设备端口。
 - `--no-interactive`：禁用交互提问。
 - `--yes`：跳过执行前确认（包括全量模式二次确认）。
+
+### `mpy-cli upload`
+
+```bash
+mpy-cli upload [--local LOCAL] [--remote REMOTE] [--port PORT] [--no-interactive] [--yes]
+```
+
+- `--local`：本地文件路径（如 `seekfree_demo/E01_demo.py`）。
+- `--remote`：设备目标路径；不传时交互模式默认与本地路径一致，可手动修改。
+- `--port`：指定设备端口。
+- `--no-interactive`：禁用交互提问；此时需显式提供 `--local` 和 `--remote`。
+- `--yes`：跳过执行前确认。
 
 ---
 
@@ -222,6 +243,12 @@ python3 -m pip install mpremote
 
 参见 Thonny 中的设备串口号（圆括号内的内容）。
 
+### 5) 为什么选择 mpy-cli？
+
+搭配 stubs，例如在智能车竞赛中使用我的项目[micropython-smartcar-stubs](https://github.com/LanternCX/micropython-smartcar-stubs)。
+
+可以实现完全无 thonny 开发 MicroPython 项目。
+
 ---
 
 ## Contribute
@@ -229,3 +256,5 @@ python3 -m pip install mpremote
 开发与规范说明：`docs/developer-guide.md`
 
 本仓库采用 GPL-3.0 协议开源，如果用于竞赛目的可酌情在赛后遵守协议。
+
+欢迎 Issue / PR / Star。
