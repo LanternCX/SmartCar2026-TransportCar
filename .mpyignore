@@ -1,0 +1,37 @@
+# mpy-cli deploy ignore rules (blacklist mode)
+# Keep default behavior as upload-all, ignore only local/dev files.
+
+# VCS and editor configs
+.git/
+.github/
+.agents/
+.opencode/
+.vscode/
+.idea/
+
+# Python environment and caches
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# mpy-cli local metadata
+.mpy-cli/
+.mpy-cli.toml
+.mpyignore
+
+# Docs and local-only project files
+docs/
+Readme.md
+README.md
+mpy-cli.md
+pyrightconfig.json
+.gitignore
+
+# Not needed on device
+seekfree_demo/
+stubs/
+tests/
+test.py
