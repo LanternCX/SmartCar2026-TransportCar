@@ -38,7 +38,7 @@
 
 **核心技能**：
 - **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
-- **[架构守护](/.agents/skills/architecture-guardian/SKILL.md)**：分层架构、模块职责、依赖规则
+- **[代码规范与架构](/.agents/skills/code-standards/SKILL.md)**：分层架构、模块职责、依赖规则与代码质量基线
 - **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
 - **[硬件集成](/.agents/skills/hardware-integration/SKILL.md)**：硬件驱动、实时约束、性能优化
 
