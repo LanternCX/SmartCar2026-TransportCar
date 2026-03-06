@@ -2,6 +2,7 @@
     "typeCheckingMode": "basic",
     "stubPath": "./stubs",
     "extraPaths": [
+        "./src",
         "./stubs"
     ],
     "pythonVersion": "3.7",

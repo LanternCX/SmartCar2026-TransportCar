@@ -1,3 +1,14 @@
-.vscode
-.venv
+.vscode/
+.idea/
+
+.venv/
+venv/
 __pycache__/
+*.pyc
+
+# mpy-cli local runtime/config
+.mpy-cli/
+.mpy-cli.toml
+
+# macOS
+.DS_Store

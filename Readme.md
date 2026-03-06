@@ -38,7 +38,7 @@
 
 **核心技能**：
 - **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
-- **[架构守护](/.agents/skills/architecture-guardian/SKILL.md)**：分层架构、模块职责、依赖规则
+- **[代码规范与架构](/.agents/skills/code-standards/SKILL.md)**：分层架构、模块职责、依赖规则与代码质量基线
 - **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
 - **[硬件集成](/.agents/skills/hardware-integration/SKILL.md)**：硬件驱动、实时约束、性能优化
 
@@ -58,19 +58,19 @@
 ### 前置要求
 
 1. **电机参数辨识**（每次更换地面或配重后）
-   - 运行 [pid_identify.py](pid_identify.py) 进行电机特性自动辨识
+   - 运行 [src/script/pid_identify.py](src/script/pid_identify.py) 进行电机特性自动辨识
    - 系统将自动计算前馈增益（gain）和时间常数（Tau），保存到 `/flash/ident_params.txt`
    - 这使得后续速度控制能够利用前馈补偿，提高速度环的响应速度
    - 把拨码开关（具体哪个我忘了）打开之后再上电就会进入参数辨识模式，车模会旋转几圈采集数据
    
 2. **陀螺仪零飘校准**（首次部署和定期校准）
-   - 运行 [calibrate_gyro.py](calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
+   - 运行 [src/script/calibrate_gyro.py](src/script/calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
    - 校准结果保存到 `/flash/gyro_offset.txt`
    - 不进行此步骤会导致航向角漂移
 
 ### 关键参数配置
 
-所有控制参数集中在 [config/params.py](config/params.py) 中：
+所有控制参数集中在 [src/config/params.py](src/config/params.py) 中：
 
 | 参数 | 值 | 说明 |
 | :--- | :--- | :--- |
@@ -89,35 +89,34 @@
 
 ```text
 .
-├── boot.py                 # 根目录启动脚本 (空)
-├── calibrate_gyro.py       # 陀螺仪校准脚本
-├── pid_identify.py         # 电机参数辨识脚本
-├── remote_control.py       # (旧)遥控入口
-├── test.py                 # 本地测试脚本
-├── boot/                   # 启动文件源目录
-│   ├── boot.py             # 实际部署的 boot.py
-│   └── user_main.py        # 实际部署的用户主程序
-├── config/                 # 配置文件
-│   └── params.py           # 全局参数定义
-├── control/                # 控制算法核心
-│   ├── kinematics.py       # 运动学解算
-│   ├── pid_controller.py   # PID 控制器
-│   └── wheel.py            # 单轮控制封装
-├── filters/                # 滤波器实现
-├── hardware/               # 硬件驱动封装
+├── src/                    # 运行时代码根目录
+│   ├── boot.py             # 启动脚本源文件
+│   ├── script/             # 运行/校准/调试脚本
+│   │   ├── calibrate_gyro.py
+│   │   ├── pid_identify.py
+│   │   ├── remote_control.py
+│   │   ├── test.py
+│   │   └── yaw_sender.py
+│   ├── config/             # 配置文件
+│   │   └── params.py       # 全局参数定义
+│   ├── control/            # 控制算法核心
+│   │   ├── kinematics.py   # 运动学解算
+│   │   ├── pid_controller.py
+│   │   └── wheel.py
+│   ├── filters/            # 滤波器实现
+│   ├── hardware/           # 硬件驱动封装
+│   ├── services/           # 业务逻辑服务
+│   ├── storage/            # 参数存储管理
+│   └── utils/              # 通用工具库
 ├── seekfree_demo/          # 逐飞科技例程(参考用)
-├── services/               # 业务逻辑服务
-│   ├── transport_car.py    # 小车单例类 (核心逻辑)
-│   └── commander.py        # 指令解析器
-├── storage/                # 参数存储管理
 ├── stubs/                  # 代码提示桩文件(用于VSCode补全)
-└── utils/                  # 通用工具库
+└── tests/                  # 主机侧测试
 ```
 
-#### [config/](config/) - 参数配置
+#### [src/config/](src/config/) - 参数配置
 - `params.py`：全局配置参数集中管理
 
-#### [control/](control/) - 控制核心模块
+#### [src/control/](src/control/) - 控制核心模块
 - `pid_controller.py`：PID 控制器实现（位置式和增量式）
 - `pid_math.py`：PID 运算和饱和处理
 - `pid_store.py`：PID 参数持久化
@@ -128,19 +127,19 @@
   - 基于参数：轮径 60mm、减速比 1:30、编码器 7PPR、4 倍频计数
 - `ident_tools.py`：电机参数辨识工具
 
-#### [filters/](filters/) - 滤波算法
+#### [src/filters/](src/filters/) - 滤波算法
 - `lowpass_filter.py`：低通滤波
 - `spike_filter.py`：中值滤波（抗脉冲干扰）
 - `diff_limit_filter.py`：差分限幅滤波（防止陡峭跳变）
 - `dual_window_regression_filter.py`：双窗口线性回归滤波（编码器精细化滤波）
 
-#### [hardware/](hardware/) - 硬件驱动
+#### [src/hardware/](src/hardware/) - 硬件驱动
 - `uart_bus.py`：UART 串口配置（UART3 调试、UART6 通信）
 - `motors.py`：电机驱动接口
 - `encoders.py`：编码器读取接口
 - `imu.py`：IMU 传感器初始化（支持 IMU660RX）
 
-#### [services/](services/) - 业务逻辑层
+#### [src/services/](src/services/) - 业务逻辑层
 - `transport_car.py`：**车模核心单例类**
   - 集中所有硬件初始化、滤波、PID 和运动学
   - 实现 `step()` 主循环，执行 5ms 控制周期
@@ -149,10 +148,10 @@
   - `parse_command()`：键值对格式的命令解析
   - `handle_query()`：信息查询接口
 
-#### [storage/](storage/) - 参数存储
+#### [src/storage/](src/storage/) - 参数存储
 - `param_manager.py`：参数的加载与保存（电机参数、陀螺仪零偏）
 
-#### [utils/](utils/) - 工具类
+#### [src/utils/](src/utils/) - 工具类
 - `quaternion.py`：四元数库，用于 IMU 姿态解算
 
 #### [stubs/](stubs/) - 类型提示
@@ -162,9 +161,9 @@
 #### [seekfree_demo/](seekfree_demo/) - 参考示例
 各类硬件和接口的使用范例
 
-#### [boot/](boot/) - 启动程序
-- `boot.py`：设备启动脚本（保存到设备根目录）
-- `user_main.py`：用户主程序（与根目录 boot.py 配套使用）
+#### [src/boot.py](src/boot.py) 与 [src/script/](src/script/) - 启动与脚本
+- `src/boot.py`：设备启动脚本源码（部署后位于设备根目录 `boot.py`）
+- `src/script/`：参数辨识、校准与调试脚本目录
 
 ### 核心控制流程
 
@@ -336,7 +335,7 @@ IMU 原始数据（加速度 + 角速度）
 
 ## 参数辨识
 
-### 电机参数辨识（`pid_identify.py`）
+### 电机参数辨识（`src/script/pid_identify.py`）
 
 目的：自动测定电机的动态特性（增益和时间常数），用于前馈补偿
 
@@ -357,7 +356,7 @@ IMU 原始数据（加速度 + 角速度）
 - `ident_params.txt`：含 `K` (增益) 和 `tau` (时间常数)
 - `pid_params.txt`：自动计算的 PID 参数，不过这个并没有在代码中使用
 
-### 陀螺仪零飘校准（`calibrate_gyro.py`）
+### 陀螺仪零飘校准（`src/script/calibrate_gyro.py`）
 
 目的：测定陀螺仪在静止状态下的输出偏差，用于姿态解算补偿
 
@@ -432,11 +431,11 @@ source .venv/bin/activate
 
 ```bash
 # 第一步：电机参数辨识（在设备上运行）
-# 使用 Thonny 上传 pid_identify.py 并运行
+# 使用 Thonny 上传 src/script/pid_identify.py 并运行
 # 输出：/flash/ident_params.txt 和 /flash/pid_params.txt
 
 # 第二步：陀螺仪零飘校准（在设备上运行）
-# 使用 Thonny 上传 calibrate_gyro.py 并运行
+# 使用 Thonny 上传 src/script/calibrate_gyro.py 并运行
 # 输出：/flash/gyro_offset.txt
 
 # 第三步：部署主程序
@@ -469,7 +468,7 @@ print=Debug message here
 
 ### 4. 修改参数并验证
 
-1. 编辑 `config/params.py` 中的参数
+1. 编辑 `src/config/params.py` 中的参数
 2. 在 VS Code 中验证代码（Pylance 会进行类型检查）
 3. 将修改后的代码上传到设备
 4. 通过 UART3（串口监听）观察调试输出
@@ -528,11 +527,11 @@ print=Debug message here
 
 | 文件/目录 | 位置 | 说明 |
 | :--- | :--- | :--- |
-| `boot.py` | 设备根目录 | 启动脚本 |
-| `user_main.py` | 设备根目录 | 主程序 |
-| `config/`, `control/`, `filters/`, `hardware/`, `services/`, `storage/`, `utils/` | 设备根目录 | 完整的代码模块 |
+| `src/boot.py` | 设备根目录 `boot.py` | 启动脚本 |
+| `src/script/` | 设备目录 `script/` | 参数辨识、校准与调试脚本 |
+| `src/config/`, `src/control/`, `src/filters/`, `src/hardware/`, `src/services/`, `src/storage/`, `src/utils/` | 设备根目录同名模块目录 | 完整业务代码模块 |
 
-**注意**：不需要上传 `stubs/`、`seekfree_demo/` 和 `test.py`
+**注意**：不需要上传 `stubs/`、`seekfree_demo/` 和 `src/script/test.py`
 
 ## 贡献与维护指南
 
