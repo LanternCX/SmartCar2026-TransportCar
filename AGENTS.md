@@ -240,6 +240,10 @@ python3 -m pytest --collect-only -q
    - 将 superpowers TDD 映射到本项目 `unit/contract/HIL`
    - 强制 RED -> GREEN -> REFACTOR
 
+6. `mpy-cli`
+   - 统一 MicroPython 端部署与文件运维命令
+   - 覆盖 init/config/plan/deploy/upload/run/delete/tree 流程
+
 ### 11.2 新功能开发顺序
 
 1. 先看 `git-workflow` 创建分支。
@@ -248,12 +252,14 @@ python3 -m pytest --collect-only -q
 4. 涉及外设/驱动查 `hardware-integration`。
 5. 开发行为变更前执行 `tdd-integration`。
 6. 提交前回到 `git-workflow` 校验提交格式。
+7. 涉及设备同步/烧录时优先查 `mpy-cli`。
 
 ### 11.3 问题诊断入口
 
 1. 控制不稳定：优先 `control-system`。
 2. 外设异常/时序抖动：优先 `hardware-integration`。
 3. 架构耦合或风格问题：回到 `code-standards`。
+4. 部署或串口同步问题：优先 `mpy-cli`。
 
 ## 12. Cursor / Copilot 规则状态
 

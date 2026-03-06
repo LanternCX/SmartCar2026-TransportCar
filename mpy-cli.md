@@ -15,6 +15,8 @@
 
 如果你是第一次使用本项目，可以遵循以下步骤。
 
+阅读完本章之后，建议继续阅读 [在其他项目中安装为命令行工具](#install)
+
 ### 0) 环境要求
 
 - Python 版本：`>= 3.10`（推荐 `3.11`）
@@ -119,6 +121,7 @@ mpy-cli deploy --no-interactive --yes
 
 ---
 
+<span id="install"></span>
 ## 在其他项目中安装为命令行工具
 
 如果你要把 `mpy-cli` 安装到另一个项目里使用，推荐在该项目自己的虚拟环境中安装：
@@ -144,6 +147,9 @@ mpy-cli config
 mpy-cli plan
 mpy-cli deploy
 mpy-cli upload
+mpy-cli run
+mpy-cli delete
+mpy-cli tree
 ```
 
 说明：
@@ -182,6 +188,10 @@ mpy-cli config
 
 常用配置项说明：
 
+- `source_dir`：本地源码根目录。`plan/deploy` 计算远端路径时以该目录为根，不保留 `source_dir` 前缀。
+- `.mpyignore`：规则匹配对象为“相对 `source_dir` 的路径”。
+- 当 `source_dir = "src"` 时，本地 `src/main.py` 对应远端 `:main.py`。
+- 若历史 `.mpyignore` 规则包含 `src/...` 前缀，需迁移为相对 `source_dir` 的写法。
 - `device_upload_dir`：设备端上传目录前缀，留空表示设备根目录。
 - 当 `device_upload_dir = "apps/demo"` 时，本地 `main.py` 会上传到设备 `:apps/demo/main.py`。
 - `full` 模式会清空该上传目录，而不是整机设备根目录。
@@ -208,6 +218,14 @@ mpy-cli deploy [--mode {incremental,full}] [--port PORT] [--no-interactive] [--y
 - `--no-interactive`：禁用交互提问。
 - `--yes`：跳过执行前确认（包括全量模式二次确认）。
 
+推荐用法：
+
+```bash
+mpy-cli deploy --no-interactive --yes
+```
+
+进行 `config` 之后直接无交互烧入
+
 ### `mpy-cli upload`
 
 ```bash
@@ -215,10 +233,75 @@ mpy-cli upload [--local LOCAL] [--remote REMOTE] [--port PORT] [--no-interactive
 ```
 
 - `--local`：本地文件路径（如 `seekfree_demo/E01_demo.py`）。
-- `--remote`：设备目标路径；不传时交互模式默认与本地路径一致，可手动修改。
+- `--remote`：设备目标路径；不传时交互模式默认优先使用“相对 `source_dir` 路径”，若本地文件不在 `source_dir` 下则回退为本地输入路径，可手动修改。
 - `--port`：指定设备端口。
 - `--no-interactive`：禁用交互提问；此时需显式提供 `--local` 和 `--remote`。
 - `--yes`：跳过执行前确认。
+
+推荐用法：
+
+```bash
+mpy-cli upload --local <LOCAL>
+```
+
+填写字段 `LOCAL` 指定本地文件路径之后交互式确认远程路径
+
+### `mpy-cli run`
+
+```bash
+mpy-cli run [--path PATH] [--port PORT] [--no-interactive] [--yes]
+```
+
+- `--path`：设备目标文件路径，语义为相对 `device_upload_dir`。
+- `--port`：指定设备端口。
+- `--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
+- `--yes`：跳过执行前确认。
+
+推荐用法：
+
+```bash
+mpy-cli run --path main.py
+```
+
+若配置 `device_upload_dir = "apps/demo"`，则会执行 `:apps/demo/main.py`。
+
+### `mpy-cli delete`
+
+```bash
+mpy-cli delete [--path PATH] [--port PORT] [--no-interactive] [--yes]
+```
+
+- `--path`：设备目标路径，语义为相对 `device_upload_dir`，可为文件或目录。
+- `--port`：指定设备端口。
+- `--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
+- `--yes`：跳过执行前确认。
+
+推荐用法：
+
+```bash
+mpy-cli delete --path obsolete.py
+```
+
+若配置 `device_upload_dir = "apps/demo"`，则会删除 `:apps/demo/obsolete.py`。
+当 `--path` 指向目录时，默认递归删除整个目录。
+
+### `mpy-cli tree`
+
+```bash
+mpy-cli tree [--path PATH] [--port PORT] [--no-interactive]
+```
+
+- `--path`：设备目标目录路径，语义为相对 `device_upload_dir`；不传时默认读取 `device_upload_dir` 根目录。
+- `--port`：指定设备端口。
+- `--no-interactive`：禁用交互提问；此时需通过 `--port` 或配置文件提供端口。
+
+推荐用法：
+
+```bash
+mpy-cli tree --path .
+```
+
+若配置 `device_upload_dir = "apps/demo"`，则默认读取 `:apps/demo`；例如 `--path services` 会读取 `:apps/demo/services`。
 
 ---
 
