@@ -8,13 +8,13 @@
 - 平台：RT1021 + MicroPython。
 - 主要语言：Python。
 - 运行时代码目录：
-  - `config/`
-  - `control/`
-  - `filters/`
-  - `hardware/`
-  - `services/`
-  - `storage/`
-  - `utils/`
+  - `src/config/`
+  - `src/control/`
+  - `src/filters/`
+  - `src/hardware/`
+  - `src/services/`
+  - `src/storage/`
+  - `src/utils/`
 - 测试目录：
   - `tests/unit/`
   - `tests/contract/`
@@ -121,9 +121,9 @@ python3 -m pytest --collect-only -q
 
 分层映射规则：
 
-- 纯逻辑改动（`control/`、`filters/`、解析器/路由/存储/工具）优先写 `tests/unit/`。
-- 命令行为改动（`services/commands/`）优先写 `tests/contract/`。
-- 强硬件耦合改动（`hardware/`、`services/transport_car.py`）至少补 HIL 证据到 `tests/hil/`，并尽量补主机侧回归。
+- 纯逻辑改动（`src/control/`、`src/filters/`、解析器/路由/存储/工具）优先写 `tests/unit/`。
+- 命令行为改动（`src/services/commands/`）优先写 `tests/contract/`。
+- 强硬件耦合改动（`src/hardware/`、`src/services/transport_car.py`）至少补 HIL 证据到 `tests/hil/`，并尽量补主机侧回归。
 
 ## 5. 代码风格规范
 
@@ -162,7 +162,7 @@ python3 -m pytest --collect-only -q
 
 ### 5.6 配置与实时性
 
-- 可调参数集中在 `config/params.py`。
+- 可调参数集中在 `src/config/params.py`。
 - 避免在运行逻辑中硬编码魔法数字。
 - 控制周期目标为 5ms。
 - 时序关键路径避免阻塞。
@@ -170,21 +170,21 @@ python3 -m pytest --collect-only -q
 
 ## 6. 架构边界（必须遵守）
 
-- `hardware/`：硬件访问与驱动抽象。
-- `control/`：控制算法（PID/运动学/里程计等）。
-- `filters/`：信号滤波。
-- `services/`：编排层与命令流。
-- `storage/`：持久化。
-- `config/`：集中配置与常量。
-- `utils/`：通用工具。
+- `src/hardware/`：硬件访问与驱动抽象。
+- `src/control/`：控制算法（PID/运动学/里程计等）。
+- `src/filters/`：信号滤波。
+- `src/services/`：编排层与命令流。
+- `src/storage/`：持久化。
+- `src/config/`：集中配置与常量。
+- `src/utils/`：通用工具。
 
 依赖方向：下层不得反向依赖上层。
 
 ## 7. 命令系统约定
 
-- 新命令放在 `services/commands/cmd_*.py`，使用 `@router.command(...)`。
-- 新查询放在 `services/commands/query_*.py`，使用 `@router.query(...)`。
-- 注册由 `services/commands/__init__.py` 自动发现完成。
+- 新命令放在 `src/services/commands/cmd_*.py`，使用 `@router.command(...)`。
+- 新查询放在 `src/services/commands/query_*.py`，使用 `@router.query(...)`。
+- 注册由 `src/services/commands/__init__.py` 自动发现完成。
 - 跨命令后处理统一放在 `TransportCar._finalize_route(...)`。
 
 ## 8. Git 工作流约定

@@ -3,7 +3,7 @@
 ## Preconditions
 
 - Device flashed with current code
-- IMU calibrated (`calibrate_gyro.py`)
+- IMU calibrated (`src/script/calibrate_gyro.py`)
 - Motor identification parameters available (`/flash/ident_params.txt`)
 
 ## Scenario A: Velocity Command Path
