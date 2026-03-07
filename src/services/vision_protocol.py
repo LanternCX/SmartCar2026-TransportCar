@@ -1,7 +1,5 @@
 """视觉协议解析与最新观测缓存."""
 
-from typing import Optional
-
 
 class VisionObservation:
     """单帧视觉目标点观测."""
@@ -19,11 +17,9 @@ class VisionProtocol:
     def __init__(self, timeout_ms: int):
         """初始化协议解析器."""
         self.timeout_ms = int(timeout_ms)
-        self._latest: Optional[VisionObservation] = None
+        self._latest = None
 
-    def try_parse_observation(
-        self, line: str, source: str, now_ms: int
-    ) -> Optional[VisionObservation]:
+    def try_parse_observation(self, line: str, source: str, now_ms: int):
         """尝试从指定来源解析一帧视觉观测."""
         if source != "uart6":
             return None
@@ -54,7 +50,7 @@ class VisionProtocol:
         self._latest = observation
         return observation
 
-    def get_observation(self, now_ms: int) -> Optional[VisionObservation]:
+    def get_observation(self, now_ms: int):
         """读取仍在有效期内的最新视觉观测."""
         if self._latest is None:
             return None

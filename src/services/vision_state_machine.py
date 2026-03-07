@@ -1,7 +1,6 @@
 """视觉状态机与相对控制意图转换."""
 
 import math
-from typing import Optional
 
 from services.vision_protocol import VisionObservation
 
@@ -85,7 +84,7 @@ class VisionMachineInputs:
 
     def __init__(
         self,
-        observation: Optional[VisionObservation],
+        observation,
         heading_deg: float,
         odom_x: float,
         odom_y: float,
@@ -140,7 +139,7 @@ class VisionStepResult:
 
 def resolve_relative_intent(
     intent: VisionControlIntent, odom_x: float, odom_y: float, heading_deg: float
-) -> Optional[VisionResolvedTarget]:
+):
     """将相对控制意图转换为本周期绝对目标."""
     if not intent.active:
         return None
