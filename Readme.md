@@ -283,6 +283,27 @@ d_angle=30          # 相对目标角度的增量（度）
 | :--- | :--- | :--- | :--- |
 | **?pos** | `?pos=x,y,yaw` | 当前世界坐标和航向角 | 位置与角度精度为浮点数 |
 | **?lock** | `?lock=0/1` | 当前是否处于位置锁定状态 | 0=解锁，1=锁定 |
+| **?health** | `?health=alive:...,uptime_ms:...,...` | 系统健康摘要 | 包含锁定、后轮模式、最近异常和视觉状态 |
+| **?tick** | `?tick=count:...,last_us:...,max_us:...,...` | 控制周期统计 | 用于诊断 5ms 周期抖动和超预算 |
+| **?imu** | `?imu=ok:...,yaw_deg:...,yaw_rate_dps:...,...` | IMU 诊断摘要 | 包含航向角、角速度和原始陀螺值 |
+| **?enc** | `?enc=m_raw:...,m_filt:...,...` | 编码器诊断摘要 | 返回三轮原始与滤波后速度 |
+| **?motor** | `?motor=m_target:...,m_duty:...,...` | 电机输出摘要 | 返回目标速度、占空比和 rear 模式 |
+| **?vision** | `?vision=state:...,obs_age_ms:...,...` | 视觉状态机摘要 | 返回观测时效与当前解析目标 |
+
+### Stage 3 设备观测脚本
+
+如果希望 agent 直接通过本地 USB + `mpy-cli` 读取真实板实时状态，可执行：
+
+```bash
+python3 tools/run_device_observe.py --port /dev/cu.usbmodem1101
+```
+
+该命令会：
+
+1. 上传 `tools/device_observe_probe.py` 到设备临时路径
+2. 启动短时控制循环并打印 `OBSERVE health/tick/imu/enc/motor/vision` 行
+3. 解析输出并给出 `status=ok` / `observe_failed` / `probe_failed` 等归因
+4. 删除远端临时探针文件
 
 ### 使用示例
 
