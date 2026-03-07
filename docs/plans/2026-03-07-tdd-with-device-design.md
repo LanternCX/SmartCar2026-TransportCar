@@ -232,7 +232,7 @@
 
 ### post-skill（加入 `tdd-with-device` 后）
 
-- agent 会把 `tdd-with-device` 作为总控流程 skill
 - agent 明确给出 `stage1 -> stage2 -> stage3`
 - agent 明确把 `stage2` 视为强制门禁
 - agent 在 `stage2` 失败时会回退,而不是直接进入 `stage3`
+- 在当前会话的子代理验证里,显式回报 `tdd-with-device` 名称并不稳定,但阶段门禁行为已按 skill 目标收敛
