@@ -83,6 +83,44 @@ VISION_STATE_NAMES = {
 }
 
 
+class _NullImu:
+    """Stage 2 安全模式下使用的空 IMU."""
+
+    def get(self):
+        """返回全零六轴数据."""
+        return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+class _NullEncoder:
+    """Stage 2 安全模式下使用的空编码器."""
+
+    def get(self):
+        """返回零脉冲."""
+        return 0.0
+
+
+class _NullMotor:
+    """Stage 2 安全模式下使用的空电机."""
+
+    def __init__(self):
+        """初始化空电机占空比记录."""
+        self.last_duty = 0
+
+    def duty(self, value):
+        """记录占空比但不触发真实输出."""
+        self.last_duty = int(value)
+
+
+def _create_null_encoders():
+    """构造三轮空编码器集合."""
+    return {"m": _NullEncoder(), "l": _NullEncoder(), "r": _NullEncoder()}
+
+
+def _create_null_motors():
+    """构造三轮空电机集合."""
+    return {"m": _NullMotor(), "l": _NullMotor(), "r": _NullMotor()}
+
+
 class TransportCar:
     """搬运车核心控制单例,集硬件、运动学、PID 控制、命令路由于一体.
 
@@ -102,12 +140,14 @@ class TransportCar:
                 break  # 检测到急停或其他致命错误
     """
 
-    def __init__(self):
+    def __init__(self, diagnostic_mode=False):
         """初始化搬运车所有组件.
 
         完成硬件初始化、滤波器和状态变量的构造,保持所有参数与旧版一致.
         包括电机、编码器、IMU、运动学、PID 控制器、串口等.
         """
+        self.diagnostic_mode = bool(diagnostic_mode)
+
         # 板载 LED 与停止开关
         self.led = Pin("C4", Pin.OUT, value=True)
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
@@ -119,8 +159,12 @@ class TransportCar:
         self.uart3.write("System Starting...\r\n")
 
         # IMU 初始化
-        self.uart3.write("Initializing IMU...\r\n")
-        self.imu = create_imu()
+        if self.diagnostic_mode:
+            self.uart3.write("Diagnostic mode: skip IMU init.\r\n")
+            self.imu = _NullImu()
+        else:
+            self.uart3.write("Initializing IMU...\r\n")
+            self.imu = create_imu()
         self.imu_data = self.imu.get()
 
         # 滤波与姿态估计状态
@@ -144,8 +188,13 @@ class TransportCar:
         self.heading_target = 0.0
 
         # Motors and encoders
-        self.motors = create_motors()
-        self.encoders = create_encoders()
+        if self.diagnostic_mode:
+            self.uart3.write("Diagnostic mode: skip motor/encoder init.\r\n")
+            self.motors = _create_null_motors()
+            self.encoders = _create_null_encoders()
+        else:
+            self.motors = create_motors()
+            self.encoders = create_encoders()
 
         # 辨识参数加载
         self.uart3.write("Loading identify parameters...\r\n")
@@ -190,7 +239,7 @@ class TransportCar:
 
         self.ticker = None
         self.boot_time_ms = self._now_ms()
-        self.last_time_us = time.ticks_us()
+        self.last_time_us = self._now_us()
         self.last_loop_dt_us = 0
         self.max_loop_dt_us = 0
         self.loop_dt_total_us = 0
@@ -269,6 +318,20 @@ class TransportCar:
         if ticks_ms is not None:
             return int(ticks_ms())
         return int(time.time() * 1000)
+
+    def _now_us(self):
+        """返回当前微秒时间戳,兼容主机测试环境."""
+        ticks_us = getattr(time, "ticks_us", None)
+        if ticks_us is not None:
+            return int(ticks_us())
+        return int(time.time() * 1000000)
+
+    def _ticks_diff_us(self, current_us, previous_us):
+        """计算两个微秒时间戳差值,兼容主机测试环境."""
+        ticks_diff = getattr(time, "ticks_diff", None)
+        if ticks_diff is not None:
+            return int(ticks_diff(current_us, previous_us))
+        return int(current_us - previous_us)
 
     def step(self):
         """单次主循环:控制、命令处理、急停检测.
@@ -499,8 +562,8 @@ class TransportCar:
         self.led.toggle()
 
         # 计算真实 dt(微秒差),即便打印阻塞也能保持积分正确
-        current_time_us = time.ticks_us()
-        dt_us = time.ticks_diff(current_time_us, self.last_time_us)
+        current_time_us = self._now_us()
+        dt_us = self._ticks_diff_us(current_time_us, self.last_time_us)
         self.last_time_us = current_time_us
         self.last_loop_dt_us = int(dt_us)
         self.loop_dt_total_us += int(dt_us)
