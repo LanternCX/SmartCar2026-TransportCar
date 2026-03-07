@@ -35,3 +35,4 @@ TBD
 | Page ID | Date | Title | Path | Keywords |
 | --- | --- | --- | --- | --- |
 | 2026-03-07-1 | 2026-03-07 | 视觉状态机迁移到主控端 | `.progress/entries/2026/2026-03-07-1.md` | vision, uart6, state-machine, transport-car |
+| 2026-03-07-2 | 2026-03-07 | 建立 Stage 3 设备观测诊断链路 | `.progress/entries/2026/2026-03-07-2.md` | diagnostics, mpy-cli, hil, observe, transport-car |
