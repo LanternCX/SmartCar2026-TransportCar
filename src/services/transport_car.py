@@ -62,12 +62,25 @@ from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from services.command_router import router as _cmd_router
 from services.vision_protocol import VisionProtocol
 from services.vision_state_machine import (
+    SMState,
     VisionMachineInputs,
     VisionStateConfig,
     VisionStateMachine,
     resolve_relative_intent,
 )
 import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
+
+
+VISION_STATE_NAMES = {
+    SMState.IDLE: "IDLE",
+    SMState.ALIGN_ANGLE: "ALIGN_ANGLE",
+    SMState.ALIGN_DIST: "ALIGN_DIST",
+    SMState.ALIGN_DX: "ALIGN_DX",
+    SMState.ORBITING: "ORBITING",
+    SMState.PUSHING: "PUSHING",
+    SMState.RETURNING: "RETURNING",
+    SMState.DONE: "DONE",
+}
 
 
 class TransportCar:
@@ -176,7 +189,15 @@ class TransportCar:
         self.rx_buf6 = ""
 
         self.ticker = None
+        self.boot_time_ms = self._now_ms()
         self.last_time_us = time.ticks_us()
+        self.last_loop_dt_us = 0
+        self.max_loop_dt_us = 0
+        self.loop_dt_total_us = 0
+        self.loop_overrun_count = 0
+        self.last_exception_text = "none"
+        self._yaw_rate = 0.0
+        self._last_gz_raw = 0.0
 
         # 相对位移暂存(供 _finalize_route 使用)
         self._pending_dx = None
@@ -351,6 +372,87 @@ class TransportCar:
             return self._vision_resolved_target.rear_only_mode
         return self.rear_only_mode
 
+    def _get_vision_state_name(self):
+        """返回当前视觉状态机状态名."""
+        state = getattr(self.vision_state_machine, "state", None)
+        if state is None:
+            return "UNKNOWN"
+        return VISION_STATE_NAMES.get(int(state), "UNKNOWN")
+
+    def build_health_snapshot(self):
+        """构造系统健康摘要快照."""
+        return {
+            "alive": 1,
+            "uptime_ms": max(0, self._now_ms() - int(self.boot_time_ms)),
+            "lock": 1 if self.command_lock else 0,
+            "rear": 1 if self._get_active_rear_only_mode() else 0,
+            "last_err": self.last_exception_text,
+            "vision_state": self._get_vision_state_name(),
+        }
+
+    def build_tick_snapshot(self):
+        """构造控制周期统计快照."""
+        avg_us = 0
+        if self.tick_count > 0:
+            avg_us = int(self.loop_dt_total_us / self.tick_count)
+        return {
+            "count": int(self.tick_count),
+            "last_us": int(self.last_loop_dt_us),
+            "max_us": int(self.max_loop_dt_us),
+            "avg_us": avg_us,
+            "overrun": int(self.loop_overrun_count),
+        }
+
+    def build_imu_snapshot(self):
+        """构造 IMU 相关诊断快照."""
+        return {
+            "ok": 1 if self.imu_data else 0,
+            "yaw_deg": float(self.heading_est),
+            "yaw_rate_dps": float(self._yaw_rate),
+            "gz_raw": float(self._last_gz_raw),
+        }
+
+    def build_encoder_snapshot(self):
+        """构造编码器观测快照."""
+        snapshot = {}
+        for state in self.wheel_states:
+            name = state["name"]
+            snapshot["%s_raw" % name] = float(state.get("raw_speed", 0.0))
+            snapshot["%s_filt" % name] = float(state.get("filtered_speed", 0.0))
+        return snapshot
+
+    def build_motor_snapshot(self):
+        """构造电机目标与占空比快照."""
+        snapshot = {}
+        for state in self.wheel_states:
+            name = state["name"]
+            snapshot["%s_target" % name] = float(self.target_speeds.get(name, 0.0))
+            snapshot["%s_duty" % name] = float(state.get("duty", 0.0))
+        snapshot["rear"] = 1 if self._get_active_rear_only_mode() else 0
+        return snapshot
+
+    def build_vision_snapshot(self):
+        """构造视觉观测与解析目标快照."""
+        observation = self.vision_protocol.get_observation(now_ms=self._now_ms())
+        snapshot = {
+            "state": self._get_vision_state_name(),
+            "obs_age_ms": None,
+            "obs_x": None,
+            "obs_y": None,
+            "target_x": None,
+            "target_y": None,
+            "target_angle": None,
+        }
+        if observation is not None:
+            snapshot["obs_age_ms"] = self._now_ms() - int(observation.timestamp_ms)
+            snapshot["obs_x"] = float(observation.x)
+            snapshot["obs_y"] = float(observation.y)
+        if self._vision_resolved_target is not None:
+            snapshot["target_x"] = float(self._vision_resolved_target.x)
+            snapshot["target_y"] = float(self._vision_resolved_target.y)
+            snapshot["target_angle"] = float(self._vision_resolved_target.angle_deg)
+        return snapshot
+
     # Internal helpers ----------------------------------------------
     def init_pid(self):
         """按 PID_MAP 配置表初始化三轮速度环增益."""
@@ -400,6 +502,12 @@ class TransportCar:
         current_time_us = time.ticks_us()
         dt_us = time.ticks_diff(current_time_us, self.last_time_us)
         self.last_time_us = current_time_us
+        self.last_loop_dt_us = int(dt_us)
+        self.loop_dt_total_us += int(dt_us)
+        if dt_us > self.max_loop_dt_us:
+            self.max_loop_dt_us = int(dt_us)
+        if dt_us > TICK_MS * 1000:
+            self.loop_overrun_count += 1
         dt_s = dt_us / 1000000.0
 
         # 依次执行:轮速滤波 -> 姿态更新 -> 控制计算
@@ -444,6 +552,7 @@ class TransportCar:
             gz_raw = float(self.imu_data[5]) - self.imu_offsets[5]
         else:
             gx_raw = gy_raw = gz_raw = 0.0
+        self._last_gz_raw = gz_raw
 
         # LSB -> rad/s,后续四元数积分使用
         rad_scale = (math.pi / 180.0) / GYRO_SCALE
@@ -744,6 +853,7 @@ class TransportCar:
                     self.rx_buf3 = self.rx_buf3[idx + 1 :]
                     self._handle_uart_line(line, source="uart3")
             except Exception as exc:
+                self.last_exception_text = str(exc)
                 self.uart3.write("ERR %s\r\n" % exc)
 
         buf_len = self.uart6.any()
@@ -758,6 +868,7 @@ class TransportCar:
                     self.rx_buf6 = self.rx_buf6[idx + 1 :]
                     self._handle_uart_line(line, source="uart6")
             except Exception as exc:
+                self.last_exception_text = str(exc)
                 self.uart3.write("ERR %s\r\n" % exc)
 
     # Command handling ----------------------------------------------
