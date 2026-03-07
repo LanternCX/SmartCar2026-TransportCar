@@ -34,13 +34,13 @@
 
 项目提供了完整的开发技能指南，规范代码开发、架构设计和系统集成，确保项目保持高内聚低耦合的特性。
 
-📚 **技能指南文档**：[.agents/skills/README.md](.agents/skills/README.md)
+📚 **技能指南文档**：[AGENTS.md](AGENTS.md)
 
 **核心技能**：
 - **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
 - **[代码规范与架构](/.agents/skills/code-standards/SKILL.md)**：分层架构、模块职责、依赖规则与代码质量基线
 - **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
-- **[硬件集成](/.agents/skills/hardware-integration/SKILL.md)**：硬件驱动、实时约束、性能优化
+- **[嵌入式开发](/.agents/skills/embedded-development/SKILL.md)**：分层 TDD、设备门禁、硬件驱动、实时约束与 HIL 留证
 
 💡 **建议**：在开发新功能或修复问题前，先查阅相关的技能指南，可以避免常见陷阱并保持代码质量。
 
