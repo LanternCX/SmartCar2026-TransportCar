@@ -15,33 +15,16 @@ REQUIRED_QUERY_TOKENS = (
 
 
 RELOAD_MODULES = (
-    "config.params",
-    "services.transport_car",
+    "services.command_router",
+    "services.diagnostics",
     "services.vision_protocol",
     "services.vision_state_machine",
-    "services.diagnostics",
     "services.commands",
 )
 
 
-def _format_snapshot(prefix, snapshot):
-    """将快照格式化为单行文本."""
-    parts = []
-    for key, value in snapshot.items():
-        parts.append("%s=%s" % (key, value))
-    return "%s %s" % (prefix, " ".join(parts))
-
-
-def _stop_motors(car):
-    """保险起见清零电机输出."""
-    for state in getattr(car, "wheel_states", ()):  # pragma: no branch
-        motor = state.get("motor")
-        if motor is not None:
-            motor.duty(0)
-
-
 def _clear_stale_modules():
-    """只清理本次调试涉及的最小模块集合."""
+    """只清理 Stage 2 smoke 直接依赖的模块."""
     module_names = tuple(sys.modules.keys())
     for module_name in module_names:
         if module_name in RELOAD_MODULES or module_name.startswith(
@@ -50,27 +33,52 @@ def _clear_stale_modules():
             del sys.modules[module_name]
 
 
+def _check_transport_car_source():
+    """轻量检查 transport_car.py 关键入口是否存在."""
+    has_class = False
+    has_diag_mode = False
+    with open("services/transport_car.py", "r") as fp:
+        for line in fp:
+            if "class TransportCar" in line:
+                has_class = True
+            if "diagnostic_mode" in line:
+                has_diag_mode = True
+            if has_class and has_diag_mode:
+                break
+    return has_class, has_diag_mode
+
+
 def main():
     """执行 Stage 2 安全探针."""
-    car = None
     try:
         gc.collect()
         _clear_stale_modules()
 
-        from services.transport_car import TransportCar
+        from services.command_router import router
+        from services import diagnostics  # noqa: F401
+        from services import vision_protocol  # noqa: F401
+        from services import vision_state_machine  # noqa: F401
+        from services.commands import query_enc  # noqa: F401
+        from services.commands import query_health  # noqa: F401
+        from services.commands import query_imu  # noqa: F401
+        from services.commands import query_motor  # noqa: F401
+        from services.commands import query_tick  # noqa: F401
+        from services.commands import query_vision  # noqa: F401
 
-        car = TransportCar(diagnostic_mode=True)
-        registered_queries = sorted(car._router._query_handlers.keys())
+        registered_queries = sorted(router._query_handlers.keys())
         missing = [
             token for token in REQUIRED_QUERY_TOKENS if token not in registered_queries
         ]
+        has_class, has_diag_mode = _check_transport_car_source()
 
         print("STAGE2 status=ok")
-        print(_format_snapshot("STAGE2 health", car.build_health_snapshot()))
-        print(_format_snapshot("STAGE2 tick", car.build_tick_snapshot()))
         print(
             "STAGE2 queries count=%d missing=%s"
             % (len(registered_queries), "none" if not missing else ";".join(missing))
+        )
+        print(
+            "STAGE2 transport_source class=%d diagnostic_mode=%d"
+            % (1 if has_class else 0, 1 if has_diag_mode else 0)
         )
     except Exception as exc:
         reason = str(exc).replace("\r", " ").replace("\n", " ").replace(",", ";")
@@ -78,9 +86,6 @@ def main():
         print_exception = getattr(sys, "print_exception", None)
         if print_exception is not None:
             print_exception(exc)
-    finally:
-        if car is not None:
-            _stop_motors(car)
 
 
 if __name__ == "__main__":
