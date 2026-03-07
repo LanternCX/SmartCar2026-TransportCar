@@ -38,6 +38,10 @@ def test_reset_command_restores_core_runtime_state():
     assert ctx._pending_dx is None
     assert ctx._pending_dy is None
     assert ctx._pending_d_angle is None
+    assert ctx.vision_protocol.cleared is True
+    assert ctx.vision_state_machine.reset_called is True
+    assert ctx._vision_step_result is None
+    assert ctx._vision_resolved_target is None
 
 
 def test_query_lock_writes_state():

@@ -1,29 +1,29 @@
-# HIL Validation Layer
+# HIL 验证层
 
-This layer documents board-level validation that cannot be fully replaced by host-side unit tests.
+本目录记录那些无法被主机侧 `unit/contract` 完全替代的板级验证项。
 
-## Scope
+## 范围
 
-- UART communication timing and conflicts
-- Motor direction and PWM behavior
-- Encoder noise behavior under load
-- IMU drift and calibration effects
+- UART 通信时序与总线冲突
+- 电机方向、PWM 输出与模式切换
+- 编码器负载噪声与里程计累积误差
+- IMU 零漂、航向估计与视觉闭环耦合效果
 
-## Execution Rule
+## 执行规则
 
-Run HIL checks for:
+以下改动必须补 HIL 证据：
 
-- any change touching `hardware/`
-- any change touching `services/transport_car.py`
-- any change altering control-loop timing assumptions
+- 任何触及 `hardware/` 的改动
+- 任何触及 `src/services/transport_car.py` 的改动
+- 任何改变控制周期假设、UART 行为或视觉状态机节拍的改动
 
-## Evidence Template
+## 证据模板
 
-For each scenario, record:
+每个场景至少记录：
 
-1. test command / action
-2. expected behavior
-3. observed UART output or measurement
-4. pass/fail decision
+1. 操作步骤 / 测试命令
+2. 预期行为
+3. 实际 UART 输出或测量结果
+4. 结论（PASS / FAIL）
 
-See `tests/hil/scenarios/basic_motion.md` for baseline scenarios.
+参考基线场景：`tests/hil/scenarios/basic_motion.md`

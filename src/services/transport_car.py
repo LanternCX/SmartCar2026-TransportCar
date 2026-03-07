@@ -1,4 +1,5 @@
 """搬运车控制单例封装,拆出原 remote_control.py 的全部逻辑."""
+
 import gc
 import math
 import time
@@ -32,6 +33,26 @@ from config.params import (
     IDENT_RESULTS_FILE,
     GYRO_OFFSET_FILE,
     PID_MAP,
+    VISION_OBSERVATION_TIMEOUT_MS,
+    VISION_TARGET_X_PX,
+    VISION_TARGET_Y_PX,
+    VISION_ANGLE_KP,
+    VISION_DIST_KP,
+    VISION_DX_KP,
+    VISION_PUSH_DX_KP,
+    VISION_PUSH_DY_M,
+    VISION_PUSH_DISTANCE_M,
+    VISION_PUSH_ANGLE_DEG,
+    VISION_ANGLE_DEADZONE_PX,
+    VISION_ANGLE_REENTRY_PX,
+    VISION_DIST_DEADZONE_PX,
+    VISION_DX_DEADZONE_PX,
+    VISION_HEADING_TOLERANCE_DEG,
+    VISION_STABLE_FRAMES,
+    VISION_MAX_DX_M,
+    VISION_MAX_DY_M,
+    VISION_MAX_D_ANGLE_DEG,
+    VISION_DONE_HOLD_MS,
 )
 from hardware.uart_bus import create_uart3, create_uart6
 from hardware.motors import create_motors
@@ -39,21 +60,28 @@ from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from services.command_router import router as _cmd_router
+from services.vision_protocol import VisionProtocol
+from services.vision_state_machine import (
+    VisionMachineInputs,
+    VisionStateConfig,
+    VisionStateMachine,
+    resolve_relative_intent,
+)
 import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
 
 
 class TransportCar:
     """搬运车核心控制单例,集硬件、运动学、PID 控制、命令路由于一体.
-    
+
     主要责任:
     - 硬件初始化与资源管理(电机、编码器、IMU、串口)
     - 周期性控制循环(5ms 周期)
     - 速度闭环与运动学变换
     - 位置锁定与偏航角控制
     - 串口命令解析和执行
-    
+
     使用模式::
-    
+
         car = TransportCar()
         car.set_ticker(ticker_obj)  # 注册 5ms 周期中断
         while True:
@@ -63,7 +91,7 @@ class TransportCar:
 
     def __init__(self):
         """初始化搬运车所有组件.
-        
+
         完成硬件初始化、滤波器和状态变量的构造,保持所有参数与旧版一致.
         包括电机、编码器、IMU、运动学、PID 控制器、串口等.
         """
@@ -162,12 +190,20 @@ class TransportCar:
         # 命令路由器:使用单例路由器(命令模块已通过 @router 装饰器完成注册)
         self._router = _cmd_router
 
+        # 视觉协议与状态机
+        self.vision_protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
+        self.vision_state_machine = VisionStateMachine(
+            self._build_vision_state_config()
+        )
+        self._vision_step_result = None
+        self._vision_resolved_target = None
+
     # Public API -----------------------------------------------------
     def mark_tick(self, _tick=None):  # noqa: F841
         """中断处理函数:被 ticker 回调时置位标志.
-        
+
         ticker 中断仅设置标志,耗时工作放在主循环执行.
-        
+
         参数:
             _tick: 中断参数(未使用,仅保持接口一致).
         """
@@ -176,15 +212,46 @@ class TransportCar:
 
     def set_ticker(self, ticker_obj):
         """记录 ticker 实例,便于 stop 时关闭.
-        
+
         参数:
             ticker_obj: ticker 对象,支持 .stop() 方法.
         """
         self.ticker = ticker_obj
 
+    def _build_vision_state_config(self):
+        """构造视觉状态机参数对象."""
+        return VisionStateConfig(
+            target_x_px=VISION_TARGET_X_PX,
+            target_y_px=VISION_TARGET_Y_PX,
+            angle_kp=VISION_ANGLE_KP,
+            dist_kp=VISION_DIST_KP,
+            dx_kp=VISION_DX_KP,
+            push_dx_kp=VISION_PUSH_DX_KP,
+            push_dy_m=VISION_PUSH_DY_M,
+            push_distance_m=VISION_PUSH_DISTANCE_M,
+            push_angle_deg=VISION_PUSH_ANGLE_DEG,
+            angle_deadzone_px=VISION_ANGLE_DEADZONE_PX,
+            angle_reentry_px=VISION_ANGLE_REENTRY_PX,
+            dist_deadzone_px=VISION_DIST_DEADZONE_PX,
+            dx_deadzone_px=VISION_DX_DEADZONE_PX,
+            heading_tolerance_deg=VISION_HEADING_TOLERANCE_DEG,
+            stable_frames=VISION_STABLE_FRAMES,
+            max_dx_m=VISION_MAX_DX_M,
+            max_dy_m=VISION_MAX_DY_M,
+            max_d_angle_deg=VISION_MAX_D_ANGLE_DEG,
+            done_hold_ms=VISION_DONE_HOLD_MS,
+        )
+
+    def _now_ms(self):
+        """返回当前毫秒时间戳,兼容主机测试环境."""
+        ticks_ms = getattr(time, "ticks_ms", None)
+        if ticks_ms is not None:
+            return int(ticks_ms())
+        return int(time.time() * 1000)
+
     def step(self):
         """单次主循环:控制、命令处理、急停检测.
-        
+
         返回:
             True 表示继续运行;False 表示检测到致命错误(如急停开关).
         """
@@ -206,7 +273,7 @@ class TransportCar:
 
     def stop(self):
         """停止控制循环、清零积分、断开电机.
-        
+
         副作用:
             停止 ticker、重置所有 PID 控制器、设置电机占空比为 0、
             向 UART3 输出 "stop" 信息.
@@ -218,6 +285,72 @@ class TransportCar:
             state["motor"].duty(0)
         self.uart3.write("stop\r\n")
 
+    def _handle_uart_line(self, line, source):
+        """按来源处理单行串口输入."""
+        if not line:
+            return
+
+        if line.startswith("?"):
+            self._router.handle_query(line[1:], self)
+            return
+
+        if source == "uart6":
+            observation = self.vision_protocol.try_parse_observation(
+                line, source=source, now_ms=self._now_ms()
+            )
+            if observation is not None:
+                return
+
+        if source == "uart3":
+            self.uart3.write("RCV: %s\r\n" % line)
+        self.apply_command(line)
+
+    def _refresh_vision_target(self, now_ms=None):
+        """推进视觉状态机并刷新当前视觉目标."""
+        if now_ms is None:
+            now_ms = self._now_ms()
+
+        if self.command_lock:
+            self.vision_protocol.clear()
+            self.vision_state_machine.reset()
+            self._vision_step_result = None
+            self._vision_resolved_target = None
+            return
+
+        observation = self.vision_protocol.get_observation(now_ms)
+        inputs = VisionMachineInputs(
+            observation=observation,
+            heading_deg=self.heading_est,
+            odom_x=self.odometry.x,
+            odom_y=self.odometry.y,
+            now_ms=now_ms,
+        )
+        self._vision_step_result = self.vision_state_machine.step(inputs)
+        self._vision_resolved_target = resolve_relative_intent(
+            self._vision_step_result.intent,
+            odom_x=self.odometry.x,
+            odom_y=self.odometry.y,
+            heading_deg=self.heading_est,
+        )
+
+    def _get_active_position_targets(self):
+        """返回当前激活控制源的位置目标."""
+        if self._vision_resolved_target is not None:
+            return self._vision_resolved_target.x, self._vision_resolved_target.y
+        return self.last_cmd.get("x"), self.last_cmd.get("y")
+
+    def _get_active_angle_command(self):
+        """返回当前激活控制源的角度目标."""
+        if self._vision_resolved_target is not None:
+            return self._vision_resolved_target.angle_deg
+        return self.last_cmd.get("angle")
+
+    def _get_active_rear_only_mode(self):
+        """返回当前激活控制源的后轮模式."""
+        if self._vision_resolved_target is not None:
+            return self._vision_resolved_target.rear_only_mode
+        return self.rear_only_mode
+
     # Internal helpers ----------------------------------------------
     def init_pid(self):
         """按 PID_MAP 配置表初始化三轮速度环增益."""
@@ -228,12 +361,12 @@ class TransportCar:
 
     def _inverse_kinematics(self, vx, vy, omega):
         """Y 型三轮逆运动学:输入车体系速度/角速度,输出三轮目标脉冲速度.
-        
+
         参数:
             vx: 纵向速度(脉冲/周期).
             vy: 横向速度(脉冲/周期).
             omega: 角速度(脉冲/周期).
-        
+
         返回:
             元组 (vm, vl, vr),限制在 ±TARGET_SPEED_MAX 范围内.
         """
@@ -254,10 +387,11 @@ class TransportCar:
 
     def _handle_tick(self):
         """执行单次 5ms 控制周期.
-        
+
         包括读取编码器、更新滤波器、IMU 更新、PID 控制、运动学变换.
         """
-        """在一个周期内执行:时间累积、轮速滤波、姿态更新、控制输出."""
+        self._refresh_vision_target()
+
         # 记录周期计数并闪烁 LED 作为心跳
         self.tick_count += 1
         self.led.toggle()
@@ -275,7 +409,7 @@ class TransportCar:
 
     def _update_wheel_speeds(self):
         """读取编码器脉冲并通过多级滤波器处理.
-        
+
         依次执行:中值滤波(去尖刺)→ 差分限幅(限突变)→ 双窗回归(融合)→ 低通(平滑).
         结果存储在 state["filtered_speed"].
         """
@@ -294,10 +428,10 @@ class TransportCar:
 
     def _update_attitude(self, dt_s):
         """更新 IMU 数据、四元数积分、解包偏航角、计算滤波角速度.
-        
+
         参数:
             dt_s: 时间增量(秒).
-        
+
         副作用:
             修改 self.q_est、self.last_yaw_rad、self.heading_est 等姿态状态.
         """
@@ -348,7 +482,9 @@ class TransportCar:
         )
 
         # 使用当前估计航向更新里程计
-        self.odometry.update(vx_rob_mps, vy_rob_mps, math.radians(self.heading_est), dt_s)
+        self.odometry.update(
+            vx_rob_mps, vy_rob_mps, math.radians(self.heading_est), dt_s
+        )
         # 积分更新航向角(度)
         self.heading_est += math.degrees(delta_yaw)
 
@@ -357,12 +493,12 @@ class TransportCar:
 
     def _run_control(self, dt_s):
         """执行完整的控制堆栈:姿态环 + 平面运动控制 + 速度环.
-        
+
         依次:角度/速度指令 → 目标角速度 → 车体系速度命令 → 逆运动学 → 电机占空比.
-        
+
         参数:
             dt_s: 时间增量(秒).
-        
+
         副作用:
             更新所有轮子的 state["duty"],并驱动电机.
         """
@@ -380,20 +516,23 @@ class TransportCar:
 
     def _compute_omega_cmd(self, dt_s):
         """根据 angle/omega 指令计算目标角速度.
-        
+
         支持三种模式:
         1. 角度模式(angle 有效):PID 跟踪目标角度.
         2. 角速度模式(omega 有效):直接跟随,极小时自动保持角度.
         3. 保持模式(两者都无):维持当前角度.
-        
+
         参数:
             dt_s: 时间增量(秒).
-        
+
         返回:
             目标角速度(限幅在 ±AUTO_OMEGA_MAX 范围内).
         """
-        cmd_angle = self.last_cmd.get("angle")
-        cmd_omega = self.last_cmd.get("omega")
+        cmd_angle = self._get_active_angle_command()
+        if self._vision_resolved_target is not None:
+            cmd_omega = None
+        else:
+            cmd_omega = self.last_cmd.get("omega")
 
         if cmd_angle is not None:
             # 角度模式:目标为绝对角度,PID 产出角速度
@@ -430,21 +569,20 @@ class TransportCar:
 
     def _compute_planar_targets(self, dt_s):
         """计算车体系目标速度,支持位置锁定和速度两种模式.
-        
+
         位置模式:世界系 P 控制 (x, y) → 车体系速度命令.
         速度模式:直接使用 vx, vy 指令.
-        
+
         参数:
             dt_s: 时间增量(秒).
-        
+
         返回:
             元组 (target_vx_脉冲, target_vy_脉冲).
         """
         target_vx_cmd = 0.0
         target_vy_cmd = 0.0
 
-        cmd_x = self.last_cmd.get("x")
-        cmd_y = self.last_cmd.get("y")
+        cmd_x, cmd_y = self._get_active_position_targets()
 
         if cmd_x is not None or cmd_y is not None:
             # 位置模式:取目标点,缺省坐标补 0
@@ -489,13 +627,13 @@ class TransportCar:
 
     def _apply_target_speeds(self, target_vx_cmd, target_vy_cmd, omega_cmd, dt_s):
         """逆运动学、限幅、速度环 PID,占空比分配到三轮.
-        
+
         参数:
             target_vx_cmd: 目标纵向速度(脉冲/周期).
             target_vy_cmd: 目标横向速度(脉冲/周期).
             omega_cmd: 目标角速度(脉冲/周期).
             dt_s: 时间增量(秒).
-        
+
         副作用:
             更新每个轮子的 state["duty"] 并驱动电机.
         """
@@ -506,7 +644,7 @@ class TransportCar:
             float(omega_cmd),
         )
 
-        if self.rear_only_mode:
+        if self._get_active_rear_only_mode():
             # 仅后轮:前两轮停,后轮减速 1/3 与旧版一致
             self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX) / 3
             self.target_speeds["l"] = 0.0
@@ -538,10 +676,10 @@ class TransportCar:
 
     def _check_unlock(self):
         """在锁定模式下检查角度/位置误差,达标时解锁.
-        
+
         当角度误差 < ANGLE_TOLERANCE 且位置误差 < POS_TOLERANCE 时,
         退出锁定模式.若启用后轮模式,解锁后自动回归全向并停车.
-        
+
         副作用:
             修改 self.command_lock、self.rear_only_mode、self.target_speeds.
         """
@@ -587,11 +725,11 @@ class TransportCar:
 
     def _process_uart(self):
         """轮询两个串口:处理查询和运动指令.
-        
+
         UART3:收集调试命令(来自 RTT 或其他监控工具).
         UART6:收集远程操控命令.
         两个串口均支持查询指令(前缀 "?")和控制指令(key=val 格式).
-        
+
         异常时向串口回写错误信息.
         """
         buf_len = self.uart3.any()
@@ -603,14 +741,8 @@ class TransportCar:
                     if idx == -1:
                         break
                     line = self.rx_buf3[:idx].rstrip("\r").strip()
-                    self.rx_buf3 = self.rx_buf3[idx + 1:]
-                    if not line:
-                        continue
-                    if line.startswith("?"):
-                        self._router.handle_query(line[1:], self)
-                    else:
-                        self.uart3.write("RCV: %s\r\n" % line)
-                        self.apply_command(line)
+                    self.rx_buf3 = self.rx_buf3[idx + 1 :]
+                    self._handle_uart_line(line, source="uart3")
             except Exception as exc:
                 self.uart3.write("ERR %s\r\n" % exc)
 
@@ -623,13 +755,8 @@ class TransportCar:
                     if idx == -1:
                         break
                     line = self.rx_buf6[:idx].rstrip("\r").strip()
-                    self.rx_buf6 = self.rx_buf6[idx + 1:]
-                    if not line:
-                        continue
-                    if line.startswith("?"):
-                        self._router.handle_query(line[1:], self)
-                    else:
-                        self.apply_command(line)
+                    self.rx_buf6 = self.rx_buf6[idx + 1 :]
+                    self._handle_uart_line(line, source="uart6")
             except Exception as exc:
                 self.uart3.write("ERR %s\r\n" % exc)
 
@@ -637,9 +764,9 @@ class TransportCar:
 
     def apply_command(self, line):
         """接收并分发原始命令行字符串到各命令处理器.
-        
+
         reset 指令优先处理(不受锁定影响);其余指令在锁定时忽略.
-        
+
         参数:
             line: 原始命令行,如 "vx=10,vy=5" 或 "reset".
         """
@@ -649,22 +776,11 @@ class TransportCar:
 
     def _finalize_route(self, dispatched):
         """在路由完成后处理跨 key 的后处理逻辑.
-        
+
         包括相对位移(dx, dy)的世界系到车体系变换.
-        
+
         参数:
             dispatched: 本次路由中分发的命令关键字集合.
-        """
-        """
-        路由完成后的后处理钩子:处理跨 key 计算并更新锁定状态.
-
-        职责:
-        - 将 _pending_dx / _pending_dy 转换为世界坐标绝对目标(x/y)
-        - 将 _pending_d_angle 叠加到 heading_target,写入 last_cmd["angle"]
-        - 判断是否触发 command_lock(位置/角度指令或后轮模式切换时加锁)
-
-        参数:
-            dispatched: 本次路由中成功分发的命令 key 集合.
         """
         # reset 命令已在 handler 中完整处理,直接返回
         if "reset" in dispatched:
@@ -702,8 +818,12 @@ class TransportCar:
 
         # 判断本次是否含位置/角度指令(由绝对 x/y/angle 直接设置触发)
         if not is_pos_cmd:
-            is_pos_cmd = ("x" in dispatched or "y" in dispatched
-                          or "angle" in dispatched or "yaw" in dispatched)
+            is_pos_cmd = (
+                "x" in dispatched
+                or "y" in dispatched
+                or "angle" in dispatched
+                or "yaw" in dispatched
+            )
 
         # 后轮模式切换触发加锁
         rear_mode_changed = getattr(self, "_rear_mode_changed", False)
