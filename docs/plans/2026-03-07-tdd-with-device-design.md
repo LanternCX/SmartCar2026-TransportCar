@@ -220,3 +220,19 @@
 3. 新增设计文档与实施计划
 4. baseline / post-skill 场景测试都有记录
 5. skill 内容明确约束 `stage1 -> stage2 -> stage3` 的门禁顺序
+
+## Skill TDD 验证记录
+
+### baseline（无新 skill）
+
+- agent 会自然使用 `tdd-integration`、`test-driven-development`、`hardware-integration`
+- agent 能较稳定给出 `stage1` 与 `stage3`
+- agent **不会稳定地**把 `stage2` 作为强制门禁
+- 缺少 `stage2` 的失败回退规则、通过标准和证据要求
+
+### post-skill（加入 `tdd-with-device` 后）
+
+- agent 会把 `tdd-with-device` 作为总控流程 skill
+- agent 明确给出 `stage1 -> stage2 -> stage3`
+- agent 明确把 `stage2` 视为强制门禁
+- agent 在 `stage2` 失败时会回退,而不是直接进入 `stage3`
