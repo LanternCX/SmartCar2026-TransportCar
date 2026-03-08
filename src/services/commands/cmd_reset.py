@@ -1,4 +1,5 @@
 """reset 系统复位指令处理器:不受 command_lock 影响."""
+
 from services.command_router import router
 from control.pid_math import reset_pi_state
 
@@ -28,3 +29,11 @@ def handle(ctx, value):
     ctx._pending_dx = None
     ctx._pending_dy = None
     ctx._pending_d_angle = None
+    if hasattr(ctx, "vision_protocol"):
+        ctx.vision_protocol.clear()
+    if hasattr(ctx, "vision_state_machine"):
+        ctx.vision_state_machine.reset()
+    if hasattr(ctx, "_vision_step_result"):
+        ctx._vision_step_result = None
+    if hasattr(ctx, "_vision_resolved_target"):
+        ctx._vision_resolved_target = None

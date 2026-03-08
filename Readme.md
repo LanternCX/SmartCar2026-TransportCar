@@ -34,13 +34,13 @@
 
 项目提供了完整的开发技能指南，规范代码开发、架构设计和系统集成，确保项目保持高内聚低耦合的特性。
 
-📚 **技能指南文档**：[.agents/skills/README.md](.agents/skills/README.md)
+📚 **技能指南文档**：[AGENTS.md](AGENTS.md)
 
 **核心技能**：
 - **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
 - **[代码规范与架构](/.agents/skills/code-standards/SKILL.md)**：分层架构、模块职责、依赖规则与代码质量基线
 - **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
-- **[硬件集成](/.agents/skills/hardware-integration/SKILL.md)**：硬件驱动、实时约束、性能优化
+- **[嵌入式开发](/.agents/skills/embedded-development/SKILL.md)**：分层 TDD、设备门禁、硬件驱动、实时约束与 HIL 留证
 
 💡 **建议**：在开发新功能或修复问题前，先查阅相关的技能指南，可以避免常见陷阱并保持代码质量。
 
@@ -48,8 +48,8 @@
 
 | UART | 用途 | 说明 |
 | :--- | :--- | :--- |
-| **UART3** | 调试输出 | 所有状态、告警信息输出到此串口，不影响控制周期 |
-| **UART6** | 无线通信 | 连接 OpenART 系统与电脑，用于实时监听和控制协议 |
+| **UART3** | 调试与人工联调 | 用于状态输出、人工命令与 Stage 3 调试，不占用 OpenArt 链路 |
+| **UART6** | OpenArt 通信 | 保留给 OpenArt 视觉与控制协议，不作为 Stage 3 自动调试口 |
 
 > **提示**：串口通信收发消息的过程中可能存在总线冲突，建议在发送消息前后加入延迟（参考 OpenART 代码实现）
 
@@ -246,6 +246,8 @@ d_angle=30          # 相对目标角度的增量（度）
 
 格式使用键值对 (Key-Value) 格式进行控制。
 
+> **视觉链路特例**：当 `UART6` 收到且仅收到 `x=...,y=...` 两个键时，系统会将其解释为 OpenArt 回传的视觉目标点，而不是绝对位置命令。该视觉数据会进入主控端内部状态机，生成连续的 `dx/dy/d_angle` 风格控制意图；默认不逐帧等待 `?lock`，但若外部离散命令已进入 `command_lock`，视觉输出会暂停并清空内部状态，等待重新获取目标。
+
 推杆指向的方向是 `y+`（纵向）。其余单位方向遵循右手系。也就是 `x+` 是右移（横向），`w+` 是顺时针旋转。
 
 ### 键值对格式说明
@@ -265,6 +267,14 @@ d_angle=30          # 相对目标角度的增量（度）
 | **reset** | 重置状态（设置零点） | - | 系统 | 发送 `reset` 或 `reset=1`：将里程计位置(x,y)及航向角归零，也就是设置当前状态为零点 |
 | **print** | 打印字符串 | - | 系统 | `print=Hello World`：由 uart6 接收并通过 uart3 打印 |
 
+### 视觉输入约定（UART6）
+
+- OpenArt 端只回传目标点坐标：`x=<pixel_x>,y=<pixel_y>`。
+- 仅当 `UART6` 包中恰好只有 `x,y` 两个键时，才进入视觉状态机。
+- 这意味着 **`UART6` 上的纯 `x,y` 双键包不再表示绝对位置命令**；若需要发送绝对位置，请使用 `UART3`，或在 `UART6` 上附带其他键使其走普通命令路由。
+- 其余 `UART6` 命令仍走现有路由协议，例如 `vx=...`、`reset`、`?lock`。
+- 视觉状态机内部会把像素误差转成相对控制意图，再由主控位置环输出，避免高帧率下直接重复发送外部增量命令造成累加过冲。
+
 ### 信息查询（Query Interface）
 
 通过发送 `? + token` 的形式向 UART6 查询当前运行状态：
@@ -273,6 +283,37 @@ d_angle=30          # 相对目标角度的增量（度）
 | :--- | :--- | :--- | :--- |
 | **?pos** | `?pos=x,y,yaw` | 当前世界坐标和航向角 | 位置与角度精度为浮点数 |
 | **?lock** | `?lock=0/1` | 当前是否处于位置锁定状态 | 0=解锁，1=锁定 |
+| **?health** | `?health=alive:...,uptime_ms:...,...` | 系统健康摘要 | 包含锁定、后轮模式、最近异常和视觉状态 |
+| **?tick** | `?tick=count:...,last_us:...,max_us:...,...` | 控制周期统计 | 用于诊断 5ms 周期抖动和超预算 |
+| **?imu** | `?imu=ok:...,yaw_deg:...,yaw_rate_dps:...,...` | IMU 诊断摘要 | 包含航向角、角速度和原始陀螺值 |
+| **?enc** | `?enc=m_raw:...,m_filt:...,...` | 编码器诊断摘要 | 返回三轮原始与滤波后速度 |
+| **?motor** | `?motor=m_target:...,m_duty:...,...` | 电机输出摘要 | 返回目标速度、占空比和 rear 模式 |
+| **?vision** | `?vision=state:...,obs_age_ms:...,...` | 视觉状态机摘要 | 返回观测时效与当前解析目标 |
+
+### Stage 2 裸片 smoke
+
+如果希望 agent 先验证板端最小运行环境是否安全可启动，可执行：
+
+```bash
+python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101
+```
+
+该命令会：
+
+1. 上传 `tools/stage2_smoke_probe.py` 到设备临时路径
+2. 以 `TransportCar(diagnostic_mode=True)` 执行一次最小安全 smoke
+3. 检查诊断查询注册、短时 `step()` 与 `health/tick/imu/enc/motor/vision` 快照构造
+4. 输出 `status=ok` / `connect_failed` / `deploy_failed` / `probe_failed` 等归因
+5. 删除远端临时探针文件
+
+### Stage 3 `uart3` 人工调试
+
+Stage 3 不再提供自动观测脚本，而是改成 `uart3` 人工调试流程：
+
+1. 保持 OpenArt 继续占用 `uart6`
+2. 通过 `uart3` 发送调试命令或查询 `?health/?tick/?imu/?enc/?motor/?vision/?lock/?pos`
+3. 结合现场现象与串口回显，由 AI 协助归因具体逻辑问题
+4. 将关键日志和结论沉淀到 `tests/hil/`
 
 ### 使用示例
 
@@ -285,6 +326,9 @@ x=1.0, y=0.5, angle=45
 
 # 相对位置：相对当前位置向前移动 0.3m
 dy=0.3
+
+# UART6 视觉输入：OpenArt 连续回传目标点
+x=168,y=24
 
 # 查询位置
 ?pos
@@ -300,6 +344,26 @@ reset=1
 - **速度模式与位置模式互斥**：发送位置指令会切换至位置模式，相反亦然
 
 > **重要**：`x/y/dx/dy/angle/d_angle` 为位置控制逻辑，`vx/vy/omega` 为速度控制逻辑
+
+## 视觉状态机迁移
+
+当前仓库已经接管原 OpenArt 端的状态机跳转逻辑。迁移后的职责边界如下：
+
+- OpenArt：只负责视觉识别，并通过 `UART6` 连续回传目标点 `x,y`。
+- RT1021 主控：负责状态机跳转、里程计判定、推行/返回阶段切换，以及 `dx/dy/d_angle` 风格控制意图的生成。
+
+迁移后的内部状态机仍保持以下阶段：
+
+- `IDLE`
+- `ALIGN_ANGLE`
+- `ALIGN_DIST`
+- `ALIGN_DX`
+- `ORBITING`
+- `PUSHING`
+- `RETURNING`
+- `DONE`
+
+其中 `push_angle` 当前由 `src/config/params.py` 中的固定参数提供，以便在不修改 OpenArt 协议的前提下保持车辆行为稳定。
 
 ## 控制算法
 
@@ -520,6 +584,13 @@ print=Debug message here
 因此通过加锁，我们可以避免两个异步线程通信的时候出现的各种问题，这里加锁丢掉所有命令则是为了保证当前命令的完整执行，防止相对位置、绝对位置、速度模式来回切换的时候出现的神秘 BUG。
 
 实际的通信协议中，为了避免神秘 BUG，一般会先查询 lock 状态，在确认没有 lock 的情况下再发送，防止命令丢失。
+
+这次重构后，系统采用“双链路”策略：
+
+- 外部离散命令（例如手动 `dy=0.2`、`d_angle=90`）仍然使用 `command_lock`。
+- 视觉链路默认不逐帧等待 `?lock`，而是由主控内部状态机在每个控制周期覆盖式刷新目标；若外部离散命令已经锁定底盘，则视觉链路会暂停并重新从 `IDLE` 获取目标。
+
+这样既保留了原本相对位置控制的稳定性，又避免了视觉高帧率输入在串口层排队等待造成的跟随迟滞。
 
 ## 文件上传清单
 

@@ -1,5 +1,7 @@
 """Fakes used by contract tests for command handlers."""
 
+from typing import Optional
+
 
 class FakeUART:
     """Collect UART writes for assertions."""
@@ -65,15 +67,35 @@ class FakeQuaternion:
         self.z = 3.0
 
 
+class FakeVisionProtocol:
+    """视觉协议假对象."""
+
+    def __init__(self):
+        self.cleared = False
+
+    def clear(self):
+        self.cleared = True
+
+
+class FakeVisionStateMachine:
+    """视觉状态机假对象."""
+
+    def __init__(self):
+        self.reset_called = False
+
+    def reset(self):
+        self.reset_called = True
+
+
 class FakeCommandContext:
     """Minimal context for motion and query handlers."""
 
     def __init__(self):
         self.command_lock = False
         self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-        self._pending_dx = None
-        self._pending_dy = None
-        self._pending_d_angle = None
+        self._pending_dx: Optional[float] = None
+        self._pending_dy: Optional[float] = None
+        self._pending_d_angle: Optional[float] = None
         self._rear_mode_changed = False
         self.rear_only_mode = False
         self.uart3 = FakeUART()
@@ -86,7 +108,22 @@ class FakeCommandContext:
         self.q_est = FakeQuaternion()
         self.last_yaw_rad = 0.0
         self.gyro_lpf = FakeLPF()
+        self.vision_protocol = FakeVisionProtocol()
+        self.vision_state_machine = FakeVisionStateMachine()
+        self._vision_step_result = object()
+        self._vision_resolved_target = object()
+        self._query_response_uart = self.uart6
         self.wheel_states = [
             {"controller": FakeController(), "duty": 9.0},
             {"controller": FakeController(), "duty": -3.0},
         ]
+        self.build_health_snapshot = lambda: {}
+        self.build_tick_snapshot = lambda: {}
+        self.build_imu_snapshot = lambda: {}
+        self.build_encoder_snapshot = lambda: {}
+        self.build_motor_snapshot = lambda: {}
+        self.build_vision_snapshot = lambda: {}
+
+    def get_query_uart(self):
+        """返回当前查询响应应写入的串口."""
+        return getattr(self, "_query_response_uart", self.uart6)

@@ -220,6 +220,8 @@ python3 -m pytest --collect-only -q
 
 ### 11.1 核心技能
 
+原 `tdd-integration`、`tdd-with-device`、`hardware-integration` 已合并为 `embedded-development`，遇到相关任务不再分别选择旧 skill。
+
 1. `code-standards`
    - 代码规范与架构边界统一入口
    - 分层职责、依赖规则、评审与重构触发条件
@@ -228,19 +230,15 @@ python3 -m pytest --collect-only -q
    - 控制算法开发、调参与故障定位
    - PID、运动学、里程计、模式切换联调
 
-3. `hardware-integration`
-   - 硬件驱动开发与实时系统集成
-   - UART/PWM/编码器/IMU 约束与时序诊断
+3. `embedded-development`
+   - 主机侧分层 TDD、设备门禁、硬件集成与实时性统一入口
+   - 覆盖 `unit/contract/HIL` 选层、`stage1 -> stage2 -> stage3 -> HIL` 与 5ms 约束
 
 4. `git-workflow`
    - 项目 Git Flow + Angular Conventional Commit
    - 项目 Git 规范唯一来源
 
-5. `tdd-integration`
-   - 将 superpowers TDD 映射到本项目 `unit/contract/HIL`
-   - 强制 RED -> GREEN -> REFACTOR
-
-6. `mpy-cli`
+5. `mpy-cli`
    - 统一 MicroPython 端部署与文件运维命令
    - 覆盖 init/config/plan/deploy/upload/run/delete/tree 流程
 
@@ -249,15 +247,14 @@ python3 -m pytest --collect-only -q
 1. 先看 `git-workflow` 创建分支。
 2. 按 `code-standards` 放置模块并实现。
 3. 涉及控制逻辑查 `control-system`。
-4. 涉及外设/驱动查 `hardware-integration`。
-5. 开发行为变更前执行 `tdd-integration`。
+4. 涉及行为改动、测试选层、外设/驱动、设备路径或 HIL 验证时，统一执行 `embedded-development`。
+5. 涉及设备同步/烧录时优先查 `mpy-cli`。
 6. 提交前回到 `git-workflow` 校验提交格式。
-7. 涉及设备同步/烧录时优先查 `mpy-cli`。
 
 ### 11.3 问题诊断入口
 
 1. 控制不稳定：优先 `control-system`。
-2. 外设异常/时序抖动：优先 `hardware-integration`。
+2. 外设异常、时序抖动、host / smoke / observe / HIL 路径判断：优先 `embedded-development`。
 3. 架构耦合或风格问题：回到 `code-standards`。
 4. 部署或串口同步问题：优先 `mpy-cli`。
 

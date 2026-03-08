@@ -1,5 +1,4 @@
 """命令路由器:装饰器注册模式,将聚合命令字符串分发到独立处理器."""
- 
 
 
 class CommandRouter:
@@ -43,18 +42,20 @@ class CommandRouter:
         返回:
             装饰器函数,原函数不变.
         """
+
         def decorator(func):
             """注册单个处理器到所有指定的命令键.
-            
+
             参数:
                 func: 处理函数.
-            
+
             返回:
                 原处理函数,保持不变.
             """
             for key in keys:
                 self._cmd_handlers[key] = func
             return func
+
         return decorator
 
     def query(self, *keys):
@@ -68,18 +69,20 @@ class CommandRouter:
          返回:
             装饰器函数,原函数不变.
         """
+
         def decorator(func):
             """注册单个查询处理器到所有指定的查询键.
-            
+
             参数:
                 func: 查询处理函数.
-            
+
             返回:
                 原处理函数,保持不变.
             """
             for key in keys:
                 self._query_handlers[key] = func
             return func
+
         return decorator
 
     # ------------------------------------------------------------------
@@ -150,24 +153,44 @@ class CommandRouter:
 
         return bool(dispatched)
 
-    def handle_query(self, token, ctx):
+    def handle_query(self, token, ctx, source="uart6"):
         """
         处理一条查询指令(去掉 "?" 前缀后的 token).
 
         参数:
             token: 查询关键字,如 ``"pos"``、``"lock"``.
             ctx:   上下文对象(TransportCar).
+            source: 查询来源串口名,用于选择响应回写口.
         返回:
             True 表示找到并调用了对应处理器;False 表示未知查询.
         """
         token = token.strip().lower()
         handler = self._query_handlers.get(token)
+        response_uart = getattr(ctx, source, None)
+        if response_uart is None and hasattr(ctx, "uart6"):
+            response_uart = ctx.uart6
         if handler:
-            handler(ctx)
-            return True
+            had_uart = hasattr(ctx, "_query_response_uart")
+            previous_uart = getattr(ctx, "_query_response_uart", None)
+            had_source = hasattr(ctx, "_query_source")
+            previous_source = getattr(ctx, "_query_source", None)
+            try:
+                setattr(ctx, "_query_response_uart", response_uart)
+                setattr(ctx, "_query_source", source)
+                handler(ctx)
+                return True
+            finally:
+                if had_uart:
+                    setattr(ctx, "_query_response_uart", previous_uart)
+                elif hasattr(ctx, "_query_response_uart"):
+                    delattr(ctx, "_query_response_uart")
+                if had_source:
+                    setattr(ctx, "_query_source", previous_source)
+                elif hasattr(ctx, "_query_source"):
+                    delattr(ctx, "_query_source")
         # 未知查询:回写 unknown 响应
-        if hasattr(ctx, "uart6"):
-            ctx.uart6.write("?unknown=%s\r\n" % token)
+        if response_uart is not None:
+            response_uart.write("?unknown=%s\r\n" % token)
         return False
 
 
