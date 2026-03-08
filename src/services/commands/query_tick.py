@@ -6,5 +6,5 @@ from services.diagnostics import format_query_response
 
 @router.query("tick")
 def handle(ctx):
-    """通过 uart6 回传控制周期统计信息."""
-    ctx.uart6.write(format_query_response("tick", ctx.build_tick_snapshot()))
+    """通过当前查询响应串口回传控制周期统计信息."""
+    ctx.get_query_uart().write(format_query_response("tick", ctx.build_tick_snapshot()))

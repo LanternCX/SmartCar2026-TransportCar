@@ -112,7 +112,18 @@ class FakeCommandContext:
         self.vision_state_machine = FakeVisionStateMachine()
         self._vision_step_result = object()
         self._vision_resolved_target = object()
+        self._query_response_uart = self.uart6
         self.wheel_states = [
             {"controller": FakeController(), "duty": 9.0},
             {"controller": FakeController(), "duty": -3.0},
         ]
+        self.build_health_snapshot = lambda: {}
+        self.build_tick_snapshot = lambda: {}
+        self.build_imu_snapshot = lambda: {}
+        self.build_encoder_snapshot = lambda: {}
+        self.build_motor_snapshot = lambda: {}
+        self.build_vision_snapshot = lambda: {}
+
+    def get_query_uart(self):
+        """返回当前查询响应应写入的串口."""
+        return getattr(self, "_query_response_uart", self.uart6)

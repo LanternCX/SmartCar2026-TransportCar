@@ -375,7 +375,7 @@ class TransportCar:
             return
 
         if line.startswith("?"):
-            self._router.handle_query(line[1:], self)
+            self._router.handle_query(line[1:], self, source=source)
             return
 
         if source == "uart6":
@@ -452,6 +452,10 @@ class TransportCar:
             "last_err": self.last_exception_text,
             "vision_state": self._get_vision_state_name(),
         }
+
+    def get_query_uart(self):
+        """返回当前查询响应应写入的串口."""
+        return getattr(self, "_query_response_uart", self.uart6)
 
     def build_tick_snapshot(self):
         """构造控制周期统计快照."""

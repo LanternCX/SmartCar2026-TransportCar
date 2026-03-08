@@ -51,6 +51,17 @@ def test_query_lock_writes_state():
     assert ctx.uart6.messages == ["?lock=1\r\n"]
 
 
+def test_query_lock_can_reply_on_uart3() -> None:
+    ctx = FakeCommandContext()
+    ctx.command_lock = True
+    ctx._query_response_uart = ctx.uart3
+
+    query_lock.handle(ctx)
+
+    assert ctx.uart3.messages == ["?lock=1\r\n"]
+    assert ctx.uart6.messages == []
+
+
 def test_query_pos_formats_position_and_heading():
     ctx = FakeCommandContext()
     ctx.odometry.x = 1.23456
@@ -58,3 +69,16 @@ def test_query_pos_formats_position_and_heading():
     ctx.heading_est = 30.1289
     query_pos.handle(ctx)
     assert ctx.uart6.messages == ["?pos=1.235,-2.346,30.13\r\n"]
+
+
+def test_query_pos_can_reply_on_uart3() -> None:
+    ctx = FakeCommandContext()
+    ctx._query_response_uart = ctx.uart3
+    ctx.odometry.x = 1.23456
+    ctx.odometry.y = -2.34567
+    ctx.heading_est = 30.1289
+
+    query_pos.handle(ctx)
+
+    assert ctx.uart3.messages == ["?pos=1.235,-2.346,30.13\r\n"]
+    assert ctx.uart6.messages == []

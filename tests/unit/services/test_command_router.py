@@ -24,6 +24,7 @@ class FakeContext:
     def __init__(self):
         self.calls = []
         self.dispatched = None
+        self.uart3 = FakeUART()
         self.uart6 = FakeUART()
 
     def _finalize_route(self, dispatched_keys):
@@ -99,6 +100,31 @@ def test_handle_query_known_token():
     ok = router.handle_query("pos", ctx)
     assert ok is True
     assert ctx.calls == [("query", "pos")]
+
+
+def test_handle_query_passes_source_uart_to_context() -> None:
+    router = CommandRouter()
+    ctx = FakeContext()
+
+    @router.query("health")
+    def query_health(local_ctx):
+        local_ctx.calls.append(local_ctx._query_response_uart)
+
+    ok = router.handle_query("health", ctx, source="uart3")
+
+    assert ok is True
+    assert ctx.calls == [ctx.uart3]
+
+
+def test_handle_query_unknown_token_writes_unknown_response_to_source_uart() -> None:
+    router = CommandRouter()
+    ctx = FakeContext()
+
+    ok = router.handle_query("missing", ctx, source="uart3")
+
+    assert ok is False
+    assert ctx.uart3.messages == ["?unknown=missing\r\n"]
+    assert ctx.uart6.messages == []
 
 
 def test_handle_query_unknown_token_writes_unknown_response():

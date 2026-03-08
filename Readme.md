@@ -48,8 +48,8 @@
 
 | UART | 用途 | 说明 |
 | :--- | :--- | :--- |
-| **UART3** | 调试输出 | 所有状态、告警信息输出到此串口，不影响控制周期 |
-| **UART6** | 无线通信 | 连接 OpenART 系统与电脑，用于实时监听和控制协议 |
+| **UART3** | 调试与人工联调 | 用于状态输出、人工命令与 Stage 3 调试，不占用 OpenArt 链路 |
+| **UART6** | OpenArt 通信 | 保留给 OpenArt 视觉与控制协议，不作为 Stage 3 自动调试口 |
 
 > **提示**：串口通信收发消息的过程中可能存在总线冲突，建议在发送消息前后加入延迟（参考 OpenART 代码实现）
 
@@ -290,20 +290,30 @@ d_angle=30          # 相对目标角度的增量（度）
 | **?motor** | `?motor=m_target:...,m_duty:...,...` | 电机输出摘要 | 返回目标速度、占空比和 rear 模式 |
 | **?vision** | `?vision=state:...,obs_age_ms:...,...` | 视觉状态机摘要 | 返回观测时效与当前解析目标 |
 
-### Stage 3 设备观测脚本
+### Stage 2 裸片 smoke
 
-如果希望 agent 直接通过本地 USB + `mpy-cli` 读取真实板实时状态，可执行：
+如果希望 agent 先验证板端最小运行环境是否安全可启动，可执行：
 
 ```bash
-python3 tools/run_device_observe.py --port /dev/cu.usbmodem1101
+python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101
 ```
 
 该命令会：
 
-1. 上传 `tools/device_observe_probe.py` 到设备临时路径
-2. 启动短时控制循环并打印 `OBSERVE health/tick/imu/enc/motor/vision` 行
-3. 解析输出并给出 `status=ok` / `observe_failed` / `probe_failed` 等归因
-4. 删除远端临时探针文件
+1. 上传 `tools/stage2_smoke_probe.py` 到设备临时路径
+2. 以 `TransportCar(diagnostic_mode=True)` 执行一次最小安全 smoke
+3. 检查诊断查询注册、短时 `step()` 与 `health/tick/imu/enc/motor/vision` 快照构造
+4. 输出 `status=ok` / `connect_failed` / `deploy_failed` / `probe_failed` 等归因
+5. 删除远端临时探针文件
+
+### Stage 3 `uart3` 人工调试
+
+Stage 3 不再提供自动观测脚本，而是改成 `uart3` 人工调试流程：
+
+1. 保持 OpenArt 继续占用 `uart6`
+2. 通过 `uart3` 发送调试命令或查询 `?health/?tick/?imu/?enc/?motor/?vision/?lock/?pos`
+3. 结合现场现象与串口回显，由 AI 协助归因具体逻辑问题
+4. 将关键日志和结论沉淀到 `tests/hil/`
 
 ### 使用示例
 

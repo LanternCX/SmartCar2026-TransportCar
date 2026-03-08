@@ -16,13 +16,20 @@ python3 -m pytest tests/unit tests/contract -q
 
 ## 设备阶段
 
-主机侧 `pytest` 之外，当前仓库补充了一条可脚本化的 Stage 3 设备观测链路：
+主机侧 `pytest` 之外，设备阶段拆成两层：
+
+- `stage2`：自动化裸片 smoke
+- `stage3`：`uart3` 人工调试
+
+`stage2` 命令：
 
 ```bash
-python3 tools/run_device_observe.py --port /dev/cu.usbmodem1101
+python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101
 ```
 
-该命令会通过 `mpy-cli` 上传临时探针、运行短时观测、读取 `OBSERVE ...` 输出并在结束后删除远端探针文件。
+该命令会通过 `mpy-cli` 上传临时探针，在 `diagnostic_mode=True` 下执行最小安全 smoke，并在结束后删除远端探针文件。
+
+`stage3` 不再定义为自动脚本；其职责是让人和 AI 在 `uart3` 上观察、查询和归因运行期逻辑问题。
 
 ## 本仓库 TDD 循环
 
@@ -32,4 +39,4 @@ python3 tools/run_device_observe.py --port /dev/cu.usbmodem1101
 4. 重新运行测试直到全绿。
 5. 在全绿前提下重构。
 
-对于硬件耦合行为，继续用 `unit/contract` 做快速回归，并将真实板证据记录到 `tests/hil/`。
+对于硬件耦合行为，继续用 `unit/contract` 做快速回归，并按 `stage1 -> stage2 -> stage3 -> HIL` 记录真实板证据。

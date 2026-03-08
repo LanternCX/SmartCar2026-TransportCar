@@ -6,5 +6,7 @@ from services.diagnostics import format_query_response
 
 @router.query("enc")
 def handle(ctx):
-    """通过 uart6 回传编码器诊断信息."""
-    ctx.uart6.write(format_query_response("enc", ctx.build_encoder_snapshot()))
+    """通过当前查询响应串口回传编码器诊断信息."""
+    ctx.get_query_uart().write(
+        format_query_response("enc", ctx.build_encoder_snapshot())
+    )

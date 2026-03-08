@@ -34,6 +34,26 @@ def test_query_health_formats_runtime_health() -> None:
     ]
 
 
+def test_query_health_can_reply_on_uart3() -> None:
+    ctx = FakeCommandContext()
+    ctx._query_response_uart = ctx.uart3
+    ctx.build_health_snapshot = lambda: {
+        "alive": 1,
+        "uptime_ms": 1500,
+        "lock": 0,
+        "rear": 0,
+        "last_err": "none",
+        "vision_state": "IDLE",
+    }
+
+    query_health.handle(ctx)
+
+    assert ctx.uart3.messages == [
+        "?health=alive:1,uptime_ms:1500,lock:0,rear:0,last_err:none,vision_state:IDLE\r\n"
+    ]
+    assert ctx.uart6.messages == []
+
+
 def test_query_tick_formats_runtime_statistics() -> None:
     ctx = FakeCommandContext()
     ctx.build_tick_snapshot = lambda: {

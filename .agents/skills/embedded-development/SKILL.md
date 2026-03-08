@@ -95,12 +95,12 @@ python3 -m pytest tests/unit tests/contract -q
 ## Step 4: Device Stages
 
 ### `stage2` MPY smoke
-目的：验证连接、同步、导入、安全探针和最小查询链路，不验证真实硬件动作。
+目的：验证连接、同步、导入、安全探针、最小查询链路与裸片最小运行是否正常，不验证真实硬件动作。
 
 默认做法：
 - 先用 `mpy-cli plan`
 - 再用 `mpy-cli upload/run/delete`
-- 运行安全 smoke 探针，例如 `tools/stage2_smoke_probe.py`
+- 运行安全 smoke 探针，例如 `tools/run_stage2_smoke.py`
 
 必须验证：
 - 设备可连接
@@ -114,11 +114,12 @@ python3 -m pytest tests/unit tests/contract -q
 - 不要把 `stage2` 失败当成“板子问题”后直接跳过
 
 ### `stage3` Device observe
-目的：在真实设备运行下读取结构化状态，确认实时行为和故障归因。
+目的：在真实设备运行下通过 `uart3` 做人工调试，确认具体逻辑行为和故障归因。
 
 默认做法：
-- 使用专门的设备观测入口，例如 `tools/run_device_observe.py`
-- 读取 `health/tick/imu/enc/motor/vision` 等快照
+- 保持 `uart6` 继续服务 OpenArt 或正式通信链路
+- 通过 `uart3` 人工发送查询或调试命令，读取 `health/tick/imu/enc/motor/vision` 等快照
+- 由人和 AI 在环分析现象，不再把 `stage3` 当作自动 PASS / FAIL 脚本
 
 必须验证：
 - 状态可读且格式稳定

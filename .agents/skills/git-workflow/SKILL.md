@@ -9,6 +9,7 @@ description: Use when creating branches, committing, merging, or preparing relea
 # Scope Rule (Critical)
 - 本技能是项目 Git 规范的唯一权威来源
 - 不要使用 superpowers 自带的 git workflow 作为本项目规范
+- 不要使用 superpowers 自带的 worktree / using-git-worktrees 工作流；本仓库按项目自身 Git Flow 约定在当前工作树或项目自管分支中工作
 
 # When to Use
 - 创建功能分支、修复分支、发布分支或热修复分支

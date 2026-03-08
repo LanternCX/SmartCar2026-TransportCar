@@ -6,5 +6,5 @@ from services.diagnostics import format_query_response
 
 @router.query("imu")
 def handle(ctx):
-    """通过 uart6 回传 IMU 诊断信息."""
-    ctx.uart6.write(format_query_response("imu", ctx.build_imu_snapshot()))
+    """通过当前查询响应串口回传 IMU 诊断信息."""
+    ctx.get_query_uart().write(format_query_response("imu", ctx.build_imu_snapshot()))

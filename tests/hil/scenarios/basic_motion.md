@@ -43,13 +43,20 @@
 2. 在推行中发送 `reset`
 3. 预期现象：里程计与航向被复位，视觉内部目标被清空，不再继续沿旧目标推行
 
-## 场景 G：Stage 3 设备观测脚本
+## 场景 G：Stage 2 裸片 smoke
 
 1. 确保设备已刷入当前分支代码
-2. 在主机执行：`python3 tools/run_device_observe.py --port /dev/cu.usbmodem1101`
-3. 预期输出包含：`OBSERVE health ...`、`OBSERVE tick ...`、`OBSERVE imu ...`、`OBSERVE enc ...`、`OBSERVE motor ...`、`OBSERVE vision ...`
-4. 预期最终状态为 `status=ok`，且 `tick.overrun=0`
-5. 若失败，记录 `status`、`reason` 与完整观测输出
+2. 在主机执行：`python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101`
+3. 预期输出包含：`status=ok reason=ok`、`status status=ok`、`queries ...`、`smoke init=1 step=1 ...`
+4. 若失败，记录 `status`、`reason` 与完整 smoke 输出
+
+## 场景 H：Stage 3 `uart3` 人工调试
+
+1. 保持 OpenArt 继续连接 `UART6`
+2. 将调试串口接到 `UART3`
+3. 人工发送 `?health`、`?tick`、`?imu`、`?enc`、`?motor`、`?vision`、`?lock`、`?pos`
+4. 预期这些查询都从 `UART3` 收到结构化回包
+5. 如需进一步排查，再结合动作命令、现场现象和 AI 建议记录结论
 
 ## 证据记录
 
