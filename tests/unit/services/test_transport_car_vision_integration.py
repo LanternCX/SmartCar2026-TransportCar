@@ -7,10 +7,13 @@ from typing import Any, cast
 import pytest
 
 from services.vision_protocol import VisionProtocol
+from services.vision_debug import build_transition_event
+from services.vision_state_defs import SM, SMState, VisionTransitionReason
 from services.vision_state_machine import (
     VisionControlIntent,
     VisionResolvedTarget,
     VisionStepResult,
+    VisionStateMachine,
 )
 
 
@@ -31,12 +34,24 @@ def _install_transport_stubs() -> None:
         def value(self):
             return self._value
 
+        def toggle(self):
+            return None
+
     class UART:
         def __init__(self, *_args, **_kwargs):
-            pass
+            self.messages = []
 
         def init(self, *_args, **_kwargs):
             return None
+
+        def write(self, text):
+            self.messages.append(text)
+
+        def any(self):
+            return 0
+
+        def read(self, _size):
+            return b""
 
     setattr(machine, "Pin", Pin)
     setattr(machine, "UART", UART)
@@ -152,6 +167,7 @@ def build_transport_car():
     car.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     car.apply_calls = []
     car.apply_command = lambda line: car.apply_calls.append(line)
+    car.debug = lambda: True
     car._now_ms = lambda: 1000
     return car
 
@@ -159,12 +175,47 @@ def build_transport_car():
 def test_uart6_xy_packet_updates_visual_observation() -> None:
     car = build_transport_car()
 
-    car._handle_uart_line("x=120,y=80", source="uart6")
+    car._handle_uart_line("left=100,top=20,right=140,bottom=90", source="uart6")
 
     observation = car.vision_protocol.get_observation(now_ms=1000)
     assert observation is not None
-    assert observation.x == 120.0
-    assert observation.y == 80.0
+    assert observation.left == 100.0
+    assert observation.top == 20.0
+    assert observation.right == 140.0
+    assert observation.bottom == 90.0
+    assert observation.center_x == 120.0
+    assert observation.center_y == 55.0
+    assert car.apply_calls == []
+
+
+def test_uart6_legacy_xy_packet_is_swallowed_without_routing_command() -> None:
+    car = build_transport_car()
+
+    car._handle_uart_line("x=120,y=80", source="uart6")
+
+    assert car.vision_protocol.get_observation(now_ms=1000) is None
+    assert car.apply_calls == []
+
+
+def test_uart6_mixed_legacy_visual_payload_is_swallowed_without_routing_command() -> (
+    None
+):
+    car = build_transport_car()
+
+    car._handle_uart_line("x=120,y=80,angle=0", source="uart6")
+
+    assert car.vision_protocol.get_observation(now_ms=1000) is None
+    assert car.apply_calls == []
+
+
+def test_uart6_malformed_legacy_visual_payload_is_swallowed_without_routing_command() -> (
+    None
+):
+    car = build_transport_car()
+
+    car._handle_uart_line("x=1,y=bad", source="uart6")
+
+    assert car.vision_protocol.get_observation(now_ms=1000) is None
     assert car.apply_calls == []
 
 
@@ -195,7 +246,7 @@ def test_visual_control_overrides_manual_position_target_without_lock() -> None:
 
 def test_refresh_vision_target_resolves_absolute_command() -> None:
     car = build_transport_car()
-    car._handle_uart_line("x=120,y=80", source="uart6")
+    car._handle_uart_line("left=100,top=20,right=140,bottom=90", source="uart6")
 
     car._refresh_vision_target(now_ms=1000)
 
@@ -209,7 +260,7 @@ def test_refresh_vision_target_resolves_absolute_command() -> None:
 def test_command_lock_blocks_visual_target_refresh() -> None:
     car = build_transport_car()
     car.command_lock = True
-    car._handle_uart_line("x=120,y=80", source="uart6")
+    car._handle_uart_line("left=100,top=20,right=140,bottom=90", source="uart6")
 
     car._refresh_vision_target(now_ms=1000)
 
@@ -217,3 +268,66 @@ def test_command_lock_blocks_visual_target_refresh() -> None:
     assert car.vision_state_machine.reset_called is True
     assert car._vision_resolved_target is None
     assert car.vision_protocol.get_observation(now_ms=1000) is None
+
+
+def test_transport_car_reads_state_name_from_registry() -> None:
+    car = build_transport_car()
+    car.vision_state_machine.state = SM.ALIGN_DX
+
+    assert car._get_vision_state_name() == "ALIGN_DX"
+
+
+def test_transport_car_debug_sink_writes_formatted_text_to_uart3() -> None:
+    car = build_transport_car()
+    event = build_transition_event(
+        old_state=SMState.ALIGN_DIST,
+        transition=SM.ALIGN_ANGLE.ANGLE_ERROR_REENTRY,
+        stable_counter=0,
+    )
+
+    car._emit_vision_debug(event)
+
+    assert any("VSM TRANS ALIGN_DIST->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
+    assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)
+
+
+def test_transport_car_debug_sink_does_not_enter_breakpoint_after_transition() -> None:
+    car = build_transport_car()
+    car.debug_calls = 0
+
+    def fake_debug() -> bool:
+        car.debug_calls += 1
+        return True
+
+    car.debug = fake_debug
+    event = build_transition_event(
+        old_state=SMState.ALIGN_DIST,
+        transition=SM.ALIGN_ANGLE.ANGLE_ERROR_REENTRY,
+        stable_counter=0,
+    )
+
+    car._emit_vision_debug(event)
+
+    assert car.debug_calls == 0
+
+
+def test_vision_state_machine_transition_logs_without_breakpoint_wait() -> None:
+    car = build_transport_car()
+    car.debug_calls = 0
+
+    def fake_debug() -> bool:
+        car.debug_calls += 1
+        return True
+
+    car.debug = fake_debug
+    car.vision_state_machine = VisionStateMachine(
+        car._build_vision_state_config(),
+        debug_sink=car._emit_vision_debug,
+    )
+
+    car._handle_uart_line("left=180,top=20,right=220,bottom=240", source="uart6")
+    car._refresh_vision_target(now_ms=1000)
+
+    assert car.debug_calls == 0
+    assert any("VSM TRANS IDLE->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
+    assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)

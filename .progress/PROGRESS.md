@@ -39,3 +39,4 @@ TBD
 | 2026-03-08-1 | 2026-03-08 | 重构设备阶段为 stage2 smoke 与 stage3 人工调试 | `.progress/entries/2026/2026-03-08-1.md` | stage2, stage3, uart3, mpy-cli, diagnostics |
 | 2026-03-08-2 | 2026-03-08 | 为低内存板端补齐 Stage 2 full/lite 回退 | `.progress/entries/2026/2026-03-08-2.md` | stage2, lite, memory, mpy-cli, transport-car |
 | 2026-03-09-1 | 2026-03-09 | 补齐 mpy-cli skill 的串口发现与路径边界语义 | `.progress/entries/2026/2026-03-09-1.md` | mpy-cli, skill, docs, serial, path-semantics |
+| 2026-03-09-2 | 2026-03-09 | 将视觉对正从单点观测切换为完整识别框 | `.progress/entries/2026/2026-03-09-2.md` | vision, bbox, uart6, state-machine, diagnostics |

@@ -3,6 +3,9 @@
 import math
 
 from services.vision_protocol import VisionObservation
+from services.vision_debug import build_transition_event
+from services.vision_state_defs import SM, SMState
+from services.vision_state_registry import vision_state_registry
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -19,26 +22,13 @@ def normalize_angle(angle_deg: float) -> float:
     return angle_deg
 
 
-class SMState:
-    """视觉状态机状态常量."""
-
-    IDLE = 0
-    ALIGN_ANGLE = 1
-    ALIGN_DIST = 2
-    ALIGN_DX = 3
-    ORBITING = 4
-    PUSHING = 5
-    RETURNING = 6
-    DONE = 7
-
-
 class VisionStateConfig:
     """视觉状态机参数集合."""
 
     def __init__(
         self,
-        target_x_px: float,
-        target_y_px: float,
+        target_center_x_px: float,
+        target_bottom_px: float,
         angle_kp: float,
         dist_kp: float,
         dx_kp: float,
@@ -58,8 +48,8 @@ class VisionStateConfig:
         done_hold_ms: int,
     ):
         """保存状态机所需全部控制参数."""
-        self.target_x_px = float(target_x_px)
-        self.target_y_px = float(target_y_px)
+        self.target_center_x_px = float(target_center_x_px)
+        self.target_bottom_px = float(target_bottom_px)
         self.angle_kp = float(angle_kp)
         self.dist_kp = float(dist_kp)
         self.dx_kp = float(dx_kp)
@@ -156,14 +146,70 @@ def resolve_relative_intent(
 class VisionStateMachine:
     """将视觉观测映射为相对位置式控制意图的状态机."""
 
-    def __init__(self, config: VisionStateConfig, initial_state: int = SMState.IDLE):
+    def __init__(
+        self,
+        config: VisionStateConfig,
+        initial_state=SM.IDLE,
+        debug_sink=None,
+    ):
         """初始化状态机运行时状态."""
         self.config = config
-        self.state = initial_state
+        coerced_state = vision_state_registry.coerce_state(initial_state)
+        self.state = coerced_state if coerced_state is not None else SM.IDLE
+        self._debug_sink = debug_sink
         self._stable_counter = 0
         self._push_start_x = 0.0
         self._push_start_y = 0.0
         self._done_since_ms = 0
+
+    def _emit_debug_event(self, event) -> None:
+        """输出结构化调试事件,失败时静默降级."""
+        if self._debug_sink is None:
+            return
+        try:
+            self._debug_sink(event)
+        except Exception:
+            pass
+
+    def _build_debug_context(self, inputs, observation):
+        """提取调试事件所需上下文."""
+        observation_x = None
+        observation_y = None
+        heading_deg = None
+        odom_x = None
+        odom_y = None
+        now_ms = None
+        if observation is not None:
+            observation_x = float(observation.center_x)
+            observation_y = float(observation.bottom)
+        if inputs is not None:
+            heading_deg = float(inputs.heading_deg)
+            odom_x = float(inputs.odom_x)
+            odom_y = float(inputs.odom_y)
+            now_ms = int(inputs.now_ms)
+        return {
+            "observation_x": observation_x,
+            "observation_y": observation_y,
+            "heading_deg": heading_deg,
+            "odom_x": odom_x,
+            "odom_y": odom_y,
+            "now_ms": now_ms,
+        }
+
+    def _set_state(self, transition, inputs, observation) -> None:
+        """切换状态并输出统一调试日志."""
+        old_state = self.state
+        self.state = transition.state
+        if old_state == self.state:
+            return
+        self._emit_debug_event(
+            build_transition_event(
+                old_state=old_state,
+                transition=transition,
+                stable_counter=self._stable_counter,
+                **self._build_debug_context(inputs, observation),
+            )
+        )
 
     def start_push(self, odom_x: float, odom_y: float) -> None:
         """记录推行阶段起点."""
@@ -172,7 +218,7 @@ class VisionStateMachine:
 
     def reset(self) -> None:
         """重置状态机到空闲态."""
-        self.state = SMState.IDLE
+        self._set_state(SM.IDLE.RESET, None, None)
         self._stable_counter = 0
         self._push_start_x = 0.0
         self._push_start_y = 0.0
@@ -181,7 +227,7 @@ class VisionStateMachine:
     def _inactive_result(self) -> VisionStepResult:
         """生成空控制结果."""
         return VisionStepResult(
-            self.state,
+            int(self.state),
             VisionControlIntent(
                 active=False,
                 dx_body=0.0,
@@ -196,7 +242,7 @@ class VisionStateMachine:
     ) -> VisionStepResult:
         """生成有效控制结果."""
         return VisionStepResult(
-            self.state,
+            int(self.state),
             VisionControlIntent(
                 active=True,
                 dx_body=dx_body,
@@ -210,24 +256,30 @@ class VisionStateMachine:
         """推进一轮状态机并输出本周期控制意图."""
         observation = inputs.observation
 
-        if self.state in (SMState.ALIGN_ANGLE, SMState.ALIGN_DIST, SMState.ALIGN_DX):
+        # 对齐阶段依赖连续视觉观测,丢目标后立即退回空闲态
+        if self.state in (SM.ALIGN_ANGLE, SM.ALIGN_DIST, SM.ALIGN_DX):
             if observation is None:
-                self.state = SMState.IDLE
+                self._set_state(SM.IDLE.OBSERVATION_LOST, inputs, observation)
                 self._stable_counter = 0
                 return self._inactive_result()
 
-        if self.state == SMState.IDLE:
+        # 空闲态只等待视觉目标出现,不主动输出控制量
+        if self.state == SM.IDLE:
             self._stable_counter = 0
             if observation is None:
                 return self._inactive_result()
-            self.state = SMState.ALIGN_ANGLE
+            self._set_state(SM.ALIGN_ANGLE.OBSERVATION_ACQUIRED, inputs, observation)
 
-        if self.state == SMState.ALIGN_ANGLE:
-            x_error = observation.x - self.config.target_x_px  # type: ignore[union-attr]
+        # 第一阶段先让目标落到图像中心附近,避免带着较大横向误差前进
+        if self.state == SM.ALIGN_ANGLE:
+            x_error = observation.center_x - self.config.target_center_x_px  # type: ignore[union-attr]
             if abs(x_error) <= self.config.angle_deadzone_px:
+                # 只有连续多帧稳定进入死区才允许切到下一阶段,用于抑制视觉抖动
                 self._stable_counter += 1
                 if self._stable_counter >= self.config.stable_frames:
-                    self.state = SMState.ALIGN_DIST
+                    self._set_state(
+                        SM.ALIGN_DIST.ANGLE_ALIGNED_STABLE, inputs, observation
+                    )
                     self._stable_counter = 0
                 return self._inactive_result()
 
@@ -239,46 +291,58 @@ class VisionStateMachine:
             )
             return self._active_result(0.0, 0.0, d_angle, False)
 
-        if self.state == SMState.ALIGN_DIST:
-            x_error = observation.x - self.config.target_x_px  # type: ignore[union-attr]
+        # 第二阶段沿车体纵向微调距离,若横向误差重新变大则回到角度对齐
+        if self.state == SM.ALIGN_DIST:
+            x_error = observation.center_x - self.config.target_center_x_px  # type: ignore[union-attr]
             if abs(x_error) > self.config.angle_reentry_px:
-                self.state = SMState.ALIGN_ANGLE
+                self._set_state(SM.ALIGN_ANGLE.ANGLE_ERROR_REENTRY, inputs, observation)
                 self._stable_counter = 0
                 return self._inactive_result()
 
-            y_error = observation.y - self.config.target_y_px  # type: ignore[union-attr]
+            y_error = observation.bottom - self.config.target_bottom_px  # type: ignore[union-attr]
             if abs(y_error) <= self.config.dist_deadzone_px:
+                # 距离稳定后再进入最终横移对齐,避免阶段切换过快
                 self._stable_counter += 1
                 if self._stable_counter >= self.config.stable_frames:
-                    self.state = SMState.ALIGN_DX
+                    self._set_state(
+                        SM.ALIGN_DX.DISTANCE_ALIGNED_STABLE, inputs, observation
+                    )
                     self._stable_counter = 0
                 return self._inactive_result()
 
             self._stable_counter = 0
             dy_body = _clamp(
-                y_error * self.config.dist_kp,
+                -y_error * self.config.dist_kp,
                 -self.config.max_dy_m,
                 self.config.max_dy_m,
             )
             return self._active_result(0.0, dy_body, 0.0, False)
 
-        if self.state == SMState.ALIGN_DX:
-            x_error = observation.x - self.config.target_x_px  # type: ignore[union-attr]
+        # 第三阶段处理最终横移误差,并决定是继续绕行还是进入推行
+        if self.state == SM.ALIGN_DX:
+            x_error = observation.center_x - self.config.target_center_x_px  # type: ignore[union-attr]
             if abs(x_error) <= self.config.dx_deadzone_px:
                 self._stable_counter += 1
                 if self._stable_counter >= self.config.stable_frames:
-                    y_error = observation.y - self.config.target_y_px  # type: ignore[union-attr]
+                    y_error = observation.bottom - self.config.target_bottom_px  # type: ignore[union-attr]
                     heading_error = normalize_angle(
                         self.config.push_angle_deg - inputs.heading_deg
                     )
                     self._stable_counter = 0
+                    # 若距离再次偏离,说明前一阶段尚未真正完成,回退重新修正
                     if abs(y_error) > self.config.dist_deadzone_px:
-                        self.state = SMState.ALIGN_DIST
+                        self._set_state(
+                            SM.ALIGN_DIST.DISTANCE_NOT_READY, inputs, observation
+                        )
+                    # 角度满足推行要求时直接进入推行态并记录里程计起点
                     elif abs(heading_error) <= self.config.heading_tolerance_deg:
-                        self.state = SMState.PUSHING
+                        self._set_state(SM.PUSHING.ENTER_PUSHING, inputs, observation)
                         self.start_push(inputs.odom_x, inputs.odom_y)
+                    # 角度未满足要求时进入绕行态,仅通过转向继续修正
                     else:
-                        self.state = SMState.ORBITING
+                        self._set_state(
+                            SM.ORBITING.HEADING_NOT_READY, inputs, observation
+                        )
                 return self._inactive_result()
 
             self._stable_counter = 0
@@ -289,12 +353,13 @@ class VisionStateMachine:
             )
             return self._active_result(dx_body, 0.0, 0.0, False)
 
-        if self.state == SMState.ORBITING:
+        # 绕行态只关注推行朝向,朝向回正后交回横移阶段做最终确认
+        if self.state == SM.ORBITING:
             heading_error = normalize_angle(
                 self.config.push_angle_deg - inputs.heading_deg
             )
             if abs(heading_error) <= self.config.heading_tolerance_deg:
-                self.state = SMState.ALIGN_DX
+                self._set_state(SM.ALIGN_DX.HEADING_ALIGNED, inputs, observation)
                 return self._inactive_result()
 
             d_angle = _clamp(
@@ -304,18 +369,21 @@ class VisionStateMachine:
             )
             return self._active_result(0.0, 0.0, d_angle, True)
 
-        if self.state == SMState.PUSHING:
+        # 推行态按照固定前进偏置推进,并在推进过程中保留少量横向纠偏
+        if self.state == SM.PUSHING:
             distance = math.sqrt(
                 (inputs.odom_x - self._push_start_x) ** 2
                 + (inputs.odom_y - self._push_start_y) ** 2
             )
+            # 推行距离达到阈值后切到返回态,后续不再继续前推
             if distance >= self.config.push_distance_m:
-                self.state = SMState.RETURNING
+                self._set_state(SM.RETURNING.PUSH_DISTANCE_REACHED, inputs, observation)
                 return self._inactive_result()
 
             dx_body = 0.0
             if observation is not None:
-                x_error = observation.x - self.config.target_x_px
+                # 推行时仍允许根据视觉横向误差做小幅修正,避免越推越偏
+                x_error = observation.center_x - self.config.target_center_x_px
                 dx_body = _clamp(
                     x_error * self.config.push_dx_kp,
                     -self.config.max_dx_m,
@@ -332,11 +400,12 @@ class VisionStateMachine:
             )
             return self._active_result(dx_body, self.config.push_dy_m, d_angle, False)
 
-        if self.state == SMState.RETURNING:
+        # 返回态只负责把车头转到反向朝向,不再输出位移目标
+        if self.state == SM.RETURNING:
             return_angle = normalize_angle(self.config.push_angle_deg + 180.0)
             heading_error = normalize_angle(return_angle - inputs.heading_deg)
             if abs(heading_error) <= self.config.heading_tolerance_deg:
-                self.state = SMState.DONE
+                self._set_state(SM.DONE.RETURN_HEADING_REACHED, inputs, observation)
                 self._done_since_ms = inputs.now_ms
                 return self._inactive_result()
 
@@ -347,10 +416,12 @@ class VisionStateMachine:
             )
             return self._active_result(0.0, 0.0, d_angle, False)
 
-        if self.state == SMState.DONE:
+        # 完成态保持静止一小段时间,给外层留出状态观测窗口
+        if self.state == SM.DONE:
             if inputs.now_ms - self._done_since_ms >= self.config.done_hold_ms:
-                self.state = SMState.IDLE
+                self._set_state(SM.IDLE.DONE_HOLD_ELAPSED, inputs, observation)
             return self._inactive_result()
 
-        self.state = SMState.IDLE
+        # 理论上不会走到这里,保底退回空闲态避免未知状态悬挂
+        self._set_state(SM.IDLE.UNKNOWN_STATE_GUARD, inputs, observation)
         return self._inactive_result()

@@ -27,13 +27,13 @@
 
 ## 场景 D：UART6 视觉跟踪链路
 
-1. 持续从 OpenArt 向 `UART6` 发送 `x=<pixel_x>,y=<pixel_y>`
+1. 持续从 OpenArt 向 `UART6` 发送 `left=<pixel_left>,top=<pixel_top>,right=<pixel_right>,bottom=<pixel_bottom>`
 2. 观察车辆在 `ALIGN_ANGLE -> ALIGN_DIST -> ALIGN_DX` 阶段的连续跟踪
 3. 预期现象：车辆控制连续、无明显等待 `?lock` 的停顿；`UART3` 无连续错误输出
 
 ## 场景 E：视觉目标丢失恢复
 
-1. 在视觉对正阶段发送若干帧 `x,y`
+1. 在视觉对正阶段发送若干帧完整框 `left,top,right,bottom`
 2. 然后停止发送视觉包超过 `VISION_OBSERVATION_TIMEOUT_MS`
 3. 预期现象：状态机回到 `IDLE`，车辆停止继续逼近目标
 

@@ -93,9 +93,20 @@ class FakeLed:
 class FakeVisionObservation:
     """视觉观测假对象."""
 
-    def __init__(self, x: float, y: float, timestamp_ms: int):
-        self.x = x
-        self.y = y
+    def __init__(
+        self,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+        timestamp_ms: int,
+    ):
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+        self.center_x = (left + right) / 2.0
+        self.center_y = (top + bottom) / 2.0
         self.timestamp_ms = timestamp_ms
 
 
@@ -133,7 +144,9 @@ def build_transport_car_for_diag() -> Any:
     car.target_speeds = {"m": 15.0, "l": 16.0, "r": 17.0}
     car.vision_state_machine = types.SimpleNamespace(state=SMState.ALIGN_DX)
     car.vision_protocol = FakeVisionProtocol(
-        FakeVisionObservation(x=120.0, y=80.0, timestamp_ms=2400)
+        FakeVisionObservation(
+            left=100.0, top=20.0, right=140.0, bottom=90.0, timestamp_ms=2400
+        )
     )
     car._vision_resolved_target = VisionResolvedTarget(
         x=0.2, y=0.4, angle_deg=15.0, rear_only_mode=True
@@ -241,8 +254,12 @@ def test_build_health_imu_and_vision_snapshots_use_current_runtime_state() -> No
     assert vision_snapshot == {
         "state": "ALIGN_DX",
         "obs_age_ms": 100,
-        "obs_x": 120.0,
-        "obs_y": 80.0,
+        "obs_left": 100.0,
+        "obs_top": 20.0,
+        "obs_right": 140.0,
+        "obs_bottom": 90.0,
+        "obs_center_x": 120.0,
+        "obs_center_y": 55.0,
         "target_x": 0.2,
         "target_y": 0.4,
         "target_angle": 15.0,

@@ -115,6 +115,21 @@ def test_diagnostic_mode_keeps_debug_query_tokens_registered() -> None:
     assert {"health", "tick", "imu", "enc", "motor", "vision"} <= registered
 
 
+def test_diagnostic_mode_wires_vision_transitions_to_breakpoint_sink(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = transport_car_module.TransportCar(diagnostic_mode=True)
+
+    assert car.vision_state_machine._debug_sink == car._emit_vision_debug
+
+
 def test_stage2_smoke_probe_collects_safe_runtime_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
