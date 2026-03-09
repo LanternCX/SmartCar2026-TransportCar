@@ -95,6 +95,14 @@ mpy-cli config
 
 ### 7) 计划部署
 
+如果你还不确定当前有哪些可连接的 MicroPython 设备，可以先执行：
+
+```bash
+mpy-cli list
+```
+
+该命令会扫描串口并探测可访问的 MicroPython 设备，输出所有可用设备的端口与基础信息。
+
 预览部署操作，防止程序产生意料之外的行为
 
 ```bash
@@ -144,6 +152,7 @@ python3 -m pip install <SOURCE_MPY_CLI_PATH>
 mpy-cli -h
 mpy-cli init
 mpy-cli config
+mpy-cli list
 mpy-cli plan
 mpy-cli deploy
 mpy-cli upload
@@ -206,6 +215,47 @@ mpy-cli plan [--mode {incremental,full}] [--port PORT] [--no-interactive] [--yes
 - `--port`：指定设备端口（如 `/dev/ttyACM0` 或 `COM3`）。
 - `--no-interactive`：禁用交互提问。
 - `--yes`：保留参数；在 `plan` 中不会触发写入确认流程。
+
+### `mpy-cli list`
+
+```bash
+mpy-cli list [--workers N] [--probe-timeout SECONDS] [--scan-mode MODE] [--reset]
+```
+
+- `--workers`：并发探测线程数，默认 `8`；当扫描到很多端口时可提升返回速度。
+- `--probe-timeout`：单端口探测超时秒数，默认 `1.0`；慢端口超时后会被跳过，不阻塞全部结果。
+- `--scan-mode`：端口探测策略，支持 `known-first`、`known-only`、`full-only`，默认 `known-first`。
+- `--reset`：先清空之前的扫描记录，再立即执行当前这次 `list`。
+- 默认会先读取运行时数据库里“上一次扫描成功过”的端口，仅对“成功缓存端口与当前 `mpremote connect list` 交集”做探测；若没有发现设备，再回退到当前可用端口全量探测。
+- 该策略兼容 macOS / Linux / Windows：是否“当前可用”以本次 `mpremote connect list` 结果为准，因此 `COM3` 这类 Windows 端口同样可用。
+- 自动扫描串口，并对选中的端口进行受控并发探测，返回所有可访问的 MicroPython 设备。
+- 若存在 `.mpy-cli.toml`，会优先使用其中的 `mpremote_binary` 配置；否则默认使用 `mpremote`。
+
+推荐用法：
+
+```bash
+mpy-cli list
+```
+
+当本机串口很多、默认探测较慢时，可按需调高并发并缩短超时：
+
+```bash
+mpy-cli list --workers 12 --probe-timeout 1.0
+```
+
+如果你想直接忽略缓存、每次都对当前端口全量探测：
+
+```bash
+mpy-cli list --scan-mode full-only
+```
+
+如果你想先清空之前的扫描记录，再做一次全新的 list：
+
+```bash
+mpy-cli list --reset
+```
+
+输出会包含当前探测到的所有可用 MicroPython 设备，例如端口、实现版本、平台与机型信息。
 
 ### `mpy-cli deploy`
 
