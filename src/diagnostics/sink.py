@@ -3,26 +3,13 @@
 提供直接写 UART 的 sink 和按等级保留的环形缓冲 sink.
 """
 
-from typing import TYPE_CHECKING
 
+class UartLike:
+    """最小 UART 写接口."""
 
-if TYPE_CHECKING:
-    from typing import Protocol
-
-    class UartLike(Protocol):
-        """最小 UART 写接口."""
-
-        def write(self, text: str) -> None:
-            """写出字符串数据."""
-            ...
-else:
-
-    class UartLike:
-        """最小 UART 写接口."""
-
-        def write(self, text: str) -> None:
-            """写出字符串数据."""
-            raise NotImplementedError
+    def write(self, text: str) -> None:
+        """写出字符串数据."""
+        raise NotImplementedError
 
 
 class UartSink:
@@ -43,7 +30,9 @@ class RingBufferSink:
         if max_lines <= 0:
             raise ValueError("max_lines must be > 0")
         self._max_lines = max_lines
-        self._slots: "list[tuple[int, int, str] | None]" = [None] * max_lines
+        self._slots = []
+        for _ in range(max_lines):
+            self._slots.append(None)
         self._size = 0
         self._next_sequence = 0
 

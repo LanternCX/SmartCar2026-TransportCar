@@ -14,6 +14,7 @@ description: Use when writing or reviewing SmartCar Python code, especially when
 # Core Rules
 - 目标平台：MicroPython（RT1021），本地开发兼容 Python 3.8+
 - 类型提示必须完整；避免 `Any`，返回值类型要显式
+- 运行时代码默认不要依赖 `typing` 模块；如需类型辅助，优先使用内建类型标注、字符串前向引用或不影响板端导入的兼容写法，避免板端导入失败
 - 注释与文档字符串统一使用中文
 - 注释与文档字符串中的标点使用半角符号，且标点后需跟一个空格，例如 `你好, 世界`
 - 单行注释行尾不加句号、逗号、分号、冒号等收尾标点

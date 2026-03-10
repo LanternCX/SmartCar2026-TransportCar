@@ -1,25 +1,13 @@
 """命令路由器:装饰器注册模式,将聚合命令字符串分发到独立处理器."""
 
-from typing import Callable, Dict, Optional, Protocol, TypedDict, Union
+CommandValue = object
 
 
-CommandValue = Union[float, str, bool]
-CommandHandler = Callable[[object, CommandValue], None]
-QueryHandler = Callable[[object], None]
-
-
-class QueryResponseUART(Protocol):
+class QueryResponseUART:
     """查询响应串口协议,仅要求提供 write 接口."""
 
     def write(self, text: str) -> None:
         """写入一段响应文本."""
-
-
-class CommandMeta(TypedDict):
-    """命令处理器注册元数据."""
-
-    handler: CommandHandler
-    value_type: str
 
 
 class CommandRouter:
@@ -47,16 +35,14 @@ class CommandRouter:
 
     def __init__(self) -> None:
         """初始化处理器注册表."""
-        self._cmd_handlers: Dict[str, CommandMeta] = {}
-        self._query_handlers: Dict[str, QueryHandler] = {}
+        self._cmd_handlers = {}
+        self._query_handlers = {}
 
     # ------------------------------------------------------------------
     # 装饰器工厂
     # ------------------------------------------------------------------
 
-    def command(
-        self, *keys: str, value_type: str = "float"
-    ) -> Callable[[CommandHandler], CommandHandler]:
+    def command(self, *keys: str, value_type: str = "float"):
         """
         装饰器工厂:将被装饰函数注册为指定 key 的命令处理器.
 
@@ -67,7 +53,7 @@ class CommandRouter:
             装饰器函数,原函数不变.
         """
 
-        def decorator(func: CommandHandler) -> CommandHandler:
+        def decorator(func):
             """注册单个处理器到所有指定的命令键.
 
             参数:
@@ -86,7 +72,7 @@ class CommandRouter:
 
         return decorator
 
-    def query(self, *keys: str) -> Callable[[QueryHandler], QueryHandler]:
+    def query(self, *keys: str):
         """
         装饰器工厂:将被装饰函数注册为指定 token 的查询处理器.
 
@@ -98,7 +84,7 @@ class CommandRouter:
             装饰器函数,原函数不变.
         """
 
-        def decorator(func: QueryHandler) -> QueryHandler:
+        def decorator(func):
             """注册单个查询处理器到所有指定的查询键.
 
             参数:

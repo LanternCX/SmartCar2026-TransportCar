@@ -3,8 +3,6 @@
 负责日志等级判断、模块过滤、格式化和 sink 分发.
 """
 
-from typing import TYPE_CHECKING, Callable, Dict, Tuple
-
 from config.params import (
     LOG_DEBUG,
     LOG_ERROR,
@@ -44,79 +42,50 @@ PROFILE_DEFAULTS = {
 CUSTOM_PROFILE_NAME = "CUSTOM"
 
 
-if TYPE_CHECKING:
-    from typing import Protocol
+class SinkLike:
+    """日志 sink 协议."""
 
-    class SinkLike(Protocol):
-        """日志 sink 协议."""
-
-        def write(self, text: str) -> None:
-            """写入一条日志文本."""
-            ...
-
-    class RecordSinkLike(Protocol):
-        """支持按等级写入的扩展 sink 协议."""
-
-        def write_record(self, level: int, text: str) -> None:
-            """按等级写入日志文本."""
-            ...
-
-    class QueryUARTLike(Protocol):
-        """查询响应串口协议."""
-
-        def write(self, text: str) -> None:
-            """写入查询响应文本."""
-            ...
-
-    class LogCommandContext(Protocol):
-        """日志命令处理器需要的最小上下文协议."""
-
-        logger_manager: "LogManager"
-
-    class LogQueryContext(LogCommandContext, Protocol):
-        """日志查询处理器需要的最小上下文协议."""
-
-        def get_query_uart(self) -> QueryUARTLike:
-            """返回查询响应串口."""
-            ...
-else:
-
-    class SinkLike:
-        """日志 sink 协议."""
-
-        def write(self, text: str) -> None:
-            """写入一条日志文本."""
-            raise NotImplementedError
-
-    class RecordSinkLike:
-        """支持按等级写入的扩展 sink 协议."""
-
-        def write_record(self, level: int, text: str) -> None:
-            """按等级写入日志文本."""
-            raise NotImplementedError
-
-    class QueryUARTLike:
-        """查询响应串口协议."""
-
-        def write(self, text: str) -> None:
-            """写入查询响应文本."""
-            raise NotImplementedError
-
-    class LogCommandContext:
-        """日志命令处理器需要的最小上下文协议."""
-
-        logger_manager: "LogManager"
-
-    class LogQueryContext(LogCommandContext):
-        """日志查询处理器需要的最小上下文协议."""
-
-        def get_query_uart(self) -> QueryUARTLike:
-            """返回查询响应串口."""
-            raise NotImplementedError
+    def write(self, text: str) -> None:
+        """写入一条日志文本."""
+        raise NotImplementedError
 
 
-FilterModules = Tuple[str, ...]
-SnapshotBuilder = Callable[[], Dict[str, object]]
+class RecordSinkLike:
+    """支持按等级写入的扩展 sink 协议."""
+
+    def write_record(self, level: int, text: str) -> None:
+        """按等级写入日志文本."""
+        raise NotImplementedError
+
+
+class QueryUARTLike:
+    """查询响应串口协议."""
+
+    def write(self, text: str) -> None:
+        """写入查询响应文本."""
+        raise NotImplementedError
+
+
+class LogCommandContext:
+    """日志命令处理器需要的最小上下文协议."""
+
+    logger_manager: "LogManager"
+
+
+class LogQueryContext(LogCommandContext):
+    """日志查询处理器需要的最小上下文协议."""
+
+    def get_query_uart(self):
+        """返回查询响应串口."""
+        raise NotImplementedError
+
+
+class SnapshotBuilder:
+    """诊断快照构造器占位协议."""
+
+    def __call__(self):
+        """返回一份快照字典."""
+        raise NotImplementedError
 
 
 class LogManager:
@@ -127,15 +96,14 @@ class LogManager:
         level: int = LOG_LEVEL_DEFAULT,
         color_enabled: bool = False,
         filter_mode: str = LOG_FILTER_MODE_DEFAULT,
-        filter_modules: FilterModules = LOG_FILTER_MODULES_DEFAULT,
-        sinks: "list[SinkLike] | tuple[SinkLike, ...]" = (),
+        filter_modules=LOG_FILTER_MODULES_DEFAULT,
+        sinks=(),
     ) -> None:
         self.level = LOG_LEVEL_DEFAULT
         self.color_enabled = False
         self.filter_mode = LOG_FILTER_MODE_DEFAULT
         self.filter_modules = LOG_FILTER_MODULES_DEFAULT
         self._profile_name = "RUN"
-        self.sinks: "list[SinkLike]"
         self.sinks = list(sinks)
         self.set_level(level)
         self.set_color_enabled(color_enabled)
@@ -225,7 +193,7 @@ class LogManager:
         self.filter_mode = normalized
         return changed
 
-    def set_filter_modules(self, filter_modules: "tuple[str, ...] | list[str]") -> None:
+    def set_filter_modules(self, filter_modules) -> None:
         """更新日志模块过滤列表."""
         modules = []
         for module_name in filter_modules:

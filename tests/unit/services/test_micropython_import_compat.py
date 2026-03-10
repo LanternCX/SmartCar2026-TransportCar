@@ -1,0 +1,56 @@
+"""验证关键运行时模块在缺少 typing 时仍可导入."""
+
+import os
+import subprocess
+import sys
+
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
+
+def test_runtime_modules_import_without_typing_module() -> None:
+    repo_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    )
+    src_path = os.path.join(repo_root, "src")
+    script = """
+import builtins
+import sys
+
+real_import = builtins.__import__
+
+def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == 'typing' or name.startswith('typing.'):
+        raise ImportError("no module named 'typing'")
+    return real_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = blocked_import
+
+modules = [
+    'services.command_router',
+    'diagnostics.manager',
+    'diagnostics.sink',
+    'services.commands.cmd_log_profile',
+    'services.commands.cmd_log_level',
+    'services.commands.cmd_log_filter',
+    'services.commands.cmd_log_modules',
+    'services.commands.cmd_log_color',
+    'services.commands.cmd_log_reset',
+    'services.commands.query_log',
+]
+
+for module_name in modules:
+    __import__(module_name)
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONPATH": src_path},
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
