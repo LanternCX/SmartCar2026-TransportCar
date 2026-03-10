@@ -7,6 +7,8 @@ from typing import Any, cast
 import pytest
 
 from services.vision_protocol import VisionProtocol
+from diagnostics.sink import UartSink
+from diagnostics.manager import LogManager
 from services.vision_debug import build_transition_event
 from services.vision_state_defs import SM, SMState, VisionTransitionReason
 from services.vision_state_machine import (
@@ -144,6 +146,10 @@ def build_transport_car():
     car = cast(Any, TransportCar.__new__(TransportCar))
     car.uart3 = FakeUART()
     car.uart6 = FakeUART()
+    car.logger_manager = LogManager(sinks=[UartSink(car.uart3)])
+    car.log_vision = car.logger_manager.get_logger("vision.state")
+    car.log_command = car.logger_manager.get_logger("services.command")
+    car.log_health = car.logger_manager.get_logger("system.health")
     car._router = FakeRouter()
     car.vision_protocol = VisionProtocol(timeout_ms=200)
     car.vision_state_machine = FakeVisionMachine(
@@ -167,7 +173,6 @@ def build_transport_car():
     car.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     car.apply_calls = []
     car.apply_command = lambda line: car.apply_calls.append(line)
-    car.debug = lambda: True
     car._now_ms = lambda: 1000
     return car
 
@@ -287,39 +292,19 @@ def test_transport_car_debug_sink_writes_formatted_text_to_uart3() -> None:
 
     car._emit_vision_debug(event)
 
+    assert any("[vision.state" in msg for msg in car.uart3.messages)
     assert any("VSM TRANS ALIGN_DIST->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
     assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)
 
 
-def test_transport_car_debug_sink_does_not_enter_breakpoint_after_transition() -> None:
+def test_transport_car_has_no_debug_breakpoint_api() -> None:
     car = build_transport_car()
-    car.debug_calls = 0
 
-    def fake_debug() -> bool:
-        car.debug_calls += 1
-        return True
-
-    car.debug = fake_debug
-    event = build_transition_event(
-        old_state=SMState.ALIGN_DIST,
-        transition=SM.ALIGN_ANGLE.ANGLE_ERROR_REENTRY,
-        stable_counter=0,
-    )
-
-    car._emit_vision_debug(event)
-
-    assert car.debug_calls == 0
+    assert hasattr(car, "debug") is False
 
 
 def test_vision_state_machine_transition_logs_without_breakpoint_wait() -> None:
     car = build_transport_car()
-    car.debug_calls = 0
-
-    def fake_debug() -> bool:
-        car.debug_calls += 1
-        return True
-
-    car.debug = fake_debug
     car.vision_state_machine = VisionStateMachine(
         car._build_vision_state_config(),
         debug_sink=car._emit_vision_debug,
@@ -328,6 +313,6 @@ def test_vision_state_machine_transition_logs_without_breakpoint_wait() -> None:
     car._handle_uart_line("left=180,top=20,right=220,bottom=240", source="uart6")
     car._refresh_vision_target(now_ms=1000)
 
-    assert car.debug_calls == 0
+    assert any("[vision.state" in msg for msg in car.uart3.messages)
     assert any("VSM TRANS IDLE->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
     assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)

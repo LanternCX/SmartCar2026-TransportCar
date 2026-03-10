@@ -1,9 +1,10 @@
 """print 调试打印指令处理器:透传消息到 uart3."""
-from services.command_router import router
+
+from services.command_router import CommandValue, router
 
 
-@router.command("print")
-def handle(ctx, value):
+@router.command("print", value_type="raw")
+def handle(ctx: object, value: CommandValue) -> None:
     """
     将 value 字符串透传输出到 uart3(调试用途).
 
@@ -11,4 +12,4 @@ def handle(ctx, value):
         ctx:   TransportCar 实例.
         value: 要打印的字符串内容(保留原始格式,不做类型转换).
     """
-    ctx.uart3.write("%s\r\n" % value)
+    getattr(ctx, "uart3").write("%s\r\n" % value)

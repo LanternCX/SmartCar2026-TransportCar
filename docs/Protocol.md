@@ -22,7 +22,7 @@
 
 - 当前 OpenArt 代码通过 `UART(2, baudrate=115200)` 与底盘通信。
 - RT1021 侧 `UART6` 对应主通信链路,`UART3` 对应调试链路。
-- 从实现上看,`UART3` 和 `UART6` 都能接收普通命令与查询；但为了避免语义混杂,推荐将 `UART6` 留给 vision 端,`UART3` 留给人工调试。
+- 从实现上看,`UART3` 和 `UART6` 都能接收普通命令与查询；但为了避免语义混杂,推荐将 `UART6` 留给 vision 端,`UART3` 留给人工调试与全局日志观察。
 
 ### 2.2 传输格式
 
@@ -32,14 +32,17 @@
 - 命令格式: `key=value[,key=value...]`
 - 查询格式: `?token`
 - 查询响应: 默认回写到收到该查询的同一串口
+- 运行时日志: 默认由 RT1021 通过 `UART3` 输出,用于持续诊断观察
 
 补充约定:
 
-- 大多数 `key` 与 `token` 在解析时会转成小写,因此通常可视为大小写不敏感；但裸 `reset` 必须使用小写 `reset`,若想规避该差异,建议统一发送 `reset=1`。
+- 大多数 `key` 与 `token` 在解析时会转成小写,因此通常可视为大小写不敏感；裸 `reset` 也接受大小写变体,但为避免歧义,仍建议统一发送 `reset=1`。
 - 普通数值命令的 `value` 按浮点数解析。
 - `print` 是特例,`value` 按原字符串透传,但由于命令行以逗号分割,`print` 内容不应再包含逗号。
+- `log_profile`、`log_level`、`log_filter`、`log_modules`、`log_color` 这类运行时日志命令的 `value` 按原字符串透传。
 - 未识别的查询会返回 `?unknown=<token>`。
-- `UART3` 上的人工查询客户端可能看到额外调试输出,例如 `RCV: ...` 回显,以及由 `print` 命令透传出的原始文本日志,因此它不是绝对纯净的查询专用串口。
+- 查询响应与日志输出是两条职责分离的通道: 查询始终回写到收到该查询的同一串口；运行时日志仍按日志系统配置输出到 `UART3`。
+- `UART3` 上的人工查询客户端可能看到额外调试输出,例如结构化运行时日志与 `print` 命令透传出的原始文本,因此它不是绝对纯净的查询专用串口。
 
 ### 2.3 坐标与方向约定
 
@@ -94,16 +97,46 @@ rear=1,angle=-90
 - 位置类命令与 `rear` 模式变更会触发 `command_lock`。
 - 速度类命令不会触发 `command_lock`,适合持续遥控；但若旧的 `x/y/angle` 目标仍挂起,位置/角度控制仍会继续优先生效。
 - `dx/dy/d_angle` 是“相对目标”,由 RT1021 在本地结合当前位姿换算后执行。
-- `reset` 可以写成裸 `reset`,也可以写成 `reset=1`。
+- `reset` 可以写成裸 `reset`（大小写均可）,也可以写成 `reset=1`。
 - `rear=1` 更适合作为一次动作的修饰条件,而不是长期保持的全局模式；车辆解锁后会自动回到全向模式。
 - `reset` 会清空 `last_cmd`、锁状态、暂存相对量和视觉状态,但当前实现并未在该命令里显式清除 `rear_only_mode` / `last_rear_mode` 字段。
 
-### 3.4 查询命令表
+### 3.4 运行时日志控制
+
+全局日志系统用于在不改代码、不重启的前提下,动态调整 RT1021 的诊断输出强度与范围。其主要目标是:
+
+- 在常规运行阶段保持较低噪声,避免调试输出干扰主链路观察
+- 在排障阶段临时打开更细粒度日志,缩小问题模块范围
+- 保持日志输出与查询应答职责分离: 日志负责持续观测,查询负责按需返回结构化快照
+
+运行时日志控制命令如下:
+
+| 参数标签 | 含义 | 典型取值 | 类型 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `log_profile` | 切换日志预设档位 | `run` / `diag` | 系统 | `run` 恢复常规运行档位；`diag` 切到调试档位 |
+| `log_level` | 设置日志等级下限 | `trace` / `debug` / `info` / `warn` / `error` / `fatal` | 系统 | 低于当前等级的日志不会输出 |
+| `log_filter` | 设置模块过滤模式 | `off` / `whitelist` / `blacklist` | 系统 | `off` 不按模块过滤；其余模式与 `log_modules` 联动 |
+| `log_modules` | 设置模块过滤列表 | `vision|control.yaw` / `none` | 系统 | 使用 `|` 分隔多个模块前缀；`none` 或空白表示清空列表 |
+| `log_color` | 设置 ANSI 颜色开关 | `0` / `1` | 系统 | `1` 开启颜色；`0` 关闭颜色 |
+| `log_reset` | 恢复运行时日志默认配置 | 推荐 `1` | 系统 | 恢复 `RUN` 缺省档位、关闭颜色并清空模块过滤列表 |
+
+说明:
+
+- `log_profile=run` 当前对应 `level=info`、`filter=off`；`log_profile=diag` 当前对应 `level=debug`、`filter=off`。
+- `log_level`、`log_profile` 的取值按文本 token 解析,推荐统一使用小写发送。
+- 若已先设置 `log_profile`,后续手工执行 `log_level` 或 `log_filter` 且该调用实际改变了当前由预设档位派生的配置,则当前档位名会变为 `custom`；若手工调用未改变状态,则可保留原档位名。
+- `log_modules` 按模块名前缀匹配,并遵循点号边界；例如 `vision` 会匹配 `vision.state`,但不会匹配 `vision2`。
+- 当 `log_filter=whitelist` 时,只有命中的模块会输出；当 `log_filter=blacklist` 时,命中的模块会被抑制。
+- `log_reset` 只恢复日志运行态配置,不等价于整车 `reset`。
+- `print=<text>` 仍是原始文本透传接口,不参与日志等级、模块过滤或颜色格式化。
+
+### 3.5 查询命令表
 
 | 查询指令 | 返回格式 | 用途 | 备注 |
 | :--- | :--- | :--- | :--- |
 | `?pos` | `?pos=x,y,yaw` | 查询当前世界坐标与航向角 | 简洁返回 |
 | `?lock` | `?lock=0/1` | 查询是否处于位置/模式锁定状态 | 简洁返回 |
+| `?log` | `?log=profile:<p>,level:<l>,filter:<m>,color:<0/1>,modules:<list>` | 查询当前运行时日志配置 | `modules` 为空时返回 `none`,`profile` 可能为 `run` / `diag` / `custom` |
 | `?vision` | `?vision=key:value,...` | 查询视觉观测与视觉目标摘要 | 结构化快照 |
 | `?health` | `?health=key:value,...` | 查询系统健康摘要 | 结构化快照 |
 | `?tick` | `?tick=key:value,...` | 查询控制周期统计 | 结构化快照 |
@@ -122,17 +155,19 @@ rear=1,angle=-90
 - 空值统一写成 `none`
 - 文本字段中的换行会被清理为空格
 - 文本字段中的逗号会被替换成分号,便于继续按逗号分隔解析
+- `?log` 中的 `modules` 使用 `|` 分隔多个模块；若当前列表为空,固定返回 `none`
 
-### 3.5 典型查询响应示例
+### 3.6 典型查询响应示例
 
 ```text
 ?pos=0.125,0.340,15.00
 ?lock=1
+?log=profile:run,level:info,filter:off,color:0,modules:none
 ?vision=state:ALIGN_DX,obs_age_ms:100,obs_left:100.0,obs_top:20.0,obs_right:140.0,obs_bottom:90.0,obs_center_x:120.0,obs_center_y:55.0,target_x:0.2,target_y:0.4,target_angle:15.0
 ?health=alive:1,uptime_ms:1500,lock:1,rear:1,last_err:none,vision_state:ALIGN_DX
 ```
 
-### 3.6 锁语义与互斥关系
+### 3.7 锁语义与互斥关系
 
 - 当发送位置类命令（`x/y/angle/dx/dy/d_angle`）时,RT1021 会进入 `command_lock`
 - 当切换 `rear` 模式且模式确实变化时,RT1021 也会进入 `command_lock`
@@ -140,7 +175,7 @@ rear=1,angle=-90
 - 旧版 OpenArt 可以通过轮询 `?lock` 实现“先等空闲再发下一条”的同步控制
 - 对 `rear=1` 这类仅改模式的短动作,`?lock` 的同步价值相对有限,更推荐把它与 `angle/x/y` 等锁定动作组合发送
 
-### 3.7 典型控制示例
+### 3.8 典型控制示例
 
 ```text
 # 速度控制：向前运动

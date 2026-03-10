@@ -1,5 +1,26 @@
 """命令路由器:装饰器注册模式,将聚合命令字符串分发到独立处理器."""
 
+from typing import Callable, Dict, Optional, Protocol, TypedDict, Union
+
+
+CommandValue = Union[float, str, bool]
+CommandHandler = Callable[[object, CommandValue], None]
+QueryHandler = Callable[[object], None]
+
+
+class QueryResponseUART(Protocol):
+    """查询响应串口协议,仅要求提供 write 接口."""
+
+    def write(self, text: str) -> None:
+        """写入一段响应文本."""
+
+
+class CommandMeta(TypedDict):
+    """命令处理器注册元数据."""
+
+    handler: CommandHandler
+    value_type: str
+
 
 class CommandRouter:
     """
@@ -17,33 +38,36 @@ class CommandRouter:
         router.route("vx=10,vy=5", car)
 
     处理器签名统一为 ``handler(ctx, value)``,其中 ``ctx`` 为调用方传入的
-    上下文对象(通常是 TransportCar 实例),``value`` 为解析后的 float 或
-    str(对 print 指令).
+    上下文对象(通常是 TransportCar 实例),``value`` 的解析方式由命令注册时的
+    ``value_type`` 决定.
 
     对于需要跨 key 后处理的指令(如 dx+dy→世界坐标变换),路由完成后会调用
     ``ctx._finalize_route(dispatched_keys)``,由上下文对象自行处理.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化处理器注册表."""
-        self._cmd_handlers = {}
-        self._query_handlers = {}
+        self._cmd_handlers: Dict[str, CommandMeta] = {}
+        self._query_handlers: Dict[str, QueryHandler] = {}
 
     # ------------------------------------------------------------------
     # 装饰器工厂
     # ------------------------------------------------------------------
 
-    def command(self, *keys):
+    def command(
+        self, *keys: str, value_type: str = "float"
+    ) -> Callable[[CommandHandler], CommandHandler]:
         """
         装饰器工厂:将被装饰函数注册为指定 key 的命令处理器.
 
         参数:
             keys: 一个或多个命令键(如 "vx"、"omega"、"w").
+            value_type: value 解析策略,支持 ``float`` 或 ``raw``.
         返回:
             装饰器函数,原函数不变.
         """
 
-        def decorator(func):
+        def decorator(func: CommandHandler) -> CommandHandler:
             """注册单个处理器到所有指定的命令键.
 
             参数:
@@ -53,12 +77,16 @@ class CommandRouter:
                 原处理函数,保持不变.
             """
             for key in keys:
-                self._cmd_handlers[key] = func
+                key_name = key.strip().lower()
+                self._cmd_handlers[key_name] = {
+                    "handler": func,
+                    "value_type": value_type,
+                }
             return func
 
         return decorator
 
-    def query(self, *keys):
+    def query(self, *keys: str) -> Callable[[QueryHandler], QueryHandler]:
         """
         装饰器工厂:将被装饰函数注册为指定 token 的查询处理器.
 
@@ -70,7 +98,7 @@ class CommandRouter:
             装饰器函数,原函数不变.
         """
 
-        def decorator(func):
+        def decorator(func: QueryHandler) -> QueryHandler:
             """注册单个查询处理器到所有指定的查询键.
 
             参数:
@@ -80,7 +108,7 @@ class CommandRouter:
                 原处理函数,保持不变.
             """
             for key in keys:
-                self._query_handlers[key] = func
+                self._query_handlers[key.strip().lower()] = func
             return func
 
         return decorator
@@ -89,7 +117,7 @@ class CommandRouter:
     # 路由执行
     # ------------------------------------------------------------------
 
-    def route(self, line, ctx):
+    def route(self, line: str, ctx: object) -> bool:
         """
         解析一行聚合命令字符串,将每条元命令分发到对应处理器.
 
@@ -97,7 +125,8 @@ class CommandRouter:
         - 按逗号分割得到各元命令
         - 每条元命令必须含 ``=``,格式为 ``key=value``
         - key 统一转为小写
-        - "print" 命令的 value 保留为字符串;其余 value 转为 float
+        - ``value_type="float"`` 时将 value 转为 float
+        - ``value_type="raw"`` 时保留去首尾空白后的原始字符串
         - 无法解析的元命令静默跳过
 
         参数:
@@ -108,23 +137,24 @@ class CommandRouter:
         副作用:
             路由结束后调用 ``ctx._finalize_route(dispatched_keys)``(若方法存在).
         """
-        line = line.strip()
-        if not line:
+        normalized_line = line.strip()
+        if not normalized_line:
             return False
 
         # 特殊处理裸 "reset" 指令(无等号)
-        if line == "reset":
-            handler = self._cmd_handlers.get("reset")
-            if handler:
-                handler(ctx, True)
+        if normalized_line.lower() == "reset":
+            command_meta = self._cmd_handlers.get("reset")
+            if command_meta:
+                command_meta["handler"](ctx, True)
                 dispatched = {"reset"}
-                if hasattr(ctx, "_finalize_route"):
-                    ctx._finalize_route(dispatched)
+                finalize = getattr(ctx, "_finalize_route", None)
+                if finalize is not None:
+                    finalize(dispatched)
                 return True
             return False
 
         dispatched = set()
-        parts = line.split(",")
+        parts = normalized_line.split(",")
 
         for part in parts:
             if "=" not in part:
@@ -133,12 +163,14 @@ class CommandRouter:
             key = key.strip().lower()
             val_str = val_str.strip()
 
-            handler = self._cmd_handlers.get(key)
-            if handler is None:
+            command_meta = self._cmd_handlers.get(key)
+            if command_meta is None:
                 continue
 
-            # "print" 保留字符串,其余转 float
-            if key == "print":
+            value_type = command_meta.get("value_type", "float")
+            handler = command_meta["handler"]
+
+            if value_type == "raw":
                 handler(ctx, val_str)
             else:
                 try:
@@ -148,12 +180,14 @@ class CommandRouter:
 
             dispatched.add(key)
 
-        if dispatched and hasattr(ctx, "_finalize_route"):
-            ctx._finalize_route(dispatched)
+        if dispatched:
+            finalize = getattr(ctx, "_finalize_route", None)
+            if finalize is not None:
+                finalize(dispatched)
 
         return bool(dispatched)
 
-    def handle_query(self, token, ctx, source="uart6"):
+    def handle_query(self, token: str, ctx: object, source: str = "uart6") -> bool:
         """
         处理一条查询指令(去掉 "?" 前缀后的 token).
 
@@ -167,8 +201,8 @@ class CommandRouter:
         token = token.strip().lower()
         handler = self._query_handlers.get(token)
         response_uart = getattr(ctx, source, None)
-        if response_uart is None and hasattr(ctx, "uart6"):
-            response_uart = ctx.uart6
+        if response_uart is None:
+            response_uart = getattr(ctx, "uart6", None)
         if handler:
             had_uart = hasattr(ctx, "_query_response_uart")
             previous_uart = getattr(ctx, "_query_response_uart", None)

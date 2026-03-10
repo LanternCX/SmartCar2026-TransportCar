@@ -95,3 +95,13 @@ def build_uart_debug_sink(write_line):
         write_line(format_transition_event(event))
 
     return sink
+
+
+def build_logger_debug_sink(logger):
+    """根据全局 logger 构造视觉调试 sink."""
+
+    def sink(event):
+        """通过结构化日志输出单条视觉调试事件."""
+        logger.info(format_transition_event(event))
+
+    return sink

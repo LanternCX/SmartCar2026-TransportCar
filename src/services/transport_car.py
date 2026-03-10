@@ -60,7 +60,8 @@ from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from services.command_router import router as _cmd_router
-from services.vision_debug import build_uart_debug_sink
+from diagnostics.manager import build_uart3_logger_manager
+from services.vision_debug import build_logger_debug_sink
 from services.vision_protocol import VisionProtocol
 from services.vision_state_registry import vision_state_registry
 from services.vision_state_machine import (
@@ -145,14 +146,19 @@ class TransportCar:
         # 串口(保持原波特率与编号)
         self.uart3 = create_uart3()
         self.uart6 = create_uart6()
-        self.uart3.write("System Starting...\r\n")
+        self.logger_manager = build_uart3_logger_manager(self.uart3)
+        self.log_system = self.logger_manager.get_logger("system.boot")
+        self.log_command = self.logger_manager.get_logger("services.command")
+        self.log_vision = self.logger_manager.get_logger("vision.state")
+        self.log_health = self.logger_manager.get_logger("system.health")
+        self.log_system.info("System Starting...")
 
         # IMU 初始化
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip IMU init.\r\n")
+            self.log_system.info("Diagnostic mode: skip IMU init.")
             self.imu = _NullImu()
         else:
-            self.uart3.write("Initializing IMU...\r\n")
+            self.log_system.info("Initializing IMU...")
             self.imu = create_imu()
         self.imu_data = self.imu.get()
 
@@ -178,7 +184,7 @@ class TransportCar:
 
         # Motors and encoders
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip motor/encoder init.\r\n")
+            self.log_system.info("Diagnostic mode: skip motor/encoder init.")
             self.motors = _create_null_motors()
             self.encoders = _create_null_encoders()
         else:
@@ -186,12 +192,12 @@ class TransportCar:
             self.encoders = create_encoders()
 
         # 辨识参数加载
-        self.uart3.write("Loading identify parameters...\r\n")
+        self.log_system.info("Loading identify parameters...")
         self.ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
         # IMU 零偏加载
         self.imu_offsets = load_gyro_offsets(
-            GYRO_OFFSET_FILE, logger=lambda msg: self.uart3.write(msg + "\r\n")
+            GYRO_OFFSET_FILE, logger=lambda msg: self.log_system.info(msg)
         )
 
         # 轮组状态构造:滤波、PID、编码器/电机封装
@@ -225,8 +231,6 @@ class TransportCar:
         self.last_rear_mode = False
         self.rx_buf3 = ""
         self.rx_buf6 = ""
-        self._debug_waiting = False
-        self._debug_resume_requested = False
 
         self.ticker = None
         self.boot_time_ms = self._now_ms()
@@ -280,109 +284,6 @@ class TransportCar:
         """
         self.ticker = ticker_obj
 
-    def debug(self):
-        """进入调试等待,直到 uart3 收到 ``debug=1``.
-
-        返回:
-            True 表示收到继续指令; False 表示等待期间触发急停.
-        """
-        pause_start_ms = self._now_ms()
-        self._debug_waiting = True
-        self._debug_resume_requested = False
-        self.rx_buf3 = ""
-        self.rx_buf6 = ""
-        self._clear_motor_outputs_for_debug()
-        self.pit_flag = False
-        self.uart3.write("DEBUG wait: send debug=1 on uart3 to resume.\r\n")
-
-        try:
-            while not self._debug_resume_requested:
-                self._poll_debug_resume_uart()
-                self._discard_uart_source(self.uart6, "rx_buf6")
-                if self._debug_resume_requested:
-                    break
-                if self.switch2.value() != self.switch2_init:
-                    self.stop()
-                    return False
-                self._sleep_ms(1)
-        finally:
-            self._debug_waiting = False
-
-        pause_elapsed_ms = self._now_ms() - pause_start_ms
-        if hasattr(self.vision_protocol, "shift_latest_timestamp"):
-            self.vision_protocol.shift_latest_timestamp(pause_elapsed_ms)
-        self._debug_resume_requested = False
-        self.pit_flag = False
-        self.last_time_us = self._now_us()
-        self.last_loop_dt_us = 0
-        self.uart3.write("DEBUG resume.\r\n")
-        return True
-
-    def _clear_motor_outputs_for_debug(self):
-        """在调试等待前清零电机输出,避免保持旧占空比."""
-        reset_pi_state(self.wheel_states)
-        if hasattr(self, "yaw_pid"):
-            self.yaw_pid.reset()
-        if hasattr(self, "yaw_integral"):
-            self.yaw_integral = 0.0
-        for state in self.wheel_states:
-            state["motor"].duty(0)
-            state["duty"] = 0.0
-
-    def _poll_debug_resume_uart(self):
-        """在断点等待期间仅解析 uart3 的 ``debug=1`` 释放指令."""
-        buf_len = self.uart3.any()
-        if not buf_len:
-            return
-
-        try:
-            raw = self.uart3.read(buf_len)
-            if raw is None:
-                return
-
-            self.rx_buf3 += raw.decode()
-            while True:
-                idx = self.rx_buf3.find("\n")
-                if idx == -1:
-                    self.rx_buf3 = self._trim_debug_resume_fragment(self.rx_buf3)
-                    break
-
-                line = self.rx_buf3[:idx].rstrip("\r").strip()
-                self.rx_buf3 = self.rx_buf3[idx + 1 :]
-                if line == "debug=1":
-                    self._debug_resume_requested = True
-                    self.rx_buf3 = ""
-                    break
-        except Exception as exc:
-            self.last_exception_text = str(exc)
-            self.uart3.write("ERR %s\r\n" % exc)
-
-    def _trim_debug_resume_fragment(self, fragment):
-        """保留可组成 ``debug=1`` 的最长后缀,其余噪声直接丢弃."""
-        token = "debug=1"
-        fragment = fragment.replace("\r", "")
-        if not fragment:
-            return ""
-
-        for start in range(len(fragment)):
-            candidate = fragment[start:]
-            if token.startswith(candidate):
-                return candidate
-        return ""
-
-    def _discard_uart_source(self, uart, buffer_attr):
-        """在断点等待期间丢弃非释放通道上的全部输入."""
-        setattr(self, buffer_attr, "")
-        buf_len = uart.any()
-        if not buf_len:
-            return
-
-        try:
-            uart.read(buf_len)
-        except Exception as exc:
-            self.last_exception_text = str(exc)
-            self.uart3.write("ERR %s\r\n" % exc)
-
     def _build_vision_state_config(self):
         """构造视觉状态机参数对象."""
         return VisionStateConfig(
@@ -407,13 +308,14 @@ class TransportCar:
             done_hold_ms=VISION_DONE_HOLD_MS,
         )
 
-    def _emit_vision_debug_line(self, msg: str) -> None:
-        """输出单行视觉调试文本到 uart3."""
-        self.uart3.write("%s\r\n" % msg)
-
     def _emit_vision_debug(self, event) -> None:
         """输出单条视觉状态迁移调试事件."""
-        build_uart_debug_sink(self._emit_vision_debug_line)(event)
+        build_logger_debug_sink(self.log_vision)(event)
+
+    def _emit_error_log(self, message: str) -> None:
+        """记录结构化错误日志并更新最近异常文本."""
+        self.last_exception_text = str(message)
+        self.log_health.error(self.last_exception_text)
 
     def _now_ms(self):
         """返回当前毫秒时间戳,兼容主机测试环境."""
@@ -421,14 +323,6 @@ class TransportCar:
         if ticks_ms is not None:
             return int(ticks_ms())
         return int(time.time() * 1000)
-
-    def _sleep_ms(self, duration_ms):
-        """休眠指定毫秒数,兼容主机测试环境."""
-        sleep_ms = getattr(time, "sleep_ms", None)
-        if sleep_ms is not None:
-            sleep_ms(int(duration_ms))
-            return
-        time.sleep(float(duration_ms) / 1000.0)
 
     def _now_us(self):
         """返回当前微秒时间戳,兼容主机测试环境."""
@@ -485,11 +379,6 @@ class TransportCar:
         if not line:
             return
 
-        if getattr(self, "_debug_waiting", False):
-            if source == "uart3" and line == "debug=1":
-                self._debug_resume_requested = True
-            return
-
         if line.startswith("?"):
             self._router.handle_query(line[1:], self, source=source)
             return
@@ -502,7 +391,7 @@ class TransportCar:
                 return
 
         if source == "uart3":
-            self.uart3.write("RCV: %s\r\n" % line)
+            self.log_command.info("RCV: %s" % line)
         self.apply_command(line)
 
     def _refresh_vision_target(self, now_ms=None):
@@ -1055,13 +944,8 @@ class TransportCar:
                 line = rx_buf[:idx].rstrip("\r").strip()
                 setattr(self, buffer_attr, rx_buf[idx + 1 :])
                 self._handle_uart_line(line, source=source)
-                if getattr(self, "_debug_waiting", False) and getattr(
-                    self, "_debug_resume_requested", False
-                ):
-                    break
         except Exception as exc:
-            self.last_exception_text = str(exc)
-            self.uart3.write("ERR %s\r\n" % exc)
+            self._emit_error_log(str(exc))
 
     # Command handling ----------------------------------------------
 
