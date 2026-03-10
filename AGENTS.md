@@ -245,6 +245,7 @@ python3 -m pytest --collect-only -q
 ### 11.2 新功能开发顺序
 
 1. 先看 `git-workflow` 创建分支。
+   - 若命中 superpowers 的 `using-git-worktrees`，一律改走项目内同名覆盖 skill，并重定向到 `git-workflow`；默认不创建 git worktree，按当前工作树执行。
 2. 按 `code-standards` 放置模块并实现。
 3. 涉及控制逻辑查 `control-system`。
 4. 涉及行为改动、测试选层、外设/驱动、设备路径或 HIL 验证时，统一执行 `embedded-development`。
