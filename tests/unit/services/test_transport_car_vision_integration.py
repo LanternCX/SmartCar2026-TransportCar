@@ -303,6 +303,129 @@ def test_transport_car_has_no_debug_breakpoint_api() -> None:
     assert hasattr(car, "debug") is False
 
 
+def test_compute_omega_cmd_keeps_visual_target_in_continuous_heading_domain() -> None:
+    car = build_transport_car()
+    car.heading_est = 270.0
+    car.heading_target = 0.0
+    car._yaw_rate = 0.0
+    car._vision_resolved_target = VisionResolvedTarget(
+        x=2.0,
+        y=3.0,
+        angle_deg=-90.0,
+        rear_only_mode=False,
+    )
+
+    class FakeYawPid:
+        def __init__(self):
+            self.calls = []
+            self.integral = 0.0
+
+        def update(self, target, now, dt_s):
+            self.calls.append((target, now, dt_s))
+            return target - now
+
+    car.yaw_pid = FakeYawPid()
+
+    omega_cmd = car._compute_omega_cmd(dt_s=0.01)
+
+    assert omega_cmd == 0.0
+    assert car.heading_target == 270.0
+    assert car.yaw_pid.calls == [(270.0, 270.0, 0.01)]
+
+
+def test_check_unlock_accepts_equivalent_wrapped_heading_and_clears_rear_mode() -> None:
+    car = build_transport_car()
+    car.command_lock = True
+    car.rear_only_mode = True
+    car.heading_target = -90.0
+    car.heading_est = 270.0
+    car.last_cmd = {"angle": -90.0}
+    car.target_speeds = {"m": 1.0, "l": 2.0, "r": 3.0}
+    car.odometry = FakeOdometry(x=0.0, y=0.0)
+
+    class FakeResettable:
+        def __init__(self):
+            self.reset_called = False
+
+        def reset(self):
+            self.reset_called = True
+
+    class FakeMotor:
+        def __init__(self):
+            self.values = []
+
+        def duty(self, value):
+            self.values.append(value)
+
+    yaw_pid = FakeResettable()
+    car.yaw_pid = yaw_pid
+    car.yaw_integral = 5.0
+    car.wheel_states = [
+        {
+            "motor": FakeMotor(),
+            "duty": 100.0,
+            "controller": FakeResettable(),
+        }
+        for _ in range(3)
+    ]
+
+    car._check_unlock()
+
+    assert car.command_lock is False
+    assert car.rear_only_mode is False
+    assert car.last_cmd == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert car.heading_target == 270.0
+    assert yaw_pid.reset_called is True
+    assert car.yaw_integral == 0.0
+    assert all(state["duty"] == 0.0 for state in car.wheel_states)
+    assert all(state["motor"].values[-1] == 0 for state in car.wheel_states)
+    assert car.uart3.messages[-1].startswith("Target Reached. Auto-revert Rear Mode")
+
+
+def test_refresh_vision_target_releases_stale_heading_when_intent_turns_inactive() -> (
+    None
+):
+    car = build_transport_car()
+    car.heading_est = -80.2
+    car.heading_target = -90.0
+    car.yaw_integral = 4.0
+    car._vision_resolved_target = VisionResolvedTarget(
+        x=0.0,
+        y=0.0,
+        angle_deg=-90.0,
+        rear_only_mode=True,
+    )
+    car.vision_state_machine = FakeVisionMachine(
+        VisionStepResult(
+            state=int(SM.ALIGN_DX),
+            intent=VisionControlIntent(
+                active=False,
+                dx_body=0.0,
+                dy_body=0.0,
+                d_angle_deg=0.0,
+                rear_only_mode=False,
+            ),
+        )
+    )
+
+    class FakeYawPid:
+        def __init__(self):
+            self.reset_called = False
+
+        def reset(self):
+            self.reset_called = True
+
+    car.yaw_pid = FakeYawPid()
+    car._handle_uart_line("left=140,top=20,right=160,bottom=219", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    assert car._vision_resolved_target is None
+    assert car.heading_target == -80.2
+    assert car.yaw_integral == 0.0
+    assert car.yaw_pid.reset_called is True
+
+
 def test_vision_state_machine_transition_logs_without_breakpoint_wait() -> None:
     car = build_transport_car()
     car.vision_state_machine = VisionStateMachine(

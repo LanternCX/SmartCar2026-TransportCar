@@ -68,6 +68,7 @@ from services.vision_state_machine import (
     VisionMachineInputs,
     VisionStateConfig,
     VisionStateMachine,
+    normalize_angle,
     resolve_relative_intent,
 )
 import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
@@ -414,6 +415,7 @@ class TransportCar:
             odom_y=self.odometry.y,
             now_ms=now_ms,
         )
+        previous_vision_target = self._vision_resolved_target
         self._vision_step_result = self.vision_state_machine.step(inputs)
         self._vision_resolved_target = resolve_relative_intent(
             self._vision_step_result.intent,
@@ -421,6 +423,11 @@ class TransportCar:
             odom_y=self.odometry.y,
             heading_deg=self.heading_est,
         )
+        if previous_vision_target is not None and self._vision_resolved_target is None:
+            # 视觉本拍不再输出角度目标时,立即释放上一拍残留的姿态锁定
+            self.heading_target = self.heading_est
+            self.yaw_pid.reset()
+            self.yaw_integral = 0.0
 
     def _get_active_position_targets(self):
         """返回当前激活控制源的位置目标."""
@@ -433,6 +440,20 @@ class TransportCar:
         if self._vision_resolved_target is not None:
             return self._vision_resolved_target.angle_deg
         return self.last_cmd.get("angle")
+
+    def _compute_angle_error_deg(
+        self, target_angle: float, current_angle: float
+    ) -> float:
+        """计算最短路径角差, 统一规范角与连续角语义."""
+        return normalize_angle(float(target_angle) - float(current_angle))
+
+    def _resolve_continuous_heading_target(
+        self, target_angle: float, current_angle: float
+    ) -> float:
+        """将目标角映射到当前连续航向附近, 避免跨圈追踪."""
+        return float(current_angle) + self._compute_angle_error_deg(
+            target_angle, current_angle
+        )
 
     def _get_active_rear_only_mode(self):
         """返回当前激活控制源的后轮模式."""
@@ -725,7 +746,9 @@ class TransportCar:
 
         if cmd_angle is not None:
             # 角度模式:目标为绝对角度,PID 产出角速度
-            self.heading_target = cmd_angle
+            self.heading_target = self._resolve_continuous_heading_target(
+                cmd_angle, self.heading_est
+            )
             omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
@@ -877,7 +900,9 @@ class TransportCar:
 
         angle_ok = True
         if self.last_cmd.get("angle") is not None:
-            err_angle = abs(self.heading_target - self.heading_est)
+            err_angle = abs(
+                self._compute_angle_error_deg(self.heading_target, self.heading_est)
+            )
             if err_angle > ANGLE_TOLERANCE:
                 angle_ok = False
 
