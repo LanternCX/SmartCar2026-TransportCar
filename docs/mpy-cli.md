@@ -180,11 +180,11 @@ python3 -m pip install -e <SOURCE_MPY_CLI_PATH>
 ### `mpy-cli init`
 
 ```bash
-mpy-cli init [--force] [--no-interactive]
+mpy-cli init [-f] [--force] [-n] [--no-interactive]
 ```
 
-- `--force`：覆盖已有 `.mpy-cli.toml` 和 `.mpyignore`。
-- `--no-interactive`：跳过初始化后的交互配置向导。
+- `-f`/`--force`：覆盖已有 `.mpy-cli.toml` 和 `.mpyignore`。
+- `-n`/`--no-interactive`：跳过初始化后的交互配置向导。
 
 ### `mpy-cli config`
 
@@ -208,24 +208,25 @@ mpy-cli config
 ### `mpy-cli plan`
 
 ```bash
-mpy-cli plan [--mode {incremental,full}] [--port PORT] [--no-interactive] [--yes]
+mpy-cli plan [-m {incremental,full}] [--mode {incremental,full}] [-b BASE] [--base BASE] [-p PORT] [--port PORT] [-n] [--no-interactive] [-y] [--yes]
 ```
 
-- `--mode`：指定同步模式（`incremental` 或 `full`）。
-- `--port`：指定设备端口（如 `/dev/ttyACM0` 或 `COM3`）。
-- `--no-interactive`：禁用交互提问。
-- `--yes`：保留参数；在 `plan` 中不会触发写入确认流程。
+- `-m`/`--mode`：指定同步模式（`incremental` 或 `full`）。
+- `-b`/`--base`：仅在 `incremental` 模式生效，指定 Git 基准提交；增量集合按“该基准提交 vs 当前工作区”计算。
+- `-p`/`--port`：指定设备端口（如 `/dev/ttyACM0` 或 `COM3`）。
+- `-n`/`--no-interactive`：禁用交互提问。
+- `-y`/`--yes`：保留参数；在 `plan` 中不会触发写入确认流程。
 
 ### `mpy-cli list`
 
 ```bash
-mpy-cli list [--workers N] [--probe-timeout SECONDS] [--scan-mode MODE] [--reset]
+mpy-cli list [-w N] [--workers N] [-t SECONDS] [--probe-timeout SECONDS] [-s MODE] [--scan-mode MODE] [-r] [--reset]
 ```
 
-- `--workers`：并发探测线程数，默认 `8`；当扫描到很多端口时可提升返回速度。
-- `--probe-timeout`：单端口探测超时秒数，默认 `1.0`；慢端口超时后会被跳过，不阻塞全部结果。
-- `--scan-mode`：端口探测策略，支持 `known-first`、`known-only`、`full-only`，默认 `known-first`。
-- `--reset`：先清空之前的扫描记录，再立即执行当前这次 `list`。
+- `-w`/`--workers`：并发探测线程数，默认 `8`；当扫描到很多端口时可提升返回速度。
+- `-t`/`--probe-timeout`：单端口探测超时秒数，默认 `1.0`；慢端口超时后会被跳过，不阻塞全部结果。
+- `-s`/`--scan-mode`：端口探测策略，支持 `known-first`、`known-only`、`full-only`，默认 `known-first`。
+- `-r`/`--reset`：先清空之前的扫描记录，再立即执行当前这次 `list`。
 - 默认会先读取运行时数据库里“上一次扫描成功过”的端口，仅对“成功缓存端口与当前 `mpremote connect list` 交集”做探测；若没有发现设备，再回退到当前可用端口全量探测。
 - 该策略兼容 macOS / Linux / Windows：是否“当前可用”以本次 `mpremote connect list` 结果为准，因此 `COM3` 这类 Windows 端口同样可用。
 - 自动扫描串口，并对选中的端口进行受控并发探测，返回所有可访问的 MicroPython 设备。
@@ -240,19 +241,19 @@ mpy-cli list
 当本机串口很多、默认探测较慢时，可按需调高并发并缩短超时：
 
 ```bash
-mpy-cli list --workers 12 --probe-timeout 1.0
+mpy-cli list -w 12 -t 1.0
 ```
 
 如果你想直接忽略缓存、每次都对当前端口全量探测：
 
 ```bash
-mpy-cli list --scan-mode full-only
+mpy-cli list -s full-only
 ```
 
 如果你想先清空之前的扫描记录，再做一次全新的 list：
 
 ```bash
-mpy-cli list --reset
+mpy-cli list -r
 ```
 
 输出会包含当前探测到的所有可用 MicroPython 设备，例如端口、实现版本、平台与机型信息。
@@ -260,18 +261,19 @@ mpy-cli list --reset
 ### `mpy-cli deploy`
 
 ```bash
-mpy-cli deploy [--mode {incremental,full}] [--port PORT] [--no-interactive] [--yes]
+mpy-cli deploy [-m {incremental,full}] [--mode {incremental,full}] [-b BASE] [--base BASE] [-p PORT] [--port PORT] [-n] [--no-interactive] [-y] [--yes]
 ```
 
-- `--mode`：指定同步模式（`incremental` 或 `full`）。
-- `--port`：指定设备端口。
-- `--no-interactive`：禁用交互提问。
-- `--yes`：跳过执行前确认（包括全量模式二次确认）。
+- `-m`/`--mode`：指定同步模式（`incremental` 或 `full`）。
+- `-b`/`--base`：仅在 `incremental` 模式生效，指定 Git 基准提交；未提供时默认对比 `HEAD` 与当前工作区。
+- `-p`/`--port`：指定设备端口。
+- `-n`/`--no-interactive`：禁用交互提问。
+- `-y`/`--yes`：跳过执行前确认（包括全量模式二次确认）。
 
 推荐用法：
 
 ```bash
-mpy-cli deploy --no-interactive --yes
+mpy-cli deploy -n -y
 ```
 
 进行 `config` 之后直接无交互烧入
@@ -279,19 +281,19 @@ mpy-cli deploy --no-interactive --yes
 ### `mpy-cli upload`
 
 ```bash
-mpy-cli upload [--local LOCAL] [--remote REMOTE] [--port PORT] [--no-interactive] [--yes]
+mpy-cli upload [-l LOCAL] [--local LOCAL] [-r REMOTE] [--remote REMOTE] [-p PORT] [--port PORT] [-n] [--no-interactive] [-y] [--yes]
 ```
 
-- `--local`：本地文件路径（如 `seekfree_demo/E01_demo.py`）。
-- `--remote`：设备目标路径；不传时交互模式默认优先使用“相对 `source_dir` 路径”，若本地文件不在 `source_dir` 下则回退为本地输入路径，可手动修改。
-- `--port`：指定设备端口。
-- `--no-interactive`：禁用交互提问；此时需显式提供 `--local` 和 `--remote`。
-- `--yes`：跳过执行前确认。
+- `-l`/`--local`：本地文件路径（如 `seekfree_demo/E01_demo.py`）。
+- `-r`/`--remote`：设备目标路径；不传时交互模式默认优先使用“相对 `source_dir` 路径”，若本地文件不在 `source_dir` 下则回退为本地输入路径，可手动修改。
+- `-p`/`--port`：指定设备端口。
+- `-n`/`--no-interactive`：禁用交互提问；此时需显式提供 `--local` 和 `--remote`。
+- `-y`/`--yes`：跳过执行前确认。
 
 推荐用法：
 
 ```bash
-mpy-cli upload --local <LOCAL>
+mpy-cli upload -l <LOCAL>
 ```
 
 填写字段 `LOCAL` 指定本地文件路径之后交互式确认远程路径
@@ -299,18 +301,18 @@ mpy-cli upload --local <LOCAL>
 ### `mpy-cli run`
 
 ```bash
-mpy-cli run [--path PATH] [--port PORT] [--no-interactive] [--yes]
+mpy-cli run [-f PATH] [--path PATH] [-p PORT] [--port PORT] [-n] [--no-interactive] [-y] [--yes]
 ```
 
-- `--path`：设备目标文件路径，语义为相对 `device_upload_dir`。
-- `--port`：指定设备端口。
-- `--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
-- `--yes`：跳过执行前确认。
+- `-f`/`--path`：设备目标文件路径，语义为相对 `device_upload_dir`。
+- `-p`/`--port`：指定设备端口。
+- `-n`/`--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
+- `-y`/`--yes`：跳过执行前确认。
 
 推荐用法：
 
 ```bash
-mpy-cli run --path main.py
+mpy-cli run -f main.py
 ```
 
 若配置 `device_upload_dir = "apps/demo"`，则会执行 `:apps/demo/main.py`。
@@ -318,18 +320,18 @@ mpy-cli run --path main.py
 ### `mpy-cli delete`
 
 ```bash
-mpy-cli delete [--path PATH] [--port PORT] [--no-interactive] [--yes]
+mpy-cli delete [-f PATH] [--path PATH] [-p PORT] [--port PORT] [-n] [--no-interactive] [-y] [--yes]
 ```
 
-- `--path`：设备目标路径，语义为相对 `device_upload_dir`，可为文件或目录。
-- `--port`：指定设备端口。
-- `--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
-- `--yes`：跳过执行前确认。
+- `-f`/`--path`：设备目标路径，语义为相对 `device_upload_dir`，可为文件或目录。
+- `-p`/`--port`：指定设备端口。
+- `-n`/`--no-interactive`：禁用交互提问；此时需显式提供 `--path`。
+- `-y`/`--yes`：跳过执行前确认。
 
 推荐用法：
 
 ```bash
-mpy-cli delete --path obsolete.py
+mpy-cli delete -f obsolete.py
 ```
 
 若配置 `device_upload_dir = "apps/demo"`，则会删除 `:apps/demo/obsolete.py`。
@@ -338,17 +340,17 @@ mpy-cli delete --path obsolete.py
 ### `mpy-cli tree`
 
 ```bash
-mpy-cli tree [--path PATH] [--port PORT] [--no-interactive]
+mpy-cli tree [-a PATH] [--path PATH] [-p PORT] [--port PORT] [-n] [--no-interactive]
 ```
 
-- `--path`：设备目标目录路径，语义为相对 `device_upload_dir`；不传时默认读取 `device_upload_dir` 根目录。
-- `--port`：指定设备端口。
-- `--no-interactive`：禁用交互提问；此时需通过 `--port` 或配置文件提供端口。
+- `-a`/`--path`：设备目标目录路径，语义为相对 `device_upload_dir`；不传时默认读取 `device_upload_dir` 根目录。
+- `-p`/`--port`：指定设备端口。
+- `-n`/`--no-interactive`：禁用交互提问；此时需通过 `--port` 或配置文件提供端口。
 
 推荐用法：
 
 ```bash
-mpy-cli tree --path .
+mpy-cli tree -a .
 ```
 
 若配置 `device_upload_dir = "apps/demo"`，则默认读取 `:apps/demo`；例如 `--path services` 会读取 `:apps/demo/services`。
