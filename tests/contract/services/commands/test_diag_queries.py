@@ -129,8 +129,12 @@ def test_query_vision_formats_target_and_observation() -> None:
     ctx.build_vision_snapshot = lambda: {
         "state": "ALIGN_DX",
         "obs_age_ms": 80,
-        "obs_x": 120.0,
-        "obs_y": 75.0,
+        "obs_left": 100.0,
+        "obs_top": 20.0,
+        "obs_right": 140.0,
+        "obs_bottom": 90.0,
+        "obs_center_x": 120.0,
+        "obs_center_y": 55.0,
         "target_x": 0.2,
         "target_y": 0.4,
         "target_angle": 15.0,
@@ -139,5 +143,5 @@ def test_query_vision_formats_target_and_observation() -> None:
     query_vision.handle(ctx)
 
     assert ctx.uart6.messages == [
-        "?vision=state:ALIGN_DX,obs_age_ms:80,obs_x:120.0,obs_y:75.0,target_x:0.2,target_y:0.4,target_angle:15.0\r\n"
+        "?vision=state:ALIGN_DX,obs_age_ms:80,obs_left:100.0,obs_top:20.0,obs_right:140.0,obs_bottom:90.0,obs_center_x:120.0,obs_center_y:55.0,target_x:0.2,target_y:0.4,target_angle:15.0\r\n"
     ]

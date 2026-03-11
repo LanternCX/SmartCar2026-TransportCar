@@ -147,6 +147,92 @@ python3 -m pytest tests/unit tests/contract -q
 - 电机方向、编码器方向与运动学坐标系必须一致
 - IMU 设备 ID、零漂校准文件和读数稳定性必须可验证
 
+## 视觉对正符号与状态语义
+
+只要任务触及视觉对正、`src/services/transport_car.py`、`?vision`、`?health`、板端 observe 或 HIL，就先把下面这组语义钉死，再谈调参。
+
+先固定 4 个基线：
+- 以 `docs/Protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准；若你看到 `src/control/kinematics.py` 旧注释里的“X 前 / Y 左”，视为历史残留，不要拿它推断当前协议方向
+- 车体系方向：`y+` = 前进，`x+` = 右移，`omega+` / `d_angle+` = 顺时针；`dx/dy/d_angle` 是车体系相对增量，`x/y/angle` 是世界系绝对目标
+- 视觉输入只认 `UART6` 上完整框 `left,top,right,bottom`；旧 `x,y` 或混合载荷会被视觉协议吞掉，不再落回遥控协议
+- `left/top/right/bottom` 已经是 OpenArt 做完 `hmirror/vflip` 后的最终画面坐标，主控侧不得再次翻转；所有 `center_x`、`bottom` 判据都基于这张最终画面
+
+### 控制量与误差量方向
+
+| 量 | 正值语义 | 当前实现里的直接含义 |
+| --- | --- | --- |
+| `x_error = obs.center_x - target_center_x` | 目标框中心在画面目标点右侧 | 画面右偏 |
+| `y_error = obs.bottom - target_bottom` | 目标框底边比期望更靠下 | 画面下偏 / 更贴近底边 |
+| `dx_body` | 车体向右横移 | `ALIGN_DX`、`PUSHING` 的横移修正量 |
+| `dy_body` | 车体向前 | `ALIGN_DIST` 和 `PUSHING` 的纵向推进量 |
+| `d_angle_deg` / `omega` | 车体顺时针旋转 | 旋转修正量 |
+| `heading_error = normalize(push_angle_deg - heading_deg)` | 当前航向还需要顺时针补偿 | 与 `d_angle_deg` 同号输出 |
+
+把状态机里的符号关系直接记住：
+- `ALIGN_ANGLE`：`x_error > 0 -> d_angle_deg > 0`，也就是目标在画面右边时，当前实现会给顺时针转向
+- `ALIGN_DX`：`x_error > 0 -> dx_body > 0`，也就是目标在画面右边时，当前实现会给车体右移
+- `ALIGN_DIST`：`dy_body = -y_error * kp`，因此 `obs_bottom` 偏上时 `y_error < 0 -> dy_body > 0`，车辆应前进；`obs_bottom` 偏下时则后退
+- `ORBITING` / `PUSHING` / `RETURNING`：`heading_error > 0 -> d_angle_deg > 0`，都按“还需要顺时针补偿”理解
+- `push_dy_m > 0` 表示沿车体 `y+` 推行；默认推行阶段是前推，不是后退
+
+关于“绝对物理方向”再补一条硬约束：
+- 当前仓库只明确了符号方向，没有把 `0 deg` 绑定到赛场东南西北；`push_angle_deg = -90` 只能解释为“相对当前复位零点的绝对航向目标”，没有 HIL 证据前，不要把它口头改写成“朝左 / 朝右 / 朝前 / 朝后”
+- 凡是说“左 / 右 / 前 / 后 / 顺时针 / 逆时针”，必须同时标明参考系是画面、车体还是世界；不带参考系的描述一律视为高风险描述
+
+### 画面语义与物理动作对照
+
+- 当前视觉链路默认采用“杆上斜装、朝地板俯视”的类人视角；目标默认位于地板平面，这两个前提共同决定了 `bottom` 可作为接近程度代理量
+- 画面坐标按像素常规理解：`left -> right` 递增，`top -> bottom` 递增
+- `obs_center_x` 变大，表示目标在最终画面里向右；在当前斜俯视几何下，车越靠近地板上的目标，目标框底边通常越接近画面底边，也就是 `obs_bottom` 越大；车越远离目标，`obs_bottom` 越小
+- 当前对正策略不是“读视觉角度”，而是“用画面误差驱动动作”：
+  - `ALIGN_ANGLE` 不是测物体角度，而是用旋转消除 `center_x` 横向误差
+  - `ALIGN_DIST` 不是米制真实距离，而是在“斜俯视 + 地板平面目标”前提下，用 `bottom` 近似代理纵向远近
+  - `ALIGN_DX` 不是世界系 `dx`，而是车体系 `dx_body` 最终横移对齐
+- 只有当相机安装姿态、镜头朝向、目标高度和地面关系基本稳定时，`bottom` 这个代理量才可靠；若目标被抬起、滚落、悬空、明显倾倒，或镜头安装角被改动，就不能把 `bottom` 继续当成稳定距离代理
+- 若现场观察到“物体向镜头右边移动但 `obs_center_x` 变小”或“物体远离镜头但 `obs_bottom` 变大”，优先检查 OpenArt 翻转配置、镜头安装方向和视觉发送格式，不要先改状态机符号
+
+### 对齐状态标识
+
+| 状态 | 当前真实判据 | 主输出 | 常见误解 |
+| --- | --- | --- | --- |
+| `IDLE` | 等待有效完整框观测 | 无 | 不是故障态 |
+| `ALIGN_ANGLE` | 看 `center_x` 是否进横向死区 | `d_angle_deg` | 名字像“角度对齐”，实际是在做水平居中 |
+| `ALIGN_DIST` | 看 `bottom` 是否进纵向死区 | `dy_body` | 名字像“真实距离”，实际是底边像素判据 |
+| `ALIGN_DX` | 再次看 `center_x`，做最终横移确认 | `dx_body` | 这里的 `DX` 是车体系横移，不是世界系 `dx` |
+| `ORBITING` | 看 `heading_error` 是否满足推行朝向 | `d_angle_deg` + `rear_only_mode=True` | 主要做朝向补偿 |
+| `PUSHING` | 沿 `push_angle_deg` 前推，保留少量横移纠偏 | `push_dy_m` + 小 `dx_body` + `d_angle_deg` | 不要默认等同“后轮模式” |
+| `RETURNING` | 转到 `push_angle_deg + 180` | `d_angle_deg` | 不再输出位移目标 |
+| `DONE` | 停留观察窗口，随后回 `IDLE` | 无 | 不是永久完成态 |
+
+关键跳转原因按当前注册名理解：
+- `OBSERVATION_ACQUIRED`：`IDLE -> ALIGN_ANGLE`
+- `ANGLE_ALIGNED_STABLE`：`ALIGN_ANGLE -> ALIGN_DIST`
+- `ANGLE_ERROR_REENTRY`：`ALIGN_DIST -> ALIGN_ANGLE`
+- `DISTANCE_ALIGNED_STABLE`：`ALIGN_DIST -> ALIGN_DX`
+- `DISTANCE_NOT_READY`：`ALIGN_DX -> ALIGN_DIST`
+- `HEADING_NOT_READY`：`ALIGN_DX -> ORBITING`
+- `HEADING_ALIGNED`：`ORBITING -> ALIGN_DX`
+- `ENTER_PUSHING`：`ALIGN_DX -> PUSHING`
+- `PUSH_DISTANCE_REACHED`：`PUSHING -> RETURNING`
+- `RETURN_HEADING_REACHED`：`RETURNING -> DONE`
+- `DONE_HOLD_ELAPSED`、`OBSERVATION_LOST`、`RESET`、`UNKNOWN_STATE_GUARD`：各类返回或兜底路径
+
+### Stage 3 / HIL 联调前置检查
+
+在 `uart3` 观测或 `tests/hil/` 留证前，至少先验证这几件事：
+- 发送一帧完整框并查询 `?vision`，确认 `obs_left/top/right/bottom/center_x/center_y` 与当前画面一致
+- 人工让目标在最终画面里向右移，确认 `obs_center_x` 增大；否则先修视觉链路，不要调 `angle_kp` / `dx_kp`
+- 人工让目标在最终画面里远离底边，确认 `obs_bottom` 变小，且当前逻辑会趋向 `dy_body > 0` 前进
+- 观察 `uart3` 状态迁移日志，确认阶段顺序是 `ALIGN_ANGLE -> ALIGN_DIST -> ALIGN_DX`，不要把 `ALIGN_DIST` / `ALIGN_DX` 的含义说反
+- 验证 `UART6` 上旧 `x,y` 已被吞掉，不会误落到普通控制链路
+- 如果方向错了，优先排查：OpenArt 翻转、识别框字段顺序、车体坐标理解、电机方向、编码器方向；不要通过“把增益改成负数”硬掩盖语义错误
+
+输出结论前，再做一次 4 项自检：
+- 我当前说的是画面方向、车体方向还是世界方向
+- 我当前说的是完整框字段 `left/top/right/bottom/center_x/bottom`，还是控制量 `dx_body/dy_body/d_angle_deg`
+- 我当前说的是 `ALIGN_ANGLE`、`ALIGN_DIST`、`ALIGN_DX` 里的哪一个阶段，判据有没有串台
+- 我当前说的是相对量 `dx/dy/d_angle`，还是绝对量 `x/y/angle`
+
 ## Failure Classification
 - `connect_failed`：串口或设备不可达
 - `deploy_failed`：上传、删除或远端路径映射失败

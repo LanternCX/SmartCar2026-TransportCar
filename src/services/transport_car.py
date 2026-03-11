@@ -34,8 +34,8 @@ from config.params import (
     GYRO_OFFSET_FILE,
     PID_MAP,
     VISION_OBSERVATION_TIMEOUT_MS,
-    VISION_TARGET_X_PX,
-    VISION_TARGET_Y_PX,
+    VISION_TARGET_BOTTOM_PX,
+    VISION_TARGET_CENTER_X_PX,
     VISION_ANGLE_KP,
     VISION_DIST_KP,
     VISION_DX_KP,
@@ -60,27 +60,18 @@ from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from services.command_router import router as _cmd_router
+from diagnostics.manager import build_uart3_logger_manager
+from services.vision_debug import build_logger_debug_sink
 from services.vision_protocol import VisionProtocol
+from services.vision_state_registry import vision_state_registry
 from services.vision_state_machine import (
-    SMState,
     VisionMachineInputs,
     VisionStateConfig,
     VisionStateMachine,
+    normalize_angle,
     resolve_relative_intent,
 )
 import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
-
-
-VISION_STATE_NAMES = {
-    SMState.IDLE: "IDLE",
-    SMState.ALIGN_ANGLE: "ALIGN_ANGLE",
-    SMState.ALIGN_DIST: "ALIGN_DIST",
-    SMState.ALIGN_DX: "ALIGN_DX",
-    SMState.ORBITING: "ORBITING",
-    SMState.PUSHING: "PUSHING",
-    SMState.RETURNING: "RETURNING",
-    SMState.DONE: "DONE",
-}
 
 
 class _NullImu:
@@ -156,14 +147,19 @@ class TransportCar:
         # 串口(保持原波特率与编号)
         self.uart3 = create_uart3()
         self.uart6 = create_uart6()
-        self.uart3.write("System Starting...\r\n")
+        self.logger_manager = build_uart3_logger_manager(self.uart3)
+        self.log_system = self.logger_manager.get_logger("system.boot")
+        self.log_command = self.logger_manager.get_logger("services.command")
+        self.log_vision = self.logger_manager.get_logger("vision.state")
+        self.log_health = self.logger_manager.get_logger("system.health")
+        self.log_system.info("System Starting...")
 
         # IMU 初始化
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip IMU init.\r\n")
+            self.log_system.info("Diagnostic mode: skip IMU init.")
             self.imu = _NullImu()
         else:
-            self.uart3.write("Initializing IMU...\r\n")
+            self.log_system.info("Initializing IMU...")
             self.imu = create_imu()
         self.imu_data = self.imu.get()
 
@@ -189,7 +185,7 @@ class TransportCar:
 
         # Motors and encoders
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip motor/encoder init.\r\n")
+            self.log_system.info("Diagnostic mode: skip motor/encoder init.")
             self.motors = _create_null_motors()
             self.encoders = _create_null_encoders()
         else:
@@ -197,12 +193,12 @@ class TransportCar:
             self.encoders = create_encoders()
 
         # 辨识参数加载
-        self.uart3.write("Loading identify parameters...\r\n")
+        self.log_system.info("Loading identify parameters...")
         self.ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
         # IMU 零偏加载
         self.imu_offsets = load_gyro_offsets(
-            GYRO_OFFSET_FILE, logger=lambda msg: self.uart3.write(msg + "\r\n")
+            GYRO_OFFSET_FILE, logger=lambda msg: self.log_system.info(msg)
         )
 
         # 轮组状态构造:滤波、PID、编码器/电机封装
@@ -263,7 +259,8 @@ class TransportCar:
         # 视觉协议与状态机
         self.vision_protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
         self.vision_state_machine = VisionStateMachine(
-            self._build_vision_state_config()
+            self._build_vision_state_config(),
+            debug_sink=self._emit_vision_debug,
         )
         self._vision_step_result = None
         self._vision_resolved_target = None
@@ -291,8 +288,8 @@ class TransportCar:
     def _build_vision_state_config(self):
         """构造视觉状态机参数对象."""
         return VisionStateConfig(
-            target_x_px=VISION_TARGET_X_PX,
-            target_y_px=VISION_TARGET_Y_PX,
+            target_center_x_px=VISION_TARGET_CENTER_X_PX,
+            target_bottom_px=VISION_TARGET_BOTTOM_PX,
             angle_kp=VISION_ANGLE_KP,
             dist_kp=VISION_DIST_KP,
             dx_kp=VISION_DX_KP,
@@ -311,6 +308,15 @@ class TransportCar:
             max_d_angle_deg=VISION_MAX_D_ANGLE_DEG,
             done_hold_ms=VISION_DONE_HOLD_MS,
         )
+
+    def _emit_vision_debug(self, event) -> None:
+        """输出单条视觉状态迁移调试事件."""
+        build_logger_debug_sink(self.log_vision)(event)
+
+    def _emit_error_log(self, message: str) -> None:
+        """记录结构化错误日志并更新最近异常文本."""
+        self.last_exception_text = str(message)
+        self.log_health.error(self.last_exception_text)
 
     def _now_ms(self):
         """返回当前毫秒时间戳,兼容主机测试环境."""
@@ -379,14 +385,14 @@ class TransportCar:
             return
 
         if source == "uart6":
-            observation = self.vision_protocol.try_parse_observation(
+            parse_result = self.vision_protocol.try_parse_observation(
                 line, source=source, now_ms=self._now_ms()
             )
-            if observation is not None:
+            if parse_result.consumed:
                 return
 
         if source == "uart3":
-            self.uart3.write("RCV: %s\r\n" % line)
+            self.log_command.info("RCV: %s" % line)
         self.apply_command(line)
 
     def _refresh_vision_target(self, now_ms=None):
@@ -409,6 +415,7 @@ class TransportCar:
             odom_y=self.odometry.y,
             now_ms=now_ms,
         )
+        previous_vision_target = self._vision_resolved_target
         self._vision_step_result = self.vision_state_machine.step(inputs)
         self._vision_resolved_target = resolve_relative_intent(
             self._vision_step_result.intent,
@@ -416,6 +423,11 @@ class TransportCar:
             odom_y=self.odometry.y,
             heading_deg=self.heading_est,
         )
+        if previous_vision_target is not None and self._vision_resolved_target is None:
+            # 视觉本拍不再输出角度目标时,立即释放上一拍残留的姿态锁定
+            self.heading_target = self.heading_est
+            self.yaw_pid.reset()
+            self.yaw_integral = 0.0
 
     def _get_active_position_targets(self):
         """返回当前激活控制源的位置目标."""
@@ -429,6 +441,20 @@ class TransportCar:
             return self._vision_resolved_target.angle_deg
         return self.last_cmd.get("angle")
 
+    def _compute_angle_error_deg(
+        self, target_angle: float, current_angle: float
+    ) -> float:
+        """计算最短路径角差, 统一规范角与连续角语义."""
+        return normalize_angle(float(target_angle) - float(current_angle))
+
+    def _resolve_continuous_heading_target(
+        self, target_angle: float, current_angle: float
+    ) -> float:
+        """将目标角映射到当前连续航向附近, 避免跨圈追踪."""
+        return float(current_angle) + self._compute_angle_error_deg(
+            target_angle, current_angle
+        )
+
     def _get_active_rear_only_mode(self):
         """返回当前激活控制源的后轮模式."""
         if self._vision_resolved_target is not None:
@@ -440,7 +466,7 @@ class TransportCar:
         state = getattr(self.vision_state_machine, "state", None)
         if state is None:
             return "UNKNOWN"
-        return VISION_STATE_NAMES.get(int(state), "UNKNOWN")
+        return vision_state_registry.get_state_name(int(state))
 
     def build_health_snapshot(self):
         """构造系统健康摘要快照."""
@@ -504,16 +530,24 @@ class TransportCar:
         snapshot = {
             "state": self._get_vision_state_name(),
             "obs_age_ms": None,
-            "obs_x": None,
-            "obs_y": None,
+            "obs_left": None,
+            "obs_top": None,
+            "obs_right": None,
+            "obs_bottom": None,
+            "obs_center_x": None,
+            "obs_center_y": None,
             "target_x": None,
             "target_y": None,
             "target_angle": None,
         }
         if observation is not None:
             snapshot["obs_age_ms"] = self._now_ms() - int(observation.timestamp_ms)
-            snapshot["obs_x"] = float(observation.x)
-            snapshot["obs_y"] = float(observation.y)
+            snapshot["obs_left"] = float(observation.left)
+            snapshot["obs_top"] = float(observation.top)
+            snapshot["obs_right"] = float(observation.right)
+            snapshot["obs_bottom"] = float(observation.bottom)
+            snapshot["obs_center_x"] = float(observation.center_x)
+            snapshot["obs_center_y"] = float(observation.center_y)
         if self._vision_resolved_target is not None:
             snapshot["target_x"] = float(self._vision_resolved_target.x)
             snapshot["target_y"] = float(self._vision_resolved_target.y)
@@ -712,7 +746,9 @@ class TransportCar:
 
         if cmd_angle is not None:
             # 角度模式:目标为绝对角度,PID 产出角速度
-            self.heading_target = cmd_angle
+            self.heading_target = self._resolve_continuous_heading_target(
+                cmd_angle, self.heading_est
+            )
             omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
@@ -864,7 +900,9 @@ class TransportCar:
 
         angle_ok = True
         if self.last_cmd.get("angle") is not None:
-            err_angle = abs(self.heading_target - self.heading_est)
+            err_angle = abs(
+                self._compute_angle_error_deg(self.heading_target, self.heading_est)
+            )
             if err_angle > ANGLE_TOLERANCE:
                 angle_ok = False
 
@@ -908,35 +946,31 @@ class TransportCar:
 
         异常时向串口回写错误信息.
         """
-        buf_len = self.uart3.any()
-        if buf_len:
-            try:
-                self.rx_buf3 += self.uart3.read(buf_len).decode()
-                while True:
-                    idx = self.rx_buf3.find("\n")
-                    if idx == -1:
-                        break
-                    line = self.rx_buf3[:idx].rstrip("\r").strip()
-                    self.rx_buf3 = self.rx_buf3[idx + 1 :]
-                    self._handle_uart_line(line, source="uart3")
-            except Exception as exc:
-                self.last_exception_text = str(exc)
-                self.uart3.write("ERR %s\r\n" % exc)
+        self._poll_uart_source(self.uart3, "rx_buf3", "uart3")
+        self._poll_uart_source(self.uart6, "rx_buf6", "uart6")
 
-        buf_len = self.uart6.any()
-        if buf_len:
-            try:
-                self.rx_buf6 += self.uart6.read(buf_len).decode()
-                while True:
-                    idx = self.rx_buf6.find("\n")
-                    if idx == -1:
-                        break
-                    line = self.rx_buf6[:idx].rstrip("\r").strip()
-                    self.rx_buf6 = self.rx_buf6[idx + 1 :]
-                    self._handle_uart_line(line, source="uart6")
-            except Exception as exc:
-                self.last_exception_text = str(exc)
-                self.uart3.write("ERR %s\r\n" % exc)
+    def _poll_uart_source(self, uart, buffer_attr, source):
+        """轮询单个串口,并按行转交给统一处理入口."""
+        buf_len = uart.any()
+        if not buf_len:
+            return
+
+        try:
+            raw = uart.read(buf_len)
+            if raw is None:
+                return
+
+            setattr(self, buffer_attr, getattr(self, buffer_attr) + raw.decode())
+            while True:
+                rx_buf = getattr(self, buffer_attr)
+                idx = rx_buf.find("\n")
+                if idx == -1:
+                    break
+                line = rx_buf[:idx].rstrip("\r").strip()
+                setattr(self, buffer_attr, rx_buf[idx + 1 :])
+                self._handle_uart_line(line, source=source)
+        except Exception as exc:
+            self._emit_error_log(str(exc))
 
     # Command handling ----------------------------------------------
 
