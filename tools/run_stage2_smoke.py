@@ -1,6 +1,7 @@
 """Stage 2 裸片 smoke 执行器."""
 
 import argparse
+import ast
 import subprocess
 import time
 from dataclasses import dataclass
@@ -78,6 +79,10 @@ def parse_probe_output(text):
 
     status_fields = details.get("status")
     if status_fields is None:
+        summary = _parse_summary_dict_output(text)
+        if summary is not None:
+            return _build_result_from_summary_dict(summary)
+    if status_fields is None:
         return Stage2RunResult("probe_failed", "missing stage2 status", details)
 
     if status_fields.get("status") == "fail":
@@ -139,9 +144,91 @@ def parse_probe_output(text):
     return Stage2RunResult("ok", "ok", details)
 
 
+def _parse_summary_dict_output(text):
+    """尝试解析板端直接打印的 summary dict."""
+    candidates = []
+    stripped = text.strip()
+    if stripped:
+        candidates.append(stripped)
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if candidate:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if not candidate.startswith("{"):
+            continue
+        try:
+            summary = ast.literal_eval(candidate)
+        except Exception:
+            continue
+        if isinstance(summary, dict):
+            return summary
+    return None
+
+
+def _build_result_from_summary_dict(summary):
+    """将 summary dict 适配为 Stage 2 结果对象."""
+    details = {
+        "status": {
+            "status": "ok" if summary.get("status") == "ok" else "fail",
+            "reason": str(summary.get("reason", "ok")),
+        },
+        "queries": {
+            "count": str(int(summary.get("query_count", 0))),
+            "missing": "none"
+            if not summary.get("missing_queries")
+            else ";".join(summary.get("missing_queries", [])),
+        },
+        "smoke": {
+            "mode": str(summary.get("transport_mode", "lite")),
+            "init": str(int(summary.get("init_ok", 0))),
+            "queries": str(int(summary.get("query_ok", 0))),
+            "step": str(int(summary.get("step_ok", 0))),
+            "tick_count": str(int(summary.get("tick_count", 0))),
+            "snapshots": "none"
+            if not summary.get("snapshots")
+            else ";".join(summary.get("snapshots", {}).keys()),
+        },
+    }
+    if summary.get("status") != "ok":
+        return Stage2RunResult(
+            "probe_failed", str(summary.get("reason", "stage2 failed")), details
+        )
+    return Stage2RunResult("ok", "ok", details)
+
+
 def _run_command(command):
     """执行单条主机侧命令并采集输出."""
     return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def _is_incremental_delete_miss(result):
+    """判断 deploy 失败是否仅由增量删除不存在文件导致."""
+    if result.returncode == 0:
+        return False
+
+    text = "%s\n%s" % (result.stdout or "", result.stderr or "")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+
+    summary_delete_lines = [line for line in lines if line.startswith("- delete ")]
+    if summary_delete_lines:
+        for line in summary_delete_lines:
+            if "No such file or directory" not in line:
+                return False
+        return True
+
+    saw_delete_miss = False
+    for index, line in enumerate(lines):
+        if "删除失败" not in line:
+            continue
+        window = " ".join(lines[index : index + 4])
+        if "No such file or directory" not in window:
+            return False
+        saw_delete_miss = True
+    return saw_delete_miss
 
 
 def run_probe(port):
@@ -156,7 +243,7 @@ def run_probe(port):
         return Stage2RunResult("connect_failed", reason, {})
 
     deploy_result = _run_command(deploy_cmd)
-    if deploy_result.returncode != 0:
+    if deploy_result.returncode != 0 and not _is_incremental_delete_miss(deploy_result):
         reason = (
             deploy_result.stderr.strip()
             or deploy_result.stdout.strip()

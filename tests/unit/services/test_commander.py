@@ -1,8 +1,8 @@
-"""Unit tests for services.commander."""
+"""命令分词函数单元测试."""
 
 import pytest
 
-from services.commander import tokenize
+from services.commanding.router import tokenize
 
 
 pytestmark = pytest.mark.unit

@@ -2,7 +2,7 @@
 
 import pytest
 
-from services.commands import (
+from services.commanding.handlers import (
     cmd_log_color,
     cmd_log_filter,
     cmd_log_level,
