@@ -45,6 +45,13 @@ python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101
 
 当 `status != ok` 时，需将完整输出附到 HIL 记录中。
 
+当前 Stage 2 裸片 smoke 允许两类通过结果：
+
+1. `mode=full`：说明板端完成了完整 runtime 导入与最小 step
+2. `mode=lite`：说明板端至少完成了最小 query smoke, query token 完整且结构化输出正常
+
+若结果为 `mode=lite`, 只能证明最小安全 smoke 可执行, 不能替代 Stage 3 `uart3` observe。
+
 ## Stage 3 人工调试
 
 Stage 3 不再依赖自动脚本，而是要求操作者通过 `uart3` 进行人工调试：
@@ -54,3 +61,5 @@ Stage 3 不再依赖自动脚本，而是要求操作者通过 `uart3` 进行人
 3. 记录关键串口回显、现场现象与 AI 给出的归因建议
 
 参考基线场景：`tests/hil/scenarios/basic_motion.md`
+
+若用户明确要求跳过 Stage 3, 必须在对应 HIL 记录中显式写明 `Stage 3 skipped by user` 以及剩余风险, 不得将该轮结果表述为完整设备验证通过
