@@ -30,9 +30,17 @@ description: Use when creating branches, committing, merging, or preparing relea
 - 常用 `type`：`feat` `fix` `refactor` `perf` `docs` `test` `chore` `style`
 - `scope` 建议使用目录域：`control` `hardware` `filters` `services` `storage` `config` `utils`
 
+# Commit Trailer
+- 仅当 commit 由 agent 创建时，提交正文末尾必须追加固定 trailer：`Co-authored-by: opencode-agent[bot] <opencode-agent[bot]@users.noreply.github.com>`
+- 人工创建的 commit 不强制追加该 trailer
+- 生成 commit message 时，agent 需要同时满足 Angular 标题格式与上述 trailer 要求
+
 # Examples
 ```text
 feat(services): add sync query for lock status
+
+Co-authored-by: opencode-agent[bot] <opencode-agent[bot]@users.noreply.github.com>
+
 fix(filters): correct dual-window boundary handling
 refactor(control): split kinematics and odometry helpers
 docs: update transport protocol section

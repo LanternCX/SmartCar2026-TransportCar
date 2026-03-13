@@ -205,6 +205,9 @@ python3 -m pytest --collect-only -q
 
 常用 type：`feat`、`fix`、`refactor`、`perf`、`docs`、`test`、`chore`、`style`。
 
+- 仅当 commit 由 agent 创建时，提交正文末尾必须追加：`Co-authored-by: opencode-agent[bot] <opencode-agent[bot]@users.noreply.github.com>`。
+- 人工创建的 commit 不强制追加该 trailer。
+
 ## 9. CI 期望
 
 - CI 在 PR / push / tag 上运行 `tests/unit` + `tests/contract`。
