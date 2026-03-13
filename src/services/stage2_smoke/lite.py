@@ -3,16 +3,7 @@
 from control.chassis_state import ChassisState
 from services.commanding.session import CommandSession
 from services.runtime.diagnostics_facade import DiagnosticsFacade
-
-
-class CaptureUart:
-    """收集查询回包的简易串口对象."""
-
-    def __init__(self):
-        self.messages = []
-
-    def write(self, text):
-        self.messages.append(text)
+from services.stage2_smoke.shared import CaptureUart, probe_queries
 
 
 class LiteContext:
@@ -76,23 +67,6 @@ class LiteContext:
             facade = DiagnosticsFacade(self)
             self._diagnostics_facade = facade
         return facade
-
-
-def _probe_queries(tokens, probe_func, capture):
-    """执行一组查询探针并返回查询结果摘要."""
-    query_outputs = {}
-    query_ok = 1
-    for name in tokens:
-        before_count = len(capture.messages)
-        probe_func(name)
-        text = (
-            capture.messages[-1].strip() if len(capture.messages) > before_count else ""
-        )
-        if text:
-            query_outputs[name] = text
-        if not text.startswith("?%s=" % name):
-            query_ok = 0
-    return query_ok, query_outputs
 
 
 def _registered_query_tokens(router):
@@ -161,13 +135,15 @@ def check_transport_source():
 def collect_lite_transport_summary(tokens, check_transport_source_func):
     """执行 lite 模式下的最小可信查询 smoke."""
     from services.commanding.router import router
-    import services.commanding.handlers as _commanding_handlers  # noqa: F401 自动发现查询处理器
+    import services.commanding.handlers as _commanding_handlers
+
+    _commanding_handlers.load_query_handlers()
 
     registered = _registered_query_tokens(router)
     missing = [name for name in tokens if name not in registered]
     transport_source_ok, query_uart_ok = check_transport_source_func()
     ctx = LiteContext()
-    query_ok, query_outputs = _probe_queries(
+    query_ok, query_outputs = probe_queries(
         tokens, lambda name: router.handle_query(name, ctx), ctx.uart3
     )
 

@@ -1,5 +1,7 @@
 """TransportCar Stage 2 安全模式单元测试."""
 
+import builtins
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -199,15 +201,216 @@ def test_stage2_smoke_probe_launcher_avoids_from_import_for_board_compat() -> No
     text = launcher.read_text(encoding="utf-8")
 
     assert "from services.stage2_smoke import main" not in text
-    assert "services.stage2_smoke_lite" in text
+    assert '"services.stage2_smoke"' in text
+    assert "services.stage2_smoke.lite" not in text
+
+
+def test_stage2_smoke_probe_launcher_imports_package_surface_and_uses_lite_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = Path(__file__).resolve().parents[3] / "tools" / "stage2_smoke_probe.py"
+    code = launcher.read_text(encoding="utf-8")
+    calls = []
+
+    fake_stage2_smoke = types.ModuleType("services.stage2_smoke")
+
+    def fake_collect_lite_transport_summary():
+        calls.append("lite")
+        return {"status": "ok"}
+
+    def fail_collect_stage2_summary():
+        raise AssertionError("probe should not call collect_stage2_summary()")
+
+    setattr(
+        fake_stage2_smoke,
+        "_collect_lite_transport_summary",
+        fake_collect_lite_transport_summary,
+    )
+    setattr(fake_stage2_smoke, "collect_stage2_summary", fail_collect_stage2_summary)
+    monkeypatch.setitem(sys.modules, "services.stage2_smoke", fake_stage2_smoke)
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.stage2_smoke":
+            calls.append(name)
+            sys.modules[name] = fake_stage2_smoke
+            return fake_stage2_smoke
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(builtins, "print", lambda value: calls.append(("print", value)))
+
+    exec(code, {"__name__": "__main__"})
+
+    assert calls == [
+        "services.stage2_smoke",
+        "lite",
+        ("print", {"status": "ok"}),
+    ]
+
+
+def test_stage2_smoke_probe_launcher_clears_stale_stage2_modules_before_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = Path(__file__).resolve().parents[3] / "tools" / "stage2_smoke_probe.py"
+    code = launcher.read_text(encoding="utf-8")
+    calls = []
+
+    fake_stage2_smoke = types.ModuleType("services.stage2_smoke")
+    setattr(
+        fake_stage2_smoke,
+        "_collect_lite_transport_summary",
+        lambda: {"status": "ok"},
+    )
+    monkeypatch.setitem(sys.modules, "services.stage2_smoke", fake_stage2_smoke)
+    monkeypatch.setitem(
+        sys.modules,
+        "services.stage2_smoke.lite",
+        types.ModuleType("services.stage2_smoke.lite"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "services.stage2_smoke.entry",
+        types.ModuleType("services.stage2_smoke.entry"),
+    )
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.stage2_smoke":
+            calls.append(
+                (
+                    "import",
+                    name,
+                    "services.stage2_smoke" in sys.modules,
+                    "services.stage2_smoke.lite" in sys.modules,
+                    "services.stage2_smoke.entry" in sys.modules,
+                )
+            )
+            sys.modules[name] = fake_stage2_smoke
+            return fake_stage2_smoke
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(builtins, "print", lambda _value: None)
+
+    exec(code, {"__name__": "__main__"})
+
+    assert calls == [
+        ("import", "services.stage2_smoke", False, False, False),
+    ]
+
+
+def test_stage2_smoke_probe_launcher_clears_stale_commanding_modules_before_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = Path(__file__).resolve().parents[3] / "tools" / "stage2_smoke_probe.py"
+    code = launcher.read_text(encoding="utf-8")
+    calls = []
+
+    fake_stage2_smoke = types.ModuleType("services.stage2_smoke")
+    setattr(
+        fake_stage2_smoke,
+        "_collect_lite_transport_summary",
+        lambda: {"status": "ok"},
+    )
+    monkeypatch.setitem(sys.modules, "services.stage2_smoke", fake_stage2_smoke)
+    monkeypatch.setitem(
+        sys.modules,
+        "services.commanding.handlers",
+        types.ModuleType("services.commanding.handlers"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "services.commanding.handlers.query_health",
+        types.ModuleType("services.commanding.handlers.query_health"),
+    )
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.stage2_smoke":
+            calls.append(
+                (
+                    "import",
+                    name,
+                    "services.commanding.handlers" in sys.modules,
+                    "services.commanding.handlers.query_health" in sys.modules,
+                )
+            )
+            sys.modules[name] = fake_stage2_smoke
+            return fake_stage2_smoke
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(builtins, "print", lambda _value: None)
+
+    exec(code, {"__name__": "__main__"})
+
+    assert calls == [
+        ("import", "services.stage2_smoke", False, False),
+    ]
+
+
+def test_stage2_smoke_entry_loads_lite_helper_without_from_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    fake_lite = types.ModuleType("services.stage2_smoke.lite")
+
+    def fake_collect_lite_transport_summary(tokens, check_transport_source_func):
+        calls.append(("lite_func", tokens, check_transport_source_func()))
+        return {"status": "ok"}
+
+    setattr(
+        fake_lite,
+        "collect_lite_transport_summary",
+        fake_collect_lite_transport_summary,
+    )
+    monkeypatch.setitem(sys.modules, "services.stage2_smoke.lite", fake_lite)
+    monkeypatch.setattr(stage2_smoke_module, "TOKENS", ("health",))
+    monkeypatch.setattr(
+        stage2_smoke_module, "_check_transport_source", lambda: (True, True)
+    )
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.stage2_smoke.lite":
+            calls.append(("import", tuple(fromlist)))
+            if fromlist:
+                raise ImportError("board from-import unavailable")
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    summary = stage2_smoke_module._collect_lite_transport_summary()
+
+    assert summary == {"status": "ok"}
+    assert calls == [
+        ("import", ()),
+        ("lite_func", ("health",), (True, True)),
+    ]
 
 
 def test_stage2_smoke_runtime_entry_stays_compact_for_device_import() -> None:
     runtime_module = (
-        Path(__file__).resolve().parents[3] / "src" / "services" / "stage2_smoke.py"
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "services"
+        / "stage2_smoke"
+        / "entry.py"
     )
 
     assert runtime_module.stat().st_size <= 10000
+
+
+def test_stage2_smoke_package_keeps_public_entrypoints() -> None:
+    assert hasattr(stage2_smoke_module, "collect_stage2_summary")
+    assert hasattr(stage2_smoke_module, "_collect_lite_transport_summary")
+    assert hasattr(stage2_smoke_module, "_collect_full_transport_summary")
 
 
 def test_stage2_smoke_probe_falls_back_to_lite_mode_on_transport_memory_error(
@@ -273,6 +476,129 @@ def test_stage2_lite_fallback_probes_pos_lock_log_queries() -> None:
         summary["query_outputs"]["log"]
         == "?log=profile:run,level:info,filter:off,color:0,modules:none"
     )
+
+
+def test_stage2_lite_summary_uses_query_only_handler_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    class LegacyRouter:
+        def __init__(self):
+            self._query_handlers = {
+                name: object() for name in stage2_smoke_module.TOKENS
+            }
+
+        def handle_query(self, token, ctx):
+            ctx.reply("?%s=ok\r\n" % token)
+            return True
+
+    import services.commanding.handlers as handlers_module
+    import importlib
+
+    router_module = importlib.import_module("services.commanding.router")
+
+    monkeypatch.setattr(router_module, "router", LegacyRouter())
+    monkeypatch.setattr(
+        handlers_module,
+        "load_query_handlers",
+        lambda: calls.append("load_query_handlers"),
+    )
+    monkeypatch.setattr(
+        stage2_smoke_module, "_check_transport_source", lambda: (True, True)
+    )
+
+    summary = stage2_smoke_module._collect_lite_transport_summary()
+
+    assert summary["status"] == "ok"
+    assert calls == ["load_query_handlers"]
+
+
+def test_commanding_handlers_package_defers_registration_until_explicit_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(sys.modules):
+        if name == "services.commanding.handlers" or name.startswith(
+            "services.commanding.handlers."
+        ):
+            del sys.modules[name]
+
+    commanding_pkg = sys.modules.get("services.commanding")
+    if commanding_pkg is not None and hasattr(commanding_pkg, "handlers"):
+        delattr(commanding_pkg, "handlers")
+
+    from services.commanding.router import CommandRouter
+
+    fresh_router = CommandRouter()
+    monkeypatch.setitem(
+        sys.modules,
+        "services.commanding.router",
+        types.SimpleNamespace(router=fresh_router, CommandRouter=CommandRouter),
+    )
+
+    handlers_module = importlib.import_module("services.commanding.handlers")
+
+    assert fresh_router.registered_query_tokens() == ()
+    assert fresh_router._cmd_handlers == {}
+
+    handlers_module.load_query_handlers()
+
+    assert fresh_router.registered_query_tokens() == tuple(
+        sorted(stage2_smoke_module.TOKENS)
+    )
+    assert fresh_router._cmd_handlers == {}
+
+
+def test_commanding_query_loader_avoids_tuple_startswith_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import services.commanding.handlers as handlers_module
+
+    imported = []
+
+    class StrictName(str):
+        def startswith(self, prefix, *args):
+            if isinstance(prefix, tuple):
+                raise TypeError("can't convert 'tuple' object to str implicitly")
+            return super().startswith(prefix, *args)
+
+    previous_query = sys.modules.pop("services.commanding.handlers.query_health", None)
+    previous_cmd = sys.modules.pop("services.commanding.handlers.cmd_dx", None)
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in (
+            "services.commanding.handlers.query_health",
+            "services.commanding.handlers.cmd_dx",
+        ):
+            imported.append(name)
+            module = types.ModuleType(name)
+            sys.modules[name] = module
+            return module
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(
+        handlers_module.os,
+        "listdir",
+        lambda _path: (
+            StrictName("__init__.py"),
+            StrictName("cmd_dx.py"),
+            StrictName("query_health.py"),
+        ),
+    )
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    try:
+        handlers_module.load_query_handlers()
+    finally:
+        sys.modules.pop("services.commanding.handlers.query_health", None)
+        sys.modules.pop("services.commanding.handlers.cmd_dx", None)
+        if previous_query is not None:
+            sys.modules["services.commanding.handlers.query_health"] = previous_query
+        if previous_cmd is not None:
+            sys.modules["services.commanding.handlers.cmd_dx"] = previous_cmd
+
+    assert imported == ["services.commanding.handlers.query_health"]
 
 
 def test_stage2_lite_summary_accepts_router_without_registered_query_tokens(

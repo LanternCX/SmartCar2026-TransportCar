@@ -76,7 +76,10 @@ from vision.protocol import VisionProtocol
 from vision.state_registry import vision_state_registry
 from vision.state_machine import VisionStateConfig, VisionStateMachine
 from vision.transforms import normalize_angle
-import services.commanding.handlers as _commanding_handlers  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
+import services.commanding.handlers as _commanding_handlers
+
+
+_commanding_handlers.load_all_handlers()
 
 
 class _NullImu:

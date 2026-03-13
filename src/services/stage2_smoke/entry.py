@@ -1,4 +1,4 @@
-"""Stage 2 裸片 smoke 超薄入口."""
+"""Stage 2 裸片 smoke 入口与共享 helper."""
 
 import gc
 import sys
@@ -24,36 +24,18 @@ RUNTIME_ROOTS = (
     "storage",
     "utils",
 )
-
-
-def _CaptureUart():
-    """构造查询回包采集 UART."""
-    from services.stage2_smoke_lite import CaptureUart
-
-    return CaptureUart()
-
-
-def _LiteContext():
-    """构造 lite 模式最小查询上下文."""
-    from services.stage2_smoke_lite import LiteContext
-
-    return LiteContext()
+PACKAGE_ROOT = "services.stage2_smoke"
 
 
 def _clear_modules():
     """清理运行时相关模块, 避免半初始化残留."""
     for name in tuple(sys.modules):
+        if name == PACKAGE_ROOT:
+            continue
         for root in RUNTIME_ROOTS:
             if name == root or name.startswith(root + "."):
                 del sys.modules[name]
                 break
-
-
-def _check_transport_source():
-    """验证显式 query 上下文协议."""
-    from services.stage2_smoke_lite import check_transport_source
-
-    return check_transport_source()
 
 
 def _normalize_reason(exc):
@@ -81,45 +63,78 @@ def _should_fallback_to_lite(exc):
     return False
 
 
+def _format_snapshot_names(summary):
+    """将快照结果格式化为输出 token 串."""
+    package = _get_package_module()
+    snapshot_names = [name for name in package.TOKENS if name in summary["snapshots"]]
+    if not snapshot_names:
+        return "none"
+    return ";".join(snapshot_names)
+
+
+def _get_package_module():
+    """返回公共包模块, 让入口逻辑感知包级 monkeypatch."""
+    return sys.modules["services.stage2_smoke"]
+
+
+def _CaptureUart():
+    """构造查询回包采集 UART."""
+    __import__("services.stage2_smoke.full")
+    module = sys.modules["services.stage2_smoke.full"]
+    return module.CaptureUart()
+
+
+def _LiteContext():
+    """构造 lite 模式最小查询上下文."""
+    __import__("services.stage2_smoke.lite")
+    module = sys.modules["services.stage2_smoke.lite"]
+    return module.LiteContext()
+
+
+def _check_transport_source():
+    """验证显式 query 上下文协议."""
+    __import__("services.stage2_smoke.lite")
+    module = sys.modules["services.stage2_smoke.lite"]
+    return module.check_transport_source()
+
+
 def _collect_full_transport_summary():
     """执行 full 模式下的完整安全 smoke."""
-    from services.stage2_smoke_full import collect_full_transport_summary
-
-    return collect_full_transport_summary(TOKENS)
+    __import__("services.stage2_smoke.full")
+    module = sys.modules["services.stage2_smoke.full"]
+    package = _get_package_module()
+    return module.collect_full_transport_summary(package.TOKENS)
 
 
 def _collect_lite_transport_summary():
     """执行 lite 模式下的最小可信查询 smoke."""
-    from services.stage2_smoke_lite import collect_lite_transport_summary
-
-    return collect_lite_transport_summary(TOKENS, _check_transport_source)
+    __import__("services.stage2_smoke.lite")
+    module = sys.modules["services.stage2_smoke.lite"]
+    package = _get_package_module()
+    return module.collect_lite_transport_summary(
+        package.TOKENS, package._check_transport_source
+    )
 
 
 def collect_stage2_summary():
     """执行一次最小安全 smoke 并返回结构化摘要."""
+    package = _get_package_module()
+
     gc.collect()
-    _clear_modules()
+    package._clear_modules()
 
     try:
-        return _collect_full_transport_summary()
+        return package._collect_full_transport_summary()
     except Exception as exc:
         if not _should_fallback_to_lite(exc):
             raise
         full_reason = _normalize_reason(exc)
 
     gc.collect()
-    _clear_modules()
-    summary = _collect_lite_transport_summary()
+    package._clear_modules()
+    summary = package._collect_lite_transport_summary()
     summary["fallback_reason"] = full_reason
     return summary
-
-
-def _format_snapshot_names(summary):
-    """将快照结果格式化为输出 token 串."""
-    snapshot_names = [name for name in TOKENS if name in summary["snapshots"]]
-    if not snapshot_names:
-        return "none"
-    return ";".join(snapshot_names)
 
 
 def main():

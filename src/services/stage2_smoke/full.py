@@ -1,31 +1,6 @@
 """Stage 2 full 模式 helper."""
 
-
-class CaptureUart:
-    """收集查询回包的简易串口对象."""
-
-    def __init__(self):
-        self.messages = []
-
-    def write(self, text):
-        self.messages.append(text)
-
-
-def _probe_queries(tokens, probe_func, capture):
-    """执行一组查询探针并返回查询结果摘要."""
-    query_outputs = {}
-    query_ok = 1
-    for name in tokens:
-        before_count = len(capture.messages)
-        probe_func(name)
-        text = (
-            capture.messages[-1].strip() if len(capture.messages) > before_count else ""
-        )
-        if text:
-            query_outputs[name] = text
-        if not text.startswith("?%s=" % name):
-            query_ok = 0
-    return query_ok, query_outputs
+from services.stage2_smoke.shared import CaptureUart, probe_queries
 
 
 def collect_full_transport_summary(tokens):
@@ -51,7 +26,7 @@ def collect_full_transport_summary(tokens):
 
     capture = CaptureUart()
     setattr(car, "uart3", capture)
-    query_ok, query_outputs = _probe_queries(
+    query_ok, query_outputs = probe_queries(
         tokens, lambda name: car.handle_uart_line("?%s" % name, source="uart3"), capture
     )
 
