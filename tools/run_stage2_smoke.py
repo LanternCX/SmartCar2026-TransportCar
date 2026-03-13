@@ -82,8 +82,8 @@ def parse_probe_output(text):
         summary = _parse_summary_dict_output(text)
         if summary is not None:
             return _build_result_from_summary_dict(summary)
-    if status_fields is None:
-        return Stage2RunResult("probe_failed", "missing stage2 status", details)
+        else:
+            return Stage2RunResult("probe_failed", "missing stage2 status", details)
 
     if status_fields.get("status") == "fail":
         return Stage2RunResult(
