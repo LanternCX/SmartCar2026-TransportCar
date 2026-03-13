@@ -1,8 +1,9 @@
-"""services.command_router 的单元测试."""
+"""命令路由器的单元测试."""
 
 import pytest
 
-from services.command_router import CommandRouter
+from services.commanding.router import CommandRouter
+from services.commanding.session import CommandSession
 
 
 pytestmark = pytest.mark.unit
@@ -21,17 +22,53 @@ class FakeUART:
 class FakeContext:
     """路由上下文桩对象."""
 
-    _query_response_uart: object
-    _query_source: str
-
     def __init__(self):
         self.calls = []
         self.dispatched = None
         self.uart3 = FakeUART()
         self.uart6 = FakeUART()
+        self.reply_uart = self.uart6
 
     def _finalize_route(self, dispatched_keys):
         self.dispatched = dispatched_keys
+
+    def finalize_route(self, dispatched_keys):
+        self.dispatched = dispatched_keys
+
+    def reply(self, text):
+        self.reply_uart.write(text)
+
+
+class FakeExplicitContext:
+    """显式 handler 上下文桩对象."""
+
+    def __init__(self):
+        self.calls = []
+        self.dispatched = None
+        self.reply_uart = FakeUART()
+        self.uart3 = FakeUART()
+        self.uart6 = FakeUART()
+        self.session = CommandSession()
+        self.finalize_calls = []
+        self.logger_manager = None
+        self.odometry = type("FakeOdometry", (), {"x": 0.0, "y": 0.0})()
+
+    def get_diagnostics_facade(self):
+        class _Facade:
+            def __init__(self, outer_ctx):
+                self._ctx = outer_ctx
+
+            def build_lock_snapshot(self):
+                return {"locked": 1 if self._ctx.session.command_lock else 0}
+
+        return _Facade(self)
+
+    def finalize_route(self, dispatched_keys):
+        self.finalize_calls.append(dispatched_keys)
+        self.dispatched = dispatched_keys
+
+    def reply(self, text):
+        self.reply_uart.write(text)
 
 
 def test_route_dispatches_registered_commands_and_finalizes():
@@ -176,6 +213,31 @@ def test_handle_query_known_token():
     assert ctx.calls == [("query", "pos")]
 
 
+def test_registered_query_tokens_exposes_sorted_public_view() -> None:
+    router = CommandRouter()
+
+    @router.query("vision", " Health ")
+    def query_any(_ctx):
+        return None
+
+    assert router.registered_query_tokens() == ("health", "vision")
+
+
+def test_handle_query_without_explicit_reply_uart_defaults_to_uart6() -> None:
+    router = CommandRouter()
+    ctx = FakeContext()
+
+    @router.query("lock")
+    def query_lock(local_ctx):
+        local_ctx.reply("?lock=0\r\n")
+
+    ok = router.handle_query("lock", ctx)
+
+    assert ok is True
+    assert ctx.uart6.messages == ["?lock=0\r\n"]
+    assert ctx.uart3.messages == []
+
+
 def test_handle_query_normalizes_registered_key() -> None:
     router = CommandRouter()
     ctx = FakeContext()
@@ -191,72 +253,114 @@ def test_handle_query_normalizes_registered_key() -> None:
 
 
 def test_handle_query_passes_source_uart_to_context() -> None:
-    router = CommandRouter()
-    ctx = FakeContext()
+    from services.commanding.router import CommandRouter as ExplicitCommandRouter
+
+    router = ExplicitCommandRouter()
+    ctx = FakeExplicitContext()
+    ctx.reply_uart = ctx.uart3
 
     @router.query("health")
     def query_health(local_ctx):
-        local_ctx.calls.append(local_ctx._query_response_uart)
+        local_ctx.calls.append(local_ctx.reply_uart)
 
-    ok = router.handle_query("health", ctx, source="uart3")
+    ok = router.handle_query("health", ctx)
 
     assert ok is True
     assert ctx.calls == [ctx.uart3]
 
 
-def test_handle_query_restores_temporary_context_attributes() -> None:
-    router = CommandRouter()
-    ctx = FakeContext()
-    previous_uart = object()
-    ctx._query_response_uart = previous_uart
-    ctx._query_source = "uart9"
+def test_handle_query_uses_explicit_context_without_temporary_attributes() -> None:
+    from services.commanding.router import CommandRouter as ExplicitCommandRouter
+
+    router = ExplicitCommandRouter()
+    ctx = FakeExplicitContext()
+    ctx.reply_uart = ctx.uart3
 
     @router.query("health")
     def query_health(local_ctx):
-        local_ctx.calls.append(
-            (local_ctx._query_response_uart, local_ctx._query_source)
-        )
+        local_ctx.calls.append(local_ctx.reply_uart)
 
-    ok = router.handle_query("health", ctx, source="uart3")
+    ok = router.handle_query("health", ctx)
 
     assert ok is True
-    assert ctx.calls == [(ctx.uart3, "uart3")]
-    assert ctx._query_response_uart is previous_uart
-    assert ctx._query_source == "uart9"
-
-
-def test_handle_query_removes_temporary_context_attributes_when_absent() -> None:
-    router = CommandRouter()
-    ctx = FakeContext()
-
-    @router.query("health")
-    def query_health(local_ctx):
-        local_ctx.calls.append(
-            (local_ctx._query_response_uart, local_ctx._query_source)
-        )
-
-    ok = router.handle_query("health", ctx, source="uart3")
-
-    assert ok is True
-    assert ctx.calls == [(ctx.uart3, "uart3")]
+    assert ctx.calls == [ctx.uart3]
     assert not hasattr(ctx, "_query_response_uart")
     assert not hasattr(ctx, "_query_source")
 
 
-def test_handle_query_unknown_token_writes_unknown_response_to_source_uart() -> None:
-    router = CommandRouter()
-    ctx = FakeContext()
+def test_handle_query_unknown_token_writes_unknown_response_to_explicit_reply_uart() -> (
+    None
+):
+    from services.commanding.router import CommandRouter as ExplicitCommandRouter
 
-    ok = router.handle_query("missing", ctx, source="uart3")
+    router = ExplicitCommandRouter()
+    ctx = FakeExplicitContext()
+    ctx.reply_uart = ctx.uart3
+
+    ok = router.handle_query("missing", ctx)
 
     assert ok is False
     assert ctx.uart3.messages == ["?unknown=missing\r\n"]
-    assert ctx.uart6.messages == []
+    assert ctx.reply_uart.messages == ["?unknown=missing\r\n"]
+    assert not hasattr(ctx, "_query_response_uart")
+    assert not hasattr(ctx, "_query_source")
 
 
-def test_handle_query_unknown_token_writes_unknown_response():
+def test_handle_query_unknown_token_writes_unknown_response() -> None:
     router = CommandRouter()
     ctx = FakeContext()
+
     ok = router.handle_query("missing", ctx)
+
     assert ok is False
     assert ctx.uart6.messages == ["?unknown=missing\r\n"]
+
+
+def test_relative_command_handlers_use_session_api_instead_of_private_fields() -> None:
+    from services.commanding.handlers import cmd_d_angle, cmd_dx, cmd_dy
+
+    ctx = FakeExplicitContext()
+
+    cmd_dx.handle(ctx, 0.1)
+    cmd_dy.handle(ctx, -0.2)
+    cmd_d_angle.handle(ctx, 15.0)
+
+    assert ctx.session.pending_dx == 0.1
+    assert ctx.session.pending_dy == -0.2
+    assert ctx.session.pending_d_angle == 15.0
+    assert not hasattr(ctx, "_pending_dx")
+    assert not hasattr(ctx, "_pending_dy")
+    assert not hasattr(ctx, "_pending_d_angle")
+
+
+def test_query_handlers_do_not_depend_on_transport_private_state() -> None:
+    from services.commanding.handlers import query_lock
+
+    ctx = FakeExplicitContext()
+    ctx.session.command_lock = True
+
+    query_lock.handle(ctx)
+
+    assert ctx.reply_uart.messages == ["?lock=1\r\n"]
+    assert not hasattr(ctx, "_query_response_uart")
+    assert not hasattr(ctx, "_query_source")
+
+
+def test_explicit_route_uses_context_finalize_without_runtime_private_protocol() -> (
+    None
+):
+    from services.commanding.router import CommandRouter as ExplicitCommandRouter
+
+    router = ExplicitCommandRouter()
+    ctx = FakeExplicitContext()
+
+    @router.command("vx")
+    def cmd_vx(local_ctx, value):
+        local_ctx.calls.append(("vx", value))
+
+    ok = router.route("vx=1", ctx)
+
+    assert ok is True
+    assert ctx.calls == [("vx", 1.0)]
+    assert ctx.finalize_calls == [{"vx"}]
+    assert not hasattr(ctx, "runtime")

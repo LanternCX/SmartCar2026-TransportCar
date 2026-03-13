@@ -5,10 +5,10 @@ from typing import Optional, Tuple
 
 import pytest
 
-from services.vision_debug import format_transition_event
-from services.vision_protocol import VisionObservation
-from services.vision_state_defs import SM, SMState, VisionTransitionReason
-from services.vision_state_machine import (
+from vision.debug import format_transition_event
+from vision.protocol import VisionObservation
+from vision.state_defs import SM, SMState, VisionTransitionReason
+from vision.state_machine import (
     VisionMachineInputs,
     VisionStateConfig,
     VisionStateMachine,
@@ -18,7 +18,7 @@ from services.vision_state_machine import (
 pytestmark = pytest.mark.unit
 
 
-def build_test_config(initial_state=SMState.IDLE) -> VisionStateMachine:
+def build_test_config(initial_state=SM.IDLE) -> VisionStateMachine:
     return VisionStateMachine(
         VisionStateConfig(
             target_center_x_px=160.0,
@@ -73,7 +73,7 @@ def test_idle_enters_align_angle_when_observation_arrives() -> None:
 
 
 def test_align_angle_uses_box_center_x_not_left_edge() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_ANGLE)
+    machine = build_test_config(initial_state=SM.ALIGN_ANGLE)
 
     result = machine.step(build_inputs((130.0, 20.0, 190.0, 90.0)))
 
@@ -82,7 +82,7 @@ def test_align_angle_uses_box_center_x_not_left_edge() -> None:
 
 
 def test_align_angle_enters_align_dist_after_stable_centering() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_ANGLE)
+    machine = build_test_config(initial_state=SM.ALIGN_ANGLE)
 
     first = machine.step(build_inputs((145.0, 20.0, 175.0, 240.0), now_ms=1000))
     second = machine.step(build_inputs((146.0, 20.0, 174.0, 240.0), now_ms=1010))
@@ -92,7 +92,7 @@ def test_align_angle_enters_align_dist_after_stable_centering() -> None:
 
 
 def test_align_dist_returns_to_align_angle_when_center_error_grows() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_DIST)
+    machine = build_test_config(initial_state=SM.ALIGN_DIST)
 
     result = machine.step(build_inputs((180.0, 20.0, 220.0, 240.0)))
 
@@ -100,7 +100,7 @@ def test_align_dist_returns_to_align_angle_when_center_error_grows() -> None:
 
 
 def test_align_dist_moves_forward_when_box_bottom_is_above_target() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_DIST)
+    machine = build_test_config(initial_state=SM.ALIGN_DIST)
 
     result = machine.step(build_inputs((145.0, 20.0, 175.0, 210.0)))
 
@@ -109,7 +109,7 @@ def test_align_dist_moves_forward_when_box_bottom_is_above_target() -> None:
 
 
 def test_align_dx_enters_pushing_when_heading_matches_push_angle() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_DX)
+    machine = build_test_config(initial_state=SM.ALIGN_DX)
 
     first = machine.step(
         build_inputs((156.0, 170.0, 164.0, 240.0), heading_deg=-90.0, now_ms=1000)
@@ -122,8 +122,20 @@ def test_align_dx_enters_pushing_when_heading_matches_push_angle() -> None:
     assert second.state == SMState.PUSHING
 
 
+def test_orbiting_requests_rear_mode_while_heading_not_ready() -> None:
+    machine = build_test_config(initial_state=SM.ORBITING)
+
+    result = machine.step(
+        build_inputs((156.0, 170.0, 164.0, 240.0), heading_deg=0.0, now_ms=1000)
+    )
+
+    assert result.intent.active is True
+    assert result.intent.rear_only_mode is True
+    assert result.intent.d_angle_deg < 0.0
+
+
 def test_align_dx_returns_to_align_dist_when_distance_not_ready() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_DX)
+    machine = build_test_config(initial_state=SM.ALIGN_DX)
 
     first = machine.step(
         build_inputs((156.0, 140.0, 164.0, 210.0), heading_deg=-90.0, now_ms=1000)
@@ -137,7 +149,7 @@ def test_align_dx_returns_to_align_dist_when_distance_not_ready() -> None:
 
 
 def test_pushing_finishes_after_push_distance_reached() -> None:
-    machine = build_test_config(initial_state=SMState.PUSHING)
+    machine = build_test_config(initial_state=SM.PUSHING)
     machine.start_push(0.0, 0.0)
 
     result = machine.step(
@@ -148,7 +160,7 @@ def test_pushing_finishes_after_push_distance_reached() -> None:
 
 
 def test_align_states_return_to_idle_when_target_lost() -> None:
-    machine = build_test_config(initial_state=SMState.ALIGN_DX)
+    machine = build_test_config(initial_state=SM.ALIGN_DX)
 
     result = machine.step(build_inputs(None))
 
@@ -156,7 +168,7 @@ def test_align_states_return_to_idle_when_target_lost() -> None:
 
 
 def test_reset_returns_machine_to_idle() -> None:
-    machine = build_test_config(initial_state=SMState.PUSHING)
+    machine = build_test_config(initial_state=SM.PUSHING)
     machine.start_push(1.0, 2.0)
 
     machine.reset()
@@ -168,8 +180,8 @@ def test_reset_returns_machine_to_idle() -> None:
 def test_debug_logger_outputs_transition_reason() -> None:
     events = []
     machine = VisionStateMachine(
-        build_test_config(initial_state=SMState.ALIGN_DIST).config,
-        initial_state=SMState.ALIGN_DIST,
+        build_test_config(initial_state=SM.ALIGN_DIST).config,
+        initial_state=SM.ALIGN_DIST,
         debug_sink=events.append,
     )
 
@@ -200,7 +212,7 @@ def test_set_state_accepts_wrapped_transition_spec() -> None:
 def test_module_can_load_without_typing_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = Path("src/services/vision_state_machine.py").read_text(encoding="utf-8")
+    source = Path("src/vision/state_machine.py").read_text(encoding="utf-8")
     real_import = __import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):

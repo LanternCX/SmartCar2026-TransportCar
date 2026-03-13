@@ -13,17 +13,29 @@ import time
 # 上电启动时间延时
 time.sleep_ms(50)
 # 选择学习板上的一号拨码开关作为启动选择开关
-boot_select = Pin("D8", Pin.IN, pull=Pin.PULL_UP_47K)
+# D8 代表 PID 参数识别程序 打开状态为 0 关闭状态为 1
+pid_ident = Pin("D8", Pin.IN, pull=Pin.PULL_UP_47K)
+# D9 代表陀螺仪校准程序 打开状态为 0 关闭状态为 1
+gyro_cal = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
 
-# 如果拨码开关打开 对应引脚拉低 就启动用户文件
-if boot_select.value() == 0:
+# 0 1 代表执行 PID 参数识别程序
+if pid_ident.value() == 0 and gyro_cal.value() == 1:
     try:
         os.chdir("/flash")
         execfile("script/pid_identify.py")
     except:
         print("File not found.")
 
-if boot_select.value() == 1:
+# 1 0 代表执行陀螺仪校准程序
+if pid_ident.value() == 1 and gyro_cal.value() == 0:
+    try:
+        os.chdir("/flash")
+        execfile("script/calibrate_gyro.py")
+    except:
+        print("File not found.")
+
+# 1 1 代表执行遥控器控制程序
+if pid_ident.value() == 1 and gyro_cal.value() == 1:
     try:
         os.chdir("/flash")
         execfile("script/remote_control.py")

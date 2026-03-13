@@ -3,6 +3,7 @@
 初始化搬运车控制系统并启动 5ms 周期的控制循环.
 支持通过 UART3 和 UART6 接收运动指令和查询请求.
 """
+
 from smartcar import ticker
 from config.params import TICK_MS
 from services.transport_car import TransportCar
@@ -14,7 +15,9 @@ car.uart3.write("Creating ticker...\r\n")
 pit1 = ticker(1)
 
 # 注册编码器和 IMU 到 ticker 的采集列表,驱动周期更新
-capture_items = [state["encoder"] for state in car.wheel_states]
+chassis_state = car.chassis_state
+assert chassis_state is not None
+capture_items = [state["encoder"] for state in chassis_state.wheel_states]
 capture_items.append(car.imu)
 pit1.capture_list(*capture_items)
 pit1.callback(car.mark_tick)

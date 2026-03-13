@@ -17,13 +17,13 @@ def _module_path(relative_path: str) -> Path:
     return Path(__file__).resolve().parents[3] / relative_path
 
 
-def _install_services_package() -> ModuleType:
-    """确保 `services` 包对象存在,便于手动装载模块."""
-    package = sys.modules.get("services")
+def _install_vision_package() -> ModuleType:
+    """确保 `vision` 包对象存在,便于手动装载模块."""
+    package = sys.modules.get("vision")
     if package is None:
-        package = ModuleType("services")
-        package.__path__ = []  # type: ignore[attr-defined]
-        sys.modules["services"] = package
+        package = ModuleType("vision")
+        package.__path__ = [str(_module_path("src/vision"))]  # type: ignore[attr-defined]
+        sys.modules["vision"] = package
     return package
 
 
@@ -54,59 +54,59 @@ def test_vision_protocol_module_loads_without_typing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _block_typing_import(monkeypatch)
-    services_pkg = _install_services_package()
+    vision_pkg = _install_vision_package()
 
-    previous_module = sys.modules.pop("services.vision_protocol", None)
+    previous_module = sys.modules.pop("vision.protocol", None)
     try:
         module = _load_module_from_path(
-            "services.vision_protocol",
-            _module_path("src/services/vision_protocol.py"),
+            "vision.protocol",
+            _module_path("src/vision/protocol.py"),
         )
-        setattr(services_pkg, "vision_protocol", module)
+        setattr(vision_pkg, "protocol", module)
         assert hasattr(module, "VisionProtocol")
     finally:
         if previous_module is not None:
-            sys.modules["services.vision_protocol"] = previous_module
-            setattr(services_pkg, "vision_protocol", previous_module)
+            sys.modules["vision.protocol"] = previous_module
+            setattr(vision_pkg, "protocol", previous_module)
         else:
-            sys.modules.pop("services.vision_protocol", None)
-            if hasattr(services_pkg, "vision_protocol"):
-                delattr(services_pkg, "vision_protocol")
+            sys.modules.pop("vision.protocol", None)
+            if hasattr(vision_pkg, "protocol"):
+                delattr(vision_pkg, "protocol")
 
 
 def test_vision_state_machine_module_loads_without_typing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _block_typing_import(monkeypatch)
-    services_pkg = _install_services_package()
+    vision_pkg = _install_vision_package()
 
-    previous_protocol = sys.modules.pop("services.vision_protocol", None)
-    previous_machine = sys.modules.pop("services.vision_state_machine", None)
+    previous_protocol = sys.modules.pop("vision.protocol", None)
+    previous_machine = sys.modules.pop("vision.state_machine", None)
     try:
         protocol_module = _load_module_from_path(
-            "services.vision_protocol",
-            _module_path("src/services/vision_protocol.py"),
+            "vision.protocol",
+            _module_path("src/vision/protocol.py"),
         )
-        setattr(services_pkg, "vision_protocol", protocol_module)
+        setattr(vision_pkg, "protocol", protocol_module)
         module = _load_module_from_path(
-            "services.vision_state_machine",
-            _module_path("src/services/vision_state_machine.py"),
+            "vision.state_machine",
+            _module_path("src/vision/state_machine.py"),
         )
-        setattr(services_pkg, "vision_state_machine", module)
+        setattr(vision_pkg, "state_machine", module)
         assert hasattr(module, "VisionStateMachine")
     finally:
         if previous_protocol is not None:
-            sys.modules["services.vision_protocol"] = previous_protocol
-            setattr(services_pkg, "vision_protocol", previous_protocol)
+            sys.modules["vision.protocol"] = previous_protocol
+            setattr(vision_pkg, "protocol", previous_protocol)
         else:
-            sys.modules.pop("services.vision_protocol", None)
-            if hasattr(services_pkg, "vision_protocol"):
-                delattr(services_pkg, "vision_protocol")
+            sys.modules.pop("vision.protocol", None)
+            if hasattr(vision_pkg, "protocol"):
+                delattr(vision_pkg, "protocol")
 
         if previous_machine is not None:
-            sys.modules["services.vision_state_machine"] = previous_machine
-            setattr(services_pkg, "vision_state_machine", previous_machine)
+            sys.modules["vision.state_machine"] = previous_machine
+            setattr(vision_pkg, "state_machine", previous_machine)
         else:
-            sys.modules.pop("services.vision_state_machine", None)
-            if hasattr(services_pkg, "vision_state_machine"):
-                delattr(services_pkg, "vision_state_machine")
+            sys.modules.pop("vision.state_machine", None)
+            if hasattr(vision_pkg, "state_machine"):
+                delattr(vision_pkg, "state_machine")

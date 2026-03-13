@@ -29,16 +29,16 @@ def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
 builtins.__import__ = blocked_import
 
 modules = [
-    'services.command_router',
+    'services.commanding.router',
     'diagnostics.manager',
     'diagnostics.sink',
-    'services.commands.cmd_log_profile',
-    'services.commands.cmd_log_level',
-    'services.commands.cmd_log_filter',
-    'services.commands.cmd_log_modules',
-    'services.commands.cmd_log_color',
-    'services.commands.cmd_log_reset',
-    'services.commands.query_log',
+    'services.commanding.handlers.cmd_log_profile',
+    'services.commanding.handlers.cmd_log_level',
+    'services.commanding.handlers.cmd_log_filter',
+    'services.commanding.handlers.cmd_log_modules',
+    'services.commanding.handlers.cmd_log_color',
+    'services.commanding.handlers.cmd_log_reset',
+    'services.commanding.handlers.query_log',
 ]
 
 for module_name in modules:

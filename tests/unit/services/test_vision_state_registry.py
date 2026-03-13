@@ -2,8 +2,8 @@
 
 import pytest
 
-from services.vision_state_defs import SM, SMState, VisionTransitionReason
-from services.vision_state_registry import vision_state_registry
+from vision.state_defs import SM, SMState, VisionTransitionReason
+from vision.state_registry import vision_state_registry
 
 
 pytestmark = pytest.mark.unit

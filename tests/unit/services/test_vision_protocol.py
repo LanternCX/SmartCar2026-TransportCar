@@ -2,7 +2,7 @@
 
 import pytest
 
-from services.vision_protocol import VisionObservation, VisionProtocol
+from vision.protocol import VisionObservation, VisionProtocol
 
 
 pytestmark = pytest.mark.unit
@@ -26,6 +26,19 @@ def test_parse_bbox_packet_from_uart6() -> None:
     assert parsed.observation.width == 40.0
     assert parsed.observation.height == 70.0
     assert parsed.observation.timestamp_ms == 1000
+
+
+def test_bbox_field_order_does_not_change_visual_consumption_priority() -> None:
+    protocol = VisionProtocol(timeout_ms=200)
+
+    parsed = protocol.try_parse_observation(
+        "bottom=90,right=140,top=20,left=100", source="uart6", now_ms=1000
+    )
+
+    assert parsed.consumed is True
+    assert parsed.observation is not None
+    assert parsed.observation.left == 100.0
+    assert parsed.observation.bottom == 90.0
 
 
 def test_legacy_xy_packet_is_consumed_without_caching_observation() -> None:

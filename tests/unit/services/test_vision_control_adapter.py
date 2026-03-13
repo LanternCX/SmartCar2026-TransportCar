@@ -2,7 +2,8 @@
 
 import pytest
 
-from services.vision_state_machine import VisionControlIntent, resolve_relative_intent
+from vision.state_machine import VisionControlIntent
+from vision.transforms import resolve_relative_intent
 
 
 pytestmark = pytest.mark.unit

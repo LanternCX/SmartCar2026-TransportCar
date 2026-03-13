@@ -1,8 +1,11 @@
 """命令处理器契约测试使用的假对象."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
-from diagnostics.manager import LogManager, QueryUARTLike, SnapshotBuilder
+from diagnostics.manager import LogManager, QueryUARTLike
+from control.chassis_state import ChassisState
+from services.runtime.diagnostics_facade import DiagnosticsFacade
+from services.commanding.session import CommandSession
 
 
 class FakeUART:
@@ -89,49 +92,112 @@ class FakeVisionStateMachine:
         self.reset_called = True
 
 
-def _empty_snapshot() -> Dict[str, object]:
-    """返回空诊断快照."""
-    return {}
+class FakeVisionCoordinator:
+    """视觉协调器假对象."""
+
+    def __init__(self) -> None:
+        self.clear_runtime_called = False
+        self.resolved_target = None
+
+    def clear_runtime(self) -> None:
+        self.clear_runtime_called = True
+
+    def build_snapshot(self, _now_ms: int):
+        return {
+            "state": "UNKNOWN",
+            "obs_age_ms": None,
+            "obs_left": None,
+            "obs_top": None,
+            "obs_right": None,
+            "obs_bottom": None,
+            "obs_center_x": None,
+            "obs_center_y": None,
+            "target_x": None,
+            "target_y": None,
+            "target_angle": None,
+        }
 
 
 class FakeCommandContext:
     """命令与查询处理器使用的最小上下文假对象."""
 
-    def __init__(self) -> None:
-        self.command_lock: bool = False
-        self.last_cmd: Dict[str, float] = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-        self._pending_dx: Optional[float] = None
-        self._pending_dy: Optional[float] = None
-        self._pending_d_angle: Optional[float] = None
-        self._rear_mode_changed: bool = False
-        self.rear_only_mode: bool = False
+    def __init__(self, reply_uart_name: str = "uart6") -> None:
+        self.session = CommandSession()
+        self.command_session = self.session
         self.uart3: FakeUART = FakeUART()
         self.uart6: FakeUART = FakeUART()
-        self.odometry: FakeOdometry = FakeOdometry()
-        self.heading_est: float = 0.0
-        self.heading_target: float = 0.0
-        self.yaw_pid: FakeYawPID = FakeYawPID()
-        self.yaw_integral: float = 0.0
-        self.q_est: FakeQuaternion = FakeQuaternion()
-        self.last_yaw_rad: float = 0.0
-        self.gyro_lpf: FakeLPF = FakeLPF()
-        self.vision_protocol: FakeVisionProtocol = FakeVisionProtocol()
-        self.vision_state_machine: FakeVisionStateMachine = FakeVisionStateMachine()
-        self._vision_step_result: object = object()
-        self._vision_resolved_target: object = object()
-        self._query_response_uart: QueryUARTLike = self.uart6
+        self.reply_uart: QueryUARTLike = cast(
+            QueryUARTLike, getattr(self, reply_uart_name)
+        )
+        self.boot_time_ms: int = 0
+        self.last_exception_text: str = "none"
+        self.vision_coordinator: FakeVisionCoordinator = FakeVisionCoordinator()
         self.logger_manager: LogManager = LogManager()
-        self.wheel_states = [
-            {"controller": FakeController(), "duty": 9.0},
-            {"controller": FakeController(), "duty": -3.0},
+        self.tick_count: int = 0
+        self.last_loop_dt_us: int = 0
+        self.max_loop_dt_us: int = 0
+        self.loop_dt_total_us: int = 0
+        self.loop_overrun_count: int = 0
+        wheel_states = [
+            {"name": "m", "controller": FakeController(), "duty": 9.0},
+            {"name": "l", "controller": FakeController(), "duty": -3.0},
         ]
-        self.build_health_snapshot: SnapshotBuilder = _empty_snapshot
-        self.build_tick_snapshot: SnapshotBuilder = _empty_snapshot
-        self.build_imu_snapshot: SnapshotBuilder = _empty_snapshot
-        self.build_encoder_snapshot: SnapshotBuilder = _empty_snapshot
-        self.build_motor_snapshot: SnapshotBuilder = _empty_snapshot
-        self.build_vision_snapshot: SnapshotBuilder = _empty_snapshot
+        self.chassis_state = ChassisState(
+            odometry=FakeOdometry(),
+            heading_est=0.0,
+            heading_target=0.0,
+            yaw_pid=FakeYawPID(),
+            yaw_integral=0.0,
+            q_est=FakeQuaternion(),
+            last_yaw_rad=0.0,
+            gyro_lpf=FakeLPF(),
+            imu_data=[0.0] * 6,
+            target_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+            wheel_states=wheel_states,
+        )
+
+    def reply(self, text: str) -> None:
+        """向当前 query 串口写回响应."""
+        self.get_query_uart().write(text)
+
+    def get_diagnostics_facade(self):
+        """返回诊断 facade, 供 query handler 使用."""
+        facade = getattr(self, "_diagnostics_facade", None)
+        if facade is None:
+            facade = DiagnosticsFacade(self)
+            self._diagnostics_facade = facade
+        return facade
+
+    def now_ms(self) -> int:
+        """返回用于 diagnostics facade 的当前毫秒数."""
+        return 1000
+
+    def reset_runtime(self) -> None:
+        """按命令子系统语义复位运行时状态."""
+        state = self.chassis_state
+        odometry = state.odometry
+        yaw_pid = state.yaw_pid
+        q_est = state.q_est
+        gyro_lpf = state.gyro_lpf
+        if odometry is None or yaw_pid is None or q_est is None or gyro_lpf is None:
+            raise AssertionError("fake context missing chassis state dependencies")
+        odometry.reset()
+        state.heading_est = 0.0
+        state.heading_target = 0.0
+        yaw_pid.reset()
+        state.yaw_integral = 0.0
+        q_est.w = 1.0
+        q_est.x = 0.0
+        q_est.y = 0.0
+        q_est.z = 0.0
+        state.last_yaw_rad = 0.0
+        gyro_lpf.reset(0.0)
+        for state in state.wheel_states:
+            state["controller"].reset()
+            state["duty"] = 0.0
+        self.session.reset_runtime_state()
+        self.vision_coordinator.clear_runtime()
 
     def get_query_uart(self) -> QueryUARTLike:
         """返回当前查询响应应写入的串口."""
-        return getattr(self, "_query_response_uart", self.uart6)
+        return cast(QueryUARTLike, getattr(self, "reply_uart", self.uart6))

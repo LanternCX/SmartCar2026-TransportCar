@@ -47,8 +47,10 @@
 
 1. 确保设备已刷入当前分支代码
 2. 在主机执行：`python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem1101`
-3. 预期输出包含：`status=ok reason=ok`、`status status=ok`、`queries ...`、`smoke init=1 step=1 ...`
-4. 若失败，记录 `status`、`reason` 与完整 smoke 输出
+3. 预期输出包含：`status=ok reason=ok`、`status status=ok`、`queries count=9 missing=none`
+4. 当前基线默认接受：`smoke mode=lite init=0 queries=1 step=0 tick_count=0 snapshots=none`
+5. 若板端内存预算允许 full runtime smoke, 可额外记录 `mode=full init=1 step=1 ...`, 但需单独注明
+6. 若失败，记录 `status`、`reason` 与完整 smoke 输出
 
 ## 场景 H：Stage 3 `uart3` 人工调试
 
@@ -57,6 +59,7 @@
 3. 人工发送 `?health`、`?tick`、`?imu`、`?enc`、`?motor`、`?vision`、`?lock`、`?pos`
 4. 预期这些查询都从 `UART3` 收到结构化回包
 5. 如需进一步排查，再结合动作命令、现场现象和 AI 建议记录结论
+6. 若本轮经用户明确要求跳过 Stage 3，则将本场景标记为 `SKIPPED`，并在独立 HIL 记录中说明剩余风险
 
 ## 证据记录
 
