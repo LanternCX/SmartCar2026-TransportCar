@@ -5,6 +5,7 @@ import math
 import time
 
 from machine import Pin
+from config.boot_role import get_vehicle_role
 from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController, PositionalPIDController
 from control.pid_math import clamp, reset_pi_state
@@ -39,6 +40,8 @@ from config.params import (
     GYRO_OFFSET_FILE,
     PID_MAP,
     VISION_OBSERVATION_TIMEOUT_MS,
+    VISION_CAMERA_POLL_ORDER,
+    VISION_ROLE_CAMERA_PRIORITIES,
     VISION_TARGET_BOTTOM_PX,
     VISION_TARGET_CENTER_X_PX,
     VISION_ANGLE_KP,
@@ -75,7 +78,7 @@ from vision.debug import build_logger_debug_sink
 from vision.protocol import VisionProtocol
 from vision.state_registry import vision_state_registry
 from vision.state_machine import VisionStateConfig, VisionStateMachine
-from vision.transforms import normalize_angle
+from vision.transforms import normalize_angle, select_state_machine_input
 import services.commanding.handlers as _commanding_handlers
 
 
@@ -110,6 +113,98 @@ class _NullMotor:
         self.last_duty = int(value)
 
 
+class _VehicleRoleProfile:
+    """车辆角色 profile 的单一 owner."""
+
+    def __init__(self, vehicle_role: str):
+        """根据角色构造运行期开关集合."""
+        role = str(vehicle_role).strip().lower()
+        if role not in ("main", "aux"):
+            raise ValueError("unsupported vehicle role: %s" % role)
+        main_enabled = role == "main"
+        self.vehicle_role = role
+        self.vision_processing_enabled = main_enabled
+        self.dual_camera_polling_enabled = main_enabled
+        self.single_task_state_machine_enabled = main_enabled
+
+
+class _DisabledVisionCoordinator:
+    """辅车 profile 使用的禁用视觉协调器."""
+
+    def __init__(self):
+        """初始化空视觉运行时状态."""
+        self.protocol = None
+        self.state_machine = None
+        self.step_result = None
+        self.resolved_target = None
+
+    def consume_uart_line(self, _line: str, _source: str, _now_ms: int) -> bool:
+        """辅车不消费任何视觉报文, 交还命令链路处理."""
+        _ = (_source, _now_ms)
+        return VisionProtocol.is_reserved_payload(_line)
+
+    def refresh(
+        self,
+        now_ms: int,
+        heading_deg: float,
+        odom_x: float,
+        odom_y: float,
+        command_lock: bool,
+        selected_input=None,
+    ):
+        """辅车 profile 不推进视觉状态机."""
+        _ = (now_ms, heading_deg, odom_x, odom_y, command_lock, selected_input)
+        return VisionCoordinatorResultDisabled()
+
+    def clear_runtime(self) -> None:
+        """禁用协调器无需清理任何视觉状态."""
+        return None
+
+    def get_observation(self, now_ms: int):
+        """辅车 profile 始终无视觉观测."""
+        _ = now_ms
+        return None
+
+    def get_state_name(self) -> str:
+        """返回禁用状态名."""
+        return "DISABLED"
+
+    def build_snapshot(self, now_ms: int):
+        """返回禁用视觉快照."""
+        _ = now_ms
+        return {
+            "state": "DISABLED",
+            "obs_age_ms": None,
+            "obs_left": None,
+            "obs_top": None,
+            "obs_right": None,
+            "obs_bottom": None,
+            "obs_center_x": None,
+            "obs_center_y": None,
+            "target_x": None,
+            "target_y": None,
+            "target_angle": None,
+        }
+
+    def get_frame(self, camera_id: str, now_ms: int):
+        """辅车 profile 始终无视觉批次缓存."""
+        _ = (camera_id, now_ms)
+        return None
+
+
+class VisionCoordinatorResultDisabled:
+    """辅车禁用视觉推进时的空结果."""
+
+    def __init__(self):
+        """构造统一空返回值."""
+        self.step_result = None
+        self.resolved_target = None
+        self.released_heading_lock = False
+
+
+_DEFAULT_MAIN_ROLE_PROFILE = _VehicleRoleProfile("main")
+
+
 def _create_null_encoders():
     """构造三轮空编码器集合."""
     return {"m": _NullEncoder(), "l": _NullEncoder(), "r": _NullEncoder()}
@@ -139,13 +234,15 @@ class TransportCar:
                 break  # 检测到急停或其他致命错误
     """
 
-    def __init__(self, diagnostic_mode=False):
+    def __init__(self, diagnostic_mode=False, vehicle_role=None):
         """初始化搬运车所有组件.
 
         完成硬件初始化、滤波器和状态变量的构造,保持所有参数与旧版一致.
         包括电机、编码器、IMU、运动学、PID 控制器、串口等.
         """
         self.diagnostic_mode = bool(diagnostic_mode)
+        self.role_profile = self._build_role_profile(vehicle_role)
+        self._active_vision_target_role = None
 
         # 板载 LED 与停止开关
         self.led = Pin("C4", Pin.OUT, value=True)
@@ -205,9 +302,7 @@ class TransportCar:
         self.ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
         # IMU 零偏加载
-        imu_offsets = load_gyro_offsets(
-            GYRO_OFFSET_FILE, logger=lambda msg: self.log_system.info(msg)
-        )
+        imu_offsets = load_gyro_offsets(GYRO_OFFSET_FILE)
 
         # 轮组状态构造:滤波、PID、编码器/电机封装
         wheel_states = []
@@ -275,15 +370,7 @@ class TransportCar:
         self._router = _cmd_router
 
         # 视觉协议与状态机
-        vision_protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
-        vision_state_machine = VisionStateMachine(
-            self._build_vision_state_config(),
-            debug_sink=self._emit_vision_debug,
-        )
-        self.vision_coordinator = VisionCoordinator(
-            protocol=vision_protocol,
-            state_machine=vision_state_machine,
-        )
+        self.vision_coordinator = self._build_vision_coordinator()
         self.uart_ingress = UartIngressService(
             router=self._router,
             vision_coordinator=self.vision_coordinator,
@@ -314,6 +401,52 @@ class TransportCar:
         """
         self.ticker = ticker_obj
 
+    @property
+    def vehicle_role(self):
+        """返回当前 profile 的车辆角色."""
+        return self._get_role_profile().vehicle_role
+
+    @property
+    def vision_processing_enabled(self):
+        """返回当前 profile 是否开启视觉处理."""
+        return self._get_role_profile().vision_processing_enabled
+
+    @property
+    def dual_camera_polling_enabled(self):
+        """返回当前 profile 是否声明双摄轮询能力."""
+        return self._get_role_profile().dual_camera_polling_enabled
+
+    @property
+    def single_task_state_machine_enabled(self):
+        """返回当前 profile 是否启用唯一任务状态机."""
+        return self._get_role_profile().single_task_state_machine_enabled
+
+    def _get_role_profile(self):
+        """返回当前角色 profile, 缺失时按主车兼容桩对象."""
+        return getattr(self, "role_profile", _DEFAULT_MAIN_ROLE_PROFILE)
+
+    def _build_role_profile(self, vehicle_role):
+        """解析显式或 boot 暴露的车辆角色, 并构造 profile."""
+        role = vehicle_role
+        if role is None:
+            role = get_vehicle_role()
+        return _VehicleRoleProfile(role)
+
+    def _build_vision_coordinator(self):
+        """按车辆 profile 构造视觉协调器."""
+        if not self.vision_processing_enabled:
+            return _DisabledVisionCoordinator()
+        vision_protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
+        vision_state_machine = VisionStateMachine(
+            self._build_vision_state_config(),
+            debug_sink=self._emit_vision_debug,
+        )
+        return VisionCoordinator(
+            protocol=vision_protocol,
+            state_machine=vision_state_machine,
+            frame_logger=self._log_vision_frame_boundary,
+        )
+
     def _build_vision_state_config(self):
         """构造视觉状态机参数对象."""
         return VisionStateConfig(
@@ -341,6 +474,44 @@ class TransportCar:
     def _emit_vision_debug(self, event) -> None:
         """输出单条视觉状态迁移调试事件."""
         build_logger_debug_sink(self.log_vision)(event)
+
+    def _get_vision_camera_poll_order(self):
+        """返回当前双摄轮询顺序, 预算不足时优先避障相机."""
+        return list(VISION_CAMERA_POLL_ORDER)
+
+    def _get_vision_role_camera_priorities(self):
+        """返回视觉角色到物理相机的优先级映射."""
+        return VISION_ROLE_CAMERA_PRIORITIES
+
+    def _log_vision_poll(self, camera_id: str) -> None:
+        """记录一次视觉轮询请求边界."""
+        self.log_vision.debug("POLL camera=%s" % str(camera_id))
+
+    def _log_vision_frame_boundary(
+        self, camera_id: str, frame_id: str, detections_count: int
+    ) -> None:
+        """记录单相机帧结束边界和检测数量."""
+        self.log_vision.info(
+            "FRAME camera=%s frame=%s end detections=%d"
+            % (str(camera_id), str(frame_id), int(detections_count))
+        )
+
+    def _poll_vision_cameras(self, poll_budget=None):
+        """按当前 profile 轮询视觉相机并返回本拍发出的查询顺序."""
+        if not self.dual_camera_polling_enabled:
+            return []
+        self._ensure_vision_coordinator()
+        if poll_budget is None:
+            poll_budget = len(self._get_vision_camera_poll_order())
+        budget = int(poll_budget)
+        if budget <= 0:
+            return []
+        polled = []
+        for camera_id in self._get_vision_camera_poll_order()[:budget]:
+            self._log_vision_poll(camera_id)
+            self.uart6.write(VisionProtocol.build_frame_query(camera_id) + "\r\n")
+            polled.append(camera_id)
+        return polled
 
     def _emit_error_log(self, message: str) -> None:
         """记录结构化错误日志并更新最近异常文本."""
@@ -459,6 +630,32 @@ class TransportCar:
             return None
         return getattr(coordinator, "resolved_target", None)
 
+    def _select_vision_state_machine_input(self, now_ms: int):
+        """从双摄批次中挑选本拍状态机输入."""
+        coordinator = self._ensure_vision_coordinator()
+        active_target_role = getattr(self, "_active_vision_target_role", None)
+        camera_frames = {}
+        if hasattr(coordinator, "get_frame"):
+            for camera_id in self._get_vision_camera_poll_order():
+                frame = coordinator.get_frame(camera_id, now_ms)
+                if frame is not None:
+                    camera_frames[str(camera_id)] = frame
+        has_frame_batches = bool(camera_frames)
+        selected = select_state_machine_input(
+            camera_frames=camera_frames,
+            active_target_role=active_target_role,
+            role_camera_priorities=self._get_vision_role_camera_priorities(),
+        )
+        if (
+            not has_frame_batches
+            and selected.observation is None
+            and hasattr(coordinator, "get_observation")
+        ):
+            selected.observation = coordinator.get_observation(now_ms)
+        if selected.target_role is not None:
+            self._active_vision_target_role = selected.target_role
+        return selected
+
     def get_diagnostics_facade(self):
         """返回当前运行时诊断 facade."""
         facade = getattr(self, "_diagnostics_facade", None)
@@ -469,8 +666,12 @@ class TransportCar:
 
     def _refresh_vision_target(self, now_ms=None):
         """推进视觉状态机并刷新当前视觉目标."""
+        if not self.vision_processing_enabled:
+            return
         if now_ms is None:
             now_ms = self._now_ms()
+
+        self._poll_vision_cameras()
 
         coordinator = self._ensure_vision_coordinator()
         session = self.command_session
@@ -479,12 +680,14 @@ class TransportCar:
             return
         odometry = chassis_state.odometry
         heading_est = float(chassis_state.heading_est or 0.0)
+        selected_input = self._select_vision_state_machine_input(now_ms)
         refresh_result = coordinator.refresh(
             now_ms=now_ms,
             heading_deg=heading_est,
             odom_x=float(odometry.x if odometry is not None else 0.0),
             odom_y=float(odometry.y if odometry is not None else 0.0),
             command_lock=session.command_lock,
+            selected_input=selected_input,
         )
         released_heading_lock = bool(refresh_result.released_heading_lock)
         if released_heading_lock:
@@ -494,6 +697,11 @@ class TransportCar:
             if yaw_pid is not None:
                 yaw_pid.reset()
             chassis_state.yaw_integral = 0.0
+        if (
+            refresh_result.resolved_target is None
+            and getattr(selected_input, "target_role", None) is None
+        ):
+            self._active_vision_target_role = None
 
     def _get_active_position_targets(self):
         """返回当前激活控制源的位置目标."""
@@ -820,15 +1028,10 @@ class TransportCar:
         """返回视觉协调器, 缺失时按当前依赖懒构造."""
         coordinator = getattr(self, "vision_coordinator", None)
         if coordinator is None:
-            protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
-            state_machine = VisionStateMachine(
-                self._build_vision_state_config(),
-                debug_sink=self._emit_vision_debug,
-            )
-            coordinator = VisionCoordinator(
-                protocol=protocol, state_machine=state_machine
-            )
+            coordinator = self._build_vision_coordinator()
             self.vision_coordinator = coordinator
+        elif hasattr(coordinator, "frame_logger"):
+            coordinator.frame_logger = self._log_vision_frame_boundary
         return coordinator
 
     def _ensure_uart_ingress(self):

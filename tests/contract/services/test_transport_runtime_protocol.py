@@ -218,14 +218,161 @@ def build_runtime_car():
 def test_uart6_visual_frame_is_consumed_before_command_routing() -> None:
     car = build_runtime_car()
     routed = []
-    car.apply_command = lambda line: routed.append(line)
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
 
-    car._handle_uart_line("left=100,top=20,right=140,bottom=90", source="uart6")
+    car._handle_uart_line(
+        "camera_id=front,frame_id=12,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=front,frame_id=12,category=follower,left=150,top=25,right=190,bottom=95",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=front,frame_id=12,frame_end=1", source="uart6")
 
     observation = car.vision_coordinator.protocol.get_observation(now_ms=1000)
+    frame = car.vision_coordinator.protocol.get_frame(now_ms=1000)
     assert observation is not None
-    assert observation.center_x == 120.0
+    assert observation.center_x == 170.0
+    assert frame is not None
+    assert [item.category for item in frame.detections] == ["cargo", "follower"]
     assert routed == []
+
+
+def test_uart6_detection_messages_do_not_publish_observation_until_frame_end() -> None:
+    car = build_runtime_car()
+    routed = []
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
+
+    car._handle_uart_line(
+        "camera_id=front,frame_id=21,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+
+    assert car.vision_coordinator.protocol.get_observation(now_ms=1000) is None
+    assert car.vision_coordinator.protocol.get_frame(now_ms=1000) is None
+    assert routed == []
+
+
+def test_uart6_explicit_frame_end_commits_empty_frame() -> None:
+    car = build_runtime_car()
+    routed = []
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
+
+    car._handle_uart_line("camera_id=front,frame_id=13,frame_end=1", source="uart6")
+
+    frame = car.vision_coordinator.protocol.get_frame(now_ms=1000)
+    observation = car.vision_coordinator.protocol.get_observation(now_ms=1000)
+    assert frame is not None
+    assert frame.camera_id == "front"
+    assert frame.frame_id == "13"
+    assert frame.detections == []
+    assert observation is None
+    assert routed == []
+
+
+def test_uart6_invalidated_batch_does_not_publish_jumped_frame() -> None:
+    car = build_runtime_car()
+    routed = []
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
+
+    car._handle_uart_line(
+        "camera_id=front,frame_id=21,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=front,frame_id=22,category=follower,left=150,top=25,right=190,bottom=95",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=front,frame_id=22,category=cargo,left=200,top=30,right=240,bottom=100",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=front,frame_id=22,frame_end=1", source="uart6")
+
+    assert car.vision_coordinator.protocol.get_frame(now_ms=1000) is None
+    assert car.vision_coordinator.protocol.get_observation(now_ms=1000) is None
+
+    car._handle_uart_line(
+        "camera_id=front,frame_id=23,category=follower,left=160,top=35,right=210,bottom=110",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=front,frame_id=23,frame_end=1", source="uart6")
+
+    frame = car.vision_coordinator.protocol.get_frame(now_ms=1000)
+    assert frame is not None
+    assert frame.frame_id == "23"
+    assert [item.category for item in frame.detections] == ["follower"]
+    assert routed == []
+
+
+def test_uart6_invalidated_old_frame_end_does_not_publish_empty_frame() -> None:
+    car = build_runtime_car()
+    routed = []
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
+
+    car._handle_uart_line(
+        "camera_id=front,frame_id=21,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=front,frame_id=22,category=follower,left=150,top=25,right=190,bottom=95",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=front,frame_id=21,frame_end=1", source="uart6")
+
+    assert car.vision_coordinator.protocol.get_frame(now_ms=1000) is None
+    assert car.vision_coordinator.protocol.get_observation(now_ms=1000) is None
+    assert routed == []
+
+
+def test_uart6_camera_id_jump_invalidates_batch_until_clean_new_frame() -> None:
+    car = build_runtime_car()
+    routed = []
+    car.apply_command = lambda line, source="uart6": routed.append((source, line))
+
+    car._handle_uart_line(
+        "camera_id=front,frame_id=31,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=rear,frame_id=31,category=follower,left=150,top=25,right=190,bottom=95",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=rear,frame_id=31,frame_end=1", source="uart6")
+    car._handle_uart_line("camera_id=front,frame_id=31,frame_end=1", source="uart6")
+
+    assert car.vision_coordinator.protocol.get_frame(now_ms=1000) is None
+    assert car.vision_coordinator.protocol.get_observation(now_ms=1000) is None
+
+    car._handle_uart_line(
+        "camera_id=rear,frame_id=32,category=follower,left=160,top=35,right=210,bottom=110",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=rear,frame_id=32,frame_end=1", source="uart6")
+
+    frame = car.vision_coordinator.protocol.get_frame(now_ms=1000)
+    assert frame is not None
+    assert frame.camera_id == "rear"
+    assert frame.frame_id == "32"
+    assert [item.category for item in frame.detections] == ["follower"]
+    assert routed == []
+
+
+def test_uart6_frame_query_is_reserved_for_vision_protocol() -> None:
+    car = build_runtime_car()
+    routed_queries = []
+    original_handle_query = car._router.handle_query
+    car._router.handle_query = lambda token, ctx: routed_queries.append(
+        (token, ctx.source)
+    )
+
+    try:
+        car._handle_uart_line("?frame=front", source="uart6")
+    finally:
+        car._router.handle_query = original_handle_query
+
+    assert routed_queries == []
 
 
 def test_query_replies_to_original_uart_source() -> None:

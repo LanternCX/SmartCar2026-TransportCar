@@ -22,6 +22,12 @@ ANGLE_TOLERANCE = 5.0  # deg
 
 # 视觉状态机参数
 VISION_OBSERVATION_TIMEOUT_MS = 120
+VISION_CAMERA_POLL_ORDER = ("cam_b", "cam_a")
+VISION_ROLE_CAMERA_PRIORITIES = {
+    "follower": ("cam_a", "cam_b"),
+    "cargo": ("cam_a", "cam_b"),
+    "obstacle": ("cam_b", "cam_a"),
+}
 VISION_TARGET_CENTER_X_PX = 160.0
 VISION_TARGET_BOTTOM_PX = 240.0
 VISION_ANGLE_KP = 0.3

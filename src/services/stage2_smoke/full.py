@@ -8,7 +8,7 @@ def collect_full_transport_summary(tokens):
     from services.commanding.router import router
     from services.transport_car import TransportCar
 
-    car = TransportCar(diagnostic_mode=True)
+    car = TransportCar(diagnostic_mode=True, vehicle_role="main")
     registered = router.registered_query_tokens()
     missing = [name for name in tokens if name not in registered]
 

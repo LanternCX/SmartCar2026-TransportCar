@@ -105,7 +105,7 @@ def test_diagnostic_mode_skips_hardware_initializers(
         lambda _path, logger=None: [0.0] * 6,
     )
 
-    car = transport_car_module.TransportCar(diagnostic_mode=True)
+    car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
 
     assert car.diagnostic_mode is True
     assert car.imu is not None
@@ -120,7 +120,7 @@ def test_diagnostic_mode_skips_hardware_initializers(
 
 
 def test_diagnostic_mode_keeps_debug_query_tokens_registered() -> None:
-    car = transport_car_module.TransportCar(diagnostic_mode=True)
+    car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
 
     registered = set(car._router._query_handlers.keys())
 
@@ -137,9 +137,31 @@ def test_diagnostic_mode_wires_vision_transitions_to_breakpoint_sink(
         lambda _path, logger=None: [0.0] * 6,
     )
 
-    car = transport_car_module.TransportCar(diagnostic_mode=True)
+    car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
 
+    assert car.vision_coordinator.state_machine is not None
     assert car.vision_coordinator.state_machine._debug_sink == car._emit_vision_debug
+
+
+def test_aux_vehicle_profile_in_diagnostic_mode_disables_visual_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="aux")
+    car.handle_uart_line("left=10,top=20,right=40,bottom=60", source="uart6")
+
+    assert car.vehicle_role == "aux"
+    assert car.vision_processing_enabled is False
+    assert car.dual_camera_polling_enabled is False
+    assert car.single_task_state_machine_enabled is False
+    assert car.vision_coordinator.get_state_name() == "DISABLED"
+    assert car.vision_coordinator.get_observation(car.now_ms()) is None
 
 
 def test_stage2_smoke_probe_collects_safe_runtime_summary(
@@ -689,8 +711,9 @@ def test_stage2_full_transport_summary_uses_public_transport_entrypoint_and_rout
             return stage2_smoke_module.TOKENS
 
     class FakeCar:
-        def __init__(self, diagnostic_mode=False):
+        def __init__(self, diagnostic_mode=False, vehicle_role=None):
             self.diagnostic_mode = diagnostic_mode
+            self.vehicle_role = vehicle_role
             self.pit_flag = False
             self.tick_count = 1
             self.uart3 = stage2_smoke_module._CaptureUart()

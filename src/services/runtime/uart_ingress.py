@@ -28,7 +28,15 @@ class UartIngressService:
         if not line:
             return
 
+        protocol = getattr(self.vision_coordinator, "protocol", None)
         if line.startswith("?"):
+            if (
+                source == "uart6"
+                and protocol is not None
+                and hasattr(protocol, "is_reserved_query")
+                and protocol.is_reserved_query(line)
+            ):
+                return
             self.router.handle_query(line[1:], self.build_context(source))
             return
 

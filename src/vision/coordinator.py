@@ -17,17 +17,30 @@ class VisionRefreshResult:
 class VisionCoordinator:
     """拥有视觉协议缓存, 状态机推进和视觉快照构造."""
 
-    def __init__(self, protocol, state_machine):
+    def __init__(self, protocol, state_machine, frame_logger=None):
         self.protocol = protocol
         self.state_machine = state_machine
+        self.frame_logger = frame_logger
         self.step_result = None
         self.resolved_target = None
+        self._frames_by_camera = {}
+        self._selected_observation = None
 
     def consume_uart_line(self, line: str, source: str, now_ms: int) -> bool:
         """尝试消费一行串口输入中的视觉观测."""
+        previous_frame = getattr(self.protocol, "_latest_frame", None)
         parse_result = self.protocol.try_parse_observation(
             line, source=source, now_ms=now_ms
         )
+        latest_frame = getattr(self.protocol, "_latest_frame", None)
+        if latest_frame is not None and latest_frame is not previous_frame:
+            self._frames_by_camera[str(latest_frame.camera_id)] = latest_frame
+            if self.frame_logger is not None:
+                self.frame_logger(
+                    camera_id=str(latest_frame.camera_id),
+                    frame_id=str(latest_frame.frame_id),
+                    detections_count=len(latest_frame.detections),
+                )
         return bool(parse_result.consumed)
 
     def refresh(
@@ -37,6 +50,7 @@ class VisionCoordinator:
         odom_x: float,
         odom_y: float,
         command_lock: bool,
+        selected_input=None,
     ):
         """推进视觉状态机并刷新最新解析目标."""
         previous_target = self.resolved_target
@@ -45,12 +59,21 @@ class VisionCoordinator:
             return VisionRefreshResult(None, None, previous_target is not None)
 
         observation = self.protocol.get_observation(now_ms)
+        target_role = None
+        obstacle_summary = None
+        if selected_input is not None:
+            observation = selected_input.observation
+            target_role = selected_input.target_role
+            obstacle_summary = selected_input.obstacle_summary
+        self._selected_observation = observation
         inputs = VisionMachineInputs(
             observation=observation,
             heading_deg=heading_deg,
             odom_x=odom_x,
             odom_y=odom_y,
             now_ms=now_ms,
+            target_role=target_role,
+            obstacle_summary=obstacle_summary,
         )
         self.step_result = self.state_machine.step(inputs)
         self.resolved_target = resolve_relative_intent(
@@ -71,10 +94,22 @@ class VisionCoordinator:
         self.state_machine.reset()
         self.step_result = None
         self.resolved_target = None
+        self._frames_by_camera = {}
+        self._selected_observation = None
 
     def get_observation(self, now_ms: int):
         """返回仍在有效期内的最新观测."""
         return self.protocol.get_observation(now_ms)
+
+    def get_frame(self, camera_id: str, now_ms: int):
+        """返回指定相机仍在有效期内的最新检测批次."""
+        frame = self._frames_by_camera.get(str(camera_id))
+        if frame is None:
+            return None
+        if int(now_ms) - int(frame.timestamp_ms) > int(self.protocol.timeout_ms):
+            self._frames_by_camera.pop(str(camera_id), None)
+            return None
+        return frame
 
     def get_state_name(self) -> str:
         """返回当前视觉状态名."""
@@ -85,7 +120,7 @@ class VisionCoordinator:
 
     def build_snapshot(self, now_ms: int):
         """构造视觉观测和解析目标快照."""
-        observation = self.get_observation(now_ms)
+        observation = self._selected_observation
         snapshot = {
             "state": self.get_state_name(),
             "obs_age_ms": None,

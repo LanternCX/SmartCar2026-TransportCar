@@ -54,6 +54,16 @@
 
 注意: 视觉协议中也会出现 `x`、`y`,但它们表示图像平面像素坐标,不是世界坐标命令。两者的区分条件见第 4 节。
 
+### 2.4 上电入口与车辆角色约定
+
+- `boot.py` 的职责已拆分为两部分: `D8/D9` 只声明车辆角色, 按钮长按只决定启动脚本
+- `D8=1,D9=0` 表示主车, `D8=0,D9=1` 表示辅车
+- `D8/D9` 板级输入带上拉电阻, 因此读到 `1` 表示开关关闭(断开), 读到 `0` 表示开关闭合; 排障时必须区分“输入电平”和“物理开关状态”
+- `D8/D9` 若为 `0/0` 或 `1/1`, 视为非法角色组合, 启动阶段应安全失败, 不进入任何业务脚本
+- 上电长按按钮 1 进入 `script/pid_identify.py`
+- 上电长按按钮 2 进入 `script/calibrate_gyro.py`
+- 上电时未长按按钮则进入 `script/remote_control.py`, 且正常运行路径可读取 `VEHICLE_ROLE`
+
 ## 3. 模块 A：车模控制协议（遥控协议）
 
 ### 3.1 适用范围
@@ -208,61 +218,110 @@ RT1021 端已经支持本节描述的视觉协议；它是后续 vision 端重�
 
 换句话说,视觉协议传的是“观测”,不是“动作”。
 
-### 4.2 视觉上报方向
+### 4.2 视觉查询/响应方向
 
-- 主方向: `OpenArt -> RT1021`
-- 物理链路: OpenArt `UART(2)` -> RT1021 `UART6`
-- 推荐频率: 随 OpenArt 主循环持续发送最新观测
-- 每帧无单独 ACK,RT1021 直接消费最新观测
+- 主方向: `RT1021 -> OpenArt`, 由主车主动查询某个相机当前缓存帧
+- 物理链路: OpenArt `UART(2)` <-> RT1021 `UART6`
+- `camera_id` 只表示物理相机身份, 不表示职责相机
+- `category` 只表示检测类别, 可在不同物理相机上重复出现
+- 单次查询只点名一个相机, 被点名相机立即返回当前缓存帧结果
+- 未被点名相机在共享视觉 UART 上必须严格静默
+- 单次查询响应允许返回 `0..N` 条检测消息, 并必须带显式结束标记
 
-### 4.3 合法视觉帧
+### 4.3 查询格式与多检测响应格式
 
-RT1021 仅在以下条件同时满足时,才会将一行文本识别为“完整视觉观测帧”:
-
-1. 消息来源是 `UART6`
-2. 一行文本按逗号分割后,恰好只有四个键值对
-3. 四个键必须是 `left`、`top`、`right`、`bottom`
-4. 四个值都能解析成浮点数
-5. `right > left` 且 `bottom > top`
-
-合法示例:
+主车查询当前某个相机的缓存帧时, 发送:
 
 ```text
-left=100,top=20,right=140,bottom=90
-top=20,left=100,bottom=90,right=140
-left=100.5, top=19.0, right=141.5, bottom=90.0
+?frame=<camera_id>
+```
+
+例如:
+
+```text
+?frame=cam_a
+?frame=cam_b
+```
+
+约束:
+
+1. 单次查询只允许点名一个 `camera_id`
+2. 只有被点名相机会响应, 未被点名相机必须保持静默
+3. 响应中的所有检测消息都属于同一次查询的同一帧
+4. 无论该帧返回 `0` 条还是多条检测, 最后一条都必须是显式 `frame_end` 标记
+
+检测消息格式:
+
+```text
+camera_id=<camera_id>,frame_id=<frame_id>,category=<category>,left=<l>,top=<t>,right=<r>,bottom=<b>
+```
+
+帧结束标记格式:
+
+```text
+camera_id=<camera_id>,frame_id=<frame_id>,frame_end=1
 ```
 
 字段语义:
 
 | 字段 | 含义 | 单位 | 说明 |
 | :--- | :--- | :--- | :--- |
+| `camera_id` | 物理相机标识 | 文本 | 例如 `cam_a`、`cam_b`, 不表示职责 |
+| `frame_id` | 相机本地帧标识 | 文本或整数文本 | 同一次查询返回的多条检测必须一致 |
+| `category` | 检测类别 | 文本 | 例如 `cargo`、`follower`、`obstacle`, 可跨相机重复 |
 | `left` | 识别框左边界 | 像素 | 相对图像左边界定义 |
 | `top` | 识别框上边界 | 像素 | 相对图像上边界定义 |
 | `right` | 识别框右边界 | 像素 | 必须大于 `left` |
 | `bottom` | 识别框下边界 | 像素 | 必须大于 `top` |
+| `frame_end` | 当前帧响应结束标记 | 推荐 `1` | 不带 bbox, 仅用于声明本批次结束 |
+
+合法示例:
+
+```text
+?frame=cam_a
+camera_id=cam_a,frame_id=12,category=cargo,left=100,top=20,right=140,bottom=90
+camera_id=cam_a,frame_id=12,category=follower,left=150,top=25,right=190,bottom=95
+camera_id=cam_a,frame_id=12,frame_end=1
+
+?frame=cam_b
+camera_id=cam_b,frame_id=33,category=cargo,left=120,top=18,right=170,bottom=110
+camera_id=cam_b,frame_id=33,category=obstacle,left=20,top=30,right=80,bottom=140
+camera_id=cam_b,frame_id=33,frame_end=1
+```
+
+空结果示例:
+
+```text
+?frame=cam_a
+camera_id=cam_a,frame_id=13,frame_end=1
+```
 
 补充说明:
 
-- 文档只约定“发送识别框像素边界”,不约定 OpenArt 内部如何选目标。
 - 当前 OpenArt 在发送前已启用 `set_vflip(True)` 与 `set_hmirror(True)`; 因此 RT1021 收到的 `left,top,right,bottom` 已经是翻转后画面的像素坐标, 主控侧不应再次做上下或左右翻转。
-- `center_x`、`center_y`、`width`、`height` 由 RT1021 在本地从识别框派生,不需要由视觉端重复发送。
-- 当前协议不包含颜色、类别、置信度、目标角度等额外字段。
+- `center_x`、`center_y`、`width`、`height` 由 RT1021 在本地从识别框派生, 不需要由视觉端重复发送。
+- `category` 当前只作为协议字段保留, 主车如何消费多类结果由后续任务决定。
+- 为兼容旧单框状态机, RT1021 当前仍保留“提交后取该帧最后一条检测作为最新观测”的兼容入口, 但新的协议主语义已经升级为“同一帧检测集合”。
 
-### 4.4 不会被当作视觉帧的情况
+### 4.4 不会被当作有效视觉响应的情况
 
-以下消息不会形成有效完整框观测:
+以下消息会被视觉协议保留并吞掉, 但不会形成有效观测或有效帧结果:
 
 - 来源不是 `UART6`
-- 键数不是 4,例如 `x=120,y=80` 或 `left=100,top=20,right=140`
-- 出现非 `left/top/right/bottom` 的额外键
-- 出现重复键,例如 `left=1,left=2,top=3,bottom=4`
+- 旧 `x,y` 载荷或不完整 bbox 载荷
+- 多检测消息缺少 `camera_id`、`frame_id` 或 `category`
+- 同一条消息出现重复键
 - `right <= left` 或 `bottom <= top`
-- 任一值不是数字
+- 同一批次内 `camera_id` / `frame_id` 发生跳变
+- 缺少显式 `frame_end` 标记
+- `frame_end` 与当前缓存批次的 `camera_id` / `frame_id` 不匹配
+- 任一数值字段不是数字
+
+其中, 若某个尚未 `frame_end` 的批次中途出现 `camera_id` 或 `frame_id` 跳变, 则跳变后对应的整批消息会被视为失效批次; 直到后续出现一个新的干净批次前, 该失效批次的后续检测与 `frame_end` 都不会被提交为有效帧。
 
 重要兼容规则:
 
-> `UART6` 上凡是包含视觉字段名 `x/y/left/top/right/bottom` 的消息,都会先被视觉协议截获。只有完全合法的 `left,top,right,bottom` 会更新最新观测；旧 `x,y` 或不完整框会被直接丢弃,不再回落到遥控协议。
+> `UART6` 上凡是包含视觉字段名 `x/y/left/top/right/bottom/camera_id/frame_id/category/frame_end` 的消息, 都会先被视觉协议截获。只有合法单框兼容包或带显式 `frame_end` 的合法多检测批次会更新缓存；旧 `x,y`、不完整框或未结束批次会被直接丢弃, 不再回落到遥控协议。
 
 例如:
 
@@ -282,11 +341,13 @@ x=1,y=bad
 
 ### 4.5 RT1021 对视觉帧的消费规则
 
-- RT1021 只保留最新一帧完整视觉框观测,不会排队缓存历史帧
-- 若观测超过 `VISION_OBSERVATION_TIMEOUT_MS` 未更新,则视为目标丢失
-- 视觉观测被消费后,RT1021 会先在本地派生 `center_x`、`center_y`、`bottom` 等几何量,再驱动状态机生成连续控制意图并换算为当前位置/角度目标
-- 视觉链路默认不逐帧等待 `?lock`,因此比旧式“发命令 -> 等解锁 -> 再发下一条”更适合连续跟踪
-- 若此时外部离散命令已进入 `command_lock`,RT1021 会清空当前视觉缓存并重置视觉状态机,避免控制权冲突
+- RT1021 当前同时保留两个兼容视图: `latest_frame` 表示最近一帧已结束的检测集合, `latest_observation` 表示兼容旧状态机的最近单条观测
+- 只有收到显式 `frame_end` 后, 当前批次才会被提交为可消费帧
+- 若某帧 `0` 条检测, 也必须在收到 `frame_end` 后提交为空帧, 此时 `latest_observation` 保持为空
+- 若观测超过 `VISION_OBSERVATION_TIMEOUT_MS` 未更新, 则视为目标丢失
+- 视觉观测被消费后, RT1021 会先在本地派生 `center_x`、`center_y`、`bottom` 等几何量, 再驱动状态机生成连续控制意图并换算为当前位置/角度目标
+- Task 3 阶段先升级协议和 ingress 边界, 暂不在运行时引入真正的双摄轮询调度和批次选择缓存
+- 若此时外部离散命令已进入 `command_lock`, RT1021 会清空当前视觉缓存并重置视觉状态机, 避免控制权冲突
 
 ### 4.6 视觉状态诊断接口
 
@@ -323,22 +384,23 @@ DONE
 
 ### 4.7 推荐交互方式
 
-下面的交互方式是推荐重构目标,不是当前 `main.py` 已完全切换到的默认行为。
+下面的交互方式是当前重构目标。
 
-推荐的 OpenArt 端交互方式如下:
+推荐的交互方式如下:
 
 1. 初始化阶段可按需发送一次 `reset`
-2. 开始检测后,持续向 `UART6` 发送 `left=<...>,top=<...>,right=<...>,bottom=<...>`
-3. 不要在每一帧视觉循环里继续发送 `dx/dy/d_angle` 或调用“等待 `?lock` 解锁”的同步控制逻辑
-4. 如需调试当前联动状态,按需查询 `?vision`、`?lock`、`?pos`
+2. 主车通过 `?frame=<camera_id>` 查询单个相机当前缓存帧
+3. 被点名相机立即返回 `0..N` 条检测消息, 最后追加 `frame_end`
+4. 不要让未被点名相机自由持续发包
+5. 如需调试当前联动状态, 按需查询 `?vision`、`?lock`、`?pos`
 
 一个最小示例:
 
 ```text
 reset
-left=145,top=20,right=175,bottom=240
-left=146,top=20,right=174,bottom=239
-left=147,top=21,right=173,bottom=240
+?frame=cam_a
+camera_id=cam_a,frame_id=12,category=cargo,left=145,top=20,right=175,bottom=240
+camera_id=cam_a,frame_id=12,frame_end=1
 ?vision
 ```
 
@@ -350,13 +412,19 @@ left=147,top=21,right=173,bottom=240
 
 | 条件 | 消息语义 |
 | :--- | :--- |
-| 来自 `UART6`,且整行消息恰好只有 `left/top/right/bottom` 四个键 | 视觉完整框观测 |
-| 来自 `UART6`,且包含 `x/y/left/top/right/bottom` 但不满足完整框条件 | 废弃或不完整视觉载荷,会被丢弃 |
-| 其他情况（例如来自 `UART3`,或为 `vx/angle/rear` 等控制键） | 遥控协议中的控制命令 |
+| 来自 `UART6`, 且为 `?frame=<camera_id>` | 保留给视觉协议的单相机帧查询 |
+| 来自 `UART6`, 且整行消息恰好只有 `left/top/right/bottom` 四个键 | 旧单框兼容观测 |
+| 来自 `UART6`, 且消息含 `camera_id/frame_id/category` 与 bbox | 多检测帧中的单条检测 |
+| 来自 `UART6`, 且消息含 `camera_id/frame_id/frame_end` | 当前查询批次结束标记 |
+| 来自 `UART6`, 且包含视觉字段但不满足上述合法条件 | 废弃, 冲突或不完整视觉载荷, 会被丢弃 |
+| 其他情况（例如来自 `UART3`, 或为 `vx/angle/rear` 等控制键） | 遥控协议中的控制命令 |
 
 因此:
 
-- `UART6: left=100,top=20,right=140,bottom=90` -> 视觉观测
+- `UART6: ?frame=cam_a` -> 视觉查询, 不进入普通 query 路由
+- `UART6: left=100,top=20,right=140,bottom=90` -> 旧单框兼容观测
+- `UART6: camera_id=cam_a,frame_id=12,category=cargo,left=100,top=20,right=140,bottom=90` -> 当前帧中的单条检测
+- `UART6: camera_id=cam_a,frame_id=12,frame_end=1` -> 当前帧结束
 - `UART6: x=120,y=80` -> 旧视觉载荷,会被忽略
 - `UART3: x=120,y=80` -> 绝对位置命令
 - `UART6: vx=1` -> 速度命令
@@ -371,7 +439,7 @@ left=147,top=21,right=173,bottom=240
 - 轮询 `?lock`
 - 通过 `send_cmd_sync()` 实现“发一条、等完成、再发下一条”
 
-RT1021 当前仍兼容这些命令与查询,但旧 OpenArt 若继续通过 `UART6` 发送 `x,y`，将不会再驱动视觉状态机。视觉端必须同步升级到完整框协议。
+RT1021 当前仍兼容这些命令与查询, 但旧 OpenArt 若继续通过 `UART6` 发送 `x,y`, 将不会再驱动视觉状态机。新的视觉端应升级到“单次查询, 多条检测响应, 显式 frame_end”的协议。
 
 ### 5.3 对新 vision 重构的建议
 
@@ -379,7 +447,7 @@ RT1021 当前仍兼容这些命令与查询,但旧 OpenArt 若继续通过 `UART
 
 - OpenArt: 负责感知与目标选择
 - RT1021: 负责状态机、控制与动作编排
-- OpenArt 与 RT1021 之间的常态交互: `连续发送 left,top,right,bottom` + `按需查询诊断`
+- OpenArt 与 RT1021 之间的常态交互: `?frame=<camera_id>` / `camera_id,frame_id,category,bbox...` / `frame_end` + `按需查询诊断`
 
 这意味着 OpenArt 端可以逐步删除:
 

@@ -40,6 +40,19 @@ class LogRecord:
 
 def sanitize_log_text(text: str) -> str:
     """将日志字段规整为单行 ASCII 文本."""
+    text = str(text)
+    clean = True
+    for char in text:
+        code = ord(char)
+        if char == "\r" or char == "\n" or char == "\t":
+            clean = False
+            break
+        if code < 32 or code > 126:
+            clean = False
+            break
+    if clean:
+        return text
+
     chars = []
     for char in text:
         code = ord(char)

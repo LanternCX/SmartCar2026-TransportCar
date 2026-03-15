@@ -4,12 +4,16 @@
 支持通过 UART3 和 UART6 接收运动指令和查询请求.
 """
 
+from config.boot_role import get_vehicle_role
 from smartcar import ticker
 from config.params import TICK_MS
 from services.transport_car import TransportCar
 
 
-car = TransportCar()
+VEHICLE_ROLE = get_vehicle_role()
+
+
+car = TransportCar(vehicle_role=VEHICLE_ROLE)
 
 car.uart3.write("Creating ticker...\r\n")
 pit1 = ticker(1)

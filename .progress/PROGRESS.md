@@ -44,3 +44,5 @@ TBD
 | 2026-03-11-1 | 2026-03-11 | 修复 ORBITING 切出后的残留旋转与航向跨圈语义 | `.progress/entries/2026/2026-03-11-1.md` | vision, orbiting, rear-only, heading, transport-car |
 | 2026-03-13-1 | 2026-03-13 | 解耦 transport runtime 并收紧设备验证表述 | `.progress/entries/2026/2026-03-13-1.md` | transport-runtime, commanding, diagnostics, stage2, hil |
 | 2026-03-13-2 | 2026-03-13 | 修复 remote_control 启动脚本对旧 wheel_states 接口的依赖 | `.progress/entries/2026/2026-03-13-2.md` | remote-control, boot, ticker, transport-car, regression |
+| 2026-03-14-1 | 2026-03-14 | 推进双摄单状态机到目标选择与 HIL 留证模板 | `.progress/entries/2026/2026-03-14-1.md` | dual-camera, state-machine, vision, hil, transport-car |
+| 2026-03-15-1 | 2026-03-15 | 记录视觉链路 OOM 排障与换板结论 | `.progress/entries/2026/2026-03-15-1.md` | oom, memory-leak, diagnostics, uart6, vision, board, hardware, firmware |

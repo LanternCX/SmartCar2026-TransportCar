@@ -152,6 +152,7 @@ class FakeVisionCoordinator:
         self.resolved_target = cast(Any, None)
         self.next_resolved_target = cast(Any, None)
         self.next_released_heading_lock = False
+        self.last_selected_input = None
         self.protocol = types.SimpleNamespace(get_observation=lambda now_ms: None)
         self.state_machine = types.SimpleNamespace(state=SM.ALIGN_DX)
 
@@ -159,8 +160,17 @@ class FakeVisionCoordinator:
         self.consume_calls.append((line, source, now_ms))
         return line.startswith("left=")
 
-    def refresh(self, now_ms, heading_deg, odom_x, odom_y, command_lock):
+    def refresh(
+        self,
+        now_ms,
+        heading_deg,
+        odom_x,
+        odom_y,
+        command_lock,
+        selected_input=None,
+    ):
         self.refresh_calls.append((now_ms, heading_deg, odom_x, odom_y, command_lock))
+        self.last_selected_input = selected_input
         self.resolved_target = self.next_resolved_target
         return types.SimpleNamespace(
             step_result=self.step_result,
@@ -205,6 +215,7 @@ def build_transport_car():
     car = cast(Any, TransportCar.__new__(TransportCar))
     car.uart3 = FakeUART()
     car.uart6 = FakeUART()
+    car._active_vision_target_role = None
     car.logger_manager = LogManager(sinks=[UartSink(cast(Any, car.uart3))])
     car.log_vision = car.logger_manager.get_logger("vision.state")
     car.log_command = car.logger_manager.get_logger("services.command")
@@ -251,6 +262,10 @@ def _vision_protocol(car):
 
 def _vision_state_machine(car):
     return car.vision_coordinator.state_machine
+
+
+def _vision_frame(car, camera_id, now_ms=1000):
+    return car.vision_coordinator.get_frame(camera_id, now_ms)
 
 
 def _build_vision_state_config() -> VisionStateConfig:
@@ -509,9 +524,10 @@ def test_transport_car_composes_subsystems_without_owning_command_or_vision_priv
         lambda _path, logger=None: [0.0] * 6,
     )
 
-    car = TransportCar()
+    car = TransportCar(vehicle_role="main")
+    assert car.vision_processing_enabled is True
     car.command_session.pending_dx = 0.1
-    car.vision_coordinator.resolved_target = VisionResolvedTarget(
+    cast(Any, car.vision_coordinator).resolved_target = VisionResolvedTarget(
         x=1.0,
         y=2.0,
         angle_deg=30.0,
@@ -565,7 +581,8 @@ def test_transport_car_rebuilds_missing_vision_coordinator_without_legacy_visual
         lambda _path, logger=None: [0.0] * 6,
     )
 
-    car = TransportCar()
+    car = TransportCar(vehicle_role="main")
+    assert car.vision_processing_enabled is True
     legacy_protocol = object()
     legacy_state_machine = object()
     car.__dict__["vision_protocol"] = legacy_protocol
@@ -589,6 +606,280 @@ def test_refresh_vision_target_resolves_absolute_command() -> None:
     assert round(car.vision_coordinator.resolved_target.x, 6) == 2.0
     assert round(car.vision_coordinator.resolved_target.y, 6) == 4.0
     assert car.vision_coordinator.resolved_target.angle_deg == 105.0
+
+
+def test_main_vehicle_polls_cameras_and_builds_observation_batches() -> None:
+    car = build_transport_car()
+
+    car._poll_vision_cameras()
+    car._handle_uart_line(
+        "camera_id=cam_b,frame_id=7,category=obstacle,left=10,top=20,right=50,bottom=80",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_b,frame_id=7,frame_end=1", source="uart6")
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=11,category=cargo,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=11,category=follower,left=150,top=25,right=190,bottom=95",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=11,frame_end=1", source="uart6")
+
+    obstacle_frame = _vision_frame(car, "cam_b")
+    cargo_frame = _vision_frame(car, "cam_a")
+
+    assert car.uart6.messages == ["?frame=cam_b\r\n", "?frame=cam_a\r\n"]
+    assert obstacle_frame is not None
+    assert obstacle_frame.camera_id == "cam_b"
+    assert obstacle_frame.frame_id == "7"
+    assert [item.category for item in obstacle_frame.detections] == ["obstacle"]
+    assert cargo_frame is not None
+    assert cargo_frame.camera_id == "cam_a"
+    assert cargo_frame.frame_id == "11"
+    assert [item.category for item in cargo_frame.detections] == ["cargo", "follower"]
+
+
+def test_transport_car_prefers_obstacle_camera_when_poll_budget_is_tight() -> None:
+    car = build_transport_car()
+
+    polled = car._poll_vision_cameras(poll_budget=1)
+
+    assert polled == ["cam_b"]
+    assert car.uart6.messages == ["?frame=cam_b\r\n"]
+
+
+def test_refresh_vision_target_prefers_active_role_across_multiple_camera_frames() -> (
+    None
+):
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car.command_session.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    car._active_vision_target_role = "cargo"
+
+    car._handle_uart_line(
+        "camera_id=cam_b,frame_id=41,category=cargo,left=140,top=20,right=180,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_b,frame_id=41,frame_end=1", source="uart6")
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=31,category=follower,left=150,top=25,right=190,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=31,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    selected_target = car._get_vision_resolved_target()
+    state_machine = _vision_state_machine(car)
+
+    assert selected_target is not None
+    assert car._active_vision_target_role == "cargo"
+    assert state_machine.calls[-1].observation is not None
+    assert state_machine.calls[-1].observation.category == "cargo"
+    assert state_machine.calls[-1].observation.camera_id == "cam_b"
+
+
+def test_overlapping_category_from_two_cameras_uses_priority_camera_before_score_tie_break() -> (
+    None
+):
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car.command_session.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=51,category=follower,left=140,top=20,right=180,bottom=170",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=51,frame_end=1", source="uart6")
+    car._handle_uart_line(
+        "camera_id=cam_b,frame_id=52,category=follower,left=100,top=10,right=220,bottom=230",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_b,frame_id=52,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    state_machine = _vision_state_machine(car)
+
+    assert car._active_vision_target_role == "follower"
+    assert state_machine.calls[-1].observation is not None
+    assert state_machine.calls[-1].observation.category == "follower"
+    assert state_machine.calls[-1].observation.camera_id == "cam_a"
+
+
+def test_unselected_detections_do_not_override_active_transport_intent() -> None:
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car.command_session.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=11,category=follower,left=150,top=25,right=190,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=11,category=cargo,left=10,top=20,right=50,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=11,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+    selected_target = car._get_vision_resolved_target()
+    state_machine = _vision_state_machine(car)
+
+    assert selected_target is not None
+    assert car._active_vision_target_role == "follower"
+    assert round(selected_target.x, 6) == 1.0
+    assert state_machine.calls[-1].observation.category == "follower"
+
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=12,category=cargo,left=240,top=20,right=280,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=12,category=follower,left=10,top=20,right=50,bottom=90",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=12,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1010)
+    selected_target = car._get_vision_resolved_target()
+
+    assert selected_target is not None
+    assert car._active_vision_target_role == "follower"
+    assert state_machine.calls[-1].observation.category == "follower"
+
+
+def test_missing_active_target_role_does_not_retarget_to_other_detection() -> None:
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car._active_vision_target_role = "follower"
+    protocol = _vision_protocol(car)
+    car.vision_coordinator = VisionCoordinator(
+        protocol=protocol,
+        state_machine=FakeVisionMachine(
+            VisionStepResult(
+                state=int(SM.IDLE),
+                intent=VisionControlIntent(
+                    active=False,
+                    dx_body=0.0,
+                    dy_body=0.0,
+                    d_angle_deg=0.0,
+                    rear_only_mode=False,
+                ),
+            )
+        ),
+    )
+
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=21,category=cargo,left=240,top=20,right=280,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=21,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    state_machine = _vision_state_machine(car)
+    assert car._active_vision_target_role == "follower"
+    assert state_machine.calls[-1].observation is None
+    assert state_machine.calls[-1].target_role == "follower"
+    assert car.vision_coordinator.step_result is not None
+    assert car.vision_coordinator.step_result.intent.active is False
+    assert car.vision_coordinator.resolved_target is None
+
+
+def test_state_machine_input_does_not_fall_back_to_raw_observation_cache() -> None:
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car._active_vision_target_role = "follower"
+    protocol = _vision_protocol(car)
+    car.vision_coordinator = VisionCoordinator(
+        protocol=protocol,
+        state_machine=FakeVisionMachine(
+            VisionStepResult(
+                state=int(SM.IDLE),
+                intent=VisionControlIntent(
+                    active=False,
+                    dx_body=0.0,
+                    dy_body=0.0,
+                    d_angle_deg=0.0,
+                    rear_only_mode=False,
+                ),
+            )
+        ),
+    )
+
+    protocol.try_parse_observation(
+        "left=120,top=20,right=160,bottom=220", source="uart6", now_ms=1000
+    )
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=22,category=cargo,left=240,top=20,right=280,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=22,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    state_machine = _vision_state_machine(car)
+    assert state_machine.calls[-1].observation is None
+    assert state_machine.calls[-1].target_role == "follower"
+    assert car.vision_coordinator.step_result is not None
+    assert car.vision_coordinator.step_result.intent.active is False
+    assert car.vision_coordinator.resolved_target is None
+
+
+def test_selected_none_is_passed_to_state_machine_without_raw_cache_fallback() -> None:
+    car = build_transport_car()
+    car.chassis_state.heading_est = 0.0
+    car.chassis_state.odometry = FakeOdometry(x=0.0, y=0.0)
+    car._active_vision_target_role = "follower"
+    protocol = _vision_protocol(car)
+    recorded_inputs = []
+
+    class RecordingMachine:
+        def __init__(self):
+            self.state = SM.IDLE
+
+        def step(self, inputs):
+            recorded_inputs.append(inputs)
+            return VisionStepResult(
+                state=int(SM.IDLE),
+                intent=VisionControlIntent(
+                    active=False,
+                    dx_body=0.0,
+                    dy_body=0.0,
+                    d_angle_deg=0.0,
+                    rear_only_mode=False,
+                ),
+            )
+
+        def reset(self):
+            return None
+
+    car.vision_coordinator = VisionCoordinator(
+        protocol=protocol,
+        state_machine=RecordingMachine(),
+    )
+
+    protocol.try_parse_observation(
+        "left=120,top=20,right=160,bottom=220", source="uart6", now_ms=1000
+    )
+    car._handle_uart_line(
+        "camera_id=cam_a,frame_id=23,category=cargo,left=240,top=20,right=280,bottom=220",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_a,frame_id=23,frame_end=1", source="uart6")
+
+    car._refresh_vision_target(now_ms=1000)
+
+    assert recorded_inputs[-1].observation is None
+    assert recorded_inputs[-1].target_role == "follower"
 
 
 def test_command_lock_blocks_visual_target_refresh() -> None:
@@ -652,7 +943,68 @@ def test_refresh_vision_target_delegates_to_coordinator() -> None:
     car._refresh_vision_target(now_ms=1000)
 
     assert coordinator.refresh_calls == [(1000, 90.0, 2.0, 3.0, False)]
+    assert coordinator.last_selected_input is not None
     assert car._get_vision_resolved_target() == coordinator.resolved_target
+
+
+def test_refresh_vision_target_does_not_swallow_typeerror_from_coordinator() -> None:
+    car = build_transport_car()
+
+    class BuggyCoordinator:
+        def __init__(self):
+            self.resolved_target = None
+            self.step_result = None
+            self.state_machine = types.SimpleNamespace(state=SM.IDLE)
+
+        def get_frame(self, camera_id, now_ms):
+            _ = (camera_id, now_ms)
+            return None
+
+        def get_observation(self, now_ms):
+            _ = now_ms
+            return None
+
+        def refresh(
+            self,
+            now_ms,
+            heading_deg,
+            odom_x,
+            odom_y,
+            command_lock,
+            selected_input=None,
+        ):
+            _ = (now_ms, heading_deg, odom_x, odom_y, command_lock)
+            if selected_input is not None:
+                raise TypeError("selected_input bug")
+            return types.SimpleNamespace(
+                step_result=None,
+                resolved_target=None,
+                released_heading_lock=False,
+            )
+
+        def get_state_name(self):
+            return "IDLE"
+
+        def build_snapshot(self, now_ms):
+            _ = now_ms
+            return {
+                "state": "IDLE",
+                "obs_age_ms": None,
+                "obs_left": None,
+                "obs_top": None,
+                "obs_right": None,
+                "obs_bottom": None,
+                "obs_center_x": None,
+                "obs_center_y": None,
+                "target_x": None,
+                "target_y": None,
+                "target_angle": None,
+            }
+
+    car.vision_coordinator = BuggyCoordinator()
+
+    with pytest.raises(TypeError, match="selected_input bug"):
+        car._refresh_vision_target(now_ms=1000)
 
 
 def test_transport_car_reads_state_name_from_registry() -> None:

@@ -42,6 +42,12 @@ PROFILE_DEFAULTS = {
 CUSTOM_PROFILE_NAME = "CUSTOM"
 
 
+def _build_format_oom_fallback(level: int) -> str:
+    """构造格式化失败时的最小降级日志文本."""
+    prefix = LEVEL_VALUE_TO_NAME.get(level, "?")[:1]
+    return "%s [log.oom       ] format oom\r\n" % prefix
+
+
 class SinkLike:
     """日志 sink 协议."""
 
@@ -124,16 +130,22 @@ class LogManager:
         """向所有 sink 分发一条日志消息."""
         if not self.should_emit(level, module_name):
             return
-        text = format_log_record(
-            LogRecord(level=level, module_name=module_name, message=message),
-            color_enabled=self.color_enabled,
-        )
+        try:
+            text = format_log_record(
+                LogRecord(level=level, module_name=module_name, message=message),
+                color_enabled=self.color_enabled,
+            )
+        except MemoryError:
+            text = _build_format_oom_fallback(level)
         for sink in self.sinks:
             write_record = getattr(sink, "write_record", None)
-            if write_record is not None:
-                write_record(level, text)
-            else:
-                sink.write(text)
+            try:
+                if write_record is not None:
+                    write_record(level, text)
+                else:
+                    sink.write(text)
+            except MemoryError:
+                continue
 
     @property
     def level_name(self) -> str:

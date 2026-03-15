@@ -71,6 +71,8 @@ class VisionMachineInputs:
         odom_x: float,
         odom_y: float,
         now_ms: int,
+        target_role=None,
+        obstacle_summary=None,
     ):
         """保存视觉、姿态、里程计与时间输入."""
         self.observation = observation
@@ -78,6 +80,8 @@ class VisionMachineInputs:
         self.odom_x = float(odom_x)
         self.odom_y = float(odom_y)
         self.now_ms = int(now_ms)
+        self.target_role = None if target_role is None else str(target_role)
+        self.obstacle_summary = obstacle_summary
 
 
 class VisionControlIntent:

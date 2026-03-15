@@ -144,6 +144,7 @@ class FakeVisionCoordinator:
         self.protocol = FakeVisionProtocol(observation)
         self.resolved_target = resolved_target
         self.state_name = state_name
+        self.selected_observation = observation
 
     def get_state_name(self) -> str:
         return self.state_name
@@ -162,7 +163,7 @@ class FakeVisionCoordinator:
             "target_y": None,
             "target_angle": None,
         }
-        observation = self.protocol.get_observation(now_ms)
+        observation = self.selected_observation
         if observation is not None:
             snapshot["obs_age_ms"] = int(now_ms) - int(observation.timestamp_ms)
             snapshot["obs_left"] = float(observation.left)
@@ -176,6 +177,28 @@ class FakeVisionCoordinator:
             snapshot["target_y"] = float(self.resolved_target.y)
             snapshot["target_angle"] = float(self.resolved_target.angle_deg)
         return snapshot
+
+
+class FakeDisabledVisionCoordinator:
+    """辅车关闭视觉处理时的假协调器."""
+
+    def get_state_name(self) -> str:
+        return "DISABLED"
+
+    def build_snapshot(self, _now_ms: int):
+        return {
+            "state": "DISABLED",
+            "obs_age_ms": None,
+            "obs_left": None,
+            "obs_top": None,
+            "obs_right": None,
+            "obs_bottom": None,
+            "obs_center_x": None,
+            "obs_center_y": None,
+            "target_x": None,
+            "target_y": None,
+            "target_angle": None,
+        }
 
 
 def build_transport_car_for_diag() -> Any:
@@ -387,6 +410,34 @@ def test_diagnostics_facade_preserves_snapshot_keys_and_query_format() -> None:
     }
 
 
+def test_aux_vehicle_profile_reports_disabled_vision_snapshot() -> None:
+    car = build_transport_car_for_diag()
+    car.role_profile = types.SimpleNamespace(
+        vehicle_role="aux",
+        vision_processing_enabled=False,
+        dual_camera_polling_enabled=False,
+        single_task_state_machine_enabled=False,
+    )
+    car.vision_coordinator = FakeDisabledVisionCoordinator()
+
+    facade = car.get_diagnostics_facade()
+
+    assert facade.build_health_snapshot()["vision_state"] == "DISABLED"
+    assert facade.build_vision_snapshot() == {
+        "state": "DISABLED",
+        "obs_age_ms": None,
+        "obs_left": None,
+        "obs_top": None,
+        "obs_right": None,
+        "obs_bottom": None,
+        "obs_center_x": None,
+        "obs_center_y": None,
+        "target_x": None,
+        "target_y": None,
+        "target_angle": None,
+    }
+
+
 def test_transport_car_no_longer_exposes_diag_snapshot_wrappers() -> None:
     assert hasattr(TransportCar, "build_health_snapshot") is False
     assert hasattr(TransportCar, "build_tick_snapshot") is False
@@ -544,6 +595,47 @@ def test_diagnostics_facade_requires_public_runtime_interfaces() -> None:
         "yaw_rate_dps": 0.0,
         "gz_raw": 0.0,
     }
+
+
+def test_vision_snapshot_reports_selected_observation_instead_of_raw_protocol_cache() -> (
+    None
+):
+    runtime = types.SimpleNamespace(
+        now_ms=lambda: 2500,
+        command_session=CommandSession(),
+        vision_coordinator=FakeVisionCoordinator(
+            FakeVisionObservation(
+                left=100.0, top=20.0, right=140.0, bottom=90.0, timestamp_ms=2400
+            ),
+            VisionResolvedTarget(x=0.2, y=0.4, angle_deg=15.0, rear_only_mode=True),
+            state_name="ALIGN_DX",
+        ),
+        chassis_state=types.SimpleNamespace(),
+        boot_time_ms=1000,
+        last_exception_text="none",
+        tick_count=0,
+        last_loop_dt_us=0,
+        max_loop_dt_us=0,
+        loop_dt_total_us=0,
+        loop_overrun_count=0,
+        logger_manager=types.SimpleNamespace(
+            filter_modules=[],
+            profile_name="DEFAULT",
+            level_name="INFO",
+            filter_mode="allow",
+            color_enabled=False,
+        ),
+    )
+    runtime.command_session.command_lock = False
+    runtime.command_session.rear_only_mode = False
+    runtime.vision_coordinator.selected_observation = None
+
+    snapshot = DiagnosticsFacade(runtime).build_vision_snapshot()
+
+    assert snapshot["obs_age_ms"] is None
+    assert snapshot["obs_left"] is None
+    assert snapshot["obs_right"] is None
+    assert snapshot["target_x"] == 0.2
 
 
 def test_diagnostics_facade_requires_command_session_and_chassis_state_owners() -> None:

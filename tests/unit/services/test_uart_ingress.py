@@ -105,3 +105,36 @@ def test_uart_ingress_polls_uart_and_keeps_source_buffers_isolated() -> None:
     assert commands == [("log", "vx=1"), ("uart3", "vx=1")]
     assert coordinator.calls == [("left=100,top=20,right=140,bottom=90", "uart6", 1000)]
     assert errors == []
+
+
+def test_uart_ingress_keeps_multi_detection_frame_batch_lines_together() -> None:
+    router = FakeRouter()
+    coordinator = FakeVisionCoordinator()
+    service = UartIngressService(
+        router=router,
+        vision_coordinator=coordinator,
+        build_context=lambda source: source,
+        apply_command=lambda line, source="uart6": None,
+        command_log=lambda line: None,
+        emit_error=lambda message: None,
+        now_ms=lambda: 1000,
+    )
+    uart6 = FakeUART(
+        [
+            (
+                b"camera_id=cam_b,frame_id=7,category=obstacle,left=10,top=20,right=50,bottom=80\n"
+                b"camera_id=cam_b,frame_id=7,frame_end=1\n"
+            )
+        ]
+    )
+
+    service.poll_source(uart6, "uart6")
+
+    assert coordinator.calls == [
+        (
+            "camera_id=cam_b,frame_id=7,category=obstacle,left=10,top=20,right=50,bottom=80",
+            "uart6",
+            1000,
+        ),
+        ("camera_id=cam_b,frame_id=7,frame_end=1", "uart6", 1000),
+    ]

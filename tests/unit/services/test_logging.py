@@ -2,6 +2,7 @@
 
 import pytest
 
+import diagnostics.manager as manager_module
 from diagnostics.sink import RingBufferSink
 from diagnostics.manager import LOG_DEBUG, LOG_ERROR, LOG_INFO, LogManager, SinkLike
 
@@ -160,6 +161,22 @@ def test_formatter_truncates_overlong_module_column() -> None:
     manager.get_logger("vision.module.extra.long.name").info("ready")
 
     assert sink.lines == ["I [vision.module+] ready\r\n"]
+
+
+def test_logger_falls_back_when_formatter_runs_out_of_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = FakeSink()
+    manager = LogManager(level=LOG_INFO, color_enabled=False, sinks=[sink])
+
+    def raise_memory_error(*_args, **_kwargs):
+        raise MemoryError("format oom")
+
+    monkeypatch.setattr(manager_module, "format_log_record", raise_memory_error)
+
+    manager.get_logger("vision.state").info("shown")
+
+    assert sink.lines == ["I [log.oom       ] format oom\r\n"]
 
 
 def test_busy_sink_drops_debug_before_error() -> None:

@@ -1,5 +1,6 @@
 """TransportCar 日志接线单元测试."""
 
+from pathlib import Path
 import sys
 import types
 from typing import Any, cast
@@ -121,6 +122,11 @@ def _build_test_logger_manager(uart: object) -> LogManager:
     return LogManager(sinks=[cast(Any, UartSink(cast(Any, uart)))])
 
 
+def _read_repo_text(relative_path: str) -> str:
+    """读取仓库内文本文件内容."""
+    return Path(relative_path).read_text(encoding="utf-8")
+
+
 def test_transport_car_boot_logs_go_through_logger(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -155,10 +161,97 @@ def test_transport_car_boot_logs_go_through_logger(
         lambda _path, logger=None: [0.0] * 6,
     )
 
-    transport_car_module.TransportCar()
+    transport_car_module.TransportCar(vehicle_role="main")
 
-    assert uart3.messages[0].startswith("I [system.boot")
+    assert any(line.startswith("I [system.boot") for line in uart3.messages)
     assert any("System Starting" in line for line in uart3.messages)
+
+
+def test_transport_car_boot_does_not_emit_temporary_memory_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uart3 = FakeUART()
+    uart6 = FakeUART()
+    monkeypatch.setattr(transport_car_module, "create_uart3", lambda: uart3)
+    monkeypatch.setattr(transport_car_module, "create_uart6", lambda: uart6)
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    transport_car_module.TransportCar(vehicle_role="main")
+
+    mem_lines = [line for line in uart3.messages if line.startswith("MEM ")]
+
+    assert mem_lines == []
+
+
+def test_transport_car_skips_gyro_offset_info_log_during_boot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uart3 = FakeUART()
+    uart6 = FakeUART()
+    monkeypatch.setattr(transport_car_module, "create_uart3", lambda: uart3)
+    monkeypatch.setattr(transport_car_module, "create_uart6", lambda: uart6)
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+
+    received = {"logger": object()}
+
+    def fake_load_gyro_offsets(_path: str, logger=None):
+        received["logger"] = logger
+        return [0.0] * 6
+
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        fake_load_gyro_offsets,
+    )
+
+    transport_car_module.TransportCar(vehicle_role="main")
+
+    assert received["logger"] is None
 
 
 def test_transport_car_error_path_uses_structured_error_log() -> None:
@@ -197,6 +290,74 @@ def test_transport_car_uart3_command_echo_uses_command_logger() -> None:
 
     assert car.uart3.messages[-1].startswith("I [services.comm+]")
     assert "RCV: vx=1" in car.uart3.messages[-1]
+
+
+def test_protocol_and_hil_docs_use_physical_camera_ids() -> None:
+    protocol_text = _read_repo_text("docs/Protocol.md")
+    strategy_text = _read_repo_text("docs/developer/strategy.md")
+    hil_text = _read_repo_text("tests/hil/2026-03-dual-camera-polling.md")
+
+    assert "?frame=cam_a" in protocol_text
+    assert "?frame=cam_b" in protocol_text
+    assert "?frame=obstacle" not in protocol_text
+    assert "?frame=cargo" not in protocol_text
+    assert "`camera_id` 只表示物理相机身份" in strategy_text
+    assert "`category` 只表示检测类别, 可在不同物理相机上重复出现" in strategy_text
+    assert "?frame=cam_a" in hil_text
+    assert "?frame=cam_b" in hil_text
+    assert "?frame=obstacle" not in hil_text
+    assert "?frame=cargo" not in hil_text
+
+
+def test_transport_car_vision_frame_boundary_logs_without_poll_noise() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.uart3 = FakeUART()
+    car.uart6 = FakeUART()
+    car.logger_manager = _build_test_logger_manager(car.uart3)
+    car.log_vision = car.logger_manager.get_logger("vision.state")
+    car.log_command = car.logger_manager.get_logger("services.command")
+    car.log_health = car.logger_manager.get_logger("system.health")
+    car.role_profile = types.SimpleNamespace(
+        vehicle_role="main",
+        vision_processing_enabled=True,
+        dual_camera_polling_enabled=True,
+        single_task_state_machine_enabled=True,
+    )
+    car._router = FakeRouter()
+    car.apply_command = lambda line, source="uart6": None
+    car._now_ms = lambda: 1000
+    car.now_ms = car._now_ms
+    car.vision_coordinator = transport_car_module.VisionCoordinator(
+        protocol=transport_car_module.VisionProtocol(timeout_ms=200),
+        state_machine=types.SimpleNamespace(
+            step=lambda _inputs: None, reset=lambda: None
+        ),
+    )
+    car.uart_ingress = transport_car_module.UartIngressService(
+        router=car._router,
+        vision_coordinator=car.vision_coordinator,
+        build_context=lambda source: {"source": source},
+        apply_command=car.apply_command,
+        command_log=lambda line: None,
+        emit_error=car._emit_error_log,
+        now_ms=car._now_ms,
+    )
+
+    car._poll_vision_cameras(poll_budget=1)
+    car._handle_uart_line(
+        "camera_id=cam_b,frame_id=7,category=obstacle,left=10,top=20,right=50,bottom=80",
+        source="uart6",
+    )
+    car._handle_uart_line("camera_id=cam_b,frame_id=7,frame_end=1", source="uart6")
+
+    assert not any("POLL camera=cam_b" in line for line in car.uart3.messages)
+    assert any(
+        "FRAME camera=cam_b frame=7 end detections=1" in line
+        for line in car.uart3.messages
+    )
 
 
 def test_transport_car_get_query_uart_defaults_to_uart6() -> None:

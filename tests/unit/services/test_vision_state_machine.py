@@ -1,18 +1,19 @@
 """视觉状态机单元测试."""
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 import pytest
 
 from vision.debug import format_transition_event
-from vision.protocol import VisionObservation
+from vision.protocol import VisionFrame, VisionObservation
 from vision.state_defs import SM, SMState, VisionTransitionReason
 from vision.state_machine import (
     VisionMachineInputs,
     VisionStateConfig,
     VisionStateMachine,
 )
+from vision.transforms import select_state_machine_input
 
 
 pytestmark = pytest.mark.unit
@@ -64,12 +65,148 @@ def build_inputs(
     )
 
 
+def build_detection(
+    category: str,
+    left: float,
+    top: float,
+    right: float,
+    bottom: float,
+    *,
+    camera_id: str = "cam_a",
+    frame_id: str = "11",
+    now_ms: int = 1000,
+) -> VisionObservation:
+    return VisionObservation(
+        left=left,
+        top=top,
+        right=right,
+        bottom=bottom,
+        timestamp_ms=now_ms,
+        camera_id=camera_id,
+        frame_id=frame_id,
+        category=category,
+    )
+
+
+def build_frame(
+    *detections: VisionObservation, camera_id: str = "cam_a"
+) -> VisionFrame:
+    return VisionFrame(
+        camera_id=camera_id, frame_id="11", detections=detections, timestamp_ms=1000
+    )
+
+
+def build_camera_frames(*frames: VisionFrame) -> Dict[str, VisionFrame]:
+    """按相机 ID 构造物理相机帧映射."""
+    return {frame.camera_id: frame for frame in frames}
+
+
 def test_idle_enters_align_angle_when_observation_arrives() -> None:
     machine = build_test_config()
 
     result = machine.step(build_inputs((180.0, 40.0, 220.0, 120.0)))
 
     assert result.state == SMState.ALIGN_ANGLE
+
+
+def test_state_machine_consumes_selected_follower_or_cargo_target_only() -> None:
+    cargo_frame = build_frame(
+        build_detection("cargo", 90.0, 20.0, 130.0, 100.0),
+        build_detection("follower", 150.0, 25.0, 190.0, 160.0),
+    )
+
+    follower_selected = select_state_machine_input(
+        cargo_frame=cargo_frame,
+        obstacle_frame=None,
+        preferred_role="follower",
+    )
+    cargo_selected = select_state_machine_input(
+        cargo_frame=cargo_frame,
+        obstacle_frame=None,
+        preferred_role="cargo",
+    )
+
+    assert follower_selected.target_role == "follower"
+    assert follower_selected.observation is not None
+    assert follower_selected.observation.category == "follower"
+    assert cargo_selected.target_role == "cargo"
+    assert cargo_selected.observation is not None
+    assert cargo_selected.observation.category == "cargo"
+
+
+def test_active_target_role_missing_does_not_fall_back_to_other_detection() -> None:
+    cargo_frame = build_frame(build_detection("cargo", 90.0, 20.0, 130.0, 100.0))
+
+    selected = select_state_machine_input(
+        cargo_frame=cargo_frame,
+        obstacle_frame=None,
+        active_target_role="follower",
+    )
+
+    assert selected.target_role == "follower"
+    assert selected.observation is None
+
+
+def test_select_state_machine_input_prefers_active_role_across_multiple_camera_frames() -> (
+    None
+):
+    cam_a_frame = build_frame(
+        build_detection(
+            "follower", 150.0, 25.0, 190.0, 160.0, camera_id="cam_a", frame_id="31"
+        ),
+        camera_id="cam_a",
+    )
+    cam_b_frame = build_frame(
+        build_detection(
+            "cargo", 90.0, 20.0, 130.0, 210.0, camera_id="cam_b", frame_id="32"
+        ),
+        camera_id="cam_b",
+    )
+
+    selected = cast(Any, select_state_machine_input)(
+        camera_frames=build_camera_frames(cam_a_frame, cam_b_frame),
+        active_target_role="cargo",
+        role_camera_priorities={
+            "follower": ("cam_a", "cam_b"),
+            "cargo": ("cam_a", "cam_b"),
+            "obstacle": ("cam_b", "cam_a"),
+        },
+    )
+
+    assert selected.target_role == "cargo"
+    assert selected.observation is not None
+    assert selected.observation.category == "cargo"
+    assert selected.observation.camera_id == "cam_b"
+
+
+def test_overlapping_category_from_two_cameras_uses_priority_camera_before_score_tie_break() -> (
+    None
+):
+    cam_a_frame = build_frame(
+        build_detection(
+            "follower", 140.0, 20.0, 180.0, 170.0, camera_id="cam_a", frame_id="41"
+        ),
+        camera_id="cam_a",
+    )
+    cam_b_frame = build_frame(
+        build_detection(
+            "follower", 100.0, 10.0, 220.0, 230.0, camera_id="cam_b", frame_id="42"
+        ),
+        camera_id="cam_b",
+    )
+
+    selected = cast(Any, select_state_machine_input)(
+        camera_frames=build_camera_frames(cam_a_frame, cam_b_frame),
+        role_camera_priorities={
+            "follower": ("cam_a", "cam_b"),
+            "cargo": ("cam_a", "cam_b"),
+        },
+    )
+
+    assert selected.target_role == "follower"
+    assert selected.observation is not None
+    assert selected.observation.camera_id == "cam_a"
+    assert selected.observation.bottom == 170.0
 
 
 def test_align_angle_uses_box_center_x_not_left_edge() -> None:

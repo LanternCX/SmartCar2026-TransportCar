@@ -2,7 +2,11 @@
 
 ## 背景
 
+<<<<<<< HEAD
 - 任务来源: `docs/superpowers/plans/2026-03-13-dual-camera-single-state-machine.md` Task 6
+=======
+- 任务来源: `docs/superpowers/plans/2026-03-13-dual-camera-single-state-machine.md` Task 6
+>>>>>>> c307ee5 (fix(services): harden boot role and vision runtime)
 - 本轮目标: 为主车双摄正交、主车唯一任务状态机、辅车纯执行方案补齐 `stage2 -> stage3 -> HIL` 验证模板
 - 当前代码基线: 已完成 Task 1 ~ Task 5 的 host TDD 与 review, Task 6 负责设备侧执行步骤与证据留存
 
@@ -97,6 +101,7 @@ smoke mode=lite init=0 queries=1 step=0 tick_count=0 snapshots=none
 
 ## Stage 3 `uart3` observe
 
+<<<<<<< HEAD
 ### 本轮内存治理手动检查补充
 
 操作步骤:
@@ -120,6 +125,8 @@ smoke mode=lite init=0 queries=1 step=0 tick_count=0 snapshots=none
 
 结论: PENDING
 
+=======
+>>>>>>> c307ee5 (fix(services): harden boot role and vision runtime)
 ### 场景 1: 主车按钮长按入口正确
 
 操作步骤:
