@@ -8,6 +8,7 @@ import pytest
 
 from vision.protocol import VisionProtocol
 from vision.coordinator import VisionCoordinator
+from vision.runtime import VisionRuntime
 from diagnostics.sink import UartSink
 from diagnostics.manager import LogManager
 from vision.debug import build_transition_event
@@ -97,8 +98,8 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-import services.transport_car as transport_car_module  # noqa: E402
-from services.transport_car import TransportCar  # noqa: E402
+import services.car as transport_car_module  # noqa: E402
+from services.car import TransportCar  # noqa: E402
 from control.chassis_state import ChassisState  # noqa: E402
 from services.commanding.session import CommandSession  # noqa: E402
 
@@ -260,6 +261,29 @@ def _vision_protocol(car):
     return car.vision_coordinator.protocol
 
 
+def build_runtime_backed_coordinator():
+    runtime = VisionRuntime(timeout_ms=200)
+    protocol = VisionProtocol(runtime)
+    state_machine = FakeVisionMachine(
+        VisionStepResult(
+            state=int(SM.IDLE),
+            intent=VisionControlIntent(
+                active=False,
+                dx_body=0.0,
+                dy_body=0.0,
+                d_angle_deg=0.0,
+                rear_only_mode=False,
+            ),
+        )
+    )
+    cast(Any, state_machine).state = SM.IDLE
+    coordinator = VisionCoordinator(
+        protocol=protocol,
+        state_machine=state_machine,
+    )
+    return coordinator, runtime
+
+
 def _vision_state_machine(car):
     return car.vision_coordinator.state_machine
 
@@ -291,6 +315,178 @@ def _build_vision_state_config() -> VisionStateConfig:
         max_d_angle_deg=30.0,
         done_hold_ms=100,
     )
+
+
+def test_transport_car_uses_runtime_owner_without_legacy_vision_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = TransportCar(vehicle_role="main")
+    assert getattr(car, "vision_service", None) is None
+    assert getattr(car, "vision_coordinator", None) is None
+    assert getattr(car, "vision_runtime", None) is None
+
+    car._ensure_vision_coordinator()
+
+    assert car.vision_service is not None
+    assert "vision_runtime" in car.__dict__
+    assert "vision_protocol" not in car.__dict__
+    assert "vision_state_machine" not in car.__dict__
+    assert "_vision_resolved_target" not in car.__dict__
+
+
+def test_transport_car_uses_vision_service_for_aux_role_disabled_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = TransportCar(vehicle_role="aux")
+    assert getattr(car, "vision_service", None) is None
+    assert getattr(car, "vision_coordinator", None) is None
+
+    car._ensure_vision_coordinator()
+
+    assert car.vision_service is not None
+    coordinator = cast(Any, car.vision_coordinator)
+
+    assert car.vision_service.enabled is False
+    assert car.vision_runtime is None
+    assert coordinator.get_state_name() == "DISABLED"
+
+
+def test_transport_car_builds_single_runtime_owner_for_vision_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = TransportCar(vehicle_role="main")
+    assert getattr(car, "vision_coordinator", None) is None
+
+    car._ensure_vision_coordinator()
+
+    coordinator = cast(Any, car.vision_coordinator)
+
+    assert coordinator.runtime is car.vision_runtime
+    assert coordinator.protocol.runtime is car.vision_runtime
+
+
+def test_transport_car_defers_vision_service_until_first_vision_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_imu",
+        lambda: types.SimpleNamespace(get=lambda: [0.0] * 6),
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_motors",
+        lambda: {
+            name: types.SimpleNamespace(duty=lambda _value: None)
+            for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(
+        transport_car_module,
+        "create_encoders",
+        lambda: {
+            name: types.SimpleNamespace(get=lambda: 0.0) for name in ("m", "l", "r")
+        },
+    )
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
+    car = TransportCar(vehicle_role="main")
+
+    assert getattr(car, "vision_service", None) is None
+    assert getattr(car, "vision_coordinator", None) is None
+    assert getattr(car, "vision_runtime", None) is None
+
+    coordinator = car._ensure_vision_coordinator()
+
+    assert coordinator is car.vision_coordinator
+    assert car.vision_service is not None
+    assert car.vision_runtime is not None
 
 
 def test_uart6_xy_packet_updates_visual_observation() -> None:
@@ -392,6 +588,27 @@ def test_visual_control_overrides_manual_position_target_without_lock() -> None:
     assert car._get_active_angle_command() == 45.0
     assert car._get_active_rear_only_mode() is True
     assert car.command_session.command_lock is False
+
+
+def test_get_vision_resolved_target_prefers_runtime_owner() -> None:
+    car = build_transport_car()
+    runtime_target = VisionResolvedTarget(
+        x=5.0,
+        y=6.0,
+        angle_deg=45.0,
+        rear_only_mode=True,
+    )
+    car.vision_runtime = VisionRuntime(timeout_ms=200)
+    cast(Any, car.vision_runtime).resolved_target = runtime_target
+    car.vision_coordinator = FakeVisionCoordinator()
+    car.vision_coordinator.resolved_target = VisionResolvedTarget(
+        x=1.0,
+        y=2.0,
+        angle_deg=15.0,
+        rear_only_mode=False,
+    )
+
+    assert car._get_vision_resolved_target() is runtime_target
 
 
 def test_compute_planar_targets_prefers_vision_target_over_manual_position_target() -> (
@@ -527,6 +744,7 @@ def test_transport_car_composes_subsystems_without_owning_command_or_vision_priv
     car = TransportCar(vehicle_role="main")
     assert car.vision_processing_enabled is True
     car.command_session.pending_dx = 0.1
+    car._ensure_vision_coordinator()
     cast(Any, car.vision_coordinator).resolved_target = VisionResolvedTarget(
         x=1.0,
         y=2.0,
@@ -583,6 +801,7 @@ def test_transport_car_rebuilds_missing_vision_coordinator_without_legacy_visual
 
     car = TransportCar(vehicle_role="main")
     assert car.vision_processing_enabled is True
+    car._ensure_vision_coordinator()
     legacy_protocol = object()
     legacy_state_machine = object()
     car.__dict__["vision_protocol"] = legacy_protocol
@@ -650,6 +869,46 @@ def test_transport_car_prefers_obstacle_camera_when_poll_budget_is_tight() -> No
     assert car.uart6.messages == ["?frame=cam_b\r\n"]
 
 
+def test_transport_car_reuses_constant_camera_poll_order_tuple() -> None:
+    car = build_transport_car()
+
+    first = car._get_vision_camera_poll_order()
+    second = car._get_vision_camera_poll_order()
+
+    assert first is transport_car_module.VISION_CAMERA_POLL_ORDER
+    assert second is first
+
+
+def test_poll_vision_cameras_reuses_cached_query_strings_on_hot_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    car = build_transport_car()
+    build_calls = []
+
+    def fake_build_frame_query(camera_id: str) -> str:
+        build_calls.append(camera_id)
+        return "?frame=%s" % camera_id
+
+    monkeypatch.setattr(
+        transport_car_module.VisionProtocol,
+        "build_frame_query",
+        staticmethod(fake_build_frame_query),
+    )
+
+    first = car._poll_vision_cameras()
+    second = car._poll_vision_cameras()
+
+    assert build_calls == ["cam_b", "cam_a"]
+    assert first is transport_car_module.VISION_CAMERA_POLL_ORDER
+    assert second is first
+    assert car.uart6.messages == [
+        "?frame=cam_b\r\n",
+        "?frame=cam_a\r\n",
+        "?frame=cam_b\r\n",
+        "?frame=cam_a\r\n",
+    ]
+
+
 def test_refresh_vision_target_prefers_active_role_across_multiple_camera_frames() -> (
     None
 ):
@@ -680,6 +939,43 @@ def test_refresh_vision_target_prefers_active_role_across_multiple_camera_frames
     assert state_machine.calls[-1].observation is not None
     assert state_machine.calls[-1].observation.category == "cargo"
     assert state_machine.calls[-1].observation.camera_id == "cam_b"
+
+
+def test_select_vision_state_machine_input_prefers_runtime_owner_frames() -> None:
+    car = build_transport_car()
+    runtime = VisionRuntime(timeout_ms=200)
+    protocol = VisionProtocol(runtime)
+    car.vision_runtime = runtime
+    car.vision_coordinator = FakeVisionCoordinator()
+    car._active_vision_target_role = "cargo"
+
+    protocol.try_parse_observation(
+        "camera_id=cam_b,frame_id=41,category=cargo,left=140,top=20,right=180,bottom=220",
+        source="uart6",
+        now_ms=990,
+    )
+    protocol.try_parse_observation(
+        "camera_id=cam_b,frame_id=41,frame_end=1",
+        source="uart6",
+        now_ms=991,
+    )
+    protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=31,category=follower,left=150,top=25,right=190,bottom=220",
+        source="uart6",
+        now_ms=992,
+    )
+    protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=31,frame_end=1",
+        source="uart6",
+        now_ms=993,
+    )
+
+    selected_input = car._select_vision_state_machine_input(now_ms=1000)
+
+    assert selected_input.target_role == "cargo"
+    assert selected_input.observation is not None
+    assert selected_input.observation.category == "cargo"
+    assert selected_input.observation.camera_id == "cam_b"
 
 
 def test_overlapping_category_from_two_cameras_uses_priority_camera_before_score_tie_break() -> (
@@ -928,6 +1224,38 @@ def test_vision_coordinator_resets_observation_when_manual_lock_is_active() -> N
     assert coordinator.get_observation(now_ms=1000) is None
 
 
+def test_coordinator_build_snapshot_reads_runtime_buffer() -> None:
+    coordinator, runtime = build_runtime_backed_coordinator()
+
+    protocol = coordinator.protocol
+    protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=31,category=follower,left=100,top=20,right=140,bottom=90",
+        source="uart6",
+        now_ms=980,
+    )
+    protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=31,frame_end=1", source="uart6", now_ms=980
+    )
+    cast(Any, runtime).selected_input = types.SimpleNamespace(
+        observation=runtime.latest_observation
+    )
+    cast(Any, runtime).resolved_target = VisionResolvedTarget(
+        x=2.0,
+        y=3.0,
+        angle_deg=15.0,
+        rear_only_mode=False,
+    )
+
+    snapshot = cast(Any, coordinator.build_snapshot(1000))
+
+    assert snapshot["state"] == "IDLE"
+    assert snapshot["obs_age_ms"] == 20
+    assert snapshot["obs_left"] == 100.0
+    assert snapshot["obs_center_x"] == 120.0
+    assert snapshot["target_x"] == 2.0
+    assert snapshot["target_angle"] == 15.0
+
+
 def test_refresh_vision_target_delegates_to_coordinator() -> None:
     car = build_transport_car()
     coordinator = FakeVisionCoordinator()
@@ -1024,8 +1352,10 @@ def test_transport_car_debug_sink_writes_formatted_text_to_uart3() -> None:
 
     car._emit_vision_debug(event)
 
-    assert any("[vision.state" in msg for msg in car.uart3.messages)
-    assert any("VSM TRANS ALIGN_DIST->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
+    assert not any("[vision.state" in msg for msg in car.uart3.messages)
+    assert not any(
+        "VSM TRANS ALIGN_DIST->ALIGN_ANGLE" in msg for msg in car.uart3.messages
+    )
     assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)
 
 
@@ -1179,6 +1509,26 @@ def test_vision_state_machine_transition_logs_without_breakpoint_wait() -> None:
     car._handle_uart_line("left=180,top=20,right=220,bottom=240", source="uart6")
     car._refresh_vision_target(now_ms=1000)
 
-    assert any("[vision.state" in msg for msg in car.uart3.messages)
+    assert not any("VSM TRANS IDLE->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
+
+
+def test_vision_state_machine_transition_logs_in_debug_level() -> None:
+    car = build_transport_car()
+    car.logger_manager.set_level_name("DEBUG")
+    event = build_transition_event(
+        old_state=SM.IDLE,
+        new_state=SM.ALIGN_ANGLE,
+        reason=VisionTransitionReason.OBSERVATION_ACQUIRED,
+        stable_counter=0,
+        observation_x=24.5,
+        observation_y=220.0,
+        heading_deg=0.0,
+        odom_x=0.0,
+        odom_y=0.0,
+        now_ms=1000,
+    )
+
+    car._emit_vision_debug(event)
+
     assert any("VSM TRANS IDLE->ALIGN_ANGLE" in msg for msg in car.uart3.messages)
     assert all("DEBUG breakpoint triggered" not in msg for msg in car.uart3.messages)

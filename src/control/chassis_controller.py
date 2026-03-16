@@ -56,21 +56,27 @@ class ChassisController:
 
     def update_wheel_speeds(self):
         """更新轮速滤波状态."""
-        self.wheel_speed_controller.update_wheel_speeds(self.state.wheel_states)
+        controller = self.wheel_speed_controller
+        assert controller is not None
+        controller.update_wheel_speeds(self.state.wheel_states)
 
     def update_attitude(self, dt_s):
         """更新姿态和里程计."""
-        self.attitude_estimator.update_attitude(self.state, dt_s)
+        estimator = self.attitude_estimator
+        assert estimator is not None
+        estimator.update_attitude(self.state, dt_s)
 
     def compute_omega_cmd(self, dt_s, cmd_angle, cmd_omega):
         """计算角速度命令."""
-        return self.motion_planner.compute_omega_cmd(
-            self.state, dt_s, cmd_angle, cmd_omega
-        )
+        planner = self.motion_planner
+        assert planner is not None
+        return planner.compute_omega_cmd(self.state, dt_s, cmd_angle, cmd_omega)
 
     def compute_planar_targets(self, dt_s, active_target_x, active_target_y, last_cmd):
         """计算平面目标速度."""
-        return self.motion_planner.compute_planar_targets(
+        planner = self.motion_planner
+        assert planner is not None
+        return planner.compute_planar_targets(
             dt_s,
             self.state.heading_est,
             self.state.odometry,
@@ -83,7 +89,9 @@ class ChassisController:
         self, target_vx_cmd, target_vy_cmd, omega_cmd, dt_s, active_rear_only_mode
     ):
         """把目标速度分配到三轮速度环."""
-        self.wheel_speed_controller.apply_target_speeds(
+        controller = self.wheel_speed_controller
+        assert controller is not None
+        controller.apply_target_speeds(
             self.state.wheel_states,
             self.state.target_speeds,
             target_vx_cmd,
@@ -95,17 +103,21 @@ class ChassisController:
 
     def compute_angle_error_deg(self, target_angle, current_angle):
         """复用运动规划器的角差计算."""
-        return self.motion_planner.compute_angle_error_deg(target_angle, current_angle)
+        planner = self.motion_planner
+        assert planner is not None
+        return planner.compute_angle_error_deg(target_angle, current_angle)
 
     def resolve_continuous_heading_target(self, target_angle, current_angle):
         """复用运动规划器的连续角解析."""
-        return self.motion_planner.resolve_continuous_heading_target(
-            target_angle, current_angle
-        )
+        planner = self.motion_planner
+        assert planner is not None
+        return planner.resolve_continuous_heading_target(target_angle, current_angle)
 
     def inverse_kinematics(self, vx, vy, omega):
         """对外暴露逆运动学兼容入口."""
-        return self.wheel_speed_controller.inverse_kinematics(vx, vy, omega)
+        controller = self.wheel_speed_controller
+        assert controller is not None
+        return controller.inverse_kinematics(vx, vy, omega)
 
     def check_unlock(self, last_cmd, command_lock, rear_only_mode):
         """检查锁定是否完成, 保持旧版 auto revert 语义."""

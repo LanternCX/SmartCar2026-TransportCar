@@ -57,3 +57,11 @@ def test_task8_runtime_and_tests_no_longer_reference_legacy_service_paths() -> N
                     )
 
     assert violations == []
+
+
+def test_runtime_modules_do_not_expose_unneeded_legacy_state() -> None:
+    import diagnostics.manager as manager_module
+    import services.car as transport_car_module
+
+    assert hasattr(manager_module, "LEVEL_NAME_TO_VALUE") is False
+    assert hasattr(transport_car_module.TransportCar, "vision_protocol") is False

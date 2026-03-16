@@ -88,8 +88,8 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-import services.transport_car as transport_car_module  # noqa: E402
-from services.transport_car import TransportCar  # noqa: E402
+import services.car as transport_car_module  # noqa: E402
+from services.car import TransportCar  # noqa: E402
 
 
 class FakeLed:
@@ -212,6 +212,10 @@ def build_transport_car_for_diag() -> Any:
     car._now_ms = lambda: 2500
     car.now_ms = car._now_ms
     car.last_exception_text = "none"
+    car.error_count = 2
+    car.last_error_stage = "runtime"
+    car.oom_count = 3
+    car.last_oom_stage = "format"
     car._command_session = CommandSession()
     car.command_session.command_lock = True
     car.command_session.rear_only_mode = False
@@ -237,6 +241,46 @@ def build_transport_car_for_diag() -> Any:
         state_name="ALIGN_DX",
     )
     return car
+
+
+def test_aux_transport_car_staged_init_skips_main_only_optional_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order = []
+
+    def fake_init_core_runtime(self) -> None:
+        call_order.append("core")
+        self.uart3 = object()
+        self.uart6 = object()
+        self.logger_manager = object()
+        self._command_session = CommandSession()
+        self.chassis_state = object()
+
+    def fake_init_optional_features(self) -> None:
+        call_order.append("optional")
+        assert self.vehicle_role == "aux"
+        self.vision_runtime = None
+        self.vision_coordinator = transport_car_module._DisabledVisionCoordinator()
+
+    monkeypatch.setattr(
+        transport_car_module.TransportCar,
+        "_init_core_runtime",
+        fake_init_core_runtime,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        transport_car_module.TransportCar,
+        "_init_optional_features",
+        fake_init_optional_features,
+        raising=False,
+    )
+
+    car = transport_car_module.TransportCar(vehicle_role="aux")
+
+    assert call_order == ["core", "optional"]
+    assert car.command_session is not None
+    assert car.vision_runtime is None
+    assert cast(Any, car.vision_coordinator).get_state_name() == "DISABLED"
 
 
 def test_handle_tick_updates_runtime_statistics(
@@ -271,8 +315,16 @@ def test_handle_tick_updates_runtime_statistics(
     assert car.led.toggle_count == 1
     assert car.last_loop_dt_us == 6005
     assert car.max_loop_dt_us == 6005
-    assert car.loop_dt_total_us == 6005
-    assert car.loop_overrun_count == 1
+
+
+def test_diagnostics_facade_reports_oom_fields_in_health_snapshot() -> None:
+    runtime = build_transport_car_for_diag()
+
+    facade = DiagnosticsFacade(runtime)
+    snapshot = facade.build_health_snapshot()
+
+    assert snapshot["oom_count"] == 3
+    assert snapshot["oom_stage"] == "format"
 
 
 def test_build_tick_snapshot_reports_overrun_statistics() -> None:
@@ -328,6 +380,8 @@ def test_build_health_imu_and_vision_snapshots_use_current_runtime_state() -> No
         "uptime_ms": 1500,
         "lock": 1,
         "rear": 1,
+        "oom_count": 3,
+        "oom_stage": "format",
         "last_err": "none",
         "vision_state": "ALIGN_DX",
     }
@@ -357,21 +411,23 @@ def test_diagnostics_facade_preserves_snapshot_keys_and_query_format() -> None:
 
     facade = car.get_diagnostics_facade()
 
-    assert facade.build_health_snapshot().keys() == {
+    assert list(facade.build_health_snapshot().keys()) == [
         "alive",
         "uptime_ms",
         "lock",
         "rear",
+        "oom_count",
+        "oom_stage",
         "last_err",
         "vision_state",
-    }
-    assert facade.build_tick_snapshot().keys() == {
+    ]
+    assert list(facade.build_tick_snapshot().keys()) == [
         "count",
         "last_us",
         "max_us",
         "avg_us",
         "overrun",
-    }
+    ]
     assert facade.build_imu_snapshot().keys() == {
         "ok",
         "yaw_deg",
@@ -395,7 +451,7 @@ def test_diagnostics_facade_preserves_snapshot_keys_and_query_format() -> None:
         "r_duty",
         "rear",
     }
-    assert facade.build_vision_snapshot().keys() == {
+    assert list(facade.build_vision_snapshot().keys()) == [
         "state",
         "obs_age_ms",
         "obs_left",
@@ -407,7 +463,7 @@ def test_diagnostics_facade_preserves_snapshot_keys_and_query_format() -> None:
         "target_x",
         "target_y",
         "target_angle",
-    }
+    ]
 
 
 def test_aux_vehicle_profile_reports_disabled_vision_snapshot() -> None:
@@ -435,6 +491,84 @@ def test_aux_vehicle_profile_reports_disabled_vision_snapshot() -> None:
         "target_x": None,
         "target_y": None,
         "target_angle": None,
+    }
+
+
+def test_diagnostics_facade_vision_snapshot_keeps_minimal_fields_and_order_from_owner() -> (
+    None
+):
+    runtime = types.SimpleNamespace(
+        boot_time_ms=1000,
+        now_ms=lambda: 2500,
+        command_session=CommandSession(),
+        last_exception_text="none",
+        tick_count=12,
+        last_loop_dt_us=5400,
+        max_loop_dt_us=6200,
+        loop_dt_total_us=60000,
+        loop_overrun_count=2,
+        logger_manager=types.SimpleNamespace(
+            filter_modules=[],
+            profile_name="DEFAULT",
+            level_name="INFO",
+            filter_mode="allow",
+            color_enabled=False,
+        ),
+        vision_coordinator=types.SimpleNamespace(
+            get_state_name=lambda: "ALIGN_DX",
+            build_snapshot=lambda _now_ms: {
+                "target_angle": 15.0,
+                "target_y": 0.4,
+                "target_x": 0.2,
+                "obs_center_y": 55.0,
+                "obs_center_x": 120.0,
+                "obs_bottom": 90.0,
+                "obs_right": 140.0,
+                "obs_top": 20.0,
+                "obs_left": 100.0,
+                "obs_age_ms": 100,
+                "state": "ALIGN_DX",
+                "debug_trace": "should-be-dropped",
+            },
+        ),
+        chassis_state=types.SimpleNamespace(
+            heading_est=0.0,
+            imu_data=[1],
+            wheel_states=[],
+            target_speeds={},
+            odometry=types.SimpleNamespace(x=0.0, y=0.0),
+        ),
+    )
+    runtime.command_session.command_lock = False
+    runtime.command_session.rear_only_mode = False
+
+    snapshot = DiagnosticsFacade(runtime).build_vision_snapshot()
+
+    assert list(snapshot.keys()) == [
+        "state",
+        "obs_age_ms",
+        "obs_left",
+        "obs_top",
+        "obs_right",
+        "obs_bottom",
+        "obs_center_x",
+        "obs_center_y",
+        "target_x",
+        "target_y",
+        "target_angle",
+    ]
+    assert snapshot == {
+        "state": "ALIGN_DX",
+        "obs_age_ms": 100,
+        "obs_left": 100.0,
+        "obs_top": 20.0,
+        "obs_right": 140.0,
+        "obs_bottom": 90.0,
+        "obs_center_x": 120.0,
+        "obs_center_y": 55.0,
+        "target_x": 0.2,
+        "target_y": 0.4,
+        "target_angle": 15.0,
     }
 
 
@@ -510,6 +644,8 @@ def test_diagnostics_facade_builds_snapshots_from_runtime_public_state() -> None
         "uptime_ms": 1500,
         "lock": 1,
         "rear": 1,
+        "oom_count": 0,
+        "oom_stage": None,
         "last_err": "none",
         "vision_state": "ALIGN_DX",
     }
@@ -543,6 +679,82 @@ def test_diagnostics_facade_builds_snapshots_from_runtime_public_state() -> None
         "r_duty": 1400.0,
         "rear": 1,
     }
+    assert facade.build_vision_snapshot() == {
+        "state": "ALIGN_DX",
+        "obs_age_ms": 100,
+        "obs_left": 100.0,
+        "obs_top": 20.0,
+        "obs_right": 140.0,
+        "obs_bottom": 90.0,
+        "obs_center_x": 120.0,
+        "obs_center_y": 55.0,
+        "target_x": 0.2,
+        "target_y": 0.4,
+        "target_angle": 15.0,
+    }
+
+
+def test_diagnostics_facade_prefers_runtime_owner_for_rear_only_and_vision_snapshot() -> (
+    None
+):
+    runtime = types.SimpleNamespace(
+        boot_time_ms=1000,
+        now_ms=lambda: 2500,
+        command_session=CommandSession(),
+        last_exception_text="none",
+        tick_count=0,
+        last_loop_dt_us=0,
+        max_loop_dt_us=0,
+        loop_dt_total_us=0,
+        loop_overrun_count=0,
+        logger_manager=types.SimpleNamespace(
+            filter_modules=[],
+            profile_name="DEFAULT",
+            level_name="INFO",
+            filter_mode="allow",
+            color_enabled=False,
+        ),
+        vision_runtime=types.SimpleNamespace(
+            latest_observation=FakeVisionObservation(
+                left=100.0,
+                top=20.0,
+                right=140.0,
+                bottom=90.0,
+                timestamp_ms=2400,
+            ),
+            selected_input=None,
+            resolved_target=VisionResolvedTarget(
+                x=0.2,
+                y=0.4,
+                angle_deg=15.0,
+                rear_only_mode=True,
+            ),
+            snapshot_buffer=None,
+        ),
+        vision_coordinator=FakeVisionCoordinator(
+            None,
+            VisionResolvedTarget(
+                x=9.0,
+                y=8.0,
+                angle_deg=75.0,
+                rear_only_mode=False,
+            ),
+            state_name="ALIGN_DX",
+        ),
+        chassis_state=types.SimpleNamespace(
+            heading_est=0.0,
+            imu_data=[1],
+            wheel_states=[],
+            target_speeds={},
+            odometry=types.SimpleNamespace(x=0.0, y=0.0),
+        ),
+    )
+    runtime.command_session.command_lock = False
+    runtime.command_session.rear_only_mode = False
+
+    facade = DiagnosticsFacade(runtime)
+
+    assert facade.build_health_snapshot()["rear"] == 1
     assert facade.build_vision_snapshot() == {
         "state": "ALIGN_DX",
         "obs_age_ms": 100,

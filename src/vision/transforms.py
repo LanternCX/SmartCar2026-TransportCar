@@ -75,6 +75,42 @@ def _resolve_camera_order(camera_frames, role_camera_priorities, target_role: st
     return ordered
 
 
+def _collect_frames_by_camera(
+    cargo_frame=None,
+    obstacle_frame=None,
+    camera_frames=None,
+    runtime=None,
+    cargo_slot=None,
+    obstacle_slot=None,
+):
+    """归一化不同入口的相机帧来源."""
+    frames_by_camera = {}
+    if runtime is not None:
+        for slot_name in ("cam_a", "cam_b"):
+            slot = getattr(runtime, slot_name, None)
+            frame = getattr(slot, "frame", None)
+            if frame is not None:
+                frames_by_camera[str(getattr(frame, "camera_id", slot_name))] = frame
+        return frames_by_camera
+    if camera_frames is not None:
+        for camera_id, frame in camera_frames.items():
+            frames_by_camera[str(camera_id)] = frame
+        return frames_by_camera
+    for slot in (cargo_slot, obstacle_slot):
+        frame = getattr(slot, "frame", None)
+        if frame is not None:
+            frames_by_camera[str(getattr(frame, "camera_id", "cam_a"))] = frame
+    if frames_by_camera:
+        return frames_by_camera
+    if cargo_frame is not None:
+        frames_by_camera[str(getattr(cargo_frame, "camera_id", "cam_a"))] = cargo_frame
+    if obstacle_frame is not None:
+        frames_by_camera[str(getattr(obstacle_frame, "camera_id", "cam_b"))] = (
+            obstacle_frame
+        )
+    return frames_by_camera
+
+
 def normalize_angle(angle_deg: float) -> float:
     """将角度规范到 (-180, 180] 区间."""
     while angle_deg > 180.0:
@@ -109,25 +145,23 @@ def select_state_machine_input(
     active_target_role=None,
     preferred_role=None,
     camera_frames=None,
+    runtime=None,
+    cargo_slot=None,
+    obstacle_slot=None,
     role_camera_priorities=None,
 ):
     """从多检测批次中挑选本拍状态机输入."""
     if preferred_role is not None and active_target_role is None:
         active_target_role = preferred_role
 
-    frames_by_camera = {}
-    if camera_frames is not None:
-        for camera_id, frame in camera_frames.items():
-            frames_by_camera[str(camera_id)] = frame
-    else:
-        if cargo_frame is not None:
-            frames_by_camera[str(getattr(cargo_frame, "camera_id", "cam_a"))] = (
-                cargo_frame
-            )
-        if obstacle_frame is not None:
-            frames_by_camera[str(getattr(obstacle_frame, "camera_id", "cam_b"))] = (
-                obstacle_frame
-            )
+    frames_by_camera = _collect_frames_by_camera(
+        cargo_frame=cargo_frame,
+        obstacle_frame=obstacle_frame,
+        camera_frames=camera_frames,
+        runtime=runtime,
+        cargo_slot=cargo_slot,
+        obstacle_slot=obstacle_slot,
+    )
 
     if active_target_role in ("follower", "cargo"):
         selected_role = str(active_target_role)

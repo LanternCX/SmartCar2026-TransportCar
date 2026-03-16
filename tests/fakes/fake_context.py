@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Optional, cast
 
-from diagnostics.manager import LogManager, QueryUARTLike
+from diagnostics.manager import LogManager
 from control.chassis_state import ChassisState
 from services.runtime.diagnostics_facade import DiagnosticsFacade
 from services.commanding.session import CommandSession
@@ -126,9 +126,7 @@ class FakeCommandContext:
         self.command_session = self.session
         self.uart3: FakeUART = FakeUART()
         self.uart6: FakeUART = FakeUART()
-        self.reply_uart: QueryUARTLike = cast(
-            QueryUARTLike, getattr(self, reply_uart_name)
-        )
+        self.reply_uart = cast(object, getattr(self, reply_uart_name))
         self.boot_time_ms: int = 0
         self.last_exception_text: str = "none"
         self.vision_coordinator: FakeVisionCoordinator = FakeVisionCoordinator()
@@ -198,6 +196,6 @@ class FakeCommandContext:
         self.session.reset_runtime_state()
         self.vision_coordinator.clear_runtime()
 
-    def get_query_uart(self) -> QueryUARTLike:
+    def get_query_uart(self):
         """返回当前查询响应应写入的串口."""
-        return cast(QueryUARTLike, getattr(self, "reply_uart", self.uart6))
+        return getattr(self, "reply_uart", self.uart6)

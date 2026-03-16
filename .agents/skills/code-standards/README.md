@@ -36,6 +36,16 @@
 - command handler, query handler, facade 和 adapter 不得直接读写宿主内部字段或临时属性
 - 禁止把算法细节, 设备细节或领域状态继续堆进编排层
 - 发现 God object, 状态双写, 职责漂移或隐式上下文协议时, 应优先重构边界
+- diagnostics 只能只读聚合 owner 状态, 不得缓存第二份运行时状态
+- command / query 装配默认应显式延迟加载, 不得回退到 import-time 全量注册
+
+## Memory Budget Gate
+- 涉及 `TransportCar` 或运行时 owner 的评审, 一号目标是最小内存占用指标, 不是结构更清晰
+- 新增常驻对象必须标注 owner、阶段、A / B / C / D / E 分类和必要性
+- import-time 禁止目录扫描、自动发现、自动注册和重型单例初始化
+- 模块级可变运行时全局状态属于阻断项
+- 可延迟功能不得重新塞回构造期无条件初始化
+- 结构更清晰但板端内存指标没有改善时, 不算有效重构
 
 ## Anti-Overdesign Rules
 - 没有多个真实消费者时, 不引入通用框架式抽象
@@ -54,6 +64,8 @@
 - 是否存在为了“通用”而增加复杂度的设计
 - 是否存在 import-time 副作用注册, 且缺少 fail-fast, 可观测性或注册结果校验
 - 是否仍满足 5ms 控制周期约束
+- 是否给出了 `mem_free_after_import`、`mem_free_after_core_init`、`mem_free_after_feature_init`、`mem_free_runtime_idle` 与 `diag_survival` 证据
+- 是否说明了新增常驻对象为何必须常驻
 
 ## Refactor Guardrails
 - 保留公共行为和通信协议（串口命令格式）

@@ -111,6 +111,7 @@ def check_transport_source():
     router = _ProbeRouter()
     service = UartIngressService(
         router=router,
+        ensure_query_handlers=lambda: None,
         vision_coordinator=_ProbeVisionCoordinator(),
         build_context=lambda source: TransportCommandContext(
             runtime, reply_uart=getattr(runtime, source), source=source

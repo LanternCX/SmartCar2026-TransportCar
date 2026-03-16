@@ -89,7 +89,8 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-import services.transport_car as transport_car_module  # noqa: E402
+import services.car as transport_car_module  # noqa: E402
+from services.runtime.diagnostics_facade import DiagnosticsFacade  # noqa: E402
 
 
 class FakeUART:
@@ -125,6 +126,46 @@ def _build_test_logger_manager(uart: object) -> LogManager:
 def _read_repo_text(relative_path: str) -> str:
     """读取仓库内文本文件内容."""
     return Path(relative_path).read_text(encoding="utf-8")
+
+
+def test_transport_car_staged_init_builds_core_runtime_before_optional_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order = []
+
+    def fake_init_core_runtime(self) -> None:
+        call_order.append("core")
+        self.uart3 = FakeUART()
+        self.uart6 = FakeUART()
+        self.logger_manager = object()
+        self._command_session = CommandSession()
+        self.chassis_state = object()
+
+    def fake_init_optional_features(self) -> None:
+        call_order.append("optional")
+        assert self.uart3 is not None
+        assert self.logger_manager is not None
+        assert self.command_session is not None
+        assert self.chassis_state is not None
+        self.vision_runtime = object()
+
+    monkeypatch.setattr(
+        transport_car_module.TransportCar,
+        "_init_core_runtime",
+        fake_init_core_runtime,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        transport_car_module.TransportCar,
+        "_init_optional_features",
+        fake_init_optional_features,
+        raising=False,
+    )
+
+    car = transport_car_module.TransportCar(vehicle_role="main")
+
+    assert call_order == ["core", "optional"]
+    assert car.vision_runtime is not None
 
 
 def test_transport_car_boot_logs_go_through_logger(
@@ -254,7 +295,27 @@ def test_transport_car_skips_gyro_offset_info_log_during_boot(
     assert received["logger"] is None
 
 
-def test_transport_car_error_path_uses_structured_error_log() -> None:
+def test_transport_car_error_path_uses_raw_uart_fallback() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.uart3 = FakeUART()
+    car.log_health = _build_test_logger_manager(car.uart3).get_logger("system.health")
+    car.last_exception_text = "none"
+    car.error_count = 0
+    car.last_error_stage = None
+    car._last_error_log_text = None
+
+    car._emit_error_log("imu init failed")
+
+    assert car.last_exception_text == "imu init failed"
+    assert car.error_count == 1
+    assert car.last_error_stage == "runtime"
+    assert car.uart3.messages == ["ERRRAW imu init failed\r\n"]
+
+
+def test_transport_car_repeated_error_log_updates_state_without_log_storm() -> None:
     car = cast(
         Any,
         transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
@@ -263,12 +324,65 @@ def test_transport_car_error_path_uses_structured_error_log() -> None:
     car.logger_manager = _build_test_logger_manager(car.uart3)
     car.log_health = car.logger_manager.get_logger("system.health")
     car.last_exception_text = "none"
+    car.error_count = 0
+    car.last_error_stage = None
+    car._last_error_log_text = None
 
-    car._emit_error_log("imu init failed")
+    car._emit_error_log("uart ingress failed")
+    first_count = len(car.uart3.messages)
+    car._emit_error_log("uart ingress failed")
 
-    assert car.last_exception_text == "imu init failed"
-    assert car.uart3.messages[-1].startswith("E [system.health")
-    assert "imu init failed" in car.uart3.messages[-1]
+    assert car.last_exception_text == "uart ingress failed"
+    assert car.error_count == 2
+    assert car.last_error_stage == "runtime"
+    assert len(car.uart3.messages) == first_count
+
+
+def test_transport_car_error_path_falls_back_to_raw_uart_when_logger_ooms() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.uart3 = FakeUART()
+
+    class OomLogger:
+        def error(self, _message: str) -> None:
+            raise MemoryError("format oom")
+
+    car.log_health = OomLogger()
+    car.last_exception_text = "none"
+    car.error_count = 0
+    car.last_error_stage = None
+    car._last_error_log_text = None
+
+    car._emit_error_log("uart ingress failed")
+
+    assert car.last_exception_text == "uart ingress failed"
+    assert car.error_count == 1
+    assert car.last_error_stage == "runtime"
+    assert car.uart3.messages == ["ERRRAW uart ingress failed\r\n"]
+
+
+def test_transport_car_error_path_does_not_call_structured_logger() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.uart3 = FakeUART()
+
+    class FailingLogger:
+        def error(self, _message: str) -> None:
+            raise AssertionError("structured logger should not run")
+
+    car.log_health = FailingLogger()
+    car.last_exception_text = "none"
+    car.error_count = 0
+    car.last_error_stage = None
+    car._last_error_log_text = None
+
+    car._emit_error_log("runtime failed")
+
+    assert car.uart3.messages == ["ERRRAW runtime failed\r\n"]
 
 
 def test_transport_car_uart3_command_echo_uses_command_logger() -> None:
@@ -338,6 +452,7 @@ def test_transport_car_vision_frame_boundary_logs_without_poll_noise() -> None:
     )
     car.uart_ingress = transport_car_module.UartIngressService(
         router=car._router,
+        ensure_query_handlers=lambda: None,
         vision_coordinator=car.vision_coordinator,
         build_context=lambda source: {"source": source},
         apply_command=car.apply_command,
@@ -354,10 +469,128 @@ def test_transport_car_vision_frame_boundary_logs_without_poll_noise() -> None:
     car._handle_uart_line("camera_id=cam_b,frame_id=7,frame_end=1", source="uart6")
 
     assert not any("POLL camera=cam_b" in line for line in car.uart3.messages)
+    assert not any(
+        "FRAME camera=cam_b frame=7 end detections=1" in line
+        for line in car.uart3.messages
+    )
+
+
+def test_transport_car_vision_frame_boundary_logs_in_debug_level() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.uart3 = FakeUART()
+    car.logger_manager = _build_test_logger_manager(car.uart3)
+    car.logger_manager.set_level_name("DEBUG")
+    car.log_vision = car.logger_manager.get_logger("vision.state")
+
+    car._log_vision_frame_boundary("cam_b", "7", 1)
+
     assert any(
         "FRAME camera=cam_b frame=7 end detections=1" in line
         for line in car.uart3.messages
     )
+
+
+def test_transport_car_vision_debug_does_not_rebuild_logger_sink_every_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.log_vision = object()
+    sink_builds = []
+    received_events = []
+
+    def fake_build_logger_debug_sink(logger):
+        sink_builds.append(logger)
+
+        def sink(event):
+            received_events.append(event)
+
+        return sink
+
+    monkeypatch.setattr(
+        transport_car_module,
+        "build_logger_debug_sink",
+        fake_build_logger_debug_sink,
+    )
+    event = object()
+
+    car._emit_vision_debug(event)
+    car._emit_vision_debug(event)
+
+    assert sink_builds == [car.log_vision]
+    assert received_events == [event, event]
+
+
+def test_transport_car_records_logger_oom_into_runtime_health_fields() -> None:
+    car = cast(
+        Any,
+        transport_car_module.TransportCar.__new__(transport_car_module.TransportCar),
+    )
+    car.oom_count = 0
+    car.last_oom_stage = None
+
+    car._record_oom("format")
+    car._record_oom("sink")
+
+    assert car.oom_count == 2
+    assert car.last_oom_stage == "sink"
+
+
+def test_diagnostics_facade_reuses_cached_vision_snapshot_in_health_query() -> None:
+    runtime = types.SimpleNamespace(
+        boot_time_ms=1000,
+        now_ms=lambda: 2500,
+        command_session=CommandSession(),
+        last_exception_text="none",
+        tick_count=0,
+        last_loop_dt_us=0,
+        max_loop_dt_us=0,
+        loop_dt_total_us=0,
+        loop_overrun_count=0,
+        oom_count=0,
+        last_oom_stage=None,
+        logger_manager=types.SimpleNamespace(
+            filter_modules=[],
+            profile_name="DEFAULT",
+            level_name="INFO",
+            filter_mode="allow",
+            color_enabled=False,
+        ),
+        vision_runtime=types.SimpleNamespace(
+            latest_observation=None,
+            selected_input=None,
+            resolved_target=None,
+        ),
+        vision_coordinator=types.SimpleNamespace(get_state_name=lambda: "ALIGN_DX"),
+        chassis_state=types.SimpleNamespace(
+            heading_est=0.0,
+            imu_data=[1],
+            wheel_states=[],
+            target_speeds={},
+            odometry=types.SimpleNamespace(x=0.0, y=0.0),
+        ),
+    )
+    runtime.command_session.command_lock = False
+    runtime.command_session.rear_only_mode = False
+    facade = DiagnosticsFacade(runtime)
+    calls = []
+    real_build_vision_snapshot = facade.build_vision_snapshot
+
+    def tracked_build_vision_snapshot():
+        calls.append("vision")
+        return real_build_vision_snapshot()
+
+    facade.build_vision_snapshot = tracked_build_vision_snapshot
+
+    health_snapshot = facade.build_health_snapshot()
+
+    assert health_snapshot["vision_state"] == "ALIGN_DX"
+    assert calls == []
 
 
 def test_transport_car_get_query_uart_defaults_to_uart6() -> None:

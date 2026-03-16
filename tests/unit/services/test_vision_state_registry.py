@@ -28,6 +28,7 @@ def test_registry_accepts_wrapped_state_object() -> None:
 
 def test_wrapped_state_exposes_transition_metadata() -> None:
     transition = SM.DONE.RETURN_HEADING_REACHED
+    assert transition is not None
 
     assert transition.state == SM.DONE
     assert transition.reason == VisionTransitionReason.RETURN_HEADING_REACHED

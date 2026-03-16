@@ -7,7 +7,7 @@ from smartcar import ticker
 from config.boot_role import get_vehicle_role
 from config.params import TICK_MS
 from services.diagnostics import format_observe_line
-from services.transport_car import TransportCar
+from services.car import TransportCar
 
 
 SAMPLE_EVERY_TICKS = 20

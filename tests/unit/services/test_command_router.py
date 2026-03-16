@@ -6,6 +6,19 @@ from services.commanding.router import CommandRouter
 from services.commanding.session import CommandSession
 
 
+EXPECTED_QUERY_HANDLER_MODULES = (
+    "services.commanding.handlers.query_enc",
+    "services.commanding.handlers.query_health",
+    "services.commanding.handlers.query_imu",
+    "services.commanding.handlers.query_lock",
+    "services.commanding.handlers.query_log",
+    "services.commanding.handlers.query_motor",
+    "services.commanding.handlers.query_pos",
+    "services.commanding.handlers.query_tick",
+    "services.commanding.handlers.query_vision",
+)
+
+
 pytestmark = pytest.mark.unit
 
 
@@ -344,6 +357,85 @@ def test_query_handlers_do_not_depend_on_transport_private_state() -> None:
     assert ctx.reply_uart.messages == ["?lock=1\r\n"]
     assert not hasattr(ctx, "_query_response_uart")
     assert not hasattr(ctx, "_query_source")
+
+
+def test_load_query_handlers_uses_static_module_list_without_directory_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    import sys
+    import types
+    import services.commanding.handlers as handlers_module
+
+    calls = []
+
+    monkeypatch.setattr(handlers_module, "sys", types.SimpleNamespace(modules={}))
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in EXPECTED_QUERY_HANDLER_MODULES:
+            calls.append(name)
+            module = types.ModuleType(name)
+            sys.modules[name] = module
+            return module
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    handlers_module.load_query_handlers()
+
+    assert calls == list(EXPECTED_QUERY_HANDLER_MODULES)
+
+
+def test_load_command_handlers_uses_static_module_list_without_query_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    import sys
+    import types
+    import services.commanding.handlers as handlers_module
+
+    calls = []
+
+    monkeypatch.setattr(handlers_module, "sys", types.SimpleNamespace(modules={}))
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("services.commanding.handlers.cmd_"):
+            calls.append(name)
+            module = types.ModuleType(name)
+            sys.modules[name] = module
+            return module
+        if name.startswith("services.commanding.handlers.query_"):
+            raise AssertionError("query handlers should not be imported")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    handlers_module.load_command_handlers()
+
+    assert calls == [
+        "services.commanding.handlers.cmd_angle",
+        "services.commanding.handlers.cmd_d_angle",
+        "services.commanding.handlers.cmd_dx",
+        "services.commanding.handlers.cmd_dy",
+        "services.commanding.handlers.cmd_log_color",
+        "services.commanding.handlers.cmd_log_filter",
+        "services.commanding.handlers.cmd_log_level",
+        "services.commanding.handlers.cmd_log_modules",
+        "services.commanding.handlers.cmd_log_profile",
+        "services.commanding.handlers.cmd_log_reset",
+        "services.commanding.handlers.cmd_omega",
+        "services.commanding.handlers.cmd_print",
+        "services.commanding.handlers.cmd_rear",
+        "services.commanding.handlers.cmd_reset",
+        "services.commanding.handlers.cmd_vx",
+        "services.commanding.handlers.cmd_vy",
+        "services.commanding.handlers.cmd_x",
+        "services.commanding.handlers.cmd_y",
+    ]
 
 
 def test_explicit_route_uses_context_finalize_without_runtime_private_protocol() -> (

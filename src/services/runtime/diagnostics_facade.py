@@ -1,16 +1,63 @@
-"""运行时诊断 facade."""
+"""@brief 运行时诊断 facade.
+
+@note facade 仅只读聚合 owner 状态, 不缓存第二份运行时状态
+"""
+
+from services.runtime.diag_health import (
+    build_health_query_response,
+    build_health_snapshot,
+    build_tick_query_response,
+    build_tick_snapshot,
+)
+from services.runtime.diag_format import (
+    HEALTH_SNAPSHOT_FIELDS,
+    TICK_SNAPSHOT_FIELDS,
+    VISION_SNAPSHOT_FIELDS,
+)
+from services.runtime.diag_motion import (
+    build_encoder_snapshot,
+    build_imu_snapshot,
+    build_lock_snapshot,
+    build_log_snapshot,
+    build_motor_snapshot,
+    build_pos_snapshot,
+)
+from services.runtime.diag_vision import (
+    build_vision_query_response,
+    build_vision_snapshot,
+)
 
 
 class DiagnosticsFacade:
-    """统一聚合 query 所需的运行时诊断数据."""
+    """@brief 统一聚合 query 所需的运行时诊断数据."""
 
     def __init__(self, runtime) -> None:
         self._runtime = runtime
 
     def _now_ms(self) -> int:
+        """@brief 返回当前毫秒时间."""
         return int(self._runtime.now_ms())
 
+    def _get_vision_runtime(self):
+        """@brief 返回视觉运行时 owner, 若未启用则返回 None."""
+        return getattr(self._runtime, "vision_runtime", None)
+
+    def _get_vision_state_name(self) -> str:
+        """@brief 返回当前视觉状态名."""
+        coordinator = getattr(self._runtime, "vision_coordinator", None)
+        if coordinator is None:
+            return "UNKNOWN"
+        if hasattr(coordinator, "get_state_name"):
+            return coordinator.get_state_name()
+        return str(getattr(coordinator, "state_name", "UNKNOWN"))
+
     def _get_rear_only_mode(self) -> bool:
+        """@brief 返回当前后轮模式标记."""
+        vision_runtime = self._get_vision_runtime()
+        if vision_runtime is not None:
+            resolved_target = getattr(vision_runtime, "resolved_target", None)
+            if resolved_target is not None:
+                return bool(resolved_target.rear_only_mode)
         coordinator = getattr(self._runtime, "vision_coordinator", None)
         if coordinator is not None:
             resolved_target = getattr(coordinator, "resolved_target", None)
@@ -19,128 +66,60 @@ class DiagnosticsFacade:
         return bool(self._runtime.command_session.rear_only_mode)
 
     def _get_command_lock(self) -> bool:
+        """@brief 返回命令锁状态."""
         return bool(self._runtime.command_session.command_lock)
 
     def _get_chassis_state(self):
+        """@brief 返回底盘状态 owner."""
         return self._runtime.chassis_state
 
     def build_health_snapshot(self):
-        """返回健康摘要快照."""
-        return {
-            "alive": 1,
-            "uptime_ms": max(0, self._now_ms() - int(self._runtime.boot_time_ms)),
-            "lock": 1 if self._get_command_lock() else 0,
-            "rear": 1 if self._get_rear_only_mode() else 0,
-            "last_err": self._runtime.last_exception_text,
-            "vision_state": self.build_vision_snapshot()["state"],
-        }
+        """@brief 返回健康摘要快照."""
+        return build_health_snapshot(self)
+
+    def build_health_query_response(self):
+        """@brief 直接构造 health 查询响应, 减少中间对象."""
+        return build_health_query_response(self)
 
     def build_tick_snapshot(self):
-        """返回 tick 统计快照."""
-        avg_us = 0
-        if self._runtime.tick_count > 0:
-            avg_us = int(self._runtime.loop_dt_total_us / self._runtime.tick_count)
-        return {
-            "count": int(self._runtime.tick_count),
-            "last_us": int(self._runtime.last_loop_dt_us),
-            "max_us": int(self._runtime.max_loop_dt_us),
-            "avg_us": avg_us,
-            "overrun": int(self._runtime.loop_overrun_count),
-        }
+        """@brief 返回 tick 统计快照."""
+        return build_tick_snapshot(self._runtime)
+
+    def build_tick_query_response(self):
+        """@brief 直接构造 tick 查询响应, 减少中间对象."""
+        return build_tick_query_response(self._runtime)
 
     def build_imu_snapshot(self):
-        """返回 IMU 摘要快照."""
-        chassis_state = self._get_chassis_state()
-        yaw_rate = 0.0
-        gz_raw = 0.0
-        heading_est = 0.0
-        imu_data = None
-        if chassis_state is not None:
-            yaw_rate = float(getattr(chassis_state, "yaw_rate", 0.0) or 0.0)
-            gz_raw = float(getattr(chassis_state, "last_gz_raw", 0.0) or 0.0)
-            heading_est = float(getattr(chassis_state, "heading_est", 0.0) or 0.0)
-            imu_data = getattr(chassis_state, "imu_data", None)
-        return {
-            "ok": 1 if imu_data else 0,
-            "yaw_deg": heading_est,
-            "yaw_rate_dps": yaw_rate,
-            "gz_raw": gz_raw,
-        }
+        """@brief 返回 IMU 摘要快照."""
+        return build_imu_snapshot(self._get_chassis_state())
 
     def build_encoder_snapshot(self):
-        """返回编码器摘要快照."""
-        snapshot = {}
-        chassis_state = self._get_chassis_state()
-        wheel_states = (
-            [] if chassis_state is None else (chassis_state.wheel_states or [])
-        )
-        for state in wheel_states:
-            name = state["name"]
-            snapshot["%s_raw" % name] = float(state.get("raw_speed", 0.0))
-            snapshot["%s_filt" % name] = float(state.get("filtered_speed", 0.0))
-        return snapshot
+        """@brief 返回编码器摘要快照."""
+        return build_encoder_snapshot(self._get_chassis_state())
 
     def build_motor_snapshot(self):
-        """返回电机摘要快照."""
-        snapshot = {}
-        chassis_state = self._get_chassis_state()
-        target_speeds = (
-            {} if chassis_state is None else (chassis_state.target_speeds or {})
+        """@brief 返回电机摘要快照."""
+        return build_motor_snapshot(
+            self._get_chassis_state(),
+            self._get_rear_only_mode(),
         )
-        wheel_states = (
-            [] if chassis_state is None else (chassis_state.wheel_states or [])
-        )
-        for state in wheel_states:
-            name = state["name"]
-            snapshot["%s_target" % name] = float(target_speeds.get(name, 0.0) or 0.0)
-            snapshot["%s_duty" % name] = float(state.get("duty", 0.0))
-        snapshot["rear"] = 1 if self._get_rear_only_mode() else 0
-        return snapshot
 
     def build_vision_snapshot(self):
-        """返回视觉摘要快照."""
-        coordinator = getattr(self._runtime, "vision_coordinator", None)
-        if coordinator is None:
-            return {
-                "state": "UNKNOWN",
-                "obs_age_ms": None,
-                "obs_left": None,
-                "obs_top": None,
-                "obs_right": None,
-                "obs_bottom": None,
-                "obs_center_x": None,
-                "obs_center_y": None,
-                "target_x": None,
-                "target_y": None,
-                "target_angle": None,
-            }
-        return coordinator.build_snapshot(self._now_ms())
+        """@brief 返回视觉摘要快照."""
+        return build_vision_snapshot(self)
+
+    def build_vision_query_response(self):
+        """@brief 直接构造 vision 查询响应, 减少中间对象."""
+        return build_vision_query_response(self)
 
     def build_pos_snapshot(self):
-        """返回位置查询快照."""
-        chassis_state = self._get_chassis_state()
-        odometry = getattr(chassis_state, "odometry", None)
-        heading_est = float(getattr(chassis_state, "heading_est", 0.0) or 0.0)
-        return {
-            "x": float(0.0 if odometry is None else odometry.x),
-            "y": float(0.0 if odometry is None else odometry.y),
-            "heading_deg": heading_est,
-        }
+        """@brief 返回位置查询快照."""
+        return build_pos_snapshot(self._get_chassis_state())
 
     def build_lock_snapshot(self):
-        """返回锁定状态快照."""
-        return {"locked": 1 if self._get_command_lock() else 0}
+        """@brief 返回锁定状态快照."""
+        return build_lock_snapshot(self._get_command_lock())
 
     def build_log_snapshot(self):
-        """返回日志配置快照."""
-        logger_manager = self._runtime.logger_manager
-        modules_text = "none"
-        if logger_manager.filter_modules:
-            modules_text = "|".join(logger_manager.filter_modules)
-        return {
-            "profile": logger_manager.profile_name.lower(),
-            "level": logger_manager.level_name.lower(),
-            "filter": logger_manager.filter_mode,
-            "color": 1 if logger_manager.color_enabled else 0,
-            "modules": modules_text,
-        }
+        """@brief 返回日志配置快照."""
+        return build_log_snapshot(self._runtime.logger_manager)

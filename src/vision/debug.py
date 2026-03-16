@@ -102,6 +102,6 @@ def build_logger_debug_sink(logger):
 
     def sink(event):
         """通过结构化日志输出单条视觉调试事件."""
-        logger.info(format_transition_event(event))
+        logger.debug(format_transition_event(event))
 
     return sink

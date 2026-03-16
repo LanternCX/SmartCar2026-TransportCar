@@ -1,5 +1,18 @@
 """运行时诊断输出辅助函数."""
 
+from services.runtime.diagnostics_facade import (
+    HEALTH_SNAPSHOT_FIELDS,
+    TICK_SNAPSHOT_FIELDS,
+    VISION_SNAPSHOT_FIELDS,
+)
+
+
+QUERY_FIELD_ORDER = {
+    "health": HEALTH_SNAPSHOT_FIELDS,
+    "tick": TICK_SNAPSHOT_FIELDS,
+    "vision": VISION_SNAPSHOT_FIELDS,
+}
+
 
 def _sanitize_text(value):
     """将字符串值清理为单行串口安全文本."""
@@ -20,7 +33,14 @@ def format_snapshot_value(value):
 def format_query_response(token, snapshot):
     """将快照字典编码为查询响应行."""
     parts = []
-    for key, value in snapshot.items():
+    field_order = QUERY_FIELD_ORDER.get(token)
+    if field_order is None:
+        items = snapshot.items()
+    else:
+        items = []
+        for key in field_order:
+            items.append((key, snapshot.get(key)))
+    for key, value in items:
         parts.append("%s:%s" % (key, format_snapshot_value(value)))
     return "?%s=%s\r\n" % (token, ",".join(parts))
 
@@ -53,8 +73,12 @@ def format_log_query_response(snapshot):
 def build_query_response_from_facade(token, facade):
     """通过 diagnostics facade 构造指定查询响应文本."""
     if token == "health":
+        if hasattr(facade, "build_health_query_response"):
+            return facade.build_health_query_response()
         return format_query_response(token, facade.build_health_snapshot())
     if token == "tick":
+        if hasattr(facade, "build_tick_query_response"):
+            return facade.build_tick_query_response()
         return format_query_response(token, facade.build_tick_snapshot())
     if token == "imu":
         return format_query_response(token, facade.build_imu_snapshot())
@@ -63,6 +87,8 @@ def build_query_response_from_facade(token, facade):
     if token == "motor":
         return format_query_response(token, facade.build_motor_snapshot())
     if token == "vision":
+        if hasattr(facade, "build_vision_query_response"):
+            return facade.build_vision_query_response()
         return format_query_response(token, facade.build_vision_snapshot())
     if token == "pos":
         return format_pos_query_response(facade.build_pos_snapshot())

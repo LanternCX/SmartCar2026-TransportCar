@@ -2,6 +2,7 @@
 
 import sys
 import types
+from typing import Any, cast
 
 import pytest
 
@@ -82,7 +83,7 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-import services.transport_car as transport_car_module  # noqa: E402
+import services.car as transport_car_module  # noqa: E402
 from vision.protocol import VisionProtocol  # noqa: E402
 
 
@@ -128,7 +129,8 @@ def test_main_vehicle_profile_enables_dual_camera_polling_and_state_machine(
     assert car.single_task_state_machine_enabled is True
 
     car.handle_uart_line("left=10,top=20,right=40,bottom=60", source="uart6")
-    observation = car.vision_coordinator.get_observation(car.now_ms())
+    coordinator = cast(Any, car.vision_coordinator)
+    observation = coordinator.get_observation(car.now_ms())
 
     assert observation is not None
     assert observation.left == 10.0
@@ -146,19 +148,21 @@ def test_aux_vehicle_profile_disables_visual_processing_and_keeps_execution_path
 
     car = transport_car_module.TransportCar(vehicle_role="aux")
     apply_calls = []
-    car.uart_ingress.apply_command = lambda line, source="uart6": apply_calls.append(
-        (source, line)
+    car._ensure_uart_ingress()
+    cast(Any, car.uart_ingress).apply_command = lambda line, source="uart6": (
+        apply_calls.append((source, line))
     )
 
     car.handle_uart_line("left=10,top=20,right=40,bottom=60", source="uart6")
     car.handle_uart_line("vx=1", source="uart6")
+    coordinator = cast(Any, car.vision_coordinator)
 
     assert car.vehicle_role == "aux"
     assert car.vision_processing_enabled is False
     assert car.dual_camera_polling_enabled is False
     assert car.single_task_state_machine_enabled is False
-    assert car.vision_coordinator.get_state_name() == "DISABLED"
-    assert car.vision_coordinator.get_observation(car.now_ms()) is None
+    assert coordinator.get_state_name() == "DISABLED"
+    assert coordinator.get_observation(car.now_ms()) is None
     assert apply_calls == [("uart6", "vx=1")]
     assert car.role_profile.vehicle_role == "aux"
     assert car.role_profile.vision_processing_enabled is False
@@ -171,8 +175,9 @@ def test_aux_vehicle_profile_uses_shared_vision_reserved_payload_helper(
 
     car = transport_car_module.TransportCar(vehicle_role="aux")
     apply_calls = []
-    car.uart_ingress.apply_command = lambda line, source="uart6": apply_calls.append(
-        (source, line)
+    car._ensure_uart_ingress()
+    cast(Any, car.uart_ingress).apply_command = lambda line, source="uart6": (
+        apply_calls.append((source, line))
     )
 
     reserved_line = "left=10,top=20,right=40,bottom=60"

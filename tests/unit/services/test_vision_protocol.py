@@ -3,9 +3,53 @@
 import pytest
 
 from vision.protocol import VisionObservation, VisionProtocol
+from vision.runtime import VisionRuntime
 
 
 pytestmark = pytest.mark.unit
+
+
+def test_vision_runtime_is_single_owner_for_frames_and_target() -> None:
+    runtime = VisionRuntime(timeout_ms=200)
+
+    assert runtime.latest_observation is None
+    assert runtime.resolved_target is None
+    assert runtime.cam_a.frame is None
+    assert runtime.cam_b.frame is None
+
+
+def test_protocol_accepts_runtime_owner_and_does_not_keep_legacy_latest_cache() -> None:
+    runtime = VisionRuntime(timeout_ms=200)
+
+    protocol = VisionProtocol(runtime)
+
+    assert protocol.runtime is runtime
+    assert hasattr(protocol, "_latest") is False
+    assert hasattr(protocol, "_latest_frame") is False
+    assert hasattr(protocol, "_pending_detections") is False
+
+
+def test_protocol_writes_frame_result_into_runtime_slot() -> None:
+    runtime = VisionRuntime(timeout_ms=200)
+    protocol = VisionProtocol(runtime)
+
+    protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=1,category=cargo,left=1,top=2,right=3,bottom=4",
+        source="uart6",
+        now_ms=1000,
+    )
+    parsed = protocol.try_parse_observation(
+        "camera_id=cam_a,frame_id=1,frame_end=1",
+        source="uart6",
+        now_ms=1001,
+    )
+
+    assert parsed.consumed is True
+    assert runtime.cam_a.frame is not None
+    assert runtime.cam_a.frame.frame_id == "1"
+    assert len(runtime.cam_a.frame.detections) == 1
+    assert runtime.latest_observation is not None
+    assert runtime.latest_observation.frame_id == "1"
 
 
 def test_parse_bbox_packet_from_uart6() -> None:

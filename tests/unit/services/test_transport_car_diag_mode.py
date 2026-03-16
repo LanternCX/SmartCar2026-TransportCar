@@ -5,6 +5,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -85,8 +86,39 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-import services.transport_car as transport_car_module  # noqa: E402
+import services.car as transport_car_module  # noqa: E402
 import services.stage2_smoke as stage2_smoke_module  # noqa: E402
+
+
+EXPECTED_ALL_HANDLER_MODULES = (
+    "services.commanding.handlers.cmd_angle",
+    "services.commanding.handlers.cmd_d_angle",
+    "services.commanding.handlers.cmd_dx",
+    "services.commanding.handlers.cmd_dy",
+    "services.commanding.handlers.cmd_log_color",
+    "services.commanding.handlers.cmd_log_filter",
+    "services.commanding.handlers.cmd_log_level",
+    "services.commanding.handlers.cmd_log_modules",
+    "services.commanding.handlers.cmd_log_profile",
+    "services.commanding.handlers.cmd_log_reset",
+    "services.commanding.handlers.cmd_omega",
+    "services.commanding.handlers.cmd_print",
+    "services.commanding.handlers.cmd_rear",
+    "services.commanding.handlers.cmd_reset",
+    "services.commanding.handlers.cmd_vx",
+    "services.commanding.handlers.cmd_vy",
+    "services.commanding.handlers.cmd_x",
+    "services.commanding.handlers.cmd_y",
+    "services.commanding.handlers.query_enc",
+    "services.commanding.handlers.query_health",
+    "services.commanding.handlers.query_imu",
+    "services.commanding.handlers.query_lock",
+    "services.commanding.handlers.query_log",
+    "services.commanding.handlers.query_motor",
+    "services.commanding.handlers.query_pos",
+    "services.commanding.handlers.query_tick",
+    "services.commanding.handlers.query_vision",
+)
 
 
 def test_diagnostic_mode_skips_hardware_initializers(
@@ -119,10 +151,47 @@ def test_diagnostic_mode_skips_hardware_initializers(
     ]
 
 
-def test_diagnostic_mode_keeps_debug_query_tokens_registered() -> None:
+def test_diagnostic_mode_builds_motion_runtime_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(transport_car_module, "load_ident_lookup", lambda _path: {})
+    monkeypatch.setattr(
+        transport_car_module,
+        "load_gyro_offsets",
+        lambda _path, logger=None: [0.0] * 6,
+    )
+
     car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
 
-    registered = set(car._router._query_handlers.keys())
+    assert car.motion_runtime is not None
+    assert car.imu is car.motion_runtime.imu
+    assert car.chassis_state is car.motion_runtime.chassis_state
+    assert car.chassis_controller is car.motion_runtime.chassis_controller
+
+
+def test_diagnostic_mode_defers_debug_query_tokens_until_first_query_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import services.commanding.handlers as handlers_module
+    import importlib
+
+    router_module = importlib.import_module("services.commanding.router")
+
+    monkeypatch.setattr(router_module, "router", router_module.CommandRouter())
+    for modname in handlers_module.ALL_HANDLER_MODULES[
+        handlers_module.QUERY_HANDLER_START_INDEX :
+    ]:
+        monkeypatch.delitem(sys.modules, modname, raising=False)
+
+    car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
+
+    router = cast(Any, car._router)
+
+    assert router._query_handlers == {}
+
+    car._ensure_query_handlers()
+
+    registered = set(router._query_handlers.keys())
 
     assert {"health", "tick", "imu", "enc", "motor", "vision"} <= registered
 
@@ -138,9 +207,11 @@ def test_diagnostic_mode_wires_vision_transitions_to_breakpoint_sink(
     )
 
     car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="main")
+    car._ensure_vision_coordinator()
+    coordinator = cast(Any, car.vision_coordinator)
 
-    assert car.vision_coordinator.state_machine is not None
-    assert car.vision_coordinator.state_machine._debug_sink == car._emit_vision_debug
+    assert coordinator.state_machine is not None
+    assert coordinator.state_machine._debug_sink == car._emit_vision_debug
 
 
 def test_aux_vehicle_profile_in_diagnostic_mode_disables_visual_runtime(
@@ -155,13 +226,14 @@ def test_aux_vehicle_profile_in_diagnostic_mode_disables_visual_runtime(
 
     car = transport_car_module.TransportCar(diagnostic_mode=True, vehicle_role="aux")
     car.handle_uart_line("left=10,top=20,right=40,bottom=60", source="uart6")
+    coordinator = cast(Any, car.vision_coordinator)
 
     assert car.vehicle_role == "aux"
     assert car.vision_processing_enabled is False
     assert car.dual_camera_polling_enabled is False
     assert car.single_task_state_machine_enabled is False
-    assert car.vision_coordinator.get_state_name() == "DISABLED"
-    assert car.vision_coordinator.get_observation(car.now_ms()) is None
+    assert coordinator.get_state_name() == "DISABLED"
+    assert coordinator.get_observation(car.now_ms()) is None
 
 
 def test_stage2_smoke_probe_collects_safe_runtime_summary(
@@ -192,6 +264,34 @@ def test_stage2_smoke_probe_collects_safe_runtime_summary(
     }
     assert set(summary["query_outputs"].keys()) == set(stage2_smoke_module.TOKENS)
     assert summary["query_outputs"]["health"].startswith("?health=")
+
+
+def test_load_all_handlers_uses_static_module_list_without_directory_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import types
+    import builtins
+    import services.commanding.handlers as handlers_module
+
+    calls = []
+
+    monkeypatch.setattr(handlers_module, "sys", types.SimpleNamespace(modules={}))
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in EXPECTED_ALL_HANDLER_MODULES:
+            calls.append(name)
+            module = types.ModuleType(name)
+            sys.modules[name] = module
+            return module
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    handlers_module.load_all_handlers()
+
+    assert calls == list(EXPECTED_ALL_HANDLER_MODULES)
 
 
 def test_stage2_smoke_probe_clears_stale_runtime_modules() -> None:
@@ -571,54 +671,33 @@ def test_commanding_handlers_package_defers_registration_until_explicit_loader(
     assert fresh_router._cmd_handlers == {}
 
 
-def test_commanding_query_loader_avoids_tuple_startswith_requirement(
+def test_commanding_query_loader_remains_safe_on_repeated_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import services.commanding.handlers as handlers_module
 
     imported = []
 
-    class StrictName(str):
-        def startswith(self, prefix, *args):
-            if isinstance(prefix, tuple):
-                raise TypeError("can't convert 'tuple' object to str implicitly")
-            return super().startswith(prefix, *args)
-
     previous_query = sys.modules.pop("services.commanding.handlers.query_health", None)
-    previous_cmd = sys.modules.pop("services.commanding.handlers.cmd_dx", None)
     real_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name in (
-            "services.commanding.handlers.query_health",
-            "services.commanding.handlers.cmd_dx",
-        ):
+        if name == "services.commanding.handlers.query_health":
             imported.append(name)
             module = types.ModuleType(name)
             sys.modules[name] = module
             return module
         return real_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr(
-        handlers_module.os,
-        "listdir",
-        lambda _path: (
-            StrictName("__init__.py"),
-            StrictName("cmd_dx.py"),
-            StrictName("query_health.py"),
-        ),
-    )
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     try:
         handlers_module.load_query_handlers()
+        handlers_module.load_query_handlers()
     finally:
         sys.modules.pop("services.commanding.handlers.query_health", None)
-        sys.modules.pop("services.commanding.handlers.cmd_dx", None)
         if previous_query is not None:
             sys.modules["services.commanding.handlers.query_health"] = previous_query
-        if previous_cmd is not None:
-            sys.modules["services.commanding.handlers.cmd_dx"] = previous_cmd
 
     assert imported == ["services.commanding.handlers.query_health"]
 
@@ -740,7 +819,7 @@ def test_stage2_full_transport_summary_uses_public_transport_entrypoint_and_rout
     monkeypatch.setattr(stage2_smoke_module, "TOKENS", ("health", "lock"))
     monkeypatch.setitem(
         sys.modules,
-        "services.transport_car",
+        "services.car",
         types.SimpleNamespace(TransportCar=FakeCar),
     )
     monkeypatch.setitem(

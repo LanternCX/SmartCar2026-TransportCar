@@ -6,36 +6,41 @@
 from config.params import LOG_DEBUG, LOG_ERROR, LOG_FATAL, LOG_INFO, LOG_TRACE, LOG_WARN
 
 
-LEVEL_PREFIX = {
-    LOG_TRACE: "T",
-    LOG_DEBUG: "D",
-    LOG_INFO: "I",
-    LOG_WARN: "W",
-    LOG_ERROR: "E",
-    LOG_FATAL: "F",
-}
-
-LEVEL_COLOR = {
-    LOG_TRACE: "37",
-    LOG_DEBUG: "36",
-    LOG_INFO: "32",
-    LOG_WARN: "33",
-    LOG_ERROR: "31",
-    LOG_FATAL: "35",
-}
-
 MODULE_COLUMN_WIDTH = 14
 
 
-class LogRecord:
-    """描述单条日志记录的只读数据."""
+def _level_prefix(level: int) -> str:
+    """返回日志等级前缀字符."""
+    if level == LOG_TRACE:
+        return "T"
+    if level == LOG_DEBUG:
+        return "D"
+    if level == LOG_INFO:
+        return "I"
+    if level == LOG_WARN:
+        return "W"
+    if level == LOG_ERROR:
+        return "E"
+    if level == LOG_FATAL:
+        return "F"
+    return "?"
 
-    __slots__ = ("level", "module_name", "message")
 
-    def __init__(self, level: int, module_name: str, message: str) -> None:
-        self.level = level
-        self.module_name = module_name
-        self.message = message
+def _level_color(level: int):
+    """返回日志等级对应的 ANSI 颜色码."""
+    if level == LOG_TRACE:
+        return "37"
+    if level == LOG_DEBUG:
+        return "36"
+    if level == LOG_INFO:
+        return "32"
+    if level == LOG_WARN:
+        return "33"
+    if level == LOG_ERROR:
+        return "31"
+    if level == LOG_FATAL:
+        return "35"
+    return None
 
 
 def sanitize_log_text(text: str) -> str:
@@ -65,23 +70,24 @@ def sanitize_log_text(text: str) -> str:
     return "".join(chars)
 
 
-def format_module_name(module_name: str) -> str:
-    """整理模块列, 过长时截断以保持可读性."""
-    cleaned = sanitize_log_text(module_name)
-    if len(cleaned) <= MODULE_COLUMN_WIDTH:
-        return cleaned
-    return cleaned[: MODULE_COLUMN_WIDTH - 1] + "+"
-
-
-def format_log_record(record: LogRecord, color_enabled: bool = False) -> str:
+def format_log_record(
+    level: int,
+    module_name: str,
+    message: str,
+    color_enabled: bool = False,
+) -> str:
     """按固定格式生成日志文本."""
+    clean_module_name = sanitize_log_text(module_name)
+    clean_message = sanitize_log_text(message)
+    if len(clean_module_name) > MODULE_COLUMN_WIDTH:
+        clean_module_name = clean_module_name[: MODULE_COLUMN_WIDTH - 1] + "+"
     line = "%s [%-14s] %s" % (
-        LEVEL_PREFIX.get(record.level, "?"),
-        format_module_name(record.module_name),
-        sanitize_log_text(record.message),
+        _level_prefix(level),
+        clean_module_name,
+        clean_message,
     )
     if color_enabled:
-        color_code = LEVEL_COLOR.get(record.level)
+        color_code = _level_color(level)
         if color_code is not None:
             line = "\x1b[%sm%s\x1b[0m" % (color_code, line)
     return line + "\r\n"

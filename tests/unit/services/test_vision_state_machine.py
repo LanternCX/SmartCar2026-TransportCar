@@ -7,6 +7,7 @@ import pytest
 
 from vision.debug import format_transition_event
 from vision.protocol import VisionFrame, VisionObservation
+from vision.runtime import VisionRuntime
 from vision.state_defs import SM, SMState, VisionTransitionReason
 from vision.state_machine import (
     VisionMachineInputs,
@@ -101,6 +102,14 @@ def build_camera_frames(*frames: VisionFrame) -> Dict[str, VisionFrame]:
     return {frame.camera_id: frame for frame in frames}
 
 
+def test_vision_runtime_keeps_fixed_camera_slots_not_camera_frames_owner() -> None:
+    runtime = VisionRuntime(timeout_ms=200)
+
+    assert runtime.get_slot("cam_a") is runtime.cam_a
+    assert runtime.get_slot("cam_b") is runtime.cam_b
+    assert hasattr(runtime, "camera_frames") is False
+
+
 def test_idle_enters_align_angle_when_observation_arrives() -> None:
     machine = build_test_config()
 
@@ -145,6 +154,47 @@ def test_active_target_role_missing_does_not_fall_back_to_other_detection() -> N
 
     assert selected.target_role == "follower"
     assert selected.observation is None
+
+
+def test_select_state_machine_input_accepts_runtime_without_camera_frames_dict() -> (
+    None
+):
+    runtime = VisionRuntime(timeout_ms=200)
+
+    selected = cast(Any, select_state_machine_input)(runtime=runtime)
+
+    assert selected.observation is None
+
+
+def test_select_state_machine_input_accepts_fixed_slots_and_keeps_camera_priority() -> (
+    None
+):
+    runtime = VisionRuntime(timeout_ms=200)
+    cast(Any, runtime.cam_a).frame = build_frame(
+        build_detection(
+            "follower", 140.0, 20.0, 180.0, 170.0, camera_id="cam_a", frame_id="51"
+        ),
+        camera_id="cam_a",
+    )
+    cast(Any, runtime.cam_b).frame = build_frame(
+        build_detection(
+            "follower", 100.0, 10.0, 220.0, 230.0, camera_id="cam_b", frame_id="52"
+        ),
+        camera_id="cam_b",
+    )
+
+    selected = cast(Any, select_state_machine_input)(
+        runtime=runtime,
+        role_camera_priorities={
+            "follower": ("cam_a", "cam_b"),
+            "cargo": ("cam_a", "cam_b"),
+        },
+    )
+
+    assert selected.target_role == "follower"
+    assert selected.observation is not None
+    assert selected.observation.camera_id == "cam_a"
+    assert selected.observation.bottom == 170.0
 
 
 def test_select_state_machine_input_prefers_active_role_across_multiple_camera_frames() -> (
@@ -349,7 +399,7 @@ def test_set_state_accepts_wrapped_transition_spec() -> None:
 def test_module_can_load_without_typing_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = Path("src/vision/state_machine.py").read_text(encoding="utf-8")
+    source = Path("src/vision/state_machine/__init__.py").read_text(encoding="utf-8")
     real_import = __import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -360,6 +410,6 @@ def test_module_can_load_without_typing_dependency(
     monkeypatch.setattr("builtins.__import__", fake_import)
 
     namespace = {"__name__": "vision_state_machine_probe"}
-    exec(compile(source, "vision_state_machine.py", "exec"), namespace)
+    exec(compile(source, "vision/state_machine/__init__.py", "exec"), namespace)
 
     assert "VisionStateMachine" in namespace

@@ -6,9 +6,12 @@ from services.stage2_smoke.shared import CaptureUart, probe_queries
 def collect_full_transport_summary(tokens):
     """执行 full 模式下的完整安全 smoke."""
     from services.commanding.router import router
-    from services.transport_car import TransportCar
+    from services.car import TransportCar
 
     car = TransportCar(diagnostic_mode=True, vehicle_role="main")
+    ensure_query_handlers = getattr(car, "_ensure_query_handlers", None)
+    if ensure_query_handlers is not None:
+        ensure_query_handlers()
     registered = router.registered_query_tokens()
     missing = [name for name in tokens if name not in registered]
 

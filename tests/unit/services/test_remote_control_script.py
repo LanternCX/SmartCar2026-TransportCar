@@ -77,11 +77,11 @@ def test_remote_control_uses_chassis_state_wheel_states_for_ticker_capture(
     fake_smartcar = types.ModuleType("smartcar")
     setattr(fake_smartcar, "ticker", lambda _channel: FakeTicker())
 
-    fake_transport_module = types.ModuleType("services.transport_car")
+    fake_transport_module = types.ModuleType("services.car")
     setattr(fake_transport_module, "TransportCar", FakeTransportCar)
 
     monkeypatch.setitem(sys.modules, "smartcar", fake_smartcar)
-    monkeypatch.setitem(sys.modules, "services.transport_car", fake_transport_module)
+    monkeypatch.setitem(sys.modules, "services.car", fake_transport_module)
     monkeypatch.setitem(sys.modules, "config.boot_role", boot_role_module)
     sys.modules.pop("remote_control_test_module", None)
 
@@ -156,11 +156,11 @@ def test_remote_control_requires_exposed_vehicle_role(
     fake_smartcar = types.ModuleType("smartcar")
     setattr(fake_smartcar, "ticker", lambda _channel: FakeTicker())
 
-    fake_transport_module = types.ModuleType("services.transport_car")
+    fake_transport_module = types.ModuleType("services.car")
     setattr(fake_transport_module, "TransportCar", FakeTransportCar)
 
     monkeypatch.setitem(sys.modules, "smartcar", fake_smartcar)
-    monkeypatch.setitem(sys.modules, "services.transport_car", fake_transport_module)
+    monkeypatch.setitem(sys.modules, "services.car", fake_transport_module)
     monkeypatch.setitem(sys.modules, "config.boot_role", boot_role_module)
     sys.modules.pop("remote_control_missing_role_module", None)
 

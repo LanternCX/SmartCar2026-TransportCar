@@ -1,5 +1,6 @@
 """搬运车运行时协议契约测试."""
 
+import importlib
 import sys
 import time
 import types
@@ -11,7 +12,6 @@ from diagnostics.manager import LogManager
 from diagnostics.sink import UartSink
 from control.chassis_state import ChassisState
 from services.commanding.session import CommandSession
-from services.commanding.router import router as command_router
 from vision.coordinator import VisionCoordinator
 from vision.protocol import VisionProtocol
 
@@ -92,7 +92,8 @@ def _install_transport_stubs() -> None:
 
 _install_transport_stubs()
 
-from services.transport_car import TransportCar  # noqa: E402
+from services.car import TransportCar  # noqa: E402
+import services.commanding.handlers as commanding_handlers  # noqa: E402
 
 
 class FakeUART:
@@ -162,6 +163,7 @@ class FakeKinematics:
 
 def build_runtime_car():
     """构造运行时协议测试使用的最小搬运车实例."""
+    router_module = importlib.import_module("services.commanding.router")
     car = cast(Any, TransportCar.__new__(TransportCar))
     car.uart3 = FakeUART()
     car.uart6 = FakeUART()
@@ -169,7 +171,13 @@ def build_runtime_car():
     car.log_command = car.logger_manager.get_logger("services.command")
     car.log_vision = car.logger_manager.get_logger("vision.state")
     car.log_health = car.logger_manager.get_logger("system.health")
-    car._router = command_router
+    car._router = router_module.router
+    car._router._cmd_handlers.clear()
+    car._router._query_handlers.clear()
+    car._query_handlers_ready = False
+    car._command_handlers_ready = False
+    for modname in commanding_handlers.ALL_HANDLER_MODULES:
+        sys.modules.pop(modname, None)
     car.vision_coordinator = VisionCoordinator(
         protocol=VisionProtocol(timeout_ms=200),
         state_machine=FakeVisionMachine(),

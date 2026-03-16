@@ -130,8 +130,11 @@ python3 -m pytest --collect-only -q
 ### 5.1 注释与文档字符串
 
 - 本项目代码注释与文档字符串使用中文。
-- 函数/类/模块应有简洁文档字符串。
-- 仅对非显然逻辑加注释，避免噪声注释。
+- 函数/类/模块必须使用 Doxygen 风格文档注释。
+- 文档注释应明确 `@brief`，必要时补充 `@param`、`@return`、`@note`、`@warning`。
+- 复杂流程、状态切换、lazy 装配、兼容桥接和静态契约等非显然逻辑必须补块注释说明意图、边界和副作用。
+- 允许并鼓励在运行时代码中使用充分注释，不以“少注释”为目标；但注释必须解释设计和约束，避免无信息噪声注释。
+- 300 行门禁按“非注释代码行”计算，文档注释、块注释、单行注释和空行均不计入。
 
 ### 5.2 导入规范
 
@@ -144,6 +147,8 @@ python3 -m pytest --collect-only -q
 - 遵循邻近文件既有风格。
 - 禁止对无关文件做大规模格式化。
 - 函数保持单一职责，重复逻辑按需提取。
+- 当一个领域模块需要拆成 2 个以上内部实现文件时, 必须优先改为包目录加 `__init__.py`, 不得继续新增共同前缀平铺模块。
+- 禁止使用共同前缀平铺文件模拟命名空间, 例如 `foo_a.py`、`foo_b.py`、`foo_c.py`; 应改为 `foo/` 分包。
 
 ### 5.4 类型与命名
 
@@ -168,6 +173,16 @@ python3 -m pytest --collect-only -q
 - 时序关键路径避免阻塞。
 - 中断回调尽量只置位标志，重计算放主循环。
 
+### 5.7 内存占用门禁
+
+- 对 `src/services/transport_car.py` 及相关运行时的改动, review 一号目标是最小内存占用指标, 不是结构更清晰。
+- 任何新增常驻对象必须说明 owner、阶段、A / B / C / D / E 类别、触发条件与板端证据。
+- `import-time` 禁止自动发现、自动注册、目录扫描和重型单例初始化。
+- 模块级可变运行时全局状态属于阻断项。
+- 可延迟功能必须显式延迟装配, 不得重新塞回构造期。
+- review 输出必须包含 `mem_free_after_import`、`mem_free_after_core_init`、`mem_free_after_feature_init`、`mem_free_runtime_idle` 与 `diag_survival` 证据。
+- 若结构变清晰但内存指标没有改善, 该改动不算有效重构。
+
 ## 6. 架构边界（必须遵守）
 
 - `src/hardware/`：硬件访问与驱动抽象。
@@ -179,6 +194,9 @@ python3 -m pytest --collect-only -q
 - `src/utils/`：通用工具。
 
 依赖方向：下层不得反向依赖上层。
+
+- diagnostics 只能只读聚合 owner 状态, 不得复制第二份运行时状态。
+- command / query 装配默认走显式延迟加载, 不得回退到 import-time 全量注册。
 
 ## 7. 命令系统约定
 
@@ -212,6 +230,7 @@ python3 -m pytest --collect-only -q
 
 - CI 在 PR / push / tag 上运行 `tests/unit` + `tests/contract`。
 - 合并前必须保证两层测试通过。
+- 涉及运行时内存重构的变更, 合并前还必须补板端 memory probe 或 HIL 证据。
 
 ## 10. 文档语言规范（强制）
 

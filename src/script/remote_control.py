@@ -7,7 +7,7 @@
 from config.boot_role import get_vehicle_role
 from smartcar import ticker
 from config.params import TICK_MS
-from services.transport_car import TransportCar
+from services.car import TransportCar
 
 
 VEHICLE_ROLE = get_vehicle_role()

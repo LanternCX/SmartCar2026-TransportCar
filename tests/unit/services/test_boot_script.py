@@ -5,6 +5,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -48,7 +49,7 @@ def _load_boot_module(
         PULL_UP_47K = "pull_up"
 
         def __init__(
-            self, name: str, _mode: object, pull: object | None = None
+            self, name: str, _mode: object, pull: Optional[object] = None
         ) -> None:
             assert pull == self.PULL_UP_47K
             self._value = pin_values[name]
@@ -57,13 +58,13 @@ def _load_boot_module(
             return self._value
 
     fake_machine = types.ModuleType("machine")
-    fake_machine.Pin = FakePin
+    setattr(fake_machine, "Pin", FakePin)
 
     fake_os = types.ModuleType("os")
-    fake_os.chdir = chdir_calls.append
+    setattr(fake_os, "chdir", chdir_calls.append)
 
     fake_time = types.ModuleType("time")
-    fake_time.sleep_ms = lambda _ms: None
+    setattr(fake_time, "sleep_ms", lambda _ms: None)
 
     def fake_execfile(path: str) -> None:
         exec_calls.append(path)
@@ -206,13 +207,13 @@ def test_boot_passes_vehicle_role_to_remote_control_via_explicit_state(
             return False
 
     fake_smartcar = types.ModuleType("smartcar")
-    fake_smartcar.ticker = lambda _channel: FakeTicker()
+    setattr(fake_smartcar, "ticker", lambda _channel: FakeTicker())
 
-    fake_transport_module = types.ModuleType("services.transport_car")
-    fake_transport_module.TransportCar = FakeTransportCar
+    fake_transport_module = types.ModuleType("services.car")
+    setattr(fake_transport_module, "TransportCar", FakeTransportCar)
 
     monkeypatch.setitem(sys.modules, "smartcar", fake_smartcar)
-    monkeypatch.setitem(sys.modules, "services.transport_car", fake_transport_module)
+    monkeypatch.setitem(sys.modules, "services.car", fake_transport_module)
 
     def run_remote_control(path: str) -> None:
         if path != "script/remote_control.py":
