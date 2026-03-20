@@ -1,9 +1,84 @@
 """UART ingress 服务单元测试."""
 
+import sys
 import types
+from typing import Any, cast
 
 import pytest
 
+
+def _install_transport_import_stubs() -> None:
+    """安装导入 CompatMixin 所需的最小板端桩模块."""
+
+    machine = types.ModuleType("machine")
+
+    class Pin:
+        OUT = 0
+        IN = 1
+        PULL_UP_47K = 2
+
+        def __init__(self, *_args, **_kwargs):
+            self._value = 1
+
+        def value(self):
+            return self._value
+
+        def toggle(self):
+            return None
+
+    class UART:
+        def __init__(self, *_args, **_kwargs):
+            self.messages = []
+
+        def init(self, *_args, **_kwargs):
+            return None
+
+        def write(self, text):
+            self.messages.append(text)
+
+        def any(self):
+            return 0
+
+        def read(self, _size):
+            return b""
+
+    setattr(machine, "Pin", Pin)
+    setattr(machine, "UART", UART)
+    sys.modules.setdefault("machine", machine)
+
+    seekfree = types.ModuleType("seekfree")
+
+    class MOTOR_CONTROLLER:
+        PWM_C30_DIR_C31 = 1
+        PWM_D4_DIR_D5 = 2
+        PWM_D6_DIR_D7 = 3
+
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def duty(self, _value):
+            return None
+
+    class IMU660RX:
+        def get(self):
+            return [0, 0, 0, 0, 0, 0]
+
+    setattr(seekfree, "MOTOR_CONTROLLER", MOTOR_CONTROLLER)
+    setattr(seekfree, "IMU660RX", IMU660RX)
+    sys.modules.setdefault("seekfree", seekfree)
+
+    smartcar = types.ModuleType("smartcar")
+    setattr(
+        smartcar,
+        "encoder",
+        lambda *_args, **_kwargs: types.SimpleNamespace(get=lambda: 0),
+    )
+    sys.modules.setdefault("smartcar", smartcar)
+
+
+_install_transport_import_stubs()
+
+from services.car.compat import CompatMixin
 from services.runtime.uart_ingress import UartIngressService
 
 
@@ -382,3 +457,35 @@ def test_uart_ingress_accepts_minimal_command_runtime_query_loader() -> None:
     service.handle_line("?health", source="uart3")
 
     assert calls == [(18, None), "query"]
+
+
+def test_compat_mixin_ensure_uart_ingress_emits_memory_trace_before_and_after_init() -> (
+    None
+):
+    class FakeCompatCar(CompatMixin):
+        """测试 CompatMixin 懒初始化埋点的最小宿主."""
+
+    trace_calls = []
+    car = cast(Any, FakeCompatCar())
+    car.uart_ingress = None
+    car.uart3 = FakeUART()
+    car.uart6 = FakeUART()
+    car._router = FakeRouter()
+    car._ensure_query_handlers = lambda: None
+    car._build_handler_context = lambda source="uart6": {"source": source}
+    car.apply_command = lambda line, source="uart6": None
+    car._log_uart_command = lambda line: None
+    car._emit_error_log = lambda message: None
+    car._now_ms = lambda: 1000
+    car._ensure_vision_coordinator = lambda: None
+    car.trace_runtime_mem = lambda stage, uart=None: trace_calls.append((stage, uart))
+
+    ingress = car._ensure_uart_ingress()
+
+    assert isinstance(ingress, UartIngressService)
+    assert ingress is car.uart_ingress
+    assert [stage for stage, _uart in trace_calls] == [
+        "before_uart_ingress_init",
+        "after_uart_ingress_init",
+    ]
+    assert all(uart is car.uart3 for _stage, uart in trace_calls)

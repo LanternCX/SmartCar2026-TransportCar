@@ -201,17 +201,33 @@ class CompatMixin:
         """
         ingress = getattr(self, "uart_ingress", None)
         if ingress is None:
-            ingress = UartIngressService(
-                router=self._router,
-                ensure_query_handlers=self._ensure_query_handlers,
-                build_context=self._build_handler_context,
-                apply_command=self.apply_command,
-                command_log=self._log_uart_command,
-                emit_error=self._emit_error_log,
-                now_ms=self._now_ms,
-                get_vision_coordinator=self._ensure_vision_coordinator,
-            )
-            self.uart_ingress = ingress
+            trace_mem = self.__dict__.get("trace_runtime_mem")
+            if trace_mem is None:
+                trace_mem = getattr(type(self), "trace_runtime_mem", None)
+            trace_fail = self.__dict__.get("trace_runtime_failure")
+            if trace_fail is None:
+                trace_fail = getattr(type(self), "trace_runtime_failure", None)
+            uart = self.__dict__.get("uart3")
+            if callable(trace_mem):
+                trace_mem("before_uart_ingress_init", uart=uart)
+            try:
+                ingress = UartIngressService(
+                    router=self._router,
+                    ensure_query_handlers=self._ensure_query_handlers,
+                    build_context=self._build_handler_context,
+                    apply_command=self.apply_command,
+                    command_log=self._log_uart_command,
+                    emit_error=self._emit_error_log,
+                    now_ms=self._now_ms,
+                    get_vision_coordinator=self._ensure_vision_coordinator,
+                )
+                self.uart_ingress = ingress
+                if callable(trace_mem):
+                    trace_mem("after_uart_ingress_init", uart=uart)
+            except Exception as exc:
+                if callable(trace_fail):
+                    trace_fail("uart_ingress_init", exc, uart=uart)
+                raise
         return ingress
 
     def apply_command(self, line, source="uart6"):

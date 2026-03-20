@@ -10,10 +10,37 @@ from config.params import TICK_MS
 from services.car import TransportCar
 
 
+def _trace_mem(stage: str, uart=None) -> None:
+    """@brief 输出启动阶段内存曲线埋点.
+
+    @param stage 当前阶段名
+    @param uart 可选串口对象
+    """
+    try:
+        TransportCar.trace_runtime_mem(stage, uart=uart)
+    except Exception as exc:
+        try:
+            TransportCar.trace_runtime_failure(stage, exc, uart=uart)
+        except Exception:
+            return
+
+
+_trace_mem("after_import_transport_car")
+
+
 VEHICLE_ROLE = get_vehicle_role()
 
 
-car = TransportCar(vehicle_role=VEHICLE_ROLE)
+_trace_mem("before_core_init")
+try:
+    car = TransportCar(vehicle_role=VEHICLE_ROLE)
+except Exception as exc:
+    TransportCar.trace_runtime_failure("core_init", exc)
+    raise
+flush_pending = getattr(TransportCar, "flush_pending_runtime_traces", None)
+if callable(flush_pending):
+    flush_pending(car.uart3)
+_trace_mem("after_core_init", uart=car.uart3)
 
 car.uart3.write("Creating ticker...\r\n")
 pit1 = ticker(1)
@@ -32,6 +59,18 @@ pit1.start(TICK_MS)
 car.uart3.write("Initialization complete. Control loop started.\r\n")
 
 # 主控制循环
+_trace_mem("before_first_step", uart=car.uart3)
+first_step = True
 while True:
-    if not car.step():
+    try:
+        keep_running = car.step()
+    except Exception as exc:
+        TransportCar.trace_runtime_failure(
+            "first_step" if first_step else "step", exc, uart=car.uart3
+        )
+        raise
+    if first_step:
+        _trace_mem("after_first_step", uart=car.uart3)
+        first_step = False
+    if not keep_running:
         break

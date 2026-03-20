@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -27,6 +28,7 @@ def test_remote_control_uses_chassis_state_wheel_states_for_ticker_capture(
     capture_calls: list[tuple] = []
     callback_calls: list[object] = []
     start_calls: list[int] = []
+    trace_messages: list[str] = []
 
     class FakeTicker:
         """记录 ticker 接线行为的假对象."""
@@ -51,6 +53,21 @@ def test_remote_control_uses_chassis_state_wheel_states_for_ticker_capture(
 
     class FakeTransportCar:
         """仅暴露重构后状态接口的假车对象."""
+
+        @staticmethod
+        def trace_runtime_mem(stage: str, uart: Optional[object] = None) -> None:
+            _ = uart
+            trace_messages.append("TRACE mem stage=%s free=123\r\n" % stage)
+
+        @staticmethod
+        def trace_runtime_failure(
+            stage: str, exc: BaseException, uart: Optional[object] = None
+        ) -> None:
+            _ = uart
+            trace_messages.append(
+                "TRACE fail stage=%s type=%s free=123\r\n"
+                % (stage, exc.__class__.__name__)
+            )
 
         def __init__(self, vehicle_role: str) -> None:
             self.uart3 = FakeUart()
@@ -102,6 +119,13 @@ def test_remote_control_uses_chassis_state_wheel_states_for_ticker_capture(
     assert callback_calls == [module.car.mark_tick]
     assert start_calls == [module.TICK_MS]
     assert module.car.ticker is not None
+    assert trace_messages == [
+        "TRACE mem stage=after_import_transport_car free=123\r\n",
+        "TRACE mem stage=before_core_init free=123\r\n",
+        "TRACE mem stage=after_core_init free=123\r\n",
+        "TRACE mem stage=before_first_step free=123\r\n",
+        "TRACE mem stage=after_first_step free=123\r\n",
+    ]
     assert module.car.uart3.messages[:2] == [
         "Creating ticker...\r\n",
         "Starting ticker (%d ms)...\r\n" % module.TICK_MS,
@@ -133,6 +157,16 @@ def test_remote_control_requires_exposed_vehicle_role(
 
     class FakeTransportCar:
         """满足启动路径最小依赖的假车对象."""
+
+        @staticmethod
+        def trace_runtime_mem(stage: str, uart: Optional[object] = None) -> None:
+            _ = (stage, uart)
+
+        @staticmethod
+        def trace_runtime_failure(
+            stage: str, exc: BaseException, uart: Optional[object] = None
+        ) -> None:
+            _ = (stage, exc, uart)
 
         def __init__(self, vehicle_role: str) -> None:
             self.uart3 = FakeUart()
@@ -174,3 +208,70 @@ def test_remote_control_requires_exposed_vehicle_role(
 
     with pytest.raises(RuntimeError, match="VEHICLE_ROLE is not exposed"):
         spec.loader.exec_module(module)
+
+
+def test_remote_control_emits_trace_fail_when_core_init_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """核心初始化失败时应输出对应阶段的失败 trace."""
+
+    trace_messages: list[str] = []
+
+    class FakeTicker:
+        def capture_list(self, *items: object) -> None:
+            return None
+
+        def callback(self, func: object) -> None:
+            return None
+
+        def start(self, tick_ms: int) -> None:
+            return None
+
+    class FakeTransportCar:
+        @staticmethod
+        def trace_runtime_mem(stage: str, uart: Optional[object] = None) -> None:
+            _ = uart
+            trace_messages.append("TRACE mem stage=%s free=123\r\n" % stage)
+
+        @staticmethod
+        def trace_runtime_failure(
+            stage: str, exc: BaseException, uart: Optional[object] = None
+        ) -> None:
+            _ = uart
+            trace_messages.append(
+                "TRACE fail stage=%s type=%s free=123\r\n"
+                % (stage, exc.__class__.__name__)
+            )
+
+        def __init__(self, vehicle_role: str) -> None:
+            _ = vehicle_role
+            raise MemoryError("oom during init")
+
+    fake_smartcar = types.ModuleType("smartcar")
+    setattr(fake_smartcar, "ticker", lambda _channel: FakeTicker())
+
+    fake_transport_module = types.ModuleType("services.car")
+    setattr(fake_transport_module, "TransportCar", FakeTransportCar)
+
+    monkeypatch.setitem(sys.modules, "smartcar", fake_smartcar)
+    monkeypatch.setitem(sys.modules, "services.car", fake_transport_module)
+    monkeypatch.setitem(sys.modules, "config.boot_role", boot_role_module)
+    sys.modules.pop("remote_control_core_init_fail_module", None)
+
+    spec = importlib.util.spec_from_file_location(
+        "remote_control_core_init_fail_module", _script_path()
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    clear_vehicle_role()
+    set_vehicle_role("main")
+
+    with pytest.raises(MemoryError, match="oom during init"):
+        spec.loader.exec_module(module)
+
+    assert trace_messages == [
+        "TRACE mem stage=after_import_transport_car free=123\r\n",
+        "TRACE mem stage=before_core_init free=123\r\n",
+        "TRACE fail stage=core_init type=MemoryError free=123\r\n",
+    ]

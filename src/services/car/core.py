@@ -7,6 +7,7 @@
 """
 
 import time
+import gc
 
 from config.params import VISION_CAMERA_POLL_ORDER
 from diagnostics.manager import build_uart3_logger_manager
@@ -39,12 +40,121 @@ from storage.param_manager import load_gyro_offsets, load_ident_lookup
 
 
 _VISION_MIXIN_LOADED = False
+_PENDING_RUNTIME_TRACES = []
 
 if False:
     VisionProtocol = None
     VisionCoordinator = None
     UartIngressService = None
     build_logger_debug_sink = None
+
+
+def _get_runtime_mem_free() -> int:
+    """@brief 返回当前可用堆内存字节数.
+
+    @return 可用字节数, 若平台不支持则返回 `-1`
+
+    @note
+    MicroPython 板端优先使用 `gc.mem_free()`, host 环境缺失该接口时走稳定降级
+    """
+    mem_free = getattr(gc, "mem_free", None)
+    if mem_free is None:
+        return -1
+    try:
+        return int(mem_free())
+    except Exception:
+        return -1
+
+
+def _write_runtime_trace(text: str, uart=None) -> None:
+    """@brief 向 uart3 写出轻量 trace 文本.
+
+    @param text 已格式化好的 trace 文本
+    @param uart 可选串口对象, 为空时先进入待冲刷队列
+
+    @note
+    启动早期 `TransportCar` 还未构造完成时, 这里先缓存文本, 避免 probe 自己扰动下一阶段内存曲线
+    """
+    trace_uart = uart
+    if trace_uart is None:
+        _PENDING_RUNTIME_TRACES.append(str(text))
+        return
+    try:
+        trace_uart.write(text)
+    except Exception:
+        return
+
+
+def _create_trace_uart():
+    """@brief 尝试创建临时 trace 串口.
+
+    @return `uart3` 对象, 失败时返回 `None`
+    """
+    try:
+        return create_uart3()
+    except Exception:
+        return None
+
+
+def trace_runtime_mem(stage: str, uart=None) -> None:
+    """@brief 输出运行时内存曲线埋点.
+
+    @param stage 当前阶段名
+    @param uart 可选串口对象
+    """
+    _write_runtime_trace(
+        "TRACE mem stage=%s free=%d\r\n" % (str(stage), _get_runtime_mem_free()),
+        uart=uart,
+    )
+
+
+def trace_runtime_failure(stage: str, exc, uart=None) -> None:
+    """@brief 输出运行时 trace 失败信息.
+
+    @param stage 当前失败阶段名
+    @param exc 捕获到的异常对象
+    @param uart 可选串口对象
+    """
+    exc_type = getattr(getattr(exc, "__class__", None), "__name__", "Exception")
+    text = "TRACE fail stage=%s type=%s free=%d\r\n" % (
+        str(stage),
+        str(exc_type),
+        _get_runtime_mem_free(),
+    )
+    trace_uart = uart if uart is not None else _create_trace_uart()
+    if trace_uart is not None:
+        flush_pending_runtime_traces(trace_uart)
+        _write_runtime_trace(text, uart=trace_uart)
+        return
+    _PENDING_RUNTIME_TRACES.append(text)
+
+
+def flush_pending_runtime_traces(uart) -> None:
+    """@brief 把早期缓存的 trace 文本冲刷到已就绪串口.
+
+    @param uart 已就绪的 `uart3` 对象
+    """
+    if uart is None:
+        return
+    pending = tuple(_PENDING_RUNTIME_TRACES)
+    if not pending:
+        return
+    del _PENDING_RUNTIME_TRACES[:]
+    for text in pending:
+        _write_runtime_trace(text, uart=uart)
+
+
+def _get_instance_attr(instance, name: str):
+    """@brief 安全读取实例属性, 避免触发兼容回退递归.
+
+    @param instance 目标实例
+    @param name 属性名
+    @return 属性值, 缺失时返回 `None`
+    """
+    try:
+        return object.__getattribute__(instance, name)
+    except AttributeError:
+        return None
 
 
 def _ensure_vision_mixin_loaded() -> None:
@@ -80,15 +190,34 @@ def _get_lazy_vision_attr(instance, name: str):
     仅当首次真正访问视觉相关入口时才触发 mixin 装配,
     避免把视觉方法表注入提前到 `TransportCar.__init__()`
     """
-    from services.car.vision import VisionMixin
+    trace_mem = _get_instance_attr(instance, "trace_runtime_mem")
+    trace_fail = _get_instance_attr(instance, "trace_runtime_failure")
+    uart = _get_instance_attr(instance, "uart3")
+    if callable(trace_mem):
+        trace_mem("before_lazy_vision_attr", uart=uart)
+    try:
+        from services.car.vision import VisionMixin
 
-    value = VisionMixin.__dict__.get(name)
-    if value is None:
-        raise AttributeError(name)
-    _ensure_vision_mixin_loaded()
-    if hasattr(value, "__get__"):
-        return value.__get__(instance, instance.__class__)
-    return value
+        value = VisionMixin.__dict__.get(name)
+        if value is None:
+            raise AttributeError(name)
+        _ensure_vision_mixin_loaded()
+        if hasattr(value, "__get__"):
+            value = value.__get__(instance, instance.__class__)
+        elif callable(value):
+            callable_value = value
+
+            def bound(*args, **kwargs):
+                return callable_value(instance, *args, **kwargs)
+
+            value = bound
+        if callable(trace_mem):
+            trace_mem("after_lazy_vision_attr", uart=uart)
+        return value
+    except Exception as exc:
+        if callable(trace_fail):
+            trace_fail("lazy_vision_attr", exc, uart=uart)
+        raise
 
 
 class TransportCar(CompatMixin, DiagnosticsMixin, LoopMixin):
@@ -143,6 +272,30 @@ class TransportCar(CompatMixin, DiagnosticsMixin, LoopMixin):
     loop_dt_total_us = runtime_core_field("loop_dt_total_us")
     loop_overrun_count = runtime_core_field("loop_overrun_count")
     last_exception_text = runtime_core_field("last_exception_text")
+
+    @staticmethod
+    def trace_runtime_mem(stage: str, uart=None) -> None:
+        """@brief 输出运行时内存曲线埋点.
+
+        @param stage 当前阶段名
+        @param uart 可选串口对象
+        """
+        trace_runtime_mem(stage, uart=uart)
+
+    @staticmethod
+    def trace_runtime_failure(stage: str, exc, uart=None) -> None:
+        """@brief 输出运行时 trace 失败信息.
+
+        @param stage 当前失败阶段名
+        @param exc 捕获到的异常对象
+        @param uart 可选串口对象
+        """
+        trace_runtime_failure(stage, exc, uart=uart)
+
+    @staticmethod
+    def flush_pending_runtime_traces(uart) -> None:
+        """@brief 冲刷早期缓存的 trace 文本."""
+        flush_pending_runtime_traces(uart)
 
     def __init__(self, diagnostic_mode=False, vehicle_role=None):
         """@brief 初始化搬运车运行时入口.

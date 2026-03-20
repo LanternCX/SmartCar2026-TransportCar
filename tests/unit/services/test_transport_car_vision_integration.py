@@ -489,6 +489,67 @@ def test_transport_car_defers_vision_service_until_first_vision_access(
     assert car.vision_runtime is not None
 
 
+def test_transport_car_lazy_vision_attr_emits_memory_trace_around_first_access() -> (
+    None
+):
+    car = build_transport_car()
+    trace_calls = []
+
+    def fake_trace(stage: str, uart=None) -> None:
+        trace_calls.append((stage, uart))
+
+    car.trace_runtime_mem = fake_trace
+
+    target = transport_car_module.core._get_lazy_vision_attr(
+        car, "_get_active_position_targets"
+    )()
+
+    assert target == (None, None)
+    assert [stage for stage, _uart in trace_calls] == [
+        "before_lazy_vision_attr",
+        "after_lazy_vision_attr",
+    ]
+    assert all(uart is car.uart3 for _stage, uart in trace_calls)
+
+
+def test_transport_car_lazy_vision_attr_uses_explicit_binding_without_descriptor() -> (
+    None
+):
+    car = build_transport_car()
+
+    class DescriptorlessRefresh:
+        def __call__(self, host, now_ms=None):
+            return host, now_ms
+
+    class FakeVisionMixin:
+        _refresh_vision_target = DescriptorlessRefresh()
+
+    original_loader = transport_car_module.core._ensure_vision_mixin_loaded
+    previous_module = sys.modules.get("services.car.vision")
+    car_pkg = sys.modules.get("services.car")
+    fake_module = types.ModuleType("services.car.vision")
+    setattr(fake_module, "VisionMixin", FakeVisionMixin)
+    if car_pkg is not None:
+        setattr(car_pkg, "vision", fake_module)
+    sys.modules["services.car.vision"] = fake_module
+    transport_car_module.core._ensure_vision_mixin_loaded = lambda: None
+    try:
+        bound = transport_car_module.core._get_lazy_vision_attr(
+            car, "_refresh_vision_target"
+        )
+        assert bound(123) == (car, 123)
+    finally:
+        transport_car_module.core._ensure_vision_mixin_loaded = original_loader
+        if previous_module is not None:
+            sys.modules["services.car.vision"] = previous_module
+            if car_pkg is not None:
+                setattr(car_pkg, "vision", previous_module)
+        else:
+            sys.modules.pop("services.car.vision", None)
+            if car_pkg is not None and hasattr(car_pkg, "vision"):
+                delattr(car_pkg, "vision")
+
+
 def test_uart6_xy_packet_updates_visual_observation() -> None:
     car = build_transport_car()
 
