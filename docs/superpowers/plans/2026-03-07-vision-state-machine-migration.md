@@ -13,8 +13,8 @@
 ### Task 1: 设计文档与协议约束落盘
 
 **Files:**
-- Create: `docs/plans/2026-03-07-vision-state-machine-migration-design.md`
-- Create: `docs/plans/2026-03-07-vision-state-machine-migration.md`
+- Create: `docs/superpowers/specs/2026-03-07-vision-state-machine-migration-design.md`
+- Create: `docs/superpowers/plans/2026-03-07-vision-state-machine-migration.md`
 
 **Step 1: 写入设计与实施计划文档**
 
@@ -25,8 +25,8 @@
 Run: `python3 - <<'PY'
 from pathlib import Path
 paths = [
-    Path('docs/plans/2026-03-07-vision-state-machine-migration-design.md'),
-    Path('docs/plans/2026-03-07-vision-state-machine-migration.md'),
+    Path('docs/superpowers/specs/2026-03-07-vision-state-machine-migration-design.md'),
+    Path('docs/superpowers/plans/2026-03-07-vision-state-machine-migration.md'),
 ]
 for path in paths:
     assert path.is_file(), path

@@ -24,14 +24,14 @@
 - 删除 `src/services/transport_car.py` 中 `debug()` 及其配套辅助函数、状态字段和相关分支。
 - 删除 `tests/unit/services/test_transport_car_debug_breakpoint.py`。
 - 调整 `tests/unit/services/test_transport_car_vision_integration.py`, 去掉“不会触发断点”的断言, 保留“视觉日志仍正常输出”的验证。
-- 删除旧计划文档 `docs/plans/2026-03-09-vision-transition-debug-breakpoint.md`。
+- 删除旧计划文档 `docs/superpowers/plans/2026-03-09-vision-transition-debug-breakpoint.md`。
 
 ## 影响范围
 
 - `src/services/transport_car.py`
 - `tests/unit/services/test_transport_car_debug_breakpoint.py`
 - `tests/unit/services/test_transport_car_vision_integration.py`
-- `docs/plans/2026-03-09-vision-transition-debug-breakpoint.md`
+- `docs/superpowers/plans/2026-03-09-vision-transition-debug-breakpoint.md`
 
 ## 测试策略
 

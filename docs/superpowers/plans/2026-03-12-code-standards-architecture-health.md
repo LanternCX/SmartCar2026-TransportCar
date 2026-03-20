@@ -13,7 +13,7 @@
 ### Task 1: 记录当前 skill 的基线压力场景
 
 **Files:**
-- Modify: `docs/plans/2026-03-12-code-standards-architecture-health-design.md`
+- Modify: `docs/superpowers/specs/2026-03-12-code-standards-architecture-health-design.md`
 
 **Step 1: Write the failing test**
 
@@ -39,7 +39,7 @@ Expected: 设计文档中明确记录 4 个失败场景和当前规则缺口。
 **Step 5: Commit**
 
 ```bash
-git add docs/plans/2026-03-12-code-standards-architecture-health-design.md
+git add docs/superpowers/specs/2026-03-12-code-standards-architecture-health-design.md
 git commit -m "docs(skill): record code-standards architecture review gaps"
 ```
 

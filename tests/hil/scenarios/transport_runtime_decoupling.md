@@ -2,7 +2,7 @@
 
 ## 背景
 
-- 任务来源: `docs/plans/2026-03-12-transport-runtime-decoupling.md` Task 9
+- 任务来源: `docs/superpowers/plans/2026-03-12-transport-runtime-decoupling.md` Task 9
 - 本轮目标: 为 transport runtime decoupling 提供设备侧最小 smoke 与 HIL 记录
 - 用户决定: 明确要求跳过 Stage 3 `uart3` 人工调试
 

@@ -67,7 +67,7 @@ git commit -m "refactor(services): remove debug breakpoint flow"
 ### Task 2: Remove obsolete design artifact and run regression checks
 
 **Files:**
-- Delete: `docs/plans/2026-03-09-vision-transition-debug-breakpoint.md`
+- Delete: `docs/superpowers/plans/2026-03-09-vision-transition-debug-breakpoint.md`
 
 **Step 1: Write the failing test**
 
@@ -80,7 +80,7 @@ Expected: PASS.
 
 **Step 3: Write minimal implementation**
 
-Delete `docs/plans/2026-03-09-vision-transition-debug-breakpoint.md`.
+Delete `docs/superpowers/plans/2026-03-09-vision-transition-debug-breakpoint.md`.
 
 **Step 4: Run test to verify no regression**
 
@@ -90,7 +90,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add docs/plans/2026-03-09-vision-transition-debug-breakpoint.md
+git add docs/superpowers/plans/2026-03-09-vision-transition-debug-breakpoint.md
 git commit -m "docs: drop obsolete debug breakpoint plan"
 ```
 

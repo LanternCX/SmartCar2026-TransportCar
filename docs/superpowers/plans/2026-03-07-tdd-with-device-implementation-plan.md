@@ -13,8 +13,8 @@
 ### Task 1: 记录 baseline 行为
 
 **Files:**
-- Create: `docs/plans/2026-03-07-tdd-with-device-design.md`
-- Create: `docs/plans/2026-03-07-tdd-with-device-implementation-plan.md`
+- Create: `docs/superpowers/specs/2026-03-07-tdd-with-device-design.md`
+- Create: `docs/superpowers/plans/2026-03-07-tdd-with-device-implementation-plan.md`
 
 **Step 1: 运行 baseline 场景测试**
 
@@ -27,7 +27,7 @@
 **Step 3: Commit**
 
 ```bash
-git add docs/plans/2026-03-07-tdd-with-device-design.md docs/plans/2026-03-07-tdd-with-device-implementation-plan.md
+git add docs/superpowers/specs/2026-03-07-tdd-with-device-design.md docs/superpowers/plans/2026-03-07-tdd-with-device-implementation-plan.md
 git commit -m "docs: add tdd with device design"
 ```
 
@@ -74,7 +74,7 @@ git commit -m "docs: index tdd with device skill"
 ### Task 4: 做 post-skill 场景验证（GREEN）
 
 **Files:**
-- Modify: `docs/plans/2026-03-07-tdd-with-device-design.md`
+- Modify: `docs/superpowers/specs/2026-03-07-tdd-with-device-design.md`
 
 **Step 1: 再跑一次同类场景测试**
 
@@ -87,7 +87,7 @@ git commit -m "docs: index tdd with device skill"
 **Step 3: 记录结果并 Commit**
 
 ```bash
-git add docs/plans/2026-03-07-tdd-with-device-design.md
+git add docs/superpowers/specs/2026-03-07-tdd-with-device-design.md
 git commit -m "test: verify tdd with device skill behavior"
 ```
 

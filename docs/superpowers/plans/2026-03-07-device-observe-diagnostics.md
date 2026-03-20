@@ -13,8 +13,8 @@
 ### Task 1: 设计与计划文档落盘
 
 **Files:**
-- Create: `docs/plans/2026-03-07-device-observe-diagnostics-design.md`
-- Create: `docs/plans/2026-03-07-device-observe-diagnostics.md`
+- Create: `docs/superpowers/specs/2026-03-07-device-observe-diagnostics-design.md`
+- Create: `docs/superpowers/plans/2026-03-07-device-observe-diagnostics.md`
 
 **Step 1: 写入设计和实施计划文档**
 
@@ -25,8 +25,8 @@
 Run: `python3 - <<'PY'
 from pathlib import Path
 paths = [
-    Path('docs/plans/2026-03-07-device-observe-diagnostics-design.md'),
-    Path('docs/plans/2026-03-07-device-observe-diagnostics.md'),
+    Path('docs/superpowers/specs/2026-03-07-device-observe-diagnostics-design.md'),
+    Path('docs/superpowers/plans/2026-03-07-device-observe-diagnostics.md'),
 ]
 for path in paths:
     assert path.is_file(), path
@@ -37,7 +37,7 @@ Expected: `ok`
 **Step 3: Commit**
 
 ```bash
-git add docs/plans/2026-03-07-device-observe-diagnostics-design.md docs/plans/2026-03-07-device-observe-diagnostics.md
+git add docs/superpowers/specs/2026-03-07-device-observe-diagnostics-design.md docs/superpowers/plans/2026-03-07-device-observe-diagnostics.md
 git commit -m "docs: add device observe diagnostics design"
 ```
 

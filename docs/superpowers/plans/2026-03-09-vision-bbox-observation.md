@@ -13,8 +13,8 @@
 ### Task 1: 落盘设计与计划文档
 
 **Files:**
-- Create: `docs/plans/2026-03-09-vision-bbox-observation-design.md`
-- Create: `docs/plans/2026-03-09-vision-bbox-observation.md`
+- Create: `docs/superpowers/specs/2026-03-09-vision-bbox-observation-design.md`
+- Create: `docs/superpowers/plans/2026-03-09-vision-bbox-observation.md`
 
 **Step 1: 写入设计文档**
 
@@ -25,8 +25,8 @@
 Run: `python3 - <<'PY'
 from pathlib import Path
 paths = [
-    Path('docs/plans/2026-03-09-vision-bbox-observation-design.md'),
-    Path('docs/plans/2026-03-09-vision-bbox-observation.md'),
+    Path('docs/superpowers/specs/2026-03-09-vision-bbox-observation-design.md'),
+    Path('docs/superpowers/plans/2026-03-09-vision-bbox-observation.md'),
 ]
 for path in paths:
     assert path.is_file(), path
