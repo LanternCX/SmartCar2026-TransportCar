@@ -6,7 +6,7 @@
 
 **Architecture:** 采用“薄壳 + 子模块分拆”方案, 保留原公开 import 路径, 把 `TransportCar`、diagnostics facade、vision protocol、vision state machine 和 log manager 的重实现拆到内部子模块。整个过程以 TDD 推进, 每个阶段先加失败测试, 再搬迁最小实现, 最后用行数门禁测试、布局测试和全量 host 回归锁定结构不回弹。
 
-**Tech Stack:** Python, MicroPython, pytest, RT1021, repo-local `.progress/`
+**Tech Stack:** Python, MicroPython, pytest, RT1021, repo-local `docs/superpowers/memory/`
 
 ---
 
@@ -248,8 +248,8 @@ Expected: PASS
 ### Task 7: 最终 host 验证与进度记录
 
 **Files:**
-- Modify: `.progress/PROGRESS.md`
-- Create: `.progress/entries/2026/2026-03-16-5.md`
+- Modify: `docs/superpowers/memory/milestone/INDEX.md`
+- Create: `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-3.md`
 
 **Step 1: Run full host verification**
 
@@ -261,7 +261,7 @@ Expected: PASS
 Run: `python3 -m pytest tests/unit/test_src_runtime_file_sizes.py -q`
 Expected: PASS, 所有受约束 `src` 文件都 <= 300 行
 
-**Step 3: Record progress**
+**Step 3: Record memory**
 
 记录:
 

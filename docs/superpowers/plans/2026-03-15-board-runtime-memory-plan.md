@@ -179,8 +179,8 @@ Expected: PASS
 **Files:**
 - Modify: `tests/hil/README.md`
 - Modify: `tests/hil/2026-03-dual-camera-polling.md`
-- Modify: `.progress/entries/2026/2026-03-15-1.md`
-- Modify: `.progress/PROGRESS.md`
+- Modify: `docs/superpowers/memory/refactor/entries/2026-03/2026-03-15-1.md`
+- Modify: `docs/superpowers/memory/refactor/INDEX.md`
 
 **Step 1: User-run Stage 3 observe**
 
@@ -191,11 +191,11 @@ Expected: PASS
 
 **Step 2: HIL evidence**
 
-用户完成板端验证后, 再把观察到的结果写入 `tests/hil/` 和 `.progress/`
+用户完成板端验证后, 再把观察到的结果写入 `tests/hil/` 和 `docs/superpowers/memory/`
 
 **Step 3: Commit**
 
 ```bash
-git add tests/hil .progress
+git add tests/hil docs/superpowers/memory/refactor/INDEX.md docs/superpowers/memory/refactor/entries/2026-03/2026-03-15-1.md
 git commit -m "docs(hil): record board memory validation"
 ```

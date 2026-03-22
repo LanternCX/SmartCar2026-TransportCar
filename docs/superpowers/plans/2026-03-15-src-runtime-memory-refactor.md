@@ -476,14 +476,14 @@ git commit -m "refactor(runtime): remove redundant module-level state"
 ### Task 8: 记录结论并做最终回归
 
 **Files:**
-- Modify: `.progress/entries/2026/2026-03-15-1.md`
-- Modify: `.progress/PROGRESS.md`
+- Modify: `docs/superpowers/memory/refactor/entries/2026-03/2026-03-15-1.md`
+- Modify: `docs/superpowers/memory/refactor/INDEX.md`
 - Test: `tests/unit`
 - Test: `tests/contract`
 
-**Step 1: Update progress**
+**Step 1: Update memory**
 
-把以下结论写入 `.progress/`:
+把以下结论写入 `docs/superpowers/memory/`:
 
 - 本轮已对 `src/` 上线运行时代码做 repo 级低内存重构
 - 已重点清理 logger 自身常驻结构和视觉运行时分散 owner
@@ -498,6 +498,6 @@ Expected: PASS
 **Step 3: Commit**
 
 ```bash
-git add .progress/entries/2026/2026-03-15-1.md .progress/PROGRESS.md
-git commit -m "docs(progress): record repo-wide runtime memory refactor"
+git add docs/superpowers/memory/refactor/entries/2026-03/2026-03-15-1.md docs/superpowers/memory/refactor/INDEX.md
+git commit -m "docs(memory): record repo-wide runtime memory refactor"
 ```

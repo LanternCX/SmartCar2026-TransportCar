@@ -69,8 +69,8 @@ Expected: PASS
 ### Task 4: 回归验证与记录
 
 **Files:**
-- Modify: `.progress/entries/2026/2026-03-15-1.md`
-- Modify: `.progress/PROGRESS.md`
+- Modify: `docs/superpowers/memory/refactor/entries/2026-03/2026-03-15-1.md`
+- Modify: `docs/superpowers/memory/refactor/INDEX.md`
 - Test: `tests/unit/services/test_transport_car_logging.py`
 - Test: `tests/unit/services/test_vision_state_machine.py`
 
@@ -79,8 +79,8 @@ Expected: PASS
 Run: `python3 -m pytest tests/unit/services/test_transport_car_logging.py tests/unit/services/test_transport_car_vision_integration.py tests/unit/services/test_vision_protocol.py tests/unit/services/test_vision_state_machine.py -q`
 Expected: 全绿
 
-**Step 2: Update progress**
+**Step 2: Update memory**
 
-将本轮结论追加到 `.progress/`, 记录:
+将本轮结论追加到 `docs/superpowers/memory/`, 记录:
 - 已保留的最小代码级内存优化
 - 这类 OOM 既可能来自代码侧对象生命周期 / 泄漏问题, 也可能与板子硬件或 MicroPython 固件状态异常有关

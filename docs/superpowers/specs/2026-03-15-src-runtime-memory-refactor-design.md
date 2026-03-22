@@ -214,5 +214,5 @@
 - logger 模块常驻实现显著简化
 - 视觉运行时收口为单 owner
 - `TransportCar` 恢复为清晰编排层
-- `.progress/` 记录本轮 repo 级代码侧收敛结论
+- `docs/superpowers/memory/` 记录本轮 repo 级代码侧收敛结论
 - 若完成后仍存在相同 OOM, 将更强地指向板子硬件, 固件或运行时内存状态异常

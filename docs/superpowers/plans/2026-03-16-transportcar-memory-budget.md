@@ -6,7 +6,7 @@
 
 **Architecture:** 先建立内存资产台账和板端测量基线, 再抽出 `RuntimeCore`、`MinimalCommandRuntime`、`MinimalDiagnostics` 等 owner, 最后将控制、视觉、完整命令系统按功能延迟装配。整个过程以板端 `mem_free` 指标和最小诊断面存活为第一验收标准, 不是以文件拆分本身为标准。
 
-**Tech Stack:** Python, MicroPython, pytest, mpy-cli, RT1021, repo-local `.progress/`
+**Tech Stack:** Python, MicroPython, pytest, mpy-cli, RT1021, repo-local `docs/superpowers/memory/`
 
 ---
 
@@ -15,7 +15,7 @@
 **Files:**
 - Create: `docs/developer/transportcar-memory-assets.md`
 - Modify: `docs/superpowers/specs/2026-03-16-transportcar-memory-budget-design.md`
-- Modify: `.progress/entries/2026/2026-03-16-1.md`
+- Modify: `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-1.md`
 
 **Step 1: 写出台账模板**
 
@@ -47,7 +47,7 @@ Expected: 仅校验测试集可收集, 不新增失败
 **Step 5: Commit**
 
 ```bash
-git add docs/developer/transportcar-memory-assets.md docs/superpowers/specs/2026-03-16-transportcar-memory-budget-design.md .progress/entries/2026/2026-03-16-1.md
+git add docs/developer/transportcar-memory-assets.md docs/superpowers/specs/2026-03-16-transportcar-memory-budget-design.md docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-1.md
 git commit -m "docs(memory): add transport runtime asset ledger"
 ```
 
@@ -377,8 +377,8 @@ git commit -m "docs(standards): gate reviews by memory budget"
 
 **Files:**
 - Modify: `tests/hil/2026-03-dual-camera-polling.md`
-- Modify: `.progress/PROGRESS.md`
-- Modify: `.progress/entries/2026/2026-03-16-1.md`
+- Modify: `docs/superpowers/memory/milestone/INDEX.md`
+- Modify: `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-1.md`
 
 **Step 1: 运行主机测试**
 
@@ -404,6 +404,6 @@ Expected: 输出 `after_import / after_core_init / after_feature_init / runtime_
 **Step 5: Commit**
 
 ```bash
-git add tests/hil/2026-03-dual-camera-polling.md .progress/PROGRESS.md .progress/entries/2026/2026-03-16-1.md
+git add tests/hil/2026-03-dual-camera-polling.md docs/superpowers/memory/milestone/INDEX.md docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-1.md
 git commit -m "test(hil): record transport runtime memory evidence"
 ```
