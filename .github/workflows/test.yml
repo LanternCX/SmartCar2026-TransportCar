@@ -1,11 +1,8 @@
-name: tdd
+name: test(python)
 
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - dev
     tags:
       - "*"
   workflow_dispatch:
