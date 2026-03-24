@@ -36,11 +36,19 @@
 
 📚 **技能指南文档**：[AGENTS.md](AGENTS.md)
 
+人工 review 时，用户主正文只看：
+
+- [docs/developer/strategy.md](docs/developer/strategy.md)
+- [docs/developer/tasks.md](docs/developer/tasks.md)
+
+其余 memory、TDD、Skill 写作方法等内容已经收进 Skill 私有入口，不再作为用户主 review 正文。
+
 **核心技能**：
-- **[代码规范](/.agents/skills/code-standards/SKILL.md)**：Python/MicroPython 代码风格、类型提示、文档要求
-- **[代码规范与架构](/.agents/skills/code-standards/SKILL.md)**：分层架构、模块职责、依赖规则与代码质量基线
-- **[控制系统](/.agents/skills/control-system/SKILL.md)**：PID 调优、运动学、滤波器设计
-- **[嵌入式开发](/.agents/skills/embedded-development/SKILL.md)**：分层 TDD、设备门禁、硬件驱动、实时约束与 HIL 留证
+- **[知识规则入口](/.agents/skills/using-rules/SKILL.md)**：仓库规则、协议、硬件事实与知识路由入口
+- **[维护入口](/.agents/skills/reference-sync/SKILL.md)**：远端规则抓取、清洗、来源追溯与参考文档更新
+- **[Skill 编写扩展](/.agents/skills/project-extension-writing-skills/SKILL.md)**：Agent 私有的 Skill 编写方法与迁移约束入口，不作为用户主 review 正文
+- **[代码评审扩展](/.agents/skills/project-extension-requesting-code-review/SKILL.md)**：AI 最终收口自检入口，默认先核对 `strategy.md` 与 `tasks.md`
+- **[工具入口](/.agents/skills/mpy-cli-tool/SKILL.md)**：`mpy-cli` 的轻量路由入口
 
 💡 **建议**：在开发新功能或修复问题前，先查阅相关的技能指南，可以避免常见陷阱并保持代码质量。
 
