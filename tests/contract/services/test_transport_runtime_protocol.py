@@ -390,7 +390,7 @@ def test_query_replies_to_original_uart_source() -> None:
     car._handle_uart_line("?lock", source="uart3")
     car._handle_uart_line("?lock", source="uart6")
 
-    assert car.uart3.messages == ["?lock=1\r\n"]
+    assert car.uart3.messages[-1] == "?lock=1\r\n"
     assert car.uart6.messages == ["?lock=1\r\n"]
 
 

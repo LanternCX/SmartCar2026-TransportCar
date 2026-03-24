@@ -39,9 +39,12 @@ class VisionRuntimeService:
 
         runtime_builder = build_runtime or self._build_default_runtime
         self.vision_runtime = runtime_builder(VISION_OBSERVATION_TIMEOUT_MS)
+        self.vision_coordinator = None
 
         if self._build_state_config is None and self._build_coordinator is None:
             raise ValueError("build_state_config is required for main role")
+        if self._build_coordinator is not None:
+            self.vision_coordinator = self._build_coordinator(self.vision_runtime)
 
     def _build_default_runtime(self, timeout_ms):
         """@brief 构造默认视觉 runtime."""

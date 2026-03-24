@@ -177,6 +177,11 @@ class VisionMixin(_VisionHost):
 
     def _get_vision_camera_poll_order(self):
         """@brief 返回双摄轮询顺序."""
+        module = getattr(self.__class__, "_public_module_ref", None)
+        if module is not None:
+            poll_order = getattr(module, "VISION_CAMERA_POLL_ORDER", None)
+            if poll_order is not None:
+                return poll_order
         return VISION_CAMERA_POLL_ORDER
 
     def _get_vision_role_camera_priorities(self):
