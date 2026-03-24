@@ -93,7 +93,7 @@
 
 | 规则编号 | 主题分类 | 规则类型 | 是否可合并 | 主落点 / 关联编号 | 原 Skill | 原规则原文 | 新归属 Skill | 建议新正文 / 备注 | 迁移状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VS-01 | 视觉语义 | 事实 | 独立保留 | 主落点 | embedded-development | 以 `docs/Protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准<br>`src/control/kinematics.py` 中“X 前 / Y 左”视为历史残留 | using-rules | 建议正文：视觉协议事实源以 `docs/Protocol.md` 与当前视觉实现为准 | 已完成 |
+| VS-01 | 视觉语义 | 事实 | 独立保留 | 主落点 | embedded-development | 以 `.agents/skills/using-rules/references/openart-protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准<br>`src/control/kinematics.py` 中“X 前 / Y 左”视为历史残留 | using-rules | 建议正文：视觉协议事实源以 `.agents/skills/using-rules/references/openart-protocol.md` 与当前视觉实现为准 | 已完成 |
 | VS-02 | 视觉语义 | 事实 | 可合并 | 主落点 | embedded-development | `y+` = 前进<br>`x+` = 右移<br>`omega+` / `d_angle+` = 顺时针<br>`dx/dy/d_angle` 是车体系相对增量<br>`x/y/angle` 是世界系绝对目标 | using-rules | 建议正文：坐标系、正方向和相对 / 绝对量定义必须集中保留 | 已完成 |
 | VS-03 | 视觉语义 | 事实 | 可合并 | 主落点 | embedded-development | 视觉输入只认 `UART6` 上完整框 `left,top,right,bottom`<br>旧 `x,y` 或混合载荷会被视觉协议吞掉<br>最终画面坐标已完成翻转处理, 主控侧不得再次翻转 | using-rules | 建议正文：视觉输入字段与翻转语义必须统一定义 | 已完成 |
 | VS-04 | 视觉语义 | 约束 | 独立保留 | 主落点 | embedded-development | 对正状态与推行状态的符号关系, 包括 `ALIGN_ANGLE`、`ALIGN_DX`、`ALIGN_DIST`、`ORBITING`、`PUSHING`、`RETURNING` | using-rules | 建议正文：对正与推行状态的符号关系必须集中定义 | 已完成 |

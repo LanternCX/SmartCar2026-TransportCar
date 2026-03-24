@@ -46,12 +46,14 @@ scope: .agents/skills and skill-owned references
 - 不应把本质上属于 Skill 私有知识源的文档长期放在仓库根 `docs/` 下
 - 用户当前特别指出: `mpy-cli-tool` 与 `Protocol` 相关 Markdown 需要重新审视归属, 倾向迁入 Skill 体系内
 
-以上判断在进一步讨论后已调整为“单一正文事实源”原则：
+以上判断在后续迁移中已进一步收敛为“单一正文事实源”原则：
 
 - 正文只维护一份, 避免双份知识长期漂移
-- 需要同时服务人类工程师与 Agent 的文档, 继续保留在 `docs/` 作为唯一事实源
-- Skill 的 `references/` 不复制正文, 而是通过引用页直接指向唯一文档
-- Agent 仍从 Skill 的 `references/` 进入, 但底层读取的是同一份正式文档
+- `mpy-cli` 正式正文已迁入 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- OpenArt 协议正式正文已迁入 `.agents/skills/using-rules/references/openart-protocol.md`
+- 有些正式正文仍保留在 `docs/`, 但 `mpy-cli` 与 OpenArt 协议这类已迁入对应 Skill 的内容, 唯一事实源已经不在根 `docs/`
+- Skill 的 `references/` 不复制正文, 而是通过引用页路由到当前正式落点
+- 根 `docs/` 下对应旧路径已删除; 本文若提到旧方案, 只用于保留迁移语境, 不再作为活动事实源
 
 ## 新的能力拆分方向
 
@@ -114,9 +116,10 @@ scope: .agents/skills and skill-owned references
 
 默认做法应为：
 
-- 正式正文保留在 `docs/`
-- `references/` 通过引用页指向这些唯一正文
-- 只有完全不需要人类工程师直接阅读、且明显属于 Skill 私有资产的内容, 才考虑直接放在 Skill 目录内部维护
+- 正式正文只保留一份, 具体落点按文档归属决定
+- 仍面向全仓库共用的人类正文可以保留在 `docs/`
+- 已明显归属某个 Skill 的正式正文可直接放在该 Skill 的 `references/` 中维护, 如 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 与 `.agents/skills/using-rules/references/openart-protocol.md`
+- `references/` 负责提供稳定入口并路由到当前唯一事实源, 不再默认假定底层正文一定在根 `docs/`
 
 ## 原则 3: 使用与维护分离
 
@@ -220,7 +223,7 @@ scope: .agents/skills and skill-owned references
 - `control-system.md`
 - `protocol.md`
 
-这些 `references/` 默认应优先以引用页形式指向 `docs/` 中的唯一正文, 而不是复制第二份内容。
+这些 `references/` 应优先以引用页形式指向当前唯一正文, 而不是复制第二份内容。当前唯一正文可能位于 `docs/`, 也可能已迁入对应 Skill。
 
 `using-rules` 只承载实现阶段需要的规则入口, 不承载最终 review 规则。
 
@@ -303,9 +306,11 @@ scope: .agents/skills and skill-owned references
 
 它应作为独立 `Reviewer` 型 Skill 存在, 不与 `using-rules` 混合。
 
-若这些评审清单未来也需要人类直接维护与阅读, 应优先把正文放在 `docs/` 并由 `references/` 引用页指向, 不复制第二份内容。
+若这些评审清单未来也需要人类直接维护与阅读, 应优先保留一份正式正文, 再由 `references/` 引用页指向, 不复制第二份内容。该正文既可以位于 `docs/`, 也可以位于对应 Skill 目录内。
 
 # 建议目录结构
+
+> 说明: 下列结构用于保留当时的信息架构设计语境, 属于历史语境说明; 其中 `mpy-cli` 与 OpenArt 协议的正式正文落点已按后续迁移结果改成当前生效口径。
 
 ```text
 .agents/skills/
@@ -316,10 +321,10 @@ scope: .agents/skills and skill-owned references
 │       ├── architecture-boundaries.md -> docs/...
 │       ├── memory-budget.md -> docs/...
 │       ├── embedded-workflow.md -> docs/...
-│       ├── hardware-facts.md -> docs/...
-│       ├── vision-semantics.md -> docs/...
+│       ├── hardware-facts.md -> references/openart-protocol.md
+│       ├── vision-semantics.md -> references/openart-protocol.md
 │       ├── control-system.md -> docs/...
-│       └── protocol.md -> docs/Protocol.md
+│       └── protocol.md -> references/openart-protocol.md
 ├── reference-sync/
 │   ├── SKILL.md
 │   ├── references/
@@ -346,10 +351,10 @@ scope: .agents/skills and skill-owned references
 ├── mpy-cli-tool/
 │   ├── SKILL.md
 │   └── references/
-│       ├── command-index.md -> docs/...
-│       ├── cli-reference.md -> docs/mpy-cli.md
-│       ├── path-mapping.md -> docs/mpy-cli.md
-│       └── troubleshooting.md -> docs/mpy-cli.md
+│       ├── command-index.md -> references/mpy-cli-manual.md
+│       ├── cli-reference.md -> references/mpy-cli-manual.md
+│       ├── path-mapping.md -> references/mpy-cli-manual.md
+│       └── troubleshooting.md -> references/mpy-cli-manual.md
 ├── git-workflow/
 └── using-git-worktrees/
 ```
@@ -578,7 +583,7 @@ scope: .agents/skills and skill-owned references
 
 ### 视觉语义与联调规则（应迁入 `using-rules`）
 
-- 视觉对正语义必须以 `docs/Protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准
+- 视觉对正语义必须以 `references/openart-protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准
 - 若看到 `src/control/kinematics.py` 中旧注释, 视为历史残留, 不得拿来推断当前协议方向
 - 车体系方向固定为 `y+` 前进、`x+` 右移、`omega+` / `d_angle+` 顺时针
 - `dx/dy/d_angle` 是车体系相对增量, `x/y/angle` 是世界系绝对目标
@@ -647,7 +652,7 @@ scope: .agents/skills and skill-owned references
 # 已确定结论
 
 1. 仓库知识主入口保留为 `using-rules`, 不再继续改名。
-2. `Protocol`、`mpy-cli-tool`、`harness-design-pattern` 等正文继续保留在 `docs/` 作为唯一事实源, Skill 侧通过 `references/` 引用页进入。
+2. `harness-design-pattern` 仍保留在 `docs/` 作为正式正文; `mpy-cli` 与 OpenArt 协议正文已分别迁入 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 与 `.agents/skills/using-rules/references/openart-protocol.md`, Skill 侧继续通过 `references/` 路由进入。
 3. `remote-spec-to-markdown` 不再作为独立 Skill 保留, 其职责直接收敛进 `reference-sync`。
 4. `code-standards`、`control-system`、`embedded-development` 与 `remote-spec-to-markdown` 作为已废弃 Skill 直接删除, 不保留兼容层或重定向入口。
 5. 扩展 superpowers 的本地 Skill 使用 `project-extension-` 前缀, 当前落地为 `project-extension-writing-skills` 与 `project-extension-requesting-code-review`。

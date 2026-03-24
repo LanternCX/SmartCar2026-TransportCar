@@ -5,17 +5,17 @@
 支持能力：
 
 - 增量部署（基于 `git diff` 文件集，仅上传修改部分）
-- 全量部署（清空设备文件根目录后重刷）
+- 全量部署（清空已配置的 `device_upload_dir` 上传目录后重刷）
 - `.mpyignore` 忽略规则，类似 `.gitignore`
 - 萌新以及跨平台友好的交互式命令行操作
 
 ---
 
-## Quick Start
+## 快速开始
 
 如果你是第一次使用本项目，可以遵循以下步骤。
 
-阅读完本章之后，建议继续阅读 [在其他项目中安装为命令行工具](#install)
+阅读完本章之后，建议继续阅读 [在其他项目中安装为命令行工具](#其他项目安装)
 
 ### 0) 环境要求
 
@@ -81,7 +81,7 @@ mpy-cli init
 - `.mpyignore`
 - `.mpy-cli/`（运行目录）
 
-详细参数参见[CLI 参数总览](#cli-params)
+详细参数参见[CLI 参数总览](#参数总览)
 
 ### 6) 后续重配（可选）
 
@@ -91,7 +91,7 @@ mpy-cli init
 mpy-cli config
 ```
 
-详细参数参见[CLI 参数总览](#cli-params)
+详细参数参见[CLI 参数总览](#参数总览)
 
 ### 7) 计划部署
 
@@ -103,25 +103,25 @@ mpy-cli list
 
 该命令会扫描串口并探测可访问的 MicroPython 设备，输出所有可用设备的端口与基础信息。
 
-预览部署操作，防止程序产生意料之外的行为
+先预览部署操作，防止程序产生意料之外的行为
 
 ```bash
 mpy-cli plan
 ```
 
-详细参数参见[CLI 参数总览](#cli-params)
+详细参数参见[CLI 参数总览](#参数总览)
 
 ### 8) 部署到 MicroPython 端
 
-预览部署操作，防止程序产生意料之外的行为
+这一步会把计划好的文件实际写入设备端，请先确认前一步 `mpy-cli plan` 的结果符合预期，再执行部署。
 
 ```bash
 mpy-cli deploy
 ```
 
-详细参数参见[CLI 参数总览](#cli-params)
+详细参数参见[CLI 参数总览](#参数总览)
 
-如果后续想要进行无交互式的部署，可以执行
+如果后续想要进行无交互式的实际部署，可以执行
 
 ```bash
 mpy-cli deploy --no-interactive --yes
@@ -129,7 +129,7 @@ mpy-cli deploy --no-interactive --yes
 
 ---
 
-<span id="install"></span>
+<span id="其他项目安装"></span>
 ## 在其他项目中安装为命令行工具
 
 如果你要把 `mpy-cli` 安装到另一个项目里使用，推荐在该项目自己的虚拟环境中安装：
@@ -172,7 +172,7 @@ python3 -m pip install -e <SOURCE_MPY_CLI_PATH>
 
 ---
 
-<span id="cli-params"></span>
+<span id="参数总览"></span>
 ## CLI 参数总览
 
 下面列出当前可用命令和参数，便于查阅。
@@ -238,7 +238,7 @@ mpy-cli list [-w N] [--workers N] [-t SECONDS] [--probe-timeout SECONDS] [-s MOD
 mpy-cli list
 ```
 
-当本机串口很多、默认探测较慢时，可按需调高并发并缩短超时：
+当本机串口很多、默认探测较慢时，可按需调高并缩短超时：
 
 ```bash
 mpy-cli list -w 12 -t 1.0
@@ -367,7 +367,8 @@ python3 -m pip install mpremote
 
 ### 2) 串口连接失败或者烧录报错
 
-- 检查串口号（如 `/dev/ttyACM0`、`COM3`）
+- 先执行 `mpy-cli list`，确认当前确实能扫描到目标设备
+- 再检查串口号是否与扫描结果一致（如 `/dev/ttyACM0`、`COM3`）
 - 关闭占用串口的软件（如 Thonny）
 
 ### 3) 我不确定会同步哪些文件
@@ -376,7 +377,9 @@ python3 -m pip install mpremote
 
 ### 4) 我不知道串口号
 
-参见 Thonny 中的设备串口号（圆括号内的内容）。
+优先执行 `mpy-cli list` 自动扫描当前可用设备与串口号。
+
+如果扫描结果仍不明确，再把 Thonny 中显示的设备串口号作为补充兜底信息核对。
 
 ### 5) 为什么选择 mpy-cli？
 
@@ -386,7 +389,7 @@ python3 -m pip install mpremote
 
 ---
 
-## Contribute
+## 贡献
 
 开发与规范说明：`docs/developer-guide.md`
 

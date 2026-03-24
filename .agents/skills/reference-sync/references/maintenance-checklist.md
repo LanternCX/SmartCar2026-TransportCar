@@ -1,0 +1,39 @@
+# 参考文档维护清单
+
+## 使用说明
+
+- 本页用于持续维护，不承接正式正文。
+- 每次更新正式正文或题面文档集时，都要同时核对来源、正式落点和检查项是否仍然成立。
+- 新增长期维护对象时，先补本页，再补 `source-registry.md`。
+
+## 维护 checklist
+
+### `mpy-cli` 正式文档
+
+- 来源：已删除的根 `docs/` 旧 mpy-cli 正文、上游工具文档、仓库内实际工具行为
+- 正式落点：`.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- 维护检查项：
+  - [ ] 命令与参数说明仍和当前工具行为一致
+  - [ ] 路径边界、`source_dir`、`device_upload_dir` 等约定没有过期
+  - [ ] 轻量入口页仍能路由到正式正文
+  - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
+
+### OpenArt 协议正文
+
+- 来源：已删除的根 `docs/` 旧 OpenArt 协议正文、协议原始约定、仓库内已确认实现
+- 正式落点：`.agents/skills/using-rules/references/openart-protocol.md`
+- 维护检查项：
+  - [ ] 协议字段、链路约定、示例与兼容说明仍然有效
+  - [ ] `using-rules` 入口页仍能路由到正式正文
+  - [ ] 正文没有混入来源追溯类维护信息
+  - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
+
+### `problem_statement` 文档集
+
+- 来源：官方题面、官方问答、题面抓取与清洗记录、仓库内既有维护文档
+- 正式落点：`docs/problem_statement/README.md`、`docs/problem_statement/sources.md`、`docs/problem_statement/spec.md`、`docs/problem_statement/qa.md`
+- 维护检查项：
+  - [ ] `README.md`、`sources.md`、`spec.md`、`qa.md` 四个对象都仍在维护范围内
+  - [ ] 官方规则或问答变化后，规格正文与问答正文已同步复核
+  - [ ] 来源追溯、抓取依据、本地产物映射仍可复查
+  - [ ] 本页与 `source-registry.md` 的对象列表保持一致

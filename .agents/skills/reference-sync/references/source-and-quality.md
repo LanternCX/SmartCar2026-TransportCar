@@ -1,6 +1,8 @@
 # 参考文档来源与质量入口
 
-- 来源记录与追溯正文唯一来源：`docs/problem_statement/sources.md`
-- 质量检查正文优先来源：`docs/problem_statement/README.md`
-- 涉及来源链、更新时间、抓取依据与原文追溯时，先读：`docs/problem_statement/sources.md`
-- 涉及问题文档集是否齐全、正文是否可复核时，再联读：`docs/problem_statement/README.md`、`docs/problem_statement/spec.md`、`docs/problem_statement/qa.md`
+- 本页偏来源与质量复核：回答“这份文档从哪里来、现在正式放在哪里、复核时要看哪些事实是否仍可信”。
+- `reference-sync` 不维护正式正文，这里只负责来源登记、追溯线索和质量复核入口。
+- 想看文档来源、历史来源、正式落点与同步触发条件，先读：`references/source-registry.md`
+- 想看持续维护对象是否齐全、每次需要复核哪些质量项，再联读：`references/maintenance-checklist.md`
+- 涉及 `problem_statement` 文档集的来源链、抓取依据与追溯细节时，再联读：`docs/problem_statement/sources.md`
+- 涉及 `problem_statement` 文档集的结构完整性、正文可复核性与质量基线时，再联读：`docs/problem_statement/README.md`、`docs/problem_statement/spec.md`、`docs/problem_statement/qa.md`

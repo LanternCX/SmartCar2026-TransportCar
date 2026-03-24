@@ -93,7 +93,7 @@ camera_id=cam_b,frame_id=33,frame_end=1
 
 需要同步调整:
 
-1. `docs/Protocol.md`
+1. `.agents/skills/using-rules/references/openart-protocol.md`
 2. `docs/developer/strategy.md`
 3. `tests/hil/2026-03-dual-camera-polling.md`
 4. `src/services/transport_car.py`
@@ -107,7 +107,7 @@ camera_id=cam_b,frame_id=33,frame_end=1
 1. `main.py` 输出格式
 2. query/response 处理逻辑
 3. 类别与 `camera_id` 透传
-4. `README.md` 与 `docs/Protocol.md`
+4. `README.md` 与视觉仓库协议正文
 5. 对应 unit/contract 测试
 
 ## 验收标准

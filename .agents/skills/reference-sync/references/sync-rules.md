@@ -1,6 +1,8 @@
 # 参考文档同步规则入口
 
-- 同步边界与来源原则正文优先来源：`docs/problem_statement/sources.md`
-- 问题文档集结构与覆盖范围正文优先来源：`docs/problem_statement/README.md`
-- 涉及“何时需要更新、如何保持唯一事实源、何处承接引用页”时，先读：`docs/problem_statement/sources.md`
-- 涉及“问题文档集如何组织、同步后如何检查完整性”时，再联读：`docs/problem_statement/README.md`
+- 本页偏何时同步与同步后检查：回答“什么情况下必须更新、更新后至少要补查哪些对象和检查项”。
+- `reference-sync` 只维护来源登记与维护清单，不承接 `mpy-cli`、OpenArt 协议等正式正文。
+- 更新任何正式正文时，必须同步检查：`references/source-registry.md`、`references/maintenance-checklist.md`
+- 想确认某类变更是否已经达到同步触发条件，先读：`references/source-registry.md`
+- 想确认同步完成后必须补查哪些对象、入口和维护项，再读：`references/maintenance-checklist.md`
+- 涉及 `problem_statement` 文档集的同步边界、来源原则与结构覆盖时，再联读：`docs/problem_statement/sources.md`、`docs/problem_statement/README.md`

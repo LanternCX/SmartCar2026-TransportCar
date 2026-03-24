@@ -2,7 +2,8 @@
 
 ## 事实源与使用方式
 
-- 协议与链路事实源以 `docs/Protocol.md` 为准
+- 完整 OpenArt 协议正文统一维护在 `references/openart-protocol.md`
+- 本页只保留已确认硬件事实、联调入口和协议查阅路由, 不与完整长协议正文混排
 - 若代码现状与正文冲突, 先以正文和用户确认结果为准, 再回头修实现
 - 若正文未明确给出引脚、串口、电平或接线事实, 必须先问用户, 禁止猜测
 
@@ -16,11 +17,16 @@
 
 ## 视觉与坐标语义
 
-- `docs/Protocol.md` 优先于历史残留描述, 旧坐标说法不得当成最新事实源
+- 坐标、查询格式、字段语义与兼容规则统一以 `references/openart-protocol.md` 为准, 旧描述不得当成最新事实源
 - 坐标与正方向固定为: `y+` = 前进, `x+` = 右移, `omega+` / `d_angle+` = 顺时针
 - `dx/dy/d_angle` 表示车体系相对增量, `x/y/angle` 表示世界系绝对目标
 - 说“左 / 右 / 前 / 后 / 顺时针 / 逆时针”时必须标明参考系
 - `push_angle_deg = -90` 只能解释为相对当前复位零点的绝对航向目标, 没有 HIL 证据前不要口头改写方向含义
+
+## 协议正文路由
+
+- 需要完整协议目的、链路约定、查询格式、字段表、兼容规则、迁移建议时, 直接查看 `references/openart-protocol.md`
+- 需要确认 `?frame=<camera_id>`、`frame_end=1`、`?vision`、`UART6` 等协议事实时, 直接以 `references/openart-protocol.md` 为准
 
 ## 视觉输入与状态机判据
 

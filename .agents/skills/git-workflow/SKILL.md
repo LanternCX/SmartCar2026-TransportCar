@@ -30,6 +30,12 @@ description: Use when creating branches, committing, merging, or preparing relea
 - 常用 `type`：`feat` `fix` `refactor` `perf` `docs` `test` `chore` `style`
 - `scope` 建议使用目录域：`control` `hardware` `filters` `services` `storage` `config` `utils`
 
+# Commit Trailer
+- 默认不追加任何 `Co-authored-by` 尾注
+- 只有用户明确要求时，才允许追加 `Co-authored-by`
+- 若允许追加，co-author 必须是真人，不得使用 agent、bot 或系统账号
+- 生成提交信息时，优先保持纯净的 Angular 标题，不要自行补尾注
+
 # Examples
 ```text
 feat(services): add sync query for lock status

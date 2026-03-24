@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 收口后补记: 本计划保留的是当时的实施语境。当前生效口径是“单一正文事实源, 但落点不再默认都在根 `docs/`”; 其中 `mpy-cli` 与 OpenArt 协议正文已分别迁入 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 与 `.agents/skills/using-rules/references/openart-protocol.md`。
+
 **Goal:** 重组仓库内 Skill 体系, 建立“单一正文 + Skill 路由 + references 引用页”的结构, 并落地首批本地扩展 Skill。
 
-**Architecture:** 保留流程型与工具型 Skill 的独立性, 把知识型 Skill 收敛到 `using-rules` 路由入口, 文档正文继续留在 `docs/` 作为唯一事实源, Skill 侧仅通过 `references/` 引用页提供查询入口。新增 `project-extension-writing-skills` 与 `project-extension-requesting-code-review` 作为对 superpowers 的本地补充 Skill, 同时精简 `mpy-cli-tool` 的主 Skill 结构。
+**Architecture:** 保留流程型与工具型 Skill 的独立性, 把知识型 Skill 收敛到 `using-rules` 路由入口, 文档正文统一保持单一事实源, 但正式落点按归属决定: 有些正文继续保留在 `docs/`, `mpy-cli` 与 OpenArt 协议正文则已迁入各自 Skill。Skill 侧通过 `references/` 提供查询入口。新增 `project-extension-writing-skills` 与 `project-extension-requesting-code-review` 作为对 superpowers 的本地补充 Skill, 同时精简 `mpy-cli-tool` 的主 Skill 结构。
 
 **Tech Stack:** Markdown, repository-local skills under `.agents/skills`, filesystem markdown reference pages, pytest-free doc verification, grep-based reference checks
 
@@ -89,10 +91,10 @@ Expected: `skill skeletons present`
 - `.agents/skills/using-rules/references/architecture-boundaries.md` -> `docs/developer/strategy.md`
 - `.agents/skills/using-rules/references/memory-budget.md` -> `docs/developer/memory-review.md`
 - `.agents/skills/using-rules/references/embedded-workflow.md` -> `docs/developer/tdd-workflow.md`
-- `.agents/skills/using-rules/references/hardware-facts.md` -> `docs/Protocol.md`
-- `.agents/skills/using-rules/references/vision-semantics.md` -> `docs/Protocol.md`
+- `.agents/skills/using-rules/references/hardware-facts.md` -> `.agents/skills/using-rules/references/openart-protocol.md`
+- `.agents/skills/using-rules/references/vision-semantics.md` -> `.agents/skills/using-rules/references/openart-protocol.md`
 - `.agents/skills/using-rules/references/control-system.md` -> `docs/developer/strategy.md`
-- `.agents/skills/using-rules/references/protocol.md` -> `docs/Protocol.md`
+- `.agents/skills/using-rules/references/protocol.md` -> `.agents/skills/using-rules/references/openart-protocol.md`
 
 - [ ] **Step 2: 在对应 Skill 下按文件逐项建立引用页**
 
@@ -140,10 +142,10 @@ Expected: `reference markdown reference pages valid`
 
 建立以下映射:
 
-- `command-index.md` -> `docs/mpy-cli.md`
-- `cli-reference.md` -> `docs/mpy-cli.md`
-- `path-mapping.md` -> `docs/mpy-cli.md`
-- `troubleshooting.md` -> `docs/mpy-cli.md`
+- `command-index.md` -> `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- `cli-reference.md` -> `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- `path-mapping.md` -> `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- `troubleshooting.md` -> `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 - [ ] **Step 3: 自检主 Skill 是否明显缩短且保留路由信息**
 
@@ -332,8 +334,8 @@ Expected: `all reference links resolve`
 Run: `python3 - <<'PY'
 from pathlib import Path
 approved = {
-    Path('docs/Protocol.md').resolve(),
-    Path('docs/mpy-cli.md').resolve(),
+    Path('.agents/skills/using-rules/references/openart-protocol.md').resolve(),
+    Path('.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md').resolve(),
     Path('docs/harness-design-pattern.md').resolve(),
     Path('docs/developer/memory-review.md').resolve(),
     Path('docs/developer/transportcar-memory-assets.md').resolve(),

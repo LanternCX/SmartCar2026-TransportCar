@@ -284,7 +284,7 @@ memory 相关内容不再作为用户要 review 的正文，而是作为 Agent �
 - 控制周期超预算时，先降复杂度，再讨论新特性
 - 电机方向、编码器方向与运动学坐标系必须一致
 - IMU 设备 ID、零漂校准文件和读数稳定性必须可验证
-- 视觉对正语义必须以 `docs/Protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准
+- 视觉对正语义必须以 `references/openart-protocol.md`、`src/services/vision_protocol.py`、`src/services/vision_state_machine.py` 为准
 - 若看到 `src/control/kinematics.py` 中旧注释，视为历史残留，不得拿来推断当前协议方向
 - 车体系方向固定为 `y+` 前进、`x+` 右移、`omega+` / `d_angle+` 顺时针
 - `dx/dy/d_angle` 是车体系相对增量，`x/y/angle` 是世界系绝对目标

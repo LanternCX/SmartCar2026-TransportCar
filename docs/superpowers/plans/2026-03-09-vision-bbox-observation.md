@@ -173,7 +173,7 @@ Expected: PASS
 
 **Files:**
 - Modify: `tests/contract/services/commands/test_diag_queries.py`
-- Modify: `docs/Protocol.md`
+- Modify: `.agents/skills/using-rules/references/openart-protocol.md`
 
 **Step 1: Write the failing test**
 

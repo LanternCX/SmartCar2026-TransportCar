@@ -15,6 +15,8 @@ from services.commanding.session import CommandSession
 
 pytestmark = pytest.mark.unit
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _install_transport_stubs() -> None:
     machine = types.ModuleType("machine")
@@ -125,7 +127,7 @@ def _build_test_logger_manager(uart: object) -> LogManager:
 
 def _read_repo_text(relative_path: str) -> str:
     """读取仓库内文本文件内容."""
-    return Path(relative_path).read_text(encoding="utf-8")
+    return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
 def test_transport_car_staged_init_builds_core_runtime_before_optional_features(
@@ -407,7 +409,9 @@ def test_transport_car_uart3_command_echo_uses_command_logger() -> None:
 
 
 def test_protocol_and_hil_docs_use_physical_camera_ids() -> None:
-    protocol_text = _read_repo_text("docs/Protocol.md")
+    protocol_text = _read_repo_text(
+        ".agents/skills/using-rules/references/openart-protocol.md"
+    )
     strategy_text = _read_repo_text("docs/developer/strategy.md")
     hil_text = _read_repo_text("tests/hil/2026-03-dual-camera-polling.md")
 

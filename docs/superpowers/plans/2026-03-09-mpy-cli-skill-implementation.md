@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 将 `.agents/skills/mpy-cli/SKILL.md` 补齐到与当前 `docs/mpy-cli.md` 的关键能力一致，尤其覆盖 `list`、端口发现策略与路径边界语义。
+**Goal:** 将 `.agents/skills/mpy-cli-tool/SKILL.md` 补齐到与当前 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 的关键能力一致，尤其覆盖 `list`、端口发现策略与路径边界语义。
 
 **Architecture:** 保持现有 skill 的章节骨架不变，采用最小改动补齐缺失能力。先用基线场景确认当前 skill 在串口未知场景下的遗漏，再更新 `SKILL.md` 的命令列表、核心语义、推荐流程、安全检查与故障入口，最后逐项对照文档验证覆盖面。
 
@@ -14,8 +14,8 @@
 
 **Files:**
 - Modify: none
-- Test: `.agents/skills/mpy-cli/SKILL.md`
-- Test: `docs/mpy-cli.md`
+- Test: `.agents/skills/mpy-cli-tool/SKILL.md`
+- Test: `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 **Step 1: 记录当前 skill 的场景性缺口**
 
@@ -28,8 +28,8 @@
 ### Task 2: 更新命令入口与推荐流程
 
 **Files:**
-- Modify: `.agents/skills/mpy-cli/SKILL.md`
-- Test: `docs/mpy-cli.md`
+- Modify: `.agents/skills/mpy-cli-tool/SKILL.md`
+- Test: `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 **Step 1: 在 When to Use / Quick Commands 中补入 `list`**
 
@@ -42,8 +42,8 @@
 ### Task 3: 更新核心语义与安全边界
 
 **Files:**
-- Modify: `.agents/skills/mpy-cli/SKILL.md`
-- Test: `docs/mpy-cli.md`
+- Modify: `.agents/skills/mpy-cli-tool/SKILL.md`
+- Test: `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 **Step 1: 补齐路径与目录语义**
 
@@ -60,8 +60,8 @@
 ### Task 4: 更新安全检查与故障入口
 
 **Files:**
-- Modify: `.agents/skills/mpy-cli/SKILL.md`
-- Test: `docs/mpy-cli.md`
+- Modify: `.agents/skills/mpy-cli-tool/SKILL.md`
+- Test: `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 **Step 1: 扩展 Safety Checklist**
 
@@ -74,8 +74,8 @@
 ### Task 5: 对照文档验证
 
 **Files:**
-- Test: `.agents/skills/mpy-cli/SKILL.md`
-- Test: `docs/mpy-cli.md`
+- Test: `.agents/skills/mpy-cli-tool/SKILL.md`
+- Test: `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
 
 **Step 1: 逐项核对关键覆盖点**
 
