@@ -19,9 +19,9 @@
 
 | 条件 | 结果 |
 | :--- | :--- |
-| 长按按钮 1 上电 | 进入 `src/script/pid_identify.py` |
-| 长按按钮 2 上电 | 进入 `src/script/calibrate_gyro.py` |
-| 不按按钮上电 | 进入 `src/script/remote_control.py` |
+| 长按按钮 1 上电 | 进入 `src/legacy/script/pid_identify.py` |
+| 长按按钮 2 上电 | 进入 `src/legacy/script/calibrate_gyro.py` |
+| 不按按钮上电 | 进入 `src/legacy/script/remote_control.py` |
 
 注意：
 
@@ -32,12 +32,12 @@
 ## 参数辨识与校准在系统中的位置
 
 1. **电机参数辨识**（每次更换地面或配重后）
-   - 运行 [src/script/pid_identify.py](../../src/script/pid_identify.py) 进行电机特性自动辨识
+   - 运行 [src/legacy/script/pid_identify.py](../../src/legacy/script/pid_identify.py) 进行电机特性自动辨识
    - 系统将自动计算前馈增益（gain）和时间常数（Tau），保存到 `/flash/ident_params.txt`
    - 这使得后续速度控制能够利用前馈补偿，提高速度环的响应速度
 
 2. **陀螺仪零飘校准**（首次部署和定期校准）
-   - 运行 [src/script/calibrate_gyro.py](../../src/script/calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
+   - 运行 [src/legacy/script/calibrate_gyro.py](../../src/legacy/script/calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
    - 校准结果保存到 `/flash/gyro_offset.txt`
    - 不进行此步骤会导致航向角漂移
 
@@ -47,22 +47,25 @@
 
 ```text
 .
-├── src/                    # 运行时代码根目录
-│   ├── boot.py             # 启动脚本源文件
-│   ├── script/             # 运行/校准/调试脚本
-│   ├── config/             # 配置文件
-│   ├── control/            # 控制算法核心
-│   ├── filters/            # 滤波器实现
-│   ├── hardware/           # 硬件驱动封装
-│   ├── services/           # 业务逻辑服务
-│   ├── storage/            # 参数存储管理
-│   └── utils/              # 通用工具库
+├── src/                    # 当前运行时代码根目录
+│   ├── legacy/             # 原系统冻结归档
+│   │   ├── boot.py         # 原启动脚本源文件
+│   │   ├── script/         # 原运行/校准/调试脚本
+│   │   ├── config/         # 原配置文件
+│   │   ├── control/        # 原控制算法核心
+│   │   ├── filters/        # 原滤波器实现
+│   │   ├── hardware/       # 原硬件驱动封装
+│   │   ├── services/       # 原业务逻辑服务
+│   │   ├── storage/        # 原参数存储管理
+│   │   └── utils/          # 原通用工具库
+│   ├── master/             # 新主车系统
+│   └── assistant/          # 新辅车系统
 ├── seekfree_demo/          # 逐飞科技例程(参考用)
 ├── stubs/                  # 代码提示桩文件(用于VSCode补全)
 └── tests/                  # 主机侧测试
 ```
 
-#### [src/control/](../../src/control/) - 控制核心模块
+#### [src/legacy/control/](../../src/legacy/control/) - 控制核心模块
 - `pid_controller.py`：PID 控制器实现（位置式和增量式）
 - `pid_math.py`：PID 运算和饱和处理
 - `pid_store.py`：PID 参数持久化
@@ -72,13 +75,13 @@
   - `Odometry`：基于编码器的里程计（位置和航向角估计）
 - `ident_tools.py`：电机参数辨识工具
 
-#### [src/filters/](../../src/filters/) - 滤波算法
+#### [src/legacy/filters/](../../src/legacy/filters/) - 滤波算法
 - `lowpass_filter.py`：低通滤波
 - `spike_filter.py`：中值滤波（抗脉冲干扰）
 - `diff_limit_filter.py`：差分限幅滤波（防止陡峭跳变）
 - `dual_window_regression_filter.py`：双窗口线性回归滤波（编码器精细化滤波）
 
-#### [src/services/](../../src/services/) - 业务逻辑层
+#### [src/legacy/services/](../../src/legacy/services/) - 业务逻辑层
 - `transport_car.py`：**车模核心单例类**
   - 集中所有硬件初始化、滤波、PID 和运动学
   - 实现 `step()` 主循环，执行 5ms 控制周期
