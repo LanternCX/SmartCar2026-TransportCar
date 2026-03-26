@@ -21,7 +21,7 @@ def body_axis_semantics():
     }
 
 
-def rotate_body_delta_to_world(dx: float, dy: float, heading_deg: float):
+def rotate_body_delta_to_world(dx, dy, heading_deg):
     """将车体系位移增量旋转到世界系
 
     @brief 使用 x 右 y 前的车体系语义

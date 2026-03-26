@@ -12,14 +12,14 @@ class Command:
 
     def __init__(
         self,
-        kind: str,
-        vx: float = 0.0,
-        vy: float = 0.0,
-        omega: float = 0.0,
-        dx: float = 0.0,
-        dy: float = 0.0,
-        dtheta: float = 0.0,
-    ) -> None:
+        kind,
+        vx=0.0,
+        vy=0.0,
+        omega=0.0,
+        dx=0.0,
+        dy=0.0,
+        dtheta=0.0,
+    ):
         self.kind = str(kind)
         self.vx = float(vx)
         self.vy = float(vy)
@@ -29,7 +29,7 @@ class Command:
         self.dtheta = float(dtheta)
 
 
-def _split_fields(line: str):
+def _split_fields(line):
     """标准化命令行
 
     @brief 去掉首尾空白并按空格拆分
@@ -43,7 +43,7 @@ def _split_fields(line: str):
     return fields
 
 
-def parse_command(line: str) -> Command:
+def parse_command(line):
     """解析辅车最小协议
 
     @brief 支持控制类和运动类最小命令

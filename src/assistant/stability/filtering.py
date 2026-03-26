@@ -10,11 +10,11 @@ class SpikeMedianFilter:
     @brief 使用滑动窗口中值抑制单点异常值
     """
 
-    def __init__(self, window: int = 5) -> None:
+    def __init__(self, window=5):
         self.window = max(1, int(window))
         self._values = []
 
-    def update(self, value: float) -> float:
+    def update(self, value):
         self._values.append(float(value))
         if len(self._values) > self.window:
             del self._values[0]
@@ -29,11 +29,11 @@ class DiffLimitFilter:
     @brief 限制连续两次输出之间的最大跳变
     """
 
-    def __init__(self, max_delta: float = 5.0) -> None:
+    def __init__(self, max_delta=5.0):
         self.max_delta = float(max_delta)
         self._last_value = None
 
-    def update(self, value: float) -> float:
+    def update(self, value):
         current = float(value)
         if self._last_value is None:
             self._last_value = current
@@ -53,11 +53,11 @@ class LowPassFilter:
     @brief 用固定 alpha 平滑角速度输入
     """
 
-    def __init__(self, alpha: float = 0.2, initial: float = 0.0) -> None:
+    def __init__(self, alpha=0.2, initial=0.0):
         self.alpha = float(alpha)
         self._value = float(initial)
 
-    def update(self, value: float) -> float:
+    def update(self, value):
         current = float(value)
         self._value = self.alpha * current + (1.0 - self.alpha) * self._value
         return self._value
@@ -69,11 +69,11 @@ class SpeedFilterChain:
     @brief 先抑制尖峰, 再做差值限幅
     """
 
-    def __init__(self, spike_window: int = 5, max_delta: float = 5.0) -> None:
+    def __init__(self, spike_window=5, max_delta=5.0):
         self.spike_filter = SpikeMedianFilter(window=spike_window)
         self.diff_filter = DiffLimitFilter(max_delta=max_delta)
 
-    def update(self, value: float) -> float:
+    def update(self, value):
         """更新速度滤波链
 
         @brief 返回经尖峰抑制与限幅后的速度值
@@ -85,7 +85,7 @@ class SpeedFilterChain:
         return float(self.diff_filter.update(filtered))
 
 
-def build_speed_filter_chain() -> SpeedFilterChain:
+def build_speed_filter_chain():
     """构造速度滤波链
 
     @brief 保留 legacy 的尖峰抑制和差值限幅顺序
@@ -95,7 +95,7 @@ def build_speed_filter_chain() -> SpeedFilterChain:
     return SpeedFilterChain()
 
 
-def build_gyro_filter(alpha: float = 0.2) -> LowPassFilter:
+def build_gyro_filter(alpha=0.2):
     """构造角速度低通滤波器
 
     @brief 保留 yaw rate 的一阶低通语义

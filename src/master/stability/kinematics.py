@@ -6,7 +6,7 @@
 import math
 
 
-def body_axis_semantics() -> dict:
+def body_axis_semantics():
     """返回车体系方向约定
 
     @brief 固定主车的方向和符号语义
@@ -21,7 +21,7 @@ def body_axis_semantics() -> dict:
     }
 
 
-def rotate_body_delta_to_world(dx: float, dy: float, heading_deg: float) -> tuple:
+def rotate_body_delta_to_world(dx, dy, heading_deg):
     """将车体系位移增量旋转到世界系
 
     @brief 使用 x 右 y 前的车体系语义

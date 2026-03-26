@@ -4,7 +4,7 @@
 """
 
 
-def render_status(last_target: dict, assistant_command: str) -> str:
+def render_status(last_target, assistant_command):
     """生成主车最小状态文本
 
     @brief 只保留主车调试最小必要信息

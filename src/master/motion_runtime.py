@@ -12,10 +12,10 @@ class MotionRuntime:
     @brief 收口主车自身目标与辅车命令接口
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.last_target = None
 
-    def apply_self_target(self, target: dict) -> dict:
+    def apply_self_target(self, target):
         """记录主车当前目标
 
         @brief 保存最近一次主车自身运动目标
@@ -26,7 +26,7 @@ class MotionRuntime:
         self.last_target = dict(target)
         return self.last_target
 
-    def build_assistant_command(self, dx: float, dy: float, dtheta: float) -> str:
+    def build_assistant_command(self, dx, dy, dtheta):
         """构造辅车运动命令
 
         @brief 透传最小 MOVE 协议

@@ -10,12 +10,12 @@ class VisionIngress:
     @brief 保留单视觉串口轮询两颗相机的接入拓扑
     """
 
-    def __init__(self, vision_uart: str, camera_ids: tuple) -> None:
+    def __init__(self, vision_uart, camera_ids):
         self.vision_uart = vision_uart
         self.camera_ids = tuple(camera_ids)
         self._poll_index = 0
 
-    def build_poll_request(self, camera_id: str) -> str:
+    def build_poll_request(self, camera_id):
         """构造单相机轮询请求
 
         @brief 未被点名相机必须保持静默
@@ -25,7 +25,7 @@ class VisionIngress:
 
         return "?frame=%s" % str(camera_id)
 
-    def build_next_poll_request(self) -> str:
+    def build_next_poll_request(self):
         """构造下一次轮询请求
 
         @brief 在同一视觉串口上按顺序轮询两颗相机
@@ -36,7 +36,7 @@ class VisionIngress:
         self._poll_index += 1
         return self.build_poll_request(camera_id)
 
-    def prepare_observation(self, observation=None) -> dict:
+    def prepare_observation(self, observation=None):
         """补齐轮询上下文后的观测
 
         @brief 让主路径显式带上当前轮询请求

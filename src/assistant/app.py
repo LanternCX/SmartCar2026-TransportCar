@@ -13,10 +13,10 @@ class AssistantApp:
     @brief 为后续辅车运行时预留最小入口
     """
 
-    def __init__(self, timeout_ms: int = 250) -> None:
+    def __init__(self, timeout_ms=250):
         self.runtime = MotionRuntime(timeout_ms=timeout_ms)
 
-    def handle_line(self, line: str, now_ms: int) -> str:
+    def handle_line(self, line, now_ms):
         """处理一条主车输入
 
         @brief 解析文本协议并交给最小执行运行时
@@ -28,7 +28,7 @@ class AssistantApp:
         command = parse_command(line)
         return self.runtime.apply_command(command, now_ms=now_ms)
 
-    def tick(self, now_ms: int) -> str:
+    def tick(self, now_ms):
         """推进最小应用循环
 
         @brief 主要用于超时停机检查

@@ -6,7 +6,7 @@
 from assistant.app import AssistantApp
 
 
-def main() -> AssistantApp:
+def main():
     """创建辅车最小应用
 
     @brief 返回辅车运行时入口对象

@@ -10,7 +10,7 @@ class VisionStateMachine:
     @brief 只保留搜索与跟踪两种最小阶段
     """
 
-    def step(self, observation=None) -> dict:
+    def step(self, observation=None):
         """推进一次最小视觉状态机
 
         @brief 有目标时进入 tracking, 无目标时进入 search

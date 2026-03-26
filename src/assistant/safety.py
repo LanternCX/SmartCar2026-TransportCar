@@ -10,12 +10,12 @@ class SafetyGuard:
     @brief 管理超时停机与急停状态
     """
 
-    def __init__(self, timeout_ms: int) -> None:
+    def __init__(self, timeout_ms):
         self.timeout_ms = int(timeout_ms)
         self.last_command_ms = None
         self.estop_active = False
 
-    def mark_command(self, now_ms: int) -> None:
+    def mark_command(self, now_ms):
         """记录最近命令时间
 
         @brief 新命令到达时刷新看门狗
@@ -24,7 +24,7 @@ class SafetyGuard:
 
         self.last_command_ms = int(now_ms)
 
-    def trigger_estop(self) -> None:
+    def trigger_estop(self):
         """触发急停
 
         @brief 将安全状态锁定为停机
@@ -32,7 +32,7 @@ class SafetyGuard:
 
         self.estop_active = True
 
-    def clear_estop(self) -> None:
+    def clear_estop(self):
         """清除急停
 
         @brief 允许系统恢复到普通看门狗检查
@@ -40,7 +40,7 @@ class SafetyGuard:
 
         self.estop_active = False
 
-    def should_stop(self, now_ms: int) -> bool:
+    def should_stop(self, now_ms):
         """判断是否应停机
 
         @brief 急停优先, 其次检查命令超时

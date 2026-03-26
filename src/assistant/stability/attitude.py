@@ -6,7 +6,7 @@
 import math
 
 
-def euler_to_quaternion(roll_deg: float, pitch_deg: float, yaw_deg: float):
+def euler_to_quaternion(roll_deg, pitch_deg, yaw_deg):
     """欧拉角转四元数
 
     @brief 使用 legacy 的 Z-Y-X 欧拉角约定

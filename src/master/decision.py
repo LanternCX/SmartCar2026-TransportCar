@@ -15,12 +15,12 @@ class Decision:
 
     def __init__(
         self,
-        phase: str,
-        selected_target: str,
-        self_target: dict,
-        assistant_target: dict,
-        assistant_command: str,
-    ) -> None:
+        phase,
+        selected_target,
+        self_target,
+        assistant_target,
+        assistant_command,
+    ):
         self.phase = str(phase)
         self.selected_target = str(selected_target)
         self.self_target = dict(self_target)
@@ -28,7 +28,7 @@ class Decision:
         self.assistant_command = str(assistant_command)
 
 
-def decide_from_state(state_output: dict) -> Decision:
+def decide_from_state(state_output):
     """根据状态机输出生成最小决策
 
     @brief 把目标选择和动作输出收口为统一决策对象
@@ -53,7 +53,7 @@ def decide_from_state(state_output: dict) -> Decision:
     )
 
 
-def decide_from_observation(observation, state_machine=None) -> Decision:
+def decide_from_observation(observation, state_machine=None):
     """根据观测生成最小决策
 
     @brief 优先选择 box, 否则回退到当前 target, 全缺失时保持

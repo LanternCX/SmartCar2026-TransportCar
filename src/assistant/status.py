@@ -10,7 +10,7 @@ class AssistantState:
     @brief 只保留第一版执行闭环需要的最小字段
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.armed = False
         self.busy = False
         self.last_cmd = "idle"
@@ -20,7 +20,7 @@ class AssistantState:
         self.last_error = ""
 
 
-def render_state(state: AssistantState) -> str:
+def render_state(state):
     """序列化最小状态回包
 
     @brief 生成单行 `STATE` 文本

@@ -6,7 +6,7 @@
 import math
 
 
-def euler_to_quaternion(roll_deg: float, pitch_deg: float, yaw_deg: float) -> tuple:
+def euler_to_quaternion(roll_deg, pitch_deg, yaw_deg):
     """欧拉角转四元数
 
     @brief 使用 Z-Y-X 欧拉角约定
@@ -34,7 +34,7 @@ def euler_to_quaternion(roll_deg: float, pitch_deg: float, yaw_deg: float) -> tu
     return (w, x, y, z)
 
 
-def quaternion_to_euler(quaternion: tuple) -> tuple:
+def quaternion_to_euler(quaternion):
     """四元数转欧拉角
 
     @brief 返回 roll / pitch / yaw, 单位度

@@ -4,7 +4,7 @@
 """
 
 
-def build_move_command(dx: float, dy: float, dtheta: float) -> str:
+def build_move_command(dx, dy, dtheta):
     """构造辅车运动命令
 
     @brief 以最小运动级协议输出 MOVE 文本
@@ -17,7 +17,7 @@ def build_move_command(dx: float, dy: float, dtheta: float) -> str:
     return "MOVE %.3f %.3f %.3f" % (float(dx), float(dy), float(dtheta))
 
 
-def build_hold_command() -> str:
+def build_hold_command():
     """构造辅车保持命令
 
     @brief 输出最小 HOLD 文本

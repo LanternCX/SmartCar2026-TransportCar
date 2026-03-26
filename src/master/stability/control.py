@@ -10,11 +10,11 @@ class HeadingController:
     @brief 保留比例控制和角速度限幅语义
     """
 
-    def __init__(self, kp: float = 0.16, omega_limit: float = 15.0) -> None:
+    def __init__(self, kp=0.16, omega_limit=15.0):
         self.kp = float(kp)
         self.omega_limit = float(omega_limit)
 
-    def compute(self, heading_error_deg: float) -> float:
+    def compute(self, heading_error_deg):
         command = float(heading_error_deg) * self.kp
         if command > self.omega_limit:
             return self.omega_limit

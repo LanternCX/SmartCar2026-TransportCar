@@ -15,15 +15,13 @@ class MasterApp:
     @brief 为后续主车运行时预留最小入口
     """
 
-    def __init__(
-        self, vision_uart: str = "uart6", camera_ids: tuple = ("cam_a", "cam_b")
-    ) -> None:
+    def __init__(self, vision_uart="uart6", camera_ids=("cam_a", "cam_b")):
         self.ingress = VisionIngress(vision_uart=vision_uart, camera_ids=camera_ids)
         self.state_machine = VisionStateMachine()
         self.motion_runtime = MotionRuntime()
         self.last_assistant_command = "HOLD"
 
-    def step(self, observation=None) -> dict:
+    def step(self, observation=None):
         """推进一次主车最小流程
 
         @brief 串联视觉状态机、最小决策和主车运动输出

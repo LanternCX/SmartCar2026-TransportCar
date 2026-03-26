@@ -16,18 +16,18 @@ class MotionRuntime:
     @brief 管理协议命令、最小状态与安全停机
     """
 
-    def __init__(self, timeout_ms: int = 250) -> None:
+    def __init__(self, timeout_ms=250):
         self.state = AssistantState()
         self.safety = SafetyGuard(timeout_ms=timeout_ms)
         self.heading_controller = HeadingController()
 
-    def _stop(self, reason: str = "") -> None:
+    def _stop(self, reason=""):
         self.state.busy = False
         self.state.velocity_command = (0.0, 0.0, 0.0)
         if reason:
             self.state.last_error = reason
 
-    def apply_command(self, command: Command, now_ms: int) -> str:
+    def apply_command(self, command, now_ms):
         """执行一条协议命令
 
         @brief 维持最小 arm/busy/odom/heading 状态
@@ -101,7 +101,7 @@ class MotionRuntime:
         self.state.last_error = "unsupported_command"
         return "ERR"
 
-    def tick(self, now_ms: int) -> str:
+    def tick(self, now_ms):
         """推进最小执行循环
 
         @brief 当前只负责安全停机收口
@@ -115,7 +115,7 @@ class MotionRuntime:
             return "DONE"
         return "BUSY" if self.state.busy else "ACK"
 
-    def state_line(self) -> str:
+    def state_line(self):
         """返回状态回包文本
 
         @brief 对外暴露最小 `STATE` 文本
