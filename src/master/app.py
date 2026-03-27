@@ -6,7 +6,6 @@
 from master.decision import decide_from_observation
 from master.motion_runtime import MotionRuntime
 from master.vision_ingress import VisionIngress
-from master.vision_state_machine import VisionStateMachine
 
 
 class MasterApp:
@@ -15,11 +14,21 @@ class MasterApp:
     @brief 为后续主车运行时预留最小入口
     """
 
-    def __init__(self, vision_uart="uart6", camera_ids=("cam_a", "cam_b")):
-        self.ingress = VisionIngress(vision_uart=vision_uart, camera_ids=camera_ids)
-        self.state_machine = VisionStateMachine()
+    def __init__(self, active_uart="uart6", reserved_uarts=("uart8",)):
+        self.ingress = VisionIngress(
+            active_uart=active_uart,
+            reserved_uarts=reserved_uarts,
+        )
         self.motion_runtime = MotionRuntime()
-        self.last_assistant_command = "HOLD"
+        self.last_assistant_command = ""
+        self.last_result = {
+            "selected_target": "idle",
+            "phase": "follow_idle",
+            "active_uart": active_uart,
+            "reserved_uarts": tuple(reserved_uarts),
+            "self_target": {"kind": "hold"},
+            "assistant_command": "",
+        }
 
     def step(self, observation=None):
         """推进一次主车最小流程
@@ -30,15 +39,18 @@ class MasterApp:
         """
 
         prepared_observation = self.ingress.prepare_observation(observation)
-        decision = decide_from_observation(
-            prepared_observation, state_machine=self.state_machine
-        )
+        if prepared_observation.get("source_status") != "active":
+            return dict(self.last_result)
+        prepared_observation["control_seq"] = self.motion_runtime.next_control_seq()
+        decision = decide_from_observation(prepared_observation)
         self_target = self.motion_runtime.apply_self_target(decision.self_target)
         self.last_assistant_command = decision.assistant_command
-        return {
+        self.last_result = {
             "selected_target": decision.selected_target,
             "phase": decision.phase,
-            "poll_request": prepared_observation.get("poll_request"),
+            "active_uart": prepared_observation.get("active_uart"),
+            "reserved_uarts": prepared_observation.get("reserved_uarts"),
             "self_target": self_target,
             "assistant_command": self.last_assistant_command,
         }
+        return dict(self.last_result)

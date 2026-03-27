@@ -3,6 +3,7 @@
 @file src/assistant/app.py
 """
 
+from config.params import FOLLOW_TIMEOUT_MS
 from assistant.motion_runtime import MotionRuntime
 from assistant.protocol import parse_command
 
@@ -13,7 +14,7 @@ class AssistantApp:
     @brief 为后续辅车运行时预留最小入口
     """
 
-    def __init__(self, timeout_ms=250):
+    def __init__(self, timeout_ms=FOLLOW_TIMEOUT_MS):
         self.runtime = MotionRuntime(timeout_ms=timeout_ms)
 
     def handle_line(self, line, now_ms):

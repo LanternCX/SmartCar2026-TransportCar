@@ -12,4 +12,4 @@ def test_assistant_app_handles_ping_and_state_query() -> None:
     assert app.handle_line("PING", now_ms=0) == "ACK"
     state = app.handle_line("STATE?", now_ms=1)
 
-    assert state.startswith("STATE ")
+    assert state.startswith("state=1,")

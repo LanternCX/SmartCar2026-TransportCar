@@ -3,8 +3,12 @@
 @file src/master/decision.py
 """
 
-from master.protocol import build_hold_command, build_move_command
-from master.vision_state_machine import VisionStateMachine
+from config.params import (
+    FOLLOW_CONTROL_KP_ANGLE,
+    FOLLOW_CONTROL_KP_X,
+    FOLLOW_CONTROL_KP_Y,
+)
+from master.protocol import build_follow_command, build_hold_command, build_move_command
 
 
 class Decision:
@@ -53,6 +57,30 @@ def decide_from_state(state_output):
     )
 
 
+def _build_idle_decision(control_seq):
+    """构造无目标时的跟随决策
+
+    @brief 当前无目标时显式发送 `valid=0` 报文
+    @param control_seq 当前控制序号
+    @return Decision
+    """
+
+    assistant_target = {"valid": 0, "dx": 0.0, "dy": 0.0, "d_angle": 0.0}
+    return Decision(
+        phase="follow_idle",
+        selected_target="idle",
+        self_target={"kind": "hold"},
+        assistant_target=assistant_target,
+        assistant_command=build_follow_command(
+            seq=control_seq,
+            valid=0,
+            dx=0.0,
+            dy=0.0,
+            d_angle=0.0,
+        ),
+    )
+
+
 def decide_from_observation(observation, state_machine=None):
     """根据观测生成最小决策
 
@@ -61,6 +89,23 @@ def decide_from_observation(observation, state_machine=None):
     @return Decision
     """
 
-    machine = VisionStateMachine() if state_machine is None else state_machine
-    state_output = machine.step(observation)
-    return decide_from_state(state_output)
+    control_seq = int(observation.get("control_seq", 0))
+    if int(observation.get("valid", 0)) != 1:
+        return _build_idle_decision(control_seq)
+    dx = float(observation.get("err_x", 0.0)) * FOLLOW_CONTROL_KP_X
+    dy = float(observation.get("err_y", 0.0)) * FOLLOW_CONTROL_KP_Y
+    d_angle = float(observation.get("d_angle", 0.0)) * FOLLOW_CONTROL_KP_ANGLE
+    assistant_target = {"valid": 1, "dx": dx, "dy": dy, "d_angle": d_angle}
+    return Decision(
+        phase="follow_track",
+        selected_target=str(observation.get("target", "idle")),
+        self_target={"kind": "hold"},
+        assistant_target=assistant_target,
+        assistant_command=build_follow_command(
+            seq=control_seq,
+            valid=1,
+            dx=dx,
+            dy=dy,
+            d_angle=d_angle,
+        ),
+    )

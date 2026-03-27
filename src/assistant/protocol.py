@@ -13,6 +13,8 @@ class Command:
     def __init__(
         self,
         kind,
+        seq=0,
+        valid=0,
         vx=0.0,
         vy=0.0,
         omega=0.0,
@@ -21,6 +23,8 @@ class Command:
         dtheta=0.0,
     ):
         self.kind = str(kind)
+        self.seq = int(seq)
+        self.valid = 1 if int(valid) else 0
         self.vx = float(vx)
         self.vy = float(vy)
         self.omega = float(omega)
@@ -43,6 +47,31 @@ def _split_fields(line):
     return fields
 
 
+def _split_pairs(line):
+    """按逗号拆解键值对协议
+
+    @brief 用于解析 `follow=1,...` 风格报文
+    @param line 原始命令文本
+    @return dict
+    """
+
+    payload = {}
+    for item in str(line).strip().split(","):
+        field = item.strip()
+        if not field:
+            continue
+        if "=" not in field:
+            raise ValueError("invalid_field")
+        key, value = field.split("=", 1)
+        key = key.strip().lower()
+        if key in payload:
+            raise ValueError("duplicate_key")
+        payload[key] = value.strip()
+    if not payload:
+        raise ValueError("empty_command")
+    return payload
+
+
 def parse_command(line):
     """解析辅车最小协议
 
@@ -50,6 +79,18 @@ def parse_command(line):
     @param line 原始命令文本
     @return Command
     """
+
+    if "=" in str(line):
+        payload = _split_pairs(line)
+        if payload.get("follow") == "1":
+            return Command(
+                kind="follow",
+                seq=int(payload["seq"]),
+                valid=int(payload["valid"]),
+                dx=float(payload.get("dx", 0.0)),
+                dy=float(payload.get("dy", 0.0)),
+                dtheta=float(payload.get("d_angle", 0.0)),
+            )
 
     fields = _split_fields(line)
     opcode = fields[0].upper()

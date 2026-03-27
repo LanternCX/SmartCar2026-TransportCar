@@ -3,8 +3,6 @@
 @file src/master/motion_runtime.py
 """
 
-from master.protocol import build_move_command
-
 
 class MotionRuntime:
     """主车最小运动执行层
@@ -14,6 +12,7 @@ class MotionRuntime:
 
     def __init__(self):
         self.last_target = None
+        self._control_seq = 0
 
     def apply_self_target(self, target):
         """记录主车当前目标
@@ -26,14 +25,12 @@ class MotionRuntime:
         self.last_target = dict(target)
         return self.last_target
 
-    def build_assistant_command(self, dx, dy, dtheta):
-        """构造辅车运动命令
+    def next_control_seq(self):
+        """分配新的跟随控制序号
 
-        @brief 透传最小 MOVE 协议
-        @param dx 右向增量
-        @param dy 前向增量
-        @param dtheta 顺时针角增量
-        @return str
+        @brief 保证主车发给辅车的 `seq` 单调递增
+        @return int
         """
 
-        return build_move_command(dx, dy, dtheta)
+        self._control_seq += 1
+        return self._control_seq
