@@ -1,4 +1,4 @@
-"""辅车滤波基线
+"""辅车滤波工具
 
 @file src/assistant/stability/filtering.py
 """
@@ -11,10 +11,18 @@ class SpikeMedianFilter:
     """
 
     def __init__(self, window=5):
+        # 窗口长度决定中值滤波参与计算的历史样本数
         self.window = max(1, int(window))
         self._values = []
 
     def update(self, value):
+        """更新尖峰抑制滤波器
+
+        @brief 返回当前窗口的中值结果
+        @param value 原始输入
+        @return float
+        """
+
         self._values.append(float(value))
         if len(self._values) > self.window:
             del self._values[0]
@@ -30,10 +38,18 @@ class DiffLimitFilter:
     """
 
     def __init__(self, max_delta=5.0):
+        # 限幅阈值和上一拍输出共同决定当前允许的变化范围
         self.max_delta = float(max_delta)
         self._last_value = None
 
     def update(self, value):
+        """更新差值限幅滤波器
+
+        @brief 限制当前输出相对上一拍的最大跳变
+        @param value 原始输入
+        @return float
+        """
+
         current = float(value)
         if self._last_value is None:
             self._last_value = current
@@ -54,10 +70,18 @@ class LowPassFilter:
     """
 
     def __init__(self, alpha=0.2, initial=0.0):
+        # 低通系数和初值决定滤波器的响应速度和初始状态
         self.alpha = float(alpha)
         self._value = float(initial)
 
     def update(self, value):
+        """更新低通滤波器
+
+        @brief 按一阶低通公式平滑输入
+        @param value 原始输入
+        @return float
+        """
+
         current = float(value)
         self._value = self.alpha * current + (1.0 - self.alpha) * self._value
         return self._value
@@ -66,17 +90,18 @@ class LowPassFilter:
 class SpeedFilterChain:
     """速度输入滤波链
 
-    @brief 先抑制尖峰, 再做差值限幅
+    @brief 先抑制尖峰, 再限制相邻输出变化
     """
 
     def __init__(self, spike_window=5, max_delta=5.0):
+        # 速度滤波链固定由中值滤波和差值限幅两段组成
         self.spike_filter = SpikeMedianFilter(window=spike_window)
         self.diff_filter = DiffLimitFilter(max_delta=max_delta)
 
     def update(self, value):
         """更新速度滤波链
 
-        @brief 返回经尖峰抑制与限幅后的速度值
+        @brief 返回经过尖峰抑制和限幅后的结果
         @param value 原始输入
         @return float
         """
@@ -88,7 +113,7 @@ class SpeedFilterChain:
 def build_speed_filter_chain():
     """构造速度滤波链
 
-    @brief 保留 legacy 的尖峰抑制和差值限幅顺序
+    @brief 构造速度输入使用的默认滤波链
     @return SpeedFilterChain
     """
 
@@ -98,7 +123,7 @@ def build_speed_filter_chain():
 def build_gyro_filter(alpha=0.2):
     """构造角速度低通滤波器
 
-    @brief 保留 yaw rate 的一阶低通语义
+    @brief 构造角速度输入使用的一阶低通滤波器
     @param alpha 低通系数
     @return LowPassFilter
     """

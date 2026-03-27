@@ -1,13 +1,13 @@
-"""主车控制基线.
+"""主车控制辅助计算
 
 @file src/master/stability/control.py
 """
 
 
 class HeadingController:
-    """最小偏航控制器
+    """根据偏航误差生成角速度命令
 
-    @brief 保留比例控制和角速度限幅语义
+    @brief 提供比例控制和角速度限幅
     """
 
     def __init__(self, kp=0.16, omega_limit=15.0):
@@ -15,6 +15,13 @@ class HeadingController:
         self.omega_limit = float(omega_limit)
 
     def compute(self, heading_error_deg):
+        """根据偏航误差计算角速度命令
+
+        @brief 按比例系数换算并限制输出范围
+        @param heading_error_deg 偏航误差, 单位度
+        @return float
+        """
+
         command = float(heading_error_deg) * self.kp
         if command > self.omega_limit:
             return self.omega_limit

@@ -1,16 +1,17 @@
-"""辅车最小状态结构与回报
+"""辅车状态结构与回包
 
 @file src/assistant/status.py
 """
 
 
 class AssistantState:
-    """辅车最小执行状态
+    """保存辅车执行阶段的核心状态
 
-    @brief 只保留第一版执行闭环需要的最小字段
+    @brief 供运行时更新和状态回包复用
     """
 
     def __init__(self):
+        # 跟随状态、里程和最近一次错误统一保存在状态对象中
         self.follow_active = False
         self.last_seq = 0
         self.odom = [0.0, 0.0]
@@ -21,9 +22,9 @@ class AssistantState:
 
 
 def render_state(state):
-    """序列化最小状态回包
+    """序列化辅车状态回包
 
-    @brief 生成单行 `STATE` 文本
+    @brief 按协议格式生成单行 `STATE` 文本
     @param state 当前辅车状态
     @return str
     """

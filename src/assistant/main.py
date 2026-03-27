@@ -7,9 +7,9 @@ from assistant.app import AssistantApp
 
 
 def main():
-    """创建辅车最小应用
+    """创建辅车应用入口对象
 
-    @brief 返回辅车运行时入口对象
+    @brief 为启动脚本提供辅车应用实例
     @return AssistantApp
     """
 

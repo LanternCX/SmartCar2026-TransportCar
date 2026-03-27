@@ -1,4 +1,4 @@
-"""辅车最小执行闭环
+"""辅车运行时执行闭环
 
 @file src/assistant/motion_runtime.py
 """
@@ -12,17 +12,28 @@ from assistant.stability.kinematics import rotate_body_delta_to_world
 
 
 class MotionRuntime:
-    """辅车最小执行运行时
+    """负责执行辅车命令并维护运行时状态
 
-    @brief 管理协议命令、最小状态与安全停机
+    @brief 管理协议命令、状态更新和安全停机
     """
 
     def __init__(self, timeout_ms=FOLLOW_TIMEOUT_MS):
+        # 运行时状态集中保存在一个对象中, 便于执行层和回包层复用
         self.state = AssistantState()
+
+        # 安全保护负责管理急停和命令超时
         self.safety = SafetyGuard(timeout_ms=timeout_ms)
+
+        # 角度误差统一通过偏航控制器换算为角速度命令
         self.heading_controller = HeadingController()
 
     def _stop(self, reason=""):
+        """将辅车状态收口为停止
+
+        @brief 清空运动输出并记录停机原因
+        @param reason 停机原因
+        """
+
         self.state.follow_active = False
         self.state.velocity_command = (0.0, 0.0, 0.0)
         self.state.timeout = reason == "timeout_stop"
@@ -32,24 +43,31 @@ class MotionRuntime:
     def _apply_follow(self, command, now_ms):
         """执行一条跟随控制报文
 
-        @brief 当前最小主线按 `seq` 去重, `valid=0` 进入保持
+        @brief 按序号去重并将跟随控制写入辅车状态
         @param command 已解析的跟随命令
         @param now_ms 当前毫秒时间
         @return str
         """
 
+        # 序号未前进时直接忽略, 避免重复报文覆盖当前状态
         if int(command.seq) <= int(self.state.last_seq):
             return "IGNORED"
+
         self.safety.mark_command(now_ms)
         self.safety.clear_estop()
         self.state.last_error = ""
         self.state.timeout = False
         self.state.last_seq = int(command.seq)
+
+        # `valid=0` 表示当前控制拍没有有效目标, 运行时进入保持状态
         if not command.valid:
             self.state.follow_active = False
             self.state.velocity_command = (0.0, 0.0, 0.0)
             return "HOLD"
+
         self.state.follow_active = True
+
+        # 位移增量先从车体系旋转到世界系, 再累计到里程状态
         world_dx, world_dy = rotate_body_delta_to_world(
             command.dx,
             command.dy,
@@ -68,12 +86,13 @@ class MotionRuntime:
     def apply_command(self, command, now_ms):
         """执行一条协议命令
 
-        @brief 维持最小 arm/busy/odom/heading 状态
+        @brief 根据命令类型更新辅车状态并返回执行结果
         @param command 已解析命令
         @param now_ms 当前毫秒时间
         @return str
         """
 
+        # 查询类命令不修改安全状态, 直接返回当前结果
         if command.kind == "ping":
             return "ACK"
         if command.kind == "state_query":
@@ -81,6 +100,7 @@ class MotionRuntime:
         if command.kind == "follow":
             return self._apply_follow(command, now_ms)
 
+        # 其余控制命令都会刷新看门狗并清空上次错误信息
         self.safety.mark_command(now_ms)
         self.state.last_error = ""
         self.state.timeout = False
@@ -117,6 +137,8 @@ class MotionRuntime:
 
         if command.kind == "move":
             self.state.follow_active = True
+
+            # 位移命令与跟随命令共用同一套里程和朝向更新逻辑
             world_dx, world_dy = rotate_body_delta_to_world(
                 command.dx,
                 command.dy,
@@ -136,9 +158,9 @@ class MotionRuntime:
         return "ERR"
 
     def tick(self, now_ms):
-        """推进最小执行循环
+        """推进辅车执行循环
 
-        @brief 当前只负责安全停机收口
+        @brief 根据急停和超时状态决定是否停机
         @param now_ms 当前毫秒时间
         @return str
         """
@@ -154,7 +176,7 @@ class MotionRuntime:
     def state_line(self):
         """返回状态回包文本
 
-        @brief 对外暴露最小 `STATE` 文本
+        @brief 按协议格式输出当前状态文本
         @return str
         """
 

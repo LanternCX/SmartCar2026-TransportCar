@@ -1,4 +1,4 @@
-"""主车视觉接入组织.
+"""主车视觉输入整理
 
 @file src/master/vision_ingress.py
 """
@@ -9,7 +9,7 @@ from config.params import FOLLOW_ACTIVE_UART, FOLLOW_RESERVED_UARTS, FOLLOW_TARG
 def _split_pairs(line):
     """按逗号拆解单行键值对
 
-    @brief 返回保持原顺序的键值列表
+    @brief 将视觉报文拆解为有序键值对列表
     @param line 原始报文文本
     @return list
     """
@@ -32,7 +32,7 @@ def _split_pairs(line):
 def _pairs_to_map(pairs):
     """将键值列表转为字典
 
-    @brief 遇到重复键时直接报错
+    @brief 保留键值映射并拒绝重复键
     @param pairs 键值列表
     @return dict
     """
@@ -48,7 +48,7 @@ def _pairs_to_map(pairs):
 def _parse_bbox(payload):
     """解析识别框字段
 
-    @brief 仅在报文提供 bbox 时进行校验
+    @brief 报文带有完整 bbox 字段时执行边界校验
     @param payload 视觉载荷字典
     @return dict
     """
@@ -67,9 +67,9 @@ def _parse_bbox(payload):
 
 
 def _parse_vision_line(line):
-    """解析当前专项方案视觉报文
+    """解析视觉链路回传的单行报文
 
-    @brief 只接受 `vision=1,...` 的持续回传格式
+    @brief 将协议文本转换为主车内部观测字典
     @param line 原始报文文本
     @return dict
     """
@@ -78,6 +78,8 @@ def _parse_vision_line(line):
     if payload.get("vision") != "1":
         raise ValueError("unsupported_vision_payload")
     valid = int(payload["valid"])
+
+    # 无目标时仍返回完整观测结构, 只将误差项保持为零
     observation = {
         "camera_id": str(payload["camera_id"]),
         "vision_seq": int(payload["seq"]),
@@ -94,22 +96,25 @@ def _parse_vision_line(line):
 
 
 class VisionIngress:
-    """主车跟随视觉接入器
+    """负责整理主车视觉链路输入
 
-    @brief 当前只启用单路视觉验收, 同时保留双路装配边界
+    @brief 校验输入链路、解析报文并补齐观测上下文
     """
 
     def __init__(self, active_uart=FOLLOW_ACTIVE_UART, reserved_uarts=None):
+        # 启用链路和预留链路配置保存在接入层, 便于统一判定输入来源
         self.active_uart = str(active_uart)
         if reserved_uarts is None:
             reserved_uarts = FOLLOW_RESERVED_UARTS
         self.reserved_uarts = tuple(reserved_uarts)
+
+        # 最近一次视觉序号用于过滤重复或回退报文
         self.latest_vision_seq = 0
 
     def _build_idle_observation(self, source_status):
-        """构造无目标观测
+        """构造空闲观测结果
 
-        @brief 为无效输入和预留链路提供统一回退结果
+        @brief 为无效输入和非启用链路返回统一观测结构
         @param source_status 输入来源状态
         @return dict
         """
@@ -127,9 +132,9 @@ class VisionIngress:
         }
 
     def prepare_observation(self, observation=None):
-        """补齐视觉接入上下文后的观测
+        """整理并补齐主车观测
 
-        @brief 当前只消费 `UART6` 的单路持续回传, `UART8` 仅保留预留位
+        @brief 过滤链路异常和过期报文, 返回统一观测结构
         @param observation 当前观测字典
         @return dict
         """
@@ -138,13 +143,17 @@ class VisionIngress:
             return self._build_idle_observation("missing")
         prepared = dict(observation)
         uart_name = str(prepared.get("uart", self.active_uart))
+
+        # 非启用链路统一回退为空闲观测, 由上层决定是否忽略
         if uart_name != self.active_uart:
             status = (
                 "reserved" if uart_name in self.reserved_uarts else "unexpected_uart"
             )
             return self._build_idle_observation(status)
+
         line = prepared.get("line")
         if line is None:
+            # 已经是结构化观测时只补齐缺省上下文, 不重复解析协议文本
             prepared.setdefault("active_uart", self.active_uart)
             prepared.setdefault("reserved_uarts", self.reserved_uarts)
             prepared.setdefault("source_status", "active")
@@ -157,6 +166,8 @@ class VisionIngress:
             parsed = _parse_vision_line(line)
         except (KeyError, TypeError, ValueError):
             return self._build_idle_observation("invalid")
+
+        # 视觉序号必须前进, 避免旧报文覆盖新状态
         if int(parsed["vision_seq"]) <= int(self.latest_vision_seq):
             return self._build_idle_observation("stale")
         self.latest_vision_seq = int(parsed["vision_seq"])

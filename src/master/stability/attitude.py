@@ -1,4 +1,4 @@
-"""主车姿态解算基线.
+"""主车姿态换算工具
 
 @file src/master/stability/attitude.py
 """
@@ -9,7 +9,7 @@ import math
 def euler_to_quaternion(roll_deg, pitch_deg, yaw_deg):
     """欧拉角转四元数
 
-    @brief 使用 Z-Y-X 欧拉角约定
+    @brief 按 Z-Y-X 欧拉角顺序转换为四元数
     @param roll_deg 横滚角, 单位度
     @param pitch_deg 俯仰角, 单位度
     @param yaw_deg 偏航角, 单位度
@@ -37,7 +37,7 @@ def euler_to_quaternion(roll_deg, pitch_deg, yaw_deg):
 def quaternion_to_euler(quaternion):
     """四元数转欧拉角
 
-    @brief 返回 roll / pitch / yaw, 单位度
+    @brief 将四元数换算为 roll / pitch / yaw, 单位为度
     @param quaternion 四元数 `(w, x, y, z)`
     @return tuple
     """

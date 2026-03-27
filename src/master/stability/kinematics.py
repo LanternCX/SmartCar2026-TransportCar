@@ -1,4 +1,4 @@
-"""主车运动学基线.
+"""主车运动学辅助计算
 
 @file src/master/stability/kinematics.py
 """
@@ -9,7 +9,7 @@ import math
 def body_axis_semantics():
     """返回车体系方向约定
 
-    @brief 固定主车的方向和符号语义
+    @brief 返回主车坐标轴和正方向定义
     @return dict
     """
 
@@ -24,7 +24,7 @@ def body_axis_semantics():
 def rotate_body_delta_to_world(dx, dy, heading_deg):
     """将车体系位移增量旋转到世界系
 
-    @brief 使用 x 右 y 前的车体系语义
+    @brief 按主车车体系定义换算世界坐标位移
     @param dx 车体系右向位移
     @param dy 车体系前向位移
     @param heading_deg 顺时针为正的朝向角

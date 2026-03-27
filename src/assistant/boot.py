@@ -1,4 +1,4 @@
-"""辅车启动入口.
+"""辅车启动执行入口
 
 @file src/assistant/boot.py
 """

@@ -1,19 +1,19 @@
-"""主车简化视觉状态机.
+"""主车视觉状态切换
 
 @file src/master/vision_state_machine.py
 """
 
 
 class VisionStateMachine:
-    """主车最小视觉状态机
+    """根据视觉观测选择跟踪阶段和输出目标
 
-    @brief 只保留搜索与跟踪两种最小阶段
+    @brief 在搜索和跟踪之间切换主车与辅车目标
     """
 
     def step(self, observation=None):
-        """推进一次最小视觉状态机
+        """推进一次视觉状态切换
 
-        @brief 有目标时进入 tracking, 无目标时进入 search
+        @brief 根据候选目标生成当前阶段和动作建议
         @param observation 当前观测字典
         @return dict
         """
@@ -21,6 +21,8 @@ class VisionStateMachine:
         observation = {} if observation is None else dict(observation)
         candidates = tuple(observation.get("candidates", ()))
         selected_target = observation.get("target")
+
+        # `box` 作为显式候选时优先进入跟踪输出
         if "box" in candidates:
             selected_target = "box"
         if selected_target is None:

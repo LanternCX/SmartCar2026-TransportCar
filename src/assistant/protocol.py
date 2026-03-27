@@ -1,4 +1,4 @@
-"""辅车最小运动协议解析
+"""辅车协议文本解析
 
 @file src/assistant/protocol.py
 """
@@ -7,7 +7,7 @@
 class Command:
     """协议命令
 
-    @brief 表示主车发给辅车的一条最小命令
+    @brief 表示主车发给辅车的一条已解析命令
     """
 
     def __init__(
@@ -22,6 +22,7 @@ class Command:
         dy=0.0,
         dtheta=0.0,
     ):
+        # 命令参数统一在构造时完成类型归一, 便于运行时直接消费
         self.kind = str(kind)
         self.seq = int(seq)
         self.valid = 1 if int(valid) else 0
@@ -36,7 +37,7 @@ class Command:
 def _split_fields(line):
     """标准化命令行
 
-    @brief 去掉首尾空白并按空格拆分
+    @brief 去掉首尾空白并按空格拆分字段
     @param line 原始命令文本
     @return list[str]
     """
@@ -50,7 +51,7 @@ def _split_fields(line):
 def _split_pairs(line):
     """按逗号拆解键值对协议
 
-    @brief 用于解析 `follow=1,...` 风格报文
+    @brief 用于解析 `follow=1,...` 形式的键值报文
     @param line 原始命令文本
     @return dict
     """
@@ -73,13 +74,14 @@ def _split_pairs(line):
 
 
 def parse_command(line):
-    """解析辅车最小协议
+    """解析辅车协议命令
 
-    @brief 支持控制类和运动类最小命令
+    @brief 支持控制命令、运动命令和跟随报文
     @param line 原始命令文本
     @return Command
     """
 
+    # 带等号的文本优先按键值协议解析, 用于处理高频跟随报文
     if "=" in str(line):
         payload = _split_pairs(line)
         if payload.get("follow") == "1":
@@ -94,6 +96,8 @@ def parse_command(line):
 
     fields = _split_fields(line)
     opcode = fields[0].upper()
+
+    # 文本命令按首字段分发到对应命令类型
 
     if opcode == "ARM" and len(fields) == 1:
         return Command(kind="arm")

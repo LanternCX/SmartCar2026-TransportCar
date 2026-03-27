@@ -7,9 +7,9 @@ from master.app import MasterApp
 
 
 def main():
-    """创建主车最小应用
+    """创建主车应用入口对象
 
-    @brief 返回主车运行时入口对象
+    @brief 为启动脚本提供主车应用实例
     @return MasterApp
     """
 
