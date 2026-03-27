@@ -1,6 +1,6 @@
 ---
 name: using-rules
-description: 在本仓库实现前或实现过程中需要检查规则、约束或领域知识时使用。
+description: Use when implementing or refactoring code in this repository and needing to check project rules, constraints, or domain knowledge.
 ---
 
 # Using Rules
@@ -8,7 +8,7 @@ description: 在本仓库实现前或实现过程中需要检查规则、约束�
 ## Overview
 
 这是当前仓库规则与知识的统一入口。
-本 Skill 只承接实现前与实现中的规则查询, 把执行规则压缩为 3 组固定入口。
+本 Skill 只承接实现前与实现中的规则查询, 把执行规则压缩为 4 组固定入口。
 其中完整 OpenArt 协议正文统一维护在 `references/openart-protocol.md`, 主入口继续通过硬件与协议页做路由。
 
 ## When to Use
@@ -20,6 +20,7 @@ description: 在本仓库实现前或实现过程中需要检查规则、约束�
 ## Routing Rules
 
 - 实现阶段通用约束、目录边界、TDD、内存装配门禁 -> `references/implementation-rules.md`
+- 注释风格、文档字符串规范与注释示例 -> `references/comment-rules.md`
 - 硬件事实、串口链路、视觉协议、坐标与联调语义 -> `references/hardware-and-protocol.md`（完整协议正文继续路由到 `references/openart-protocol.md`）
 - 比赛目标、双车协同、控制层级、调参与诊断顺序 -> `references/strategy-and-control.md`
 

@@ -6,14 +6,13 @@
 - 方向与任务目标继续以 `docs/developer/strategy.md`、`docs/developer/tasks.md` 为准
 - 若改动触及 PID、运动学、里程计或轨迹行为, 还要联读 `references/strategy-and-control.md`
 - 若改动触及硬件事实、视觉协议或联调语义, 还要联读 `references/hardware-and-protocol.md`
+- 若改动触及注释补充、注释风格或文档字符串规范, 还要联读 `references/comment-rules.md`
 
 ## 基础实现约束
 
 - 目标平台是 RT1021 + MicroPython, 本地开发兼容 Python 3.8+
 - 类型提示必须完整, 避免 `Any`, 返回值类型必须显式
 - 运行时代码默认不要依赖 `typing`, 如需类型辅助, 优先使用不影响板端导入的兼容写法
-- 注释与文档字符串统一使用中文, 文档注释统一采用 Doxygen 风格
-- 注释标点统一使用半角符号并保持空格规则, 单行注释行尾不加收尾标点
 - 参数与阈值统一集中到 `config/params.py`
 - 禁止静默失败, 只捕获预期异常并保留上下文
 
