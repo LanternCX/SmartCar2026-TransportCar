@@ -14,3 +14,4 @@ milestone
 | 2026-03-16-1 | 2026-03-16 | 完成搬运车最小内存占用重构设计与实施计划 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-1.md` | 完成搬运车最小内存占用重构的正式设计与实施计划，并把内存门禁提升为评审硬约束。 | memory-budget, transport-car, architecture, review, standards, plan |
 | 2026-03-16-2 | 2026-03-16 | 完成主机侧全量验证并确认板端串口离线阻塞最终验收 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-2.md` | 完成主机侧全量验证，并把板端最终验收明确标记为受串口离线阻塞。 | verification, stage2, hil, serial, mpy-cli, blocked |
 | 2026-03-16-3 | 2026-03-16 | 批准 src 运行时代码 300 行硬门禁并重写拆分设计 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-16-3.md` | 批准 src 运行时代码 300 行硬门禁，并重写后续拆分设计。 | file-size, transport-car, diagnostics, vision, runtime, plan |
+| 2026-03-26-1 | 2026-03-26 | 重定向 OpenArt 辅车跟随主线到位置式高频闭环 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-26-1.md` | 将当前阶段目标收敛为 OpenArt 误差驱动的主车高频位置式控制与辅车持续闭环响应。 | follow-control, openart, position-control, imu, memory |
