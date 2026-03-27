@@ -9,7 +9,7 @@
 1. 车模控制协议（遥控协议）
 2. 车模与视觉端通信协议
 
-其中,车模控制协议用于人工调试、脚本控制和兼容旧链路；视觉通信协议用于当前重构目标下的 OpenArt -> RT1021 视觉观测上报。
+其中,车模控制协议用于主车到辅车遥控与状态查询；视觉通信协议用于 OpenArt -> RT1021 视觉误差上报。
 
 ## 2. 共享传输约定
 
@@ -17,14 +17,15 @@
 
 | 链路 | OpenArt 侧 | RT1021 侧 | 推荐用途 |
 | :--- | :--- | :--- | :--- |
-| 主通信链路 | `UART(2)` | `UART6` | 视觉观测上报、兼容旧遥控命令、同口查询 |
-| 调试链路 | 可不接 | `UART3` | 人工调试、日志输出、手工查询 |
+| 视觉链路 A | 独立视觉发送口 | `UART6` | OpenArt A 持续回传目标误差 |
+| 视觉链路 B | 独立视觉发送口 | `UART8` | OpenArt B 持续回传目标误差 |
+| 遥控链路 | 主控遥控发送口 | `UART3` | 主车到辅车遥控通信 |
 
 说明:
 
-- 当前 OpenArt 代码通过 `UART(2, baudrate=115200)` 与底盘通信。
-- RT1021 侧 `UART6` 对应主通信链路,`UART3` 对应调试链路。
-- 从实现上看,`UART3` 和 `UART6` 都能接收普通命令与查询；但为了避免语义混杂,推荐将 `UART6` 留给 vision 端,`UART3` 留给人工调试与全局日志观察。
+- 当前专项方案使用两条独立视觉链路, 由两个正交 OpenArt 分别向 RT1021 持续回传视觉结果。
+- RT1021 侧 `UART6` 与 `UART8` 分别承接两路视觉输入, `UART3` 用于主车到辅车遥控通信。
+- 当前专项方案不再把 `UART3` 作为独立调试串口语义保留, 也不再把视觉主链路组织成单串口轮询查询。
 
 ### 2.2 传输格式
 
@@ -34,7 +35,7 @@
 - 命令格式: `key=value[,key=value...]`
 - 查询格式: `?token`
 - 查询响应: 默认回写到收到该查询的同一串口
-- 运行时日志: 默认由 RT1021 通过 `UART3` 输出,用于持续诊断观察
+- 当前专项方案不预留独立调试串口, `UART3` 主用途是主车到辅车遥控通信
 
 补充约定:
 
@@ -43,8 +44,8 @@
 - `print` 是特例,`value` 按原字符串透传,但由于命令行以逗号分割,`print` 内容不应再包含逗号。
 - `log_profile`、`log_level`、`log_filter`、`log_modules`、`log_color` 这类运行时日志命令的 `value` 按原字符串透传。
 - 未识别的查询会返回 `?unknown=<token>`。
-- 查询响应与日志输出是两条职责分离的通道: 查询始终回写到收到该查询的同一串口；运行时日志仍按日志系统配置输出到 `UART3`。
-- `UART3` 上的人工查询客户端可能看到额外调试输出,例如结构化运行时日志与 `print` 命令透传出的原始文本,因此它不是绝对纯净的查询专用串口。
+- 查询响应与日志输出不再作为当前专项方案主线能力依赖。
+- 若后续恢复日志或手工查询能力, 应视为专项外扩展, 不得反向改变当前串口边界。
 
 ### 2.3 坐标与方向约定
 
@@ -68,14 +69,16 @@
 
 ## 3. 模块 A：车模控制协议（遥控协议）
 
+> 本模块定义当前控制与查询协议。高频跟随控制格式以 3.9 和第 4 节为准。
+
 ### 3.1 适用范围
 
 本模块用于:
 
-- 人工串口调试
-- 上位机脚本控制
-- 兼容旧版 OpenArt 主导式控制链路
+- 主车到辅车控制
+- 状态查询与联调观察
 - 查询底盘位置、锁状态和诊断快照
+- 通用控制场景
 
 ### 3.2 控制命令格式
 
@@ -187,6 +190,8 @@ rear=1,angle=-90
 - 旧版 OpenArt 可以通过轮询 `?lock` 实现“先等空闲再发下一条”的同步控制
 - 对 `rear=1` 这类仅改模式的短动作,`?lock` 的同步价值相对有限,更推荐把它与 `angle/x/y` 等锁定动作组合发送
 
+注意: 上述锁语义不适用于高频 `follow=1,...` 控制主线。
+
 ### 3.8 典型控制示例
 
 ```text
@@ -206,154 +211,167 @@ rear=1,angle=-90
 reset
 ```
 
-## 4. 模块 B：车模与视觉端通信协议
+### 3.9 当前专项方案的主车到辅车高频控制格式
 
-### 4.1 设计目标
-
-RT1021 端已经支持本节描述的视觉协议；它是后续 vision 端重构的目标接口,但当前 `main.py` 仍主要使用旧式“发控制命令 + 轮询 `?lock/?pos`”链路。
-
-目标边界是:
-
-- OpenArt 负责图像采集、目标检测和目标选择
-- RT1021 负责视觉状态机、位置/姿态控制、推行与返回动作
-- OpenArt 不再需要在每一帧里主动发 `dx/dy/d_angle` 或反复等待 `?lock`
-
-换句话说,视觉协议传的是“观测”,不是“动作”。
-
-### 4.2 视觉查询/响应方向
-
-- 主方向: `RT1021 -> OpenArt`, 由主车主动查询某个相机当前缓存帧
-- 物理链路: OpenArt `UART(2)` <-> RT1021 `UART6`
-- `camera_id` 只表示物理相机身份, 不表示职责相机
-- `category` 只表示检测类别, 可在不同物理相机上重复出现
-- 单次查询只点名一个相机, 被点名相机立即返回当前缓存帧结果
-- 未被点名相机在共享视觉 UART 上必须严格静默
-- 单次查询响应允许返回 `0..N` 条检测消息, 并必须带显式结束标记
-
-### 4.3 查询格式与多检测响应格式
-
-主车查询当前某个相机的缓存帧时, 发送:
+当前 OpenArt 跟随专项方案中, 主车到辅车不再把每条消息当成离散任务, 而是发送高频更新的位置式控制量:
 
 ```text
-?frame=<camera_id>
-```
-
-例如:
-
-```text
-?frame=cam_a
-?frame=cam_b
-```
-
-约束:
-
-1. 单次查询只允许点名一个 `camera_id`
-2. 只有被点名相机会响应, 未被点名相机必须保持静默
-3. 响应中的所有检测消息都属于同一次查询的同一帧
-4. 无论该帧返回 `0` 条还是多条检测, 最后一条都必须是显式 `frame_end` 标记
-
-检测消息格式:
-
-```text
-camera_id=<camera_id>,frame_id=<frame_id>,category=<category>,left=<l>,top=<t>,right=<r>,bottom=<b>
-```
-
-帧结束标记格式:
-
-```text
-camera_id=<camera_id>,frame_id=<frame_id>,frame_end=1
+follow=1,seq=<seq>,valid=<0|1>,dx=<dx>,dy=<dy>,d_angle=<da>
 ```
 
 字段语义:
 
 | 字段 | 含义 | 单位 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `camera_id` | 物理相机标识 | 文本 | 例如 `cam_a`、`cam_b`, 不表示职责 |
-| `frame_id` | 相机本地帧标识 | 文本或整数文本 | 同一次查询返回的多条检测必须一致 |
-| `category` | 检测类别 | 文本 | 例如 `cargo`、`follower`、`obstacle`, 可跨相机重复 |
-| `left` | 识别框左边界 | 像素 | 相对图像左边界定义 |
-| `top` | 识别框上边界 | 像素 | 相对图像上边界定义 |
-| `right` | 识别框右边界 | 像素 | 必须大于 `left` |
-| `bottom` | 识别框下边界 | 像素 | 必须大于 `top` |
-| `frame_end` | 当前帧响应结束标记 | 推荐 `1` | 不带 bbox, 仅用于声明本批次结束 |
+| `follow` | 跟随控制报文标记 | 推荐 `1` | 用于让辅车识别当前专项方案控制输入 |
+| `seq` | 递增序号 | 整数 | 便于丢弃重复或倒退旧包 |
+| `valid` | 当前拍是否存在有效目标 | `0/1` | `0` 时表示主车显式进入无目标策略 |
+| `dx` | 车体系横向位置式控制量 | 米 | 由主车对视觉误差做 P 环后得到 |
+| `dy` | 车体系纵向位置式控制量 | 米 | 由主车对视觉误差做 P 环后得到 |
+| `d_angle` | 角度位置式控制量 | 度 | 当前可为 `0` 或由主车角度链给出 |
+
+补充约束:
+
+- 该报文的主语义是“持续闭环控制输入”, 不是“执行完成再处理下一条”的动作命令。
+- `dx/dy/d_angle` 均按位置式语义解释, 不退化成速度式主控制链路。
+- 主车在高频链路上持续刷新该报文, 不等待上一条“执行完成”。
+- 辅车若检测到 `seq` 倒退或重复, 应丢弃旧包。
+- 若当前无有效视觉目标, 主车应发送 `valid=0` 的报文, 不依赖辅车把缺包理解成归零命令。
+- 辅车若在控制超时窗口内未收到新包, 应进入保持或安全停车策略。
+
+当前专项方案默认频率与超时预算:
+
+- 每路 OpenArt 视觉持续回传目标 `>= 20 Hz`
+- 主车到辅车 `follow=1,...` 控制链目标 `>= 50 Hz`
+- 辅车状态回传目标 `10 Hz`
+- 辅车控制超时窗口默认 `150 ms`
+
+示例:
+
+```text
+follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072,d_angle=0.000
+follow=1,seq=3002,valid=1,dx=-0.015,dy=0.069,d_angle=0.000
+follow=1,seq=3003,valid=0,dx=0.000,dy=0.000,d_angle=0.000
+```
+
+### 3.10 当前专项方案的辅车最小状态回传格式
+
+当前专项方案中, 辅车到主车的最小状态回传固定为:
+
+```text
+state=1,follow_active=<0|1>,last_seq=<seq>,odom_x=<x>,odom_y=<y>,heading=<deg>,timeout=<0|1>
+```
+
+字段语义:
+
+| 字段 | 含义 | 单位 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `state` | 状态报文标记 | 推荐 `1` | 用于让主车识别状态回传 |
+| `follow_active` | 当前是否在跟随控制态 | `0/1` | `1` 表示已进入当前专项方案控制链 |
+| `last_seq` | 最近接受的控制报文序号 | 整数 | 用于确认主辅链路是否同步 |
+| `odom_x` | 当前里程计 X | 米 | 仅作为辅助手段, 不作为高精度真值 |
+| `odom_y` | 当前里程计 Y | 米 | 仅作为辅助手段, 不作为高精度真值 |
+| `heading` | 当前航向角 | 度 | 由角度链估计 |
+| `timeout` | 当前是否处于控制超时态 | `0/1` | `1` 表示已进入超时保护 |
+
+示例:
+
+```text
+state=1,follow_active=1,last_seq=3002,odom_x=0.018,odom_y=0.062,heading=1.25,timeout=0
+```
+
+## 4. 模块 B：车模与视觉端通信协议
+
+### 4.1 设计目标
+
+本节同时包含两类信息:
+
+- 当前专项方案下应优先遵循的持续回传协议
+- 为对照旧实现而保留的历史兼容说明
+
+目标边界是:
+
+- OpenArt 负责图像采集、目标检测、目标选择与目标误差计算
+- RT1021 负责 P 环映射、位置/姿态控制与主辅高频闭环执行
+- OpenArt 不再需要在每一帧里主动发 `dx/dy/d_angle` 或反复等待 `?lock`
+
+换句话说,视觉协议传的是“观测”,不是“动作”。
+
+### 4.2 当前专项方案的视觉方向
+
+- 主方向: `OpenArt -> RT1021`
+- RT1021 通过 `UART6` 与 `UART8` 分别接收两个正交 OpenArt 的持续回传
+- 当前专项方案不再使用 `?frame=<camera_id>` 这类轮询查询作为主线前提
+- 视觉链路传递的是“目标误差”, 不是“离散动作命令”
+
+### 4.3 持续回传格式
+
+当前专项方案中, 每个 OpenArt 持续发送单行结构化文本:
+
+```text
+vision=1,camera_id=<camera_id>,seq=<seq>,valid=<0|1>,target=<target>,err_x=<ex>,err_y=<ey>,bbox_left=<l>,bbox_top=<t>,bbox_right=<r>,bbox_bottom=<b>
+```
+
+字段语义:
+
+| 字段 | 含义 | 单位 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `vision` | 视觉报文标记 | 推荐 `1` | 用于让接收侧快速识别视觉上报 |
+| `camera_id` | 当前 OpenArt 标识 | 文本 | 例如 `cam_a`、`cam_b` |
+| `seq` | 递增序号 | 整数 | 同一路视觉链路内单调递增 |
+| `valid` | 当前是否检测到目标 | `0/1` | `0` 表示本拍无有效目标 |
+| `target` | 目标类别或标签 | 文本 | 例如 `follower`；无目标时建议 `none` |
+| `err_x` | 目标相对目标点的横向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
+| `err_y` | 目标相对目标点的纵向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
+| `bbox_left` | 识别框左边界 | 像素 | `valid=0` 时可省略 |
+| `bbox_top` | 识别框上边界 | 像素 | `valid=0` 时可省略 |
+| `bbox_right` | 识别框右边界 | 像素 | `valid=0` 时可省略 |
+| `bbox_bottom` | 识别框下边界 | 像素 | `valid=0` 时可省略 |
 
 合法示例:
 
 ```text
-?frame=cam_a
-camera_id=cam_a,frame_id=12,category=cargo,left=100,top=20,right=140,bottom=90
-camera_id=cam_a,frame_id=12,category=follower,left=150,top=25,right=190,bottom=95
-camera_id=cam_a,frame_id=12,frame_end=1
-
-?frame=cam_b
-camera_id=cam_b,frame_id=33,category=cargo,left=120,top=18,right=170,bottom=110
-camera_id=cam_b,frame_id=33,category=obstacle,left=20,top=30,right=80,bottom=140
-camera_id=cam_b,frame_id=33,frame_end=1
+vision=1,camera_id=cam_a,seq=101,valid=1,target=follower,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
+vision=1,camera_id=cam_b,seq=58,valid=1,target=follower,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
 ```
 
-空结果示例:
+无目标示例:
 
 ```text
-?frame=cam_a
-camera_id=cam_a,frame_id=13,frame_end=1
+vision=1,camera_id=cam_a,seq=102,valid=0,target=none
 ```
 
 补充说明:
 
-- 当前 OpenArt 在发送前已启用 `set_vflip(True)` 与 `set_hmirror(True)`; 因此 RT1021 收到的 `left,top,right,bottom` 已经是翻转后画面的像素坐标, 主控侧不应再次做上下或左右翻转。
-- `center_x`、`center_y`、`width`、`height` 由 RT1021 在本地从识别框派生, 不需要由视觉端重复发送。
-- `category` 当前只作为协议字段保留, 主车如何消费多类结果由后续任务决定。
-- 为兼容旧单框状态机, RT1021 当前仍保留“提交后取该帧最后一条检测作为最新观测”的兼容入口, 但新的协议主语义已经升级为“同一帧检测集合”。
+- 当前专项方案中, 目标点与误差都在 OpenArt 侧计算完成后再发送给主控。
+- `err_x` / `err_y` 的主语义是供主车直接做 P 环映射的控制误差, 不是原始图像像素差。
+- `bbox_*` 主要用于联调观察与必要的视觉侧留证, 不是主控做误差计算的唯一输入前提。
+- `err_x > 0` 固定表示应朝车体系 `x+` 方向修正, `err_y > 0` 固定表示应朝车体系 `y+` 方向修正。
 
-### 4.4 不会被当作有效视觉响应的情况
+### 4.4 不会被当作有效视觉上报的情况
 
-以下消息会被视觉协议保留并吞掉, 但不会形成有效观测或有效帧结果:
+以下消息不会被当作当前专项方案的有效视觉上报:
 
-- 来源不是 `UART6`
-- 旧 `x,y` 载荷或不完整 bbox 载荷
-- 多检测消息缺少 `camera_id`、`frame_id` 或 `category`
-- 同一条消息出现重复键
-- `right <= left` 或 `bottom <= top`
-- 同一批次内 `camera_id` / `frame_id` 发生跳变
-- 缺少显式 `frame_end` 标记
-- `frame_end` 与当前缓存批次的 `camera_id` / `frame_id` 不匹配
+- 来源不是 `UART6` 或 `UART8`
+- 缺少 `vision=1`
+- 缺少 `camera_id`、`seq` 或 `valid`
+- `valid=1` 但缺少 `err_x` 或 `err_y`
 - 任一数值字段不是数字
+- 同一条消息出现重复键
+- `valid=1` 且给出了非法 bbox, 如 `bbox_right <= bbox_left` 或 `bbox_bottom <= bbox_top`
+- 沿用旧轮询协议 `?frame=<camera_id>`、`frame_end=1` 或旧 `x,y` 载荷作为当前主线输入
 
-其中, 若某个尚未 `frame_end` 的批次中途出现 `camera_id` 或 `frame_id` 跳变, 则跳变后对应的整批消息会被视为失效批次; 直到后续出现一个新的干净批次前, 该失效批次的后续检测与 `frame_end` 都不会被提交为有效帧。
+### 4.5 RT1021 对持续视觉上报的消费规则
 
-重要兼容规则:
-
-> `UART6` 上凡是包含视觉字段名 `x/y/left/top/right/bottom/camera_id/frame_id/category/frame_end` 的消息, 都会先被视觉协议截获。只有合法单框兼容包或带显式 `frame_end` 的合法多检测批次会更新缓存；旧 `x,y`、不完整框或未结束批次会被直接丢弃, 不再回落到遥控协议。
-
-例如:
-
-```text
-x=120,y=80,angle=0
-```
-
-在 `UART6` 上会被视为冲突视觉载荷并直接丢弃,不会再被当成绝对位置/角度控制命令执行。
-
-再例如:
-
-```text
-x=1,y=bad
-```
-
-这条消息会被视为旧视觉载荷并直接丢弃。因此 vision 端应保证视觉帧始终升级到完整框格式。
-
-### 4.5 RT1021 对视觉帧的消费规则
-
-- RT1021 当前同时保留两个兼容视图: `latest_frame` 表示最近一帧已结束的检测集合, `latest_observation` 表示兼容旧状态机的最近单条观测
-- 只有收到显式 `frame_end` 后, 当前批次才会被提交为可消费帧
-- 若某帧 `0` 条检测, 也必须在收到 `frame_end` 后提交为空帧, 此时 `latest_observation` 保持为空
-- 若观测超过 `VISION_OBSERVATION_TIMEOUT_MS` 未更新, 则视为目标丢失
-- 视觉观测被消费后, RT1021 会先在本地派生 `center_x`、`center_y`、`bottom` 等几何量, 再驱动状态机生成连续控制意图并换算为当前位置/角度目标
-- 当前协议先定义稳定的链路边界与提交语义, 是否在运行时引入真正的双摄轮询调度和批次选择缓存, 不影响这里约定的字段和结束标记语义
-- 若此时外部离散命令已进入 `command_lock`, RT1021 会清空当前视觉缓存并重置视觉状态机, 避免控制权冲突
+- RT1021 分别维护来自 `UART6` 与 `UART8` 的最近有效视觉上报
+- 每一路视觉链路按 `seq` 更新, 用于丢弃明显倒退或重复的旧包
+- `valid=0` 表示该路当前无有效目标, 不应被误解为位置控制量归零命令
+- 主车收到 `err_x` / `err_y` 后, 直接以 P 环映射到位置式控制量
+- 当前专项方案下, 视觉输入链不再依赖轮询节拍、批次结束标记或单次查询多条响应语义
 
 ### 4.6 视觉状态诊断接口
 
-虽然视觉上报本身没有逐帧 ACK,但可以通过 `?vision` 查询 RT1021 当前已经接收到和解析出的视觉状态。
+当前专项方案不把诊断查询作为主线前提, 但如需观察 RT1021 当前内部视觉状态, 仍可保留 `?vision` 作为辅助诊断接口。
 
 当前 `?vision` 快照字段如下:
 
@@ -384,77 +402,20 @@ RETURNING
 DONE
 ```
 
-### 4.7 推荐交互方式
+### 4.7 当前专项方案的默认交互方式
 
-下面的交互方式是当前重构目标。
+当前专项方案的默认交互方式如下:
 
-推荐的交互方式如下:
-
-1. 初始化阶段可按需发送一次 `reset`
-2. 主车通过 `?frame=<camera_id>` 查询单个相机当前缓存帧
-3. 被点名相机立即返回 `0..N` 条检测消息, 最后追加 `frame_end`
-4. 不要让未被点名相机自由持续发包
-5. 如需调试当前联动状态, 按需查询 `?vision`、`?lock`、`?pos`
+1. 两个 OpenArt 分别通过独立视觉链路持续回传 `vision=1,...` 报文
+2. 主车分别消费 `UART6` 与 `UART8` 上的最新有效误差
+3. 主车对视觉误差做 P 环映射, 生成高频位置式控制量
+4. 主车通过 `UART3` 向辅车持续发送 `follow=1,...` 报文
+5. 如需辅助观察内部状态, 再按需查询 `?vision`、`?lock`、`?pos`
 
 一个最小示例:
 
 ```text
-reset
-?frame=cam_a
-camera_id=cam_a,frame_id=12,category=cargo,left=145,top=20,right=175,bottom=240
-camera_id=cam_a,frame_id=12,frame_end=1
-?vision
+vision=1,camera_id=cam_a,seq=101,valid=1,target=follower,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
+vision=1,camera_id=cam_b,seq=58,valid=1,target=follower,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
+follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072,d_angle=0.000
 ```
-
-## 5. 兼容与迁移说明
-
-### 5.1 同名字段的语义区分
-
-这是本协议最重要的兼容规则:
-
-| 条件 | 消息语义 |
-| :--- | :--- |
-| 来自 `UART6`, 且为 `?frame=<camera_id>` | 保留给视觉协议的单相机帧查询 |
-| 来自 `UART6`, 且整行消息恰好只有 `left/top/right/bottom` 四个键 | 旧单框兼容观测 |
-| 来自 `UART6`, 且消息含 `camera_id/frame_id/category` 与 bbox | 多检测帧中的单条检测 |
-| 来自 `UART6`, 且消息含 `camera_id/frame_id/frame_end` | 当前查询批次结束标记 |
-| 来自 `UART6`, 且包含视觉字段但不满足上述合法条件 | 废弃, 冲突或不完整视觉载荷, 会被丢弃 |
-| 其他情况（例如来自 `UART3`, 或为 `vx/angle/rear` 等控制键） | 遥控协议中的控制命令 |
-
-因此:
-
-- `UART6: ?frame=cam_a` -> 视觉查询, 不进入普通 query 路由
-- `UART6: left=100,top=20,right=140,bottom=90` -> 旧单框兼容观测
-- `UART6: camera_id=cam_a,frame_id=12,category=cargo,left=100,top=20,right=140,bottom=90` -> 当前帧中的单条检测
-- `UART6: camera_id=cam_a,frame_id=12,frame_end=1` -> 当前帧结束
-- `UART6: x=120,y=80` -> 旧视觉载荷,会被忽略
-- `UART3: x=120,y=80` -> 绝对位置命令
-- `UART6: vx=1` -> 速度命令
-
-### 5.2 对旧 OpenArt 代码的兼容
-
-旧版 OpenArt 控制逻辑中常见的做法包括:
-
-- 发送 `dx/dy/d_angle`
-- 发送 `rear=1,angle=...`
-- 查询 `?pos`
-- 轮询 `?lock`
-- 通过 `send_cmd_sync()` 实现“发一条、等完成、再发下一条”
-
-RT1021 当前仍兼容这些命令与查询, 但旧 OpenArt 若继续通过 `UART6` 发送 `x,y`, 将不会再驱动视觉状态机。新的视觉端应升级到“单次查询, 多条检测响应, 显式 frame_end”的协议。
-
-### 5.3 对新 vision 重构的建议
-
-新的重构方向建议收敛为:
-
-- OpenArt: 负责感知与目标选择
-- RT1021: 负责状态机、控制与动作编排
-- OpenArt 与 RT1021 之间的常态交互: `?frame=<camera_id>` / `camera_id,frame_id,category,bbox...` / `frame_end` + `按需查询诊断`
-
-这意味着 OpenArt 端可以逐步删除:
-
-- 每帧 `send_cmd_sync()`
-- 每阶段主动 `?lock` 等待
-- 每阶段主动 `?pos` 回读再做状态机跳转
-
-保留这些接口只作为兼容与排障手段,而不是新的主控制链路。
