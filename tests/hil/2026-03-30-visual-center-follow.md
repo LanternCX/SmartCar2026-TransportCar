@@ -2,8 +2,8 @@
 
 ## 状态
 
-- 当前状态: 待执行
-- 原因: 当前模板仅用于本阶段最小上板留证, 具体板端结果待后续联调填写
+- 当前状态: 待继续
+- 原因: 主机侧与部署计划已通过, 但当前未探测到可用 MicroPython 设备, 配置端口 `/dev/cu.usbmodem11101` 也不存在, 暂停在设备连接阶段
 
 ## 目标
 
@@ -18,6 +18,7 @@
 - 已烧录当前阶段 `master` 与 `assistant` 固件
 - 双路视觉输入已按统一语义输出 `err_x/err_y`, 且主线目标为辅车色标
 - 主车与辅车串口连接正常, 可收发当前阶段最小协议
+- 主辅车电机与编码器映射按 `src/legacy/hardware/` 中的正式硬件层实现保持一致
 - 测试场地允许人工移动主车或移动目标, 但本阶段不要求主车主动运动
 - 已知本阶段不验收灰度链路、不验收角度控制、不验收主车主动运动
 
@@ -54,8 +55,12 @@
 - 死区保持现象:
 - 色标丢失停住现象:
 - 辅车最小状态回传样例:
-- 主机侧验证: `python3 -m pytest tests/unit tests/contract -q`
-- 备注:
+- 主机侧验证: `python3 -m pytest tests/unit tests/contract -q` -> `93 passed`
+- 部署计划: `mpy-cli plan --mode incremental --no-interactive --yes` -> `upload 26, delete 0`
+- 设备发现: `mpy-cli list` -> 未探测到可用的 MicroPython 设备
+- 连接验证: `ls /dev/cu.usbmodem11101` -> `No such file or directory`
+- smoke 结果: `python3 tools/run_stage2_smoke.py --port /dev/cu.usbmodem11101` -> `deploy_failed`, 原因是 `mpremote` 无法访问该端口
+- 备注: 已将 `.mpy-cli.toml` 的 `source_dir` 修正为 `src/master`, 当前阻塞点只剩设备端口/占用状态
 
 ## 失败时最小排查项
 
@@ -68,4 +73,4 @@
 
 ## 结论
 
-- hil_pending
+- deploy_failed: 设备端口不存在或当前不可访问, 待用户连接设备或提供正确端口后继续

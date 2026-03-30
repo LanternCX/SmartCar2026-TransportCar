@@ -19,6 +19,20 @@ def test_master_and_assistant_keep_legacy_entry_shape() -> None:
         assert (runtime_root / "main.py").exists()
 
 
+def test_master_and_assistant_expose_new_structure_directories() -> None:
+    """主辅车当前阶段必须先落新框架目录边界."""
+
+    expected = {
+        "master": ("hw", "ctrl", "vision", "script"),
+        "assistant": ("hw", "ctrl", "script"),
+    }
+
+    for runtime_name, directory_names in expected.items():
+        runtime_root = PROJECT_ROOT / "src" / runtime_name
+        for directory_name in directory_names:
+            assert (runtime_root / directory_name).is_dir()
+
+
 def test_master_and_assistant_runtime_files_do_not_use_typing_module() -> None:
     """运行时代码不应依赖 typing 模块."""
 

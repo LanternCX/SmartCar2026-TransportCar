@@ -3,10 +3,29 @@
 @file src/master/app.py
 """
 
-from master.decision import decide_from_observation
+from master.hw.encoders import build_encoder_bundle
+from master.hw.imu import build_imu_bundle
+from master.hw.motors import build_motor_bundle
+from master.hw.uart import build_uart_bundle
 from master.motion_runtime import MotionRuntime
-from master.vision_ingress import VisionIngress
-from master.vision_state_machine import MarkerStateMachine
+from master.vision.decision import decide_from_observation
+from master.vision.ingress import VisionIngress
+from master.vision.state_machine import MarkerStateMachine
+
+
+def build_hw_bundle():
+    """构造主车硬件装配入口.
+
+    @brief 当前阶段先收口已存在的新框架硬件边界对象。
+    @return dict
+    """
+
+    return {
+        "uart": build_uart_bundle(),
+        "motors": build_motor_bundle(),
+        "encoders": build_encoder_bundle(),
+        "imu": build_imu_bundle(),
+    }
 
 
 class MasterApp:
@@ -16,6 +35,7 @@ class MasterApp:
     """
 
     def __init__(self, active_uart="uart6", reserved_uarts=("uart8",)):
+        self.hw_bundle = build_hw_bundle()
         self.ingress = VisionIngress(
             active_uart=active_uart,
             reserved_uarts=reserved_uarts,

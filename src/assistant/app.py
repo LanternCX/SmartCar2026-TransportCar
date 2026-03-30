@@ -4,8 +4,27 @@
 """
 
 from config.params import FOLLOW_TIMEOUT_MS
-from assistant.motion_runtime import MotionRuntime
+from assistant.ctrl.chassis import ChassisRuntime
 from assistant.protocol import parse_command
+from assistant.hw.encoders import build_encoder_bundle
+from assistant.hw.imu import build_imu_bundle
+from assistant.hw.motors import build_motor_bundle
+from assistant.hw.uart import build_uart_bundle
+
+
+def build_hw_bundle():
+    """构造辅车硬件装配入口.
+
+    @brief 当前阶段先收口已存在的新框架硬件边界对象。
+    @return dict
+    """
+
+    return {
+        "uart": build_uart_bundle(),
+        "motors": build_motor_bundle(),
+        "encoders": build_encoder_bundle(),
+        "imu": build_imu_bundle(),
+    }
 
 
 class AssistantApp:
@@ -15,8 +34,9 @@ class AssistantApp:
     """
 
     def __init__(self, timeout_ms=FOLLOW_TIMEOUT_MS):
+        self.hw_bundle = build_hw_bundle()
         # 应用层只保留一个运行时对象, 统一收口命令执行和状态维护
-        self.runtime = MotionRuntime(timeout_ms=timeout_ms)
+        self.runtime = ChassisRuntime(timeout_ms=timeout_ms, hw_bundle=self.hw_bundle)
         self._timeout_reported = False
 
     def _render_ack(self):
