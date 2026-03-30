@@ -59,13 +59,14 @@
 
 ### 2.4 上电入口与车辆角色约定
 
-- `boot.py` 的职责已拆分为两部分: `D8/D9` 只声明车辆角色, 按钮长按只决定启动脚本
-- `D8=1,D9=0` 表示主车, `D8=0,D9=1` 表示辅车
+- 以下条目属于旧阶段入口与角色切换说明, 当前阶段不作为 `master` / `assistant` 分别烧录方案的实现依据
+- 当前阶段公开入口以 `main.py` 为准, 主辅角色通过分别烧录不同目录静态确定
+- `D8=1,D9=0` 表示主车, `D8=0,D9=1` 表示辅车（仅保留为历史板级语义参考）
 - `D8/D9` 板级输入带上拉电阻, 因此读到 `1` 表示开关关闭(断开), 读到 `0` 表示开关闭合; 排障时必须区分“输入电平”和“物理开关状态”
-- `D8/D9` 若为 `0/0` 或 `1/1`, 视为非法角色组合, 启动阶段应安全失败, 不进入任何业务脚本
-- 上电长按按钮 1 进入 `script/pid_identify.py`
-- 上电长按按钮 2 进入 `script/calibrate_gyro.py`
-- 上电时未长按按钮则进入 `script/remote_control.py`, 且正常运行路径可读取 `VEHICLE_ROLE`
+- `D8/D9` 若为 `0/0` 或 `1/1`, 视为非法角色组合（仅保留为历史排障参考）
+- 上电长按按钮 1 进入 `script/pid_identify.py`（当前阶段由 `main.py` 内部分发）
+- 上电长按按钮 2 进入 `script/calibrate_gyro.py`（当前阶段由 `main.py` 内部分发）
+- 上电时未长按按钮则进入正常运行路径（当前阶段不再以 `script/remote_control.py` 作为主路径）
 
 ## 3. 模块 A：车模控制协议（遥控协议）
 
@@ -213,10 +214,10 @@ reset
 
 ### 3.9 当前专项方案的主车到辅车高频控制格式
 
-当前 OpenArt 跟随专项方案中, 主车到辅车不再把每条消息当成离散任务, 而是发送高频更新的位置式控制量:
+当前阶段若实现“辅车色标二维回中”最小闭环, 主车到辅车不再把每条消息当成离散任务, 而是发送高频更新的二维位置式控制量:
 
 ```text
-follow=1,seq=<seq>,valid=<0|1>,dx=<dx>,dy=<dy>,d_angle=<da>
+follow=1,seq=<seq>,valid=<0|1>,dx=<dx>,dy=<dy>
 ```
 
 字段语义:
@@ -228,12 +229,11 @@ follow=1,seq=<seq>,valid=<0|1>,dx=<dx>,dy=<dy>,d_angle=<da>
 | `valid` | 当前拍是否存在有效目标 | `0/1` | `0` 时表示主车显式进入无目标策略 |
 | `dx` | 车体系横向位置式控制量 | 米 | 由主车对视觉误差做 P 环后得到 |
 | `dy` | 车体系纵向位置式控制量 | 米 | 由主车对视觉误差做 P 环后得到 |
-| `d_angle` | 角度位置式控制量 | 度 | 当前可为 `0` 或由主车角度链给出 |
 
 补充约束:
 
 - 该报文的主语义是“持续闭环控制输入”, 不是“执行完成再处理下一条”的动作命令。
-- `dx/dy/d_angle` 均按位置式语义解释, 不退化成速度式主控制链路。
+- `dx/dy` 均按位置式语义解释, 不退化成速度式主控制链路。
 - 主车在高频链路上持续刷新该报文, 不等待上一条“执行完成”。
 - 辅车若检测到 `seq` 倒退或重复, 应丢弃旧包。
 - 若当前无有效视觉目标, 主车应发送 `valid=0` 的报文, 不依赖辅车把缺包理解成归零命令。
@@ -249,17 +249,17 @@ follow=1,seq=<seq>,valid=<0|1>,dx=<dx>,dy=<dy>,d_angle=<da>
 示例:
 
 ```text
-follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072,d_angle=0.000
-follow=1,seq=3002,valid=1,dx=-0.015,dy=0.069,d_angle=0.000
-follow=1,seq=3003,valid=0,dx=0.000,dy=0.000,d_angle=0.000
+follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072
+follow=1,seq=3002,valid=1,dx=-0.015,dy=0.069
+follow=1,seq=3003,valid=0,dx=0.000,dy=0.000
 ```
 
 ### 3.10 当前专项方案的辅车最小状态回传格式
 
-当前专项方案中, 辅车到主车的最小状态回传固定为:
+当前阶段若实现“辅车色标二维回中”最小闭环, 辅车到主车的最小状态回传固定为:
 
 ```text
-state=1,follow_active=<0|1>,last_seq=<seq>,odom_x=<x>,odom_y=<y>,heading=<deg>,timeout=<0|1>
+state=1,state_label=<IDLE|BUSY|TIMEOUT>,last_seq=<seq>,follow_active=<0|1>
 ```
 
 字段语义:
@@ -267,17 +267,14 @@ state=1,follow_active=<0|1>,last_seq=<seq>,odom_x=<x>,odom_y=<y>,heading=<deg>,t
 | 字段 | 含义 | 单位 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `state` | 状态报文标记 | 推荐 `1` | 用于让主车识别状态回传 |
-| `follow_active` | 当前是否在跟随控制态 | `0/1` | `1` 表示已进入当前专项方案控制链 |
+| `state_label` | 当前最小状态标签 | 固定集合 | 当前阶段只允许 `IDLE`、`BUSY`、`TIMEOUT` |
 | `last_seq` | 最近接受的控制报文序号 | 整数 | 用于确认主辅链路是否同步 |
-| `odom_x` | 当前里程计 X | 米 | 仅作为辅助手段, 不作为高精度真值 |
-| `odom_y` | 当前里程计 Y | 米 | 仅作为辅助手段, 不作为高精度真值 |
-| `heading` | 当前航向角 | 度 | 由角度链估计 |
-| `timeout` | 当前是否处于控制超时态 | `0/1` | `1` 表示已进入超时保护 |
+| `follow_active` | 当前是否在跟随控制态 | `0/1` | `1` 表示已进入当前专项方案控制链 |
 
 示例:
 
 ```text
-state=1,follow_active=1,last_seq=3002,odom_x=0.018,odom_y=0.062,heading=1.25,timeout=0
+state=1,state_label=BUSY,last_seq=3002,follow_active=1
 ```
 
 ## 4. 模块 B：车模与视觉端通信协议
@@ -389,7 +386,7 @@ vision=1,camera_id=cam_a,seq=102,valid=0,target=none
 | `target_y` | RT1021 当前解析出的世界系目标 `y` |
 | `target_angle` | RT1021 当前解析出的目标航向角 |
 
-当前状态名可能包括:
+旧阶段视觉状态名可能包括:
 
 ```text
 IDLE
@@ -400,6 +397,14 @@ ORBITING
 PUSHING
 RETURNING
 DONE
+```
+
+当前阶段“辅车色标二维回中”最小闭环只使用以下状态:
+
+```text
+MARKER_MISSING
+TRACKING
+CENTER_HOLD
 ```
 
 ### 4.7 当前专项方案的默认交互方式
@@ -417,5 +422,5 @@ DONE
 ```text
 vision=1,camera_id=cam_a,seq=101,valid=1,target=follower,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
 vision=1,camera_id=cam_b,seq=58,valid=1,target=follower,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
-follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072,d_angle=0.000
+follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072
 ```
