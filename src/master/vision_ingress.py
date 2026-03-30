@@ -3,7 +3,14 @@
 @file src/master/vision_ingress.py
 """
 
-from config.params import FOLLOW_ACTIVE_UART, FOLLOW_RESERVED_UARTS, FOLLOW_TARGET_LABEL
+import time
+
+from config.params import (
+    FOLLOW_ACTIVE_UART,
+    FOLLOW_RESERVED_UARTS,
+    FOLLOW_TARGET_LABEL,
+    FOLLOW_TIMEOUT_MS,
+)
 
 
 def _split_pairs(line):
@@ -101,15 +108,61 @@ class VisionIngress:
     @brief 校验输入链路、解析报文并补齐观测上下文
     """
 
-    def __init__(self, active_uart=FOLLOW_ACTIVE_UART, reserved_uarts=None):
-        # 启用链路和预留链路配置保存在接入层, 便于统一判定输入来源
+    def __init__(
+        self,
+        active_uart=FOLLOW_ACTIVE_UART,
+        reserved_uarts=None,
+        timeout_ms=FOLLOW_TIMEOUT_MS,
+    ):
+        # 当前阶段两路 UART 都属于视觉主链路, 这里只保留已配置链路集合
         self.active_uart = str(active_uart)
         if reserved_uarts is None:
             reserved_uarts = FOLLOW_RESERVED_UARTS
         self.reserved_uarts = tuple(reserved_uarts)
+        self.known_uarts = (self.active_uart,) + tuple(
+            uart for uart in self.reserved_uarts if str(uart) != self.active_uart
+        )
+        self.timeout_ms = int(timeout_ms)
 
-        # 最近一次视觉序号用于过滤重复或回退报文
+        # 入口层同时维护“本拍是否有新输入”和“最近有效目标是否仍新鲜”。
         self.latest_vision_seq = 0
+        self.current_target = self._build_idle_observation("missing")
+        self._latest_by_uart = {}
+        self._frame_has_input = False
+        self._frame_updated_uarts = ()
+        self._frame_now_ms = self._resolve_now_ms(None)
+
+    def _resolve_now_ms(self, now_ms):
+        if now_ms is None:
+            ticks_ms = getattr(time, "ticks_ms", None)
+            if ticks_ms is not None:
+                return int(ticks_ms())
+            return int(time.time() * 1000)
+        return int(now_ms)
+
+    def begin_frame(self, now_ms=None):
+        """开始新的应用拍次.
+
+        @brief 清理当前拍输入标记, 让选路只在本拍有新视觉输入时生效。
+        @return None
+        """
+
+        self._frame_has_input = False
+        self._frame_updated_uarts = ()
+        self._frame_now_ms = self._resolve_now_ms(now_ms)
+
+    def _normalize_marker_error(self, uart_name, err_x, err_y):
+        """统一双路视觉误差语义
+
+        @brief 当前阶段要求双路 UART 都直接输出统一车体系语义, 入口层不再二次翻转
+        @param uart_name 当前输入来源
+        @param err_x 横向误差
+        @param err_y 纵向误差
+        @return tuple
+        """
+
+        _ = uart_name
+        return float(err_x), float(err_y)
 
     def _build_idle_observation(self, source_status):
         """构造空闲观测结果
@@ -120,18 +173,37 @@ class VisionIngress:
         """
 
         return {
-            "active_uart": self.active_uart,
+            "configured_uart": self.active_uart,
+            "source_uart": "",
             "reserved_uarts": self.reserved_uarts,
             "source_status": str(source_status),
-            "camera_id": FOLLOW_TARGET_LABEL,
+            "camera_id": "",
             "target": "idle",
+            "selected_target": "idle",
             "vision_seq": 0,
             "valid": 0,
+            "fresh": 0,
+            "stale": 0,
+            "has_new_input": 0,
             "err_x": 0.0,
             "err_y": 0.0,
         }
 
-    def prepare_observation(self, observation=None):
+    def _mark_target_state(self, observation, now_ms, has_new_input):
+        marked = dict(observation)
+        marked.setdefault("selected_target", str(marked.get("target", "idle")))
+        marked.setdefault("last_seen_ms", int(now_ms))
+        is_valid = int(marked.get("valid", 0)) == 1
+        is_fresh = False
+        if is_valid:
+            age_ms = int(now_ms) - int(marked.get("last_seen_ms", now_ms))
+            is_fresh = age_ms <= self.timeout_ms
+        marked["fresh"] = 1 if is_fresh else 0
+        marked["stale"] = 0 if is_fresh else 1
+        marked["has_new_input"] = 1 if has_new_input else 0
+        return marked
+
+    def prepare_observation(self, observation=None, now_ms=None):
         """整理并补齐主车观测
 
         @brief 过滤链路异常和过期报文, 返回统一观测结构
@@ -139,39 +211,117 @@ class VisionIngress:
         @return dict
         """
 
+        if now_ms is None and isinstance(observation, dict):
+            now_ms = observation.get("now_ms")
+        frame_now_ms = self._resolve_now_ms(now_ms)
         if observation is None:
-            return self._build_idle_observation("missing")
+            self.current_target = self._mark_target_state(
+                self._build_idle_observation("missing"),
+                frame_now_ms,
+                False,
+            )
+            return dict(self.current_target)
         prepared = dict(observation)
         uart_name = str(prepared.get("uart", self.active_uart))
 
-        # 非启用链路统一回退为空闲观测, 由上层决定是否忽略
-        if uart_name != self.active_uart:
-            status = (
-                "reserved" if uart_name in self.reserved_uarts else "unexpected_uart"
-            )
-            return self._build_idle_observation(status)
+        if uart_name not in self.known_uarts:
+            idle = self._build_idle_observation("unexpected_uart")
+            idle["source_uart"] = uart_name
+            self.current_target = self._mark_target_state(idle, frame_now_ms, False)
+            return dict(self.current_target)
 
         line = prepared.get("line")
         if line is None:
+            if len(prepared) == 1 and "uart" in prepared:
+                idle = self._build_idle_observation("missing")
+                idle["source_uart"] = uart_name
+                self.current_target = self._mark_target_state(idle, frame_now_ms, False)
+                return dict(self.current_target)
             # 已经是结构化观测时只补齐缺省上下文, 不重复解析协议文本
-            prepared.setdefault("active_uart", self.active_uart)
+            self._frame_has_input = True
+            self._frame_updated_uarts = tuple(
+                set(self._frame_updated_uarts + (uart_name,))
+            )
+            prepared["err_x"], prepared["err_y"] = self._normalize_marker_error(
+                uart_name, prepared.get("err_x", 0.0), prepared.get("err_y", 0.0)
+            )
+            prepared.setdefault("configured_uart", self.active_uart)
+            prepared.setdefault("source_uart", uart_name)
             prepared.setdefault("reserved_uarts", self.reserved_uarts)
             prepared.setdefault("source_status", "active")
             prepared.setdefault("target", FOLLOW_TARGET_LABEL)
             prepared.setdefault("valid", 0)
-            prepared.setdefault("err_x", 0.0)
-            prepared.setdefault("err_y", 0.0)
-            return prepared
+            prepared["last_seen_ms"] = frame_now_ms
+            if "vision_seq" in prepared:
+                self.latest_vision_seq = int(prepared["vision_seq"])
+            self._latest_by_uart[uart_name] = dict(prepared)
+            self.current_target = self._mark_target_state(prepared, frame_now_ms, True)
+            return dict(self.current_target)
+        self._frame_has_input = True
+        self._frame_updated_uarts = tuple(set(self._frame_updated_uarts + (uart_name,)))
         try:
             parsed = _parse_vision_line(line)
         except (KeyError, TypeError, ValueError):
-            return self._build_idle_observation("invalid")
+            idle = self._build_idle_observation("invalid")
+            idle["source_uart"] = uart_name
+            idle["last_seen_ms"] = frame_now_ms
+            self._latest_by_uart[uart_name] = dict(idle)
+            self.current_target = self._mark_target_state(idle, frame_now_ms, True)
+            return dict(self.current_target)
 
-        # 视觉序号必须前进, 避免旧报文覆盖新状态
-        if int(parsed["vision_seq"]) <= int(self.latest_vision_seq):
-            return self._build_idle_observation("stale")
         self.latest_vision_seq = int(parsed["vision_seq"])
-        parsed["active_uart"] = self.active_uart
+        parsed["err_x"], parsed["err_y"] = self._normalize_marker_error(
+            uart_name, parsed["err_x"], parsed["err_y"]
+        )
+        parsed["configured_uart"] = self.active_uart
+        parsed["source_uart"] = uart_name
         parsed["reserved_uarts"] = self.reserved_uarts
         parsed["source_status"] = "active"
-        return parsed
+        parsed["last_seen_ms"] = frame_now_ms
+        self._latest_by_uart[uart_name] = dict(parsed)
+        self.current_target = self._mark_target_state(parsed, frame_now_ms, True)
+        return dict(self.current_target)
+
+    def select_current_target(self, now_ms=None):
+        """返回当前选中的目标观测.
+
+        @brief 按双 UART 的最新有效观测选路, 同样新鲜时固定优先 UART6。
+        @return dict
+        """
+
+        frame_now_ms = self._resolve_now_ms(now_ms)
+
+        valid_items = []
+        for uart_name in self.known_uarts:
+            item = self._latest_by_uart.get(uart_name)
+            if (
+                item
+                and item.get("source_status") == "active"
+                and int(item.get("valid", 0)) == 1
+            ):
+                marked = self._mark_target_state(
+                    item,
+                    frame_now_ms,
+                    uart_name in self._frame_updated_uarts,
+                )
+                if int(marked.get("fresh", 0)) == 1:
+                    valid_items.append(marked)
+
+        if not valid_items:
+            source_status = "stale" if self._latest_by_uart else "missing"
+            self.current_target = self._mark_target_state(
+                self._build_idle_observation(source_status),
+                frame_now_ms,
+                False,
+            )
+            return dict(self.current_target)
+
+        valid_items.sort(
+            key=lambda item: (
+                int(item.get("last_seen_ms", 0)),
+                item.get("source_uart", "") == "uart6",
+            ),
+            reverse=True,
+        )
+        self.current_target = dict(valid_items[0])
+        return dict(self.current_target)

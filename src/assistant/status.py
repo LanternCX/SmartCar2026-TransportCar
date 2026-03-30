@@ -13,12 +13,31 @@ class AssistantState:
     def __init__(self):
         # 跟随状态、里程和最近一次错误统一保存在状态对象中
         self.follow_active = False
+        self.state_label = "IDLE"
         self.last_seq = 0
         self.odom = [0.0, 0.0]
         self.heading_deg = 0.0
         self.velocity_command = (0.0, 0.0, 0.0)
         self.timeout = False
         self.last_error = ""
+
+
+def _normalize_state_label(state):
+    """将内部状态收口为对外最小状态标签
+
+    @brief 对外只暴露 `IDLE`、`BUSY`、`TIMEOUT`
+    @param state 当前辅车状态
+    @return str
+    """
+
+    if bool(state.timeout) or state.last_error == "timeout_stop":
+        return "TIMEOUT"
+    if bool(state.follow_active):
+        return "BUSY"
+    label = str(getattr(state, "state_label", "")).upper()
+    if label in ("IDLE", "BUSY", "TIMEOUT"):
+        return label
+    return "IDLE"
 
 
 def render_state(state):
@@ -29,14 +48,8 @@ def render_state(state):
     @return str
     """
 
-    return (
-        "state=1,follow_active=%d,last_seq=%d,odom_x=%.3f,odom_y=%.3f,heading=%.3f,timeout=%d"
-        % (
-            1 if state.follow_active else 0,
-            int(state.last_seq),
-            state.odom[0],
-            state.odom[1],
-            state.heading_deg,
-            1 if state.timeout else 0,
-        )
+    return "state=1,state_label=%s,last_seq=%d,follow_active=%d" % (
+        _normalize_state_label(state),
+        int(state.last_seq),
+        1 if state.follow_active else 0,
     )

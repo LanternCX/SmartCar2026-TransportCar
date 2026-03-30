@@ -7,8 +7,6 @@ from config.params import FOLLOW_TIMEOUT_MS
 from assistant.protocol import Command
 from assistant.safety import SafetyGuard
 from assistant.status import AssistantState, render_state
-from assistant.stability.control import HeadingController
-from assistant.stability.kinematics import rotate_body_delta_to_world
 
 
 class MotionRuntime:
@@ -24,9 +22,6 @@ class MotionRuntime:
         # 安全保护负责管理急停和命令超时
         self.safety = SafetyGuard(timeout_ms=timeout_ms)
 
-        # 角度误差统一通过偏航控制器换算为角速度命令
-        self.heading_controller = HeadingController()
-
     def _stop(self, reason=""):
         """将辅车状态收口为停止
 
@@ -35,10 +30,52 @@ class MotionRuntime:
         """
 
         self.state.follow_active = False
+        self.state.state_label = "TIMEOUT" if reason == "timeout_stop" else "IDLE"
         self.state.velocity_command = (0.0, 0.0, 0.0)
         self.state.timeout = reason == "timeout_stop"
         if reason:
             self.state.last_error = reason
+
+    def _preserve_timeout_stop(self):
+        """在超时锁定下执行停止动作但保留超时对外状态
+
+        @brief 供超时后的普通辅助入口复用
+        """
+
+        self.state.follow_active = False
+        self.state.velocity_command = (0.0, 0.0, 0.0)
+        self.state.state_label = "TIMEOUT"
+        self.state.timeout = True
+        self.state.last_error = "timeout_stop"
+
+    def _is_timeout_locked(self):
+        """判断当前是否处于超时锁定状态
+
+        @brief 超时后仅允许新序号跟随或显式复位退出
+        @return bool
+        """
+
+        return bool(self.state.timeout) or self.state.state_label == "TIMEOUT"
+
+    def _clear_follow_deadline(self):
+        """清除跟随链路的超时基准
+
+        @brief 辅助入口结束或打断跟随后, 后续 tick 不应再重放旧超时
+        """
+
+        self.safety.last_command_ms = None
+
+    def _reject_unsupported_command(self):
+        """拒绝当前阶段不支持的入口
+
+        @brief 保持当前运动输出不变, 仅对外返回错误结果
+        @return str
+        """
+
+        if not self._is_timeout_locked():
+            self.state.timeout = False
+        self.state.last_error = "unsupported_command"
+        return "ERR"
 
     def _apply_follow(self, command, now_ms):
         """执行一条跟随控制报文
@@ -62,25 +99,13 @@ class MotionRuntime:
         # `valid=0` 表示当前控制拍没有有效目标, 运行时进入保持状态
         if not command.valid:
             self.state.follow_active = False
+            self.state.state_label = "IDLE"
             self.state.velocity_command = (0.0, 0.0, 0.0)
             return "HOLD"
 
         self.state.follow_active = True
-
-        # 位移增量先从车体系旋转到世界系, 再累计到里程状态
-        world_dx, world_dy = rotate_body_delta_to_world(
-            command.dx,
-            command.dy,
-            self.state.heading_deg,
-        )
-        self.state.odom[0] += world_dx
-        self.state.odom[1] += world_dy
-        self.state.heading_deg += command.dtheta
-        self.state.velocity_command = (
-            command.dx,
-            command.dy,
-            self.heading_controller.compute(command.dtheta),
-        )
+        self.state.state_label = "BUSY"
+        self.state.velocity_command = (command.dx, command.dy, 0.0)
         return "BUSY"
 
     def apply_command(self, command, now_ms):
@@ -100,62 +125,50 @@ class MotionRuntime:
         if command.kind == "follow":
             return self._apply_follow(command, now_ms)
 
-        # 其余控制命令都会刷新看门狗并清空上次错误信息
-        self.safety.mark_command(now_ms)
-        self.state.last_error = ""
-        self.state.timeout = False
-
         if command.kind == "arm":
             return "ACK"
         if command.kind == "disarm":
-            self._stop()
+            self._clear_follow_deadline()
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop()
+            else:
+                self._stop()
             return "ACK"
         if command.kind == "stop":
             self.safety.trigger_estop()
-            self._stop("estop")
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop()
+            else:
+                self._stop("estop")
             return "DONE"
         if command.kind == "reset_odom":
+            self._clear_follow_deadline()
             self.state.odom[0] = 0.0
             self.state.odom[1] = 0.0
             self.state.heading_deg = 0.0
-            self.state.last_seq = 0
+            self.state.follow_active = False
+            self.state.state_label = "IDLE"
+            self.state.velocity_command = (0.0, 0.0, 0.0)
             self.state.timeout = False
+            self.state.last_error = ""
             self.safety.clear_estop()
             return "ACK"
         if command.kind == "hold":
+            self._clear_follow_deadline()
             self.state.follow_active = False
+            if not self._is_timeout_locked():
+                self.state.state_label = "IDLE"
             self.state.velocity_command = (0.0, 0.0, 0.0)
             self.safety.clear_estop()
             return "DONE"
 
-        self.safety.clear_estop()
-
         if command.kind == "vel":
-            self.state.follow_active = True
-            self.state.velocity_command = (command.vx, command.vy, command.omega)
-            return "BUSY"
+            return self._reject_unsupported_command()
 
         if command.kind == "move":
-            self.state.follow_active = True
+            return self._reject_unsupported_command()
 
-            # 位移命令与跟随命令共用同一套里程和朝向更新逻辑
-            world_dx, world_dy = rotate_body_delta_to_world(
-                command.dx,
-                command.dy,
-                self.state.heading_deg,
-            )
-            self.state.odom[0] += world_dx
-            self.state.odom[1] += world_dy
-            self.state.heading_deg += command.dtheta
-            self.state.velocity_command = (
-                command.dx,
-                command.dy,
-                self.heading_controller.compute(command.dtheta),
-            )
-            return "BUSY"
-
-        self.state.last_error = "unsupported_command"
-        return "ERR"
+        return self._reject_unsupported_command()
 
     def tick(self, now_ms):
         """推进辅车执行循环
@@ -166,8 +179,11 @@ class MotionRuntime:
         """
 
         if self.safety.should_stop(now_ms):
-            reason = "estop" if self.safety.estop_active else "timeout_stop"
-            self._stop(reason)
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop()
+            else:
+                reason = "estop" if self.safety.estop_active else "timeout_stop"
+                self._stop(reason)
             return "DONE"
         if self.state.follow_active:
             return "BUSY"

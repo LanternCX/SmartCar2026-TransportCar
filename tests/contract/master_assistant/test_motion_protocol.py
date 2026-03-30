@@ -8,7 +8,7 @@ def test_master_assistant_motion_protocol_contract() -> None:
     from master.protocol import build_follow_command
     from assistant.protocol import parse_command
 
-    command = build_follow_command(seq=7, valid=1, dx=0.10, dy=0.0, d_angle=15.0)
+    command = build_follow_command(seq=7, valid=1, dx=0.10, dy=0.0)
     parsed = parse_command(command)
 
     assert parsed.kind == "follow"
@@ -16,22 +16,19 @@ def test_master_assistant_motion_protocol_contract() -> None:
     assert parsed.valid == 1
     assert parsed.dx == 0.10
     assert parsed.dy == 0.0
-    assert parsed.dtheta == 15.0
+    assert command == "follow=1,seq=7,valid=1,dx=0.100,dy=0.000"
 
 
 def test_master_assistant_invalid_target_contract() -> None:
     from master.protocol import build_follow_command
     from assistant.protocol import parse_command
 
-    parsed = parse_command(
-        build_follow_command(seq=8, valid=0, dx=0.0, dy=0.0, d_angle=0.0)
-    )
+    parsed = parse_command(build_follow_command(seq=8, valid=0, dx=0.0, dy=0.0))
 
     assert parsed.kind == "follow"
     assert parsed.valid == 0
     assert parsed.dx == 0.0
     assert parsed.dy == 0.0
-    assert parsed.dtheta == 0.0
 
 
 def test_assistant_state_reply_keeps_minimal_fields() -> None:
@@ -40,17 +37,8 @@ def test_assistant_state_reply_keeps_minimal_fields() -> None:
     state = AssistantState()
     state.follow_active = True
     state.last_seq = 7
-    state.odom[0] = 0.1
-    state.odom[1] = -0.2
-    state.heading_deg = 15.0
     state.timeout = False
 
     line = render_state(state)
 
-    assert line.startswith("state=1,")
-    assert "follow_active=1" in line
-    assert "last_seq=7" in line
-    assert "odom_x=0.100" in line
-    assert "odom_y=-0.200" in line
-    assert "heading=15.000" in line
-    assert "timeout=0" in line
+    assert line == "state=1,state_label=BUSY,last_seq=7,follow_active=1"

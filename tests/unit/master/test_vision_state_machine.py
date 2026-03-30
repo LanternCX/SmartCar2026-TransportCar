@@ -1,41 +1,49 @@
-def test_master_vision_state_machine_outputs_motion_target() -> None:
-    from master.vision_state_machine import VisionStateMachine
+def test_state_machine_marks_missing_when_target_is_invalid() -> None:
+    from master.vision_state_machine import MarkerStateMachine
 
-    machine = VisionStateMachine()
+    machine = MarkerStateMachine(deadzone_px=8.0)
 
-    target = machine.step(observation={"target": "box"})
+    result = machine.step(valid=0, err_x=3.0, err_y=-4.0)
 
-    assert target is not None
-    assert target["phase"] == "tracking"
-
-
-def test_master_vision_state_machine_holds_when_target_missing() -> None:
-    from master.vision_state_machine import VisionStateMachine
-
-    machine = VisionStateMachine()
-
-    target = machine.step(observation={})
-
-    assert target["phase"] == "search"
-    assert target["self"]["kind"] == "hold"
+    assert result["phase"] == "MARKER_MISSING"
+    assert result["hold"] is True
 
 
-def test_master_vision_state_machine_selects_box_and_outputs_assistant_target() -> None:
-    from master.vision_state_machine import VisionStateMachine
+def test_state_machine_enters_center_hold_when_error_is_inside_deadzone() -> None:
+    from master.vision_state_machine import MarkerStateMachine
 
-    machine = VisionStateMachine()
+    machine = MarkerStateMachine(deadzone_px=8.0)
 
-    target = machine.step(
-        observation={
-            "target": "cone",
-            "candidates": ["cone", "box"],
-            "offset_x": 0.1,
-            "forward": 0.2,
-            "assistant_dx": 0.05,
-            "assistant_dy": 0.0,
-            "assistant_dtheta": 10.0,
-        }
+    result = machine.step(valid=1, err_x=3.0, err_y=-4.0)
+
+    assert result["phase"] == "CENTER_HOLD"
+    assert result["hold"] is True
+
+
+def test_state_machine_tracks_when_error_is_outside_deadzone() -> None:
+    from master.vision_state_machine import MarkerStateMachine
+
+    machine = MarkerStateMachine(deadzone_px=8.0)
+
+    result = machine.step(valid=1, err_x=12.0, err_y=-4.0)
+
+    assert result["phase"] == "TRACKING"
+    assert result["hold"] is False
+
+
+def test_state_machine_ignores_whether_input_is_new_when_target_is_still_available() -> (
+    None
+):
+    from master.vision_state_machine import MarkerStateMachine
+
+    machine = MarkerStateMachine(deadzone_px=8.0)
+
+    result = machine.step(
+        has_target=True,
+        err_x=12.0,
+        err_y=-4.0,
+        has_new_input=False,
     )
 
-    assert target["selected_target"] == "box"
-    assert target["assistant"]["kind"] == "move"
+    assert result["phase"] == "TRACKING"
+    assert result["hold"] is False

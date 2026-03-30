@@ -6,13 +6,15 @@ def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
 
     assert (
         runtime.apply_command(
-            parse_command("follow=1,seq=7,valid=1,dx=0.10,dy=-0.05,d_angle=15"),
+            parse_command("follow=1,seq=7,valid=1,dx=0.10,dy=-0.05"),
             now_ms=1,
         )
         == "BUSY"
     )
     assert runtime.state.follow_active is True
     assert runtime.state.last_seq == 7
+    assert runtime.state.state_label == "BUSY"
+    assert runtime.state.velocity_command == (0.1, -0.05, 0.0)
     assert runtime.state.timeout is False
 
 
@@ -23,12 +25,12 @@ def test_motion_runtime_discards_duplicate_or_older_follow_packet() -> None:
     runtime = MotionRuntime(timeout_ms=100)
 
     runtime.apply_command(
-        parse_command("follow=1,seq=7,valid=1,dx=0.10,dy=0.00,d_angle=0"),
+        parse_command("follow=1,seq=7,valid=1,dx=0.10,dy=0.00"),
         now_ms=1,
     )
 
     result = runtime.apply_command(
-        parse_command("follow=1,seq=7,valid=1,dx=0.20,dy=0.10,d_angle=0"),
+        parse_command("follow=1,seq=7,valid=1,dx=0.20,dy=0.10"),
         now_ms=2,
     )
 
@@ -43,12 +45,14 @@ def test_motion_runtime_marks_follow_inactive_when_target_missing() -> None:
     runtime = MotionRuntime(timeout_ms=100)
 
     result = runtime.apply_command(
-        parse_command("follow=1,seq=8,valid=0,dx=0.00,dy=0.00,d_angle=0"),
+        parse_command("follow=1,seq=8,valid=0,dx=0.00,dy=0.00"),
         now_ms=2,
     )
 
     assert result == "HOLD"
     assert runtime.state.follow_active is False
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.velocity_command == (0.0, 0.0, 0.0)
     assert runtime.tick(now_ms=3) == "ACK"
 
 
@@ -58,10 +62,251 @@ def test_motion_runtime_stops_when_timeout_expires() -> None:
 
     runtime = MotionRuntime(timeout_ms=100)
     runtime.apply_command(
-        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0,d_angle=5"), now_ms=10
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
     )
 
     assert runtime.tick(now_ms=150) == "DONE"
     assert runtime.state.follow_active is False
+    assert runtime.state.state_label == "TIMEOUT"
     assert runtime.state.timeout is True
     assert runtime.state.last_error == "timeout_stop"
+
+
+def test_motion_runtime_rejects_legacy_velocity_entry_in_current_stage() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+
+    result = runtime.apply_command(parse_command("VEL 0.1 0.2 0.3"), now_ms=1)
+
+    assert result == "ERR"
+    assert runtime.state.follow_active is False
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.velocity_command == (0.0, 0.0, 0.0)
+    assert runtime.state.last_error == "unsupported_command"
+
+
+def test_motion_runtime_rejects_legacy_move_entry_in_current_stage() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+
+    result = runtime.apply_command(parse_command("MOVE 0.1 0.2 15"), now_ms=1)
+
+    assert result == "ERR"
+    assert runtime.state.follow_active is False
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.velocity_command == (0.0, 0.0, 0.0)
+    assert runtime.state.last_error == "unsupported_command"
+
+
+def test_motion_runtime_hold_does_not_clear_timeout_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    result = runtime.apply_command(parse_command("HOLD"), now_ms=151)
+
+    assert result == "DONE"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+    assert runtime.state.last_error == "timeout_stop"
+
+
+def test_motion_runtime_newer_follow_can_exit_timeout_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    result = runtime.apply_command(
+        parse_command("follow=1,seq=9,valid=1,dx=0.1,dy=-0.1"), now_ms=151
+    )
+
+    assert result == "BUSY"
+    assert runtime.state.state_label == "BUSY"
+    assert runtime.state.timeout is False
+    assert runtime.state.last_error == ""
+    assert runtime.state.last_seq == 9
+
+
+def test_motion_runtime_reset_odom_clears_timeout_but_keeps_last_seq() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    result = runtime.apply_command(parse_command("RESET_ODOM"), now_ms=151)
+
+    assert result == "ACK"
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.timeout is False
+    assert runtime.state.last_error == ""
+    assert runtime.state.last_seq == 8
+
+
+def test_motion_runtime_stop_does_not_clear_timeout_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    result = runtime.apply_command(parse_command("STOP"), now_ms=151)
+
+    assert result == "DONE"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+    assert runtime.state.last_error == "timeout_stop"
+
+
+def test_motion_runtime_disarm_does_not_clear_timeout_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    result = runtime.apply_command(parse_command("DISARM"), now_ms=151)
+
+    assert result == "ACK"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+    assert runtime.state.last_error == "timeout_stop"
+
+
+def test_motion_runtime_ping_and_state_query_keep_current_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    ping_result = runtime.apply_command(parse_command("PING"), now_ms=151)
+    state_line = runtime.apply_command(parse_command("STATE?"), now_ms=152)
+
+    assert ping_result == "ACK"
+    assert state_line == "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+
+
+def test_motion_runtime_tick_after_stop_keeps_timeout_state() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+    assert runtime.apply_command(parse_command("STOP"), now_ms=151) == "DONE"
+
+    tick_result = runtime.tick(now_ms=152)
+
+    assert tick_result == "DONE"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+    assert runtime.state.last_error == "timeout_stop"
+
+
+def test_motion_runtime_ignored_legacy_vel_does_not_delay_timeout() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+
+    assert runtime.apply_command(parse_command("VEL 0.1 0.2 0.3"), now_ms=80) == "ERR"
+    assert runtime.tick(now_ms=110) == "DONE"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+
+
+def test_motion_runtime_ignored_legacy_move_does_not_delay_timeout() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+
+    assert runtime.apply_command(parse_command("MOVE 0.1 0.2 15"), now_ms=80) == "ERR"
+    assert runtime.tick(now_ms=110) == "DONE"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+
+
+def test_motion_runtime_reset_odom_clears_velocity_command_but_keeps_last_seq() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=-0.1"), now_ms=10
+    )
+
+    result = runtime.apply_command(parse_command("RESET_ODOM"), now_ms=11)
+
+    assert result == "ACK"
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.velocity_command == (0.0, 0.0, 0.0)
+    assert runtime.state.last_seq == 8
+
+
+def test_motion_runtime_hold_does_not_retrigger_timeout_on_later_tick() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+    assert runtime.tick(now_ms=150) == "DONE"
+
+    assert runtime.apply_command(parse_command("HOLD"), now_ms=151) == "DONE"
+    assert runtime.tick(now_ms=260) == "ACK"
+    assert runtime.state.state_label == "TIMEOUT"
+    assert runtime.state.timeout is True
+
+
+def test_motion_runtime_reset_odom_does_not_start_new_timeout_window() -> None:
+    from assistant.motion_runtime import MotionRuntime
+    from assistant.protocol import parse_command
+
+    runtime = MotionRuntime(timeout_ms=100)
+    runtime.apply_command(
+        parse_command("follow=1,seq=8,valid=1,dx=0.2,dy=0.0"), now_ms=10
+    )
+
+    assert runtime.apply_command(parse_command("RESET_ODOM"), now_ms=20) == "ACK"
+    assert runtime.tick(now_ms=130) == "ACK"
+    assert runtime.state.state_label == "IDLE"
+    assert runtime.state.timeout is False

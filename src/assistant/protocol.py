@@ -91,7 +91,6 @@ def parse_command(line):
                 valid=int(payload["valid"]),
                 dx=float(payload.get("dx", 0.0)),
                 dy=float(payload.get("dy", 0.0)),
-                dtheta=float(payload.get("d_angle", 0.0)),
             )
 
     fields = _split_fields(line)
