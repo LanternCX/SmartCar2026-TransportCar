@@ -12,7 +12,9 @@ try:
     from master.vision.decision import decide_from_observation
     from master.vision.ingress import VisionIngress
     from master.vision.state_machine import MarkerStateMachine
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name != "master":
+        raise
     from hw.encoders import build_encoder_bundle
     from hw.imu import build_imu_bundle
     from hw.motors import build_motor_bundle
@@ -46,17 +48,20 @@ class MasterRuntimeLoop:
 
     def __init__(self, uart_bundle, app=None):
         self.uart_bundle = uart_bundle
-        self.app = app or MasterApp()
+        self.app = app or MasterApp(uart_bundle=uart_bundle)
 
     def step(self, now_ms):
+        last_result = None
         for uart_name in ("uart6", "uart8"):
             line = self.uart_bundle[uart_name].read_line()
             if line:
-                result = self.app.step(
+                last_result = self.app.step(
                     {"uart": uart_name, "line": line, "now_ms": now_ms}
                 )
-                self.uart_bundle["uart3"].write_line(result["assistant_command"])
-                return result
+
+        if last_result is not None:
+            self.uart_bundle["uart3"].write_line(last_result["assistant_command"])
+            return last_result
 
         result = self.app.step({"now_ms": now_ms})
         self.uart_bundle["uart3"].write_line(result["assistant_command"])
@@ -69,14 +74,33 @@ class MasterApp:
     @brief 对外提供主车流程的单步推进入口。
     """
 
-    def __init__(self, active_uart="uart6", reserved_uarts=("uart8",)):
-        self.hw_bundle = build_hw_bundle()
+    def __init__(
+        self,
+        active_uart="uart6",
+        reserved_uarts=("uart8",),
+        hw_bundle=None,
+        uart_bundle=None,
+    ):
+        if hw_bundle is not None and uart_bundle is not None:
+            if hw_bundle.get("uart") is not uart_bundle:
+                raise ValueError("hw_bundle 与 uart_bundle 必须引用同一套串口装配")
+        elif hw_bundle is None:
+            if uart_bundle is None:
+                hw_bundle = build_hw_bundle()
+            else:
+                hw_bundle = {"uart": uart_bundle}
+
+        self.hw_bundle = hw_bundle
         self.ingress = VisionIngress(
             active_uart=active_uart,
             reserved_uarts=reserved_uarts,
         )
         self.state_machine = MarkerStateMachine()
-        self.motion_runtime = MotionRuntime()
+        self.motion_runtime = None
+        self._control_seq = 0
+        self._last_self_target = {"kind": "hold"}
+        self._last_state_output = {"phase": "MARKER_MISSING", "hold": True}
+        self._last_has_target = False
         self.last_assistant_command = ""
         self.last_result = {
             "selected_target": "idle",
@@ -86,6 +110,33 @@ class MasterApp:
             "self_target": {"kind": "hold"},
             "assistant_command": "",
         }
+
+    def _next_control_seq(self):
+        if self.motion_runtime is not None:
+            return self.motion_runtime.next_control_seq()
+        self._control_seq += 1
+        return self._control_seq
+
+    def _ensure_motion_runtime(self):
+        if self.motion_runtime is None:
+            runtime = MotionRuntime()
+            runtime._control_seq = self._control_seq
+            runtime.last_target = dict(self._last_self_target)
+            self.motion_runtime = runtime
+        return self.motion_runtime
+
+    def _apply_self_target(self, target):
+        prepared_target = dict(target)
+        if (
+            prepared_target.get("kind", "hold") == "hold"
+            and self.motion_runtime is None
+        ):
+            self._last_self_target = prepared_target
+            return dict(self._last_self_target)
+        self._last_self_target = self._ensure_motion_runtime().apply_self_target(
+            prepared_target
+        )
+        return dict(self._last_self_target)
 
     def step(self, observation=None):
         """推进一次主车流程.
@@ -107,22 +158,27 @@ class MasterApp:
         self.ingress.begin_frame(now_ms=now_ms)
         self.ingress.prepare_observation(prepared_observation, now_ms=now_ms)
         selected_observation = self.ingress.select_current_target(now_ms=now_ms)
-        state_output = self.state_machine.step(
-            has_target=(
-                int(selected_observation.get("valid", 0)) == 1
-                and int(selected_observation.get("fresh", 0)) == 1
-            ),
-            err_x=float(selected_observation.get("err_x", 0.0)),
-            err_y=float(selected_observation.get("err_y", 0.0)),
-            has_new_input=bool(selected_observation.get("has_new_input", 0)),
+        has_target = (
+            int(selected_observation.get("valid", 0)) == 1
+            and int(selected_observation.get("fresh", 0)) == 1
         )
+        has_new_input = bool(selected_observation.get("has_new_input", 0))
+        if has_new_input or has_target != self._last_has_target:
+            self._last_state_output = self.state_machine.step(
+                has_target=has_target,
+                err_x=float(selected_observation.get("err_x", 0.0)),
+                err_y=float(selected_observation.get("err_y", 0.0)),
+                has_new_input=has_new_input,
+            )
+            self._last_has_target = has_target
+        state_output = dict(self._last_state_output)
 
         selected = dict(selected_observation)
         selected.update(state_output)
-        selected["control_seq"] = self.motion_runtime.next_control_seq()
+        selected["control_seq"] = self._next_control_seq()
 
         decision = decide_from_observation(selected)
-        self_target = self.motion_runtime.apply_self_target(decision.self_target)
+        self_target = self._apply_self_target(decision.self_target)
         self.last_assistant_command = decision.assistant_command
         active_uart = str(selected_observation.get("source_uart", "")).strip()
         if not active_uart:

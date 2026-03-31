@@ -1,53 +1,247 @@
-def test_assistant_app_module_imports() -> None:
-    from assistant.app import AssistantApp
-    from assistant.app import AssistantRuntimeLoop
-
-    assert AssistantApp is not None
-    assert AssistantRuntimeLoop is not None
-
-
-def test_assistant_main_returns_runtime_loop() -> None:
+def test_assistant_main_starts_runtime_when_no_button_is_held(monkeypatch) -> None:
     from assistant.main import main
-    from assistant.app import AssistantRuntimeLoop
 
-    runtime = main()
+    started = {"count": 0}
 
-    assert isinstance(runtime, AssistantRuntimeLoop)
+    def _start_runtime() -> None:
+        started["count"] += 1
+
+    monkeypatch.setattr("assistant.main._read_button_state", lambda pin: False)
+    monkeypatch.setattr("assistant.main._start_runtime", _start_runtime)
+    main()
+
+    assert started["count"] == 1
 
 
-def test_assistant_main_can_load_when_assistant_is_device_root() -> None:
+def _install_device_root_stub_modules(monkeypatch, sys, app_module) -> None:
+    import types
+
+    monkeypatch.setitem(sys.modules, "app", app_module)
+
+    script_pkg = types.ModuleType("script")
+    monkeypatch.setitem(sys.modules, "script", script_pkg)
+    pid_identify = types.ModuleType("script.pid_identify")
+    setattr(pid_identify, "main", lambda: None)
+    monkeypatch.setitem(sys.modules, "script.pid_identify", pid_identify)
+    calibrate_gyro = types.ModuleType("script.calibrate_gyro")
+    setattr(calibrate_gyro, "main", lambda: None)
+    monkeypatch.setitem(sys.modules, "script.calibrate_gyro", calibrate_gyro)
+
+
+def test_assistant_main_executes_runtime_loop_when_executed_as_device_root(
+    monkeypatch,
+) -> None:
+    import importlib.util
     from pathlib import Path
-    import subprocess
+    import sys
+    import types
+    import pytest
 
     runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    result = subprocess.run(
+    src_root = runtime_root.parent
+
+    app = types.ModuleType("app")
+
+    class DummyLoop:
+        def __init__(self, loop_bundle):
+            self.loop_bundle = loop_bundle
+
+        def step(self, now_ms):
+            step_calls.append((self.loop_bundle, now_ms))
+            raise SystemExit(0)
+
+    step_calls = []
+    hw_bundle = {
+        "uart": {"uart3": object()},
+        "motors": {},
+        "encoders": {"rear_left": object()},
+        "imu": object(),
+    }
+    setattr(app, "AssistantRuntimeLoop", DummyLoop)
+    setattr(app, "build_hw_bundle", lambda: hw_bundle)
+    _install_device_root_stub_modules(monkeypatch, sys, app)
+
+    for module_name in list(sys.modules):
+        if module_name == "assistant" or module_name.startswith("assistant."):
+            sys.modules.pop(module_name, None)
+
+    monkeypatch.syspath_prepend(str(runtime_root))
+    monkeypatch.setattr(
+        sys,
+        "path",
         [
-            "python3",
-            "main.py",
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != src_root.resolve()
         ],
-        cwd=str(runtime_root),
-        env={"PYTHONPATH": ""},
-        capture_output=True,
-        text=True,
+    )
+    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(SystemExit) as exc_info:
+        spec.loader.exec_module(module)
+
+    assert exc_info.value.code == 0
+    assert len(step_calls) == 1
+    assert step_calls[0][0] is hw_bundle
+    assert set(step_calls[0][0]) == {"uart", "motors", "encoders", "imu"}
+    assert isinstance(step_calls[0][1], int)
+
+
+def test_assistant_main_does_not_swallow_real_package_import_error(monkeypatch) -> None:
+    import builtins
+    import importlib.util
+    from pathlib import Path
+    import sys
+    import types
+    import pytest
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
+    src_root = runtime_root.parent
+
+    fallback_app = types.ModuleType("app")
+    setattr(fallback_app, "AssistantRuntimeLoop", object)
+    setattr(
+        fallback_app,
+        "build_hw_bundle",
+        lambda: {"uart": {"uart3": object()}, "motors": {}},
+    )
+    _install_device_root_stub_modules(monkeypatch, sys, fallback_app)
+
+    for module_name in list(sys.modules):
+        if module_name == "assistant" or module_name.startswith("assistant."):
+            sys.modules.pop(module_name, None)
+
+    monkeypatch.syspath_prepend(str(runtime_root))
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != src_root.resolve()
+        ],
     )
 
-    assert result.returncode == 0, result.stderr
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "assistant.app":
+            raise ModuleNotFoundError("缺少依赖", name="missing_dependency")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(ModuleNotFoundError, match="缺少依赖") as exc_info:
+        spec.loader.exec_module(module)
+
+    assert exc_info.value.name == "missing_dependency"
 
 
-def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held() -> None:
+def test_assistant_app_does_not_swallow_real_package_import_error(monkeypatch) -> None:
+    import builtins
+    import importlib
+    from pathlib import Path
+    import sys
+    import pytest
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
+    src_root = runtime_root.parent
+
+    monkeypatch.syspath_prepend(str(runtime_root))
+    monkeypatch.syspath_prepend(str(src_root))
+
+    for module_name in list(sys.modules):
+        if module_name == "assistant.app" or module_name.startswith("assistant.app."):
+            sys.modules.pop(module_name, None)
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "assistant.protocol":
+            raise ModuleNotFoundError("缺少协议依赖", name="missing_dependency")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+
+    with pytest.raises(ModuleNotFoundError, match="缺少协议依赖") as exc_info:
+        importlib.import_module("assistant.app")
+
+    assert exc_info.value.name == "missing_dependency"
+
+
+def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> None:
     from assistant.main import main
 
-    result = main(button_reader=lambda pin: pin == "C9")
+    called = {"calibrate": 0}
 
-    assert result == "calibrate_gyro"
+    def _run_calibrate_gyro() -> None:
+        called["calibrate"] += 1
+
+    monkeypatch.setattr("assistant.main._read_button_state", lambda pin: pin == "C9")
+    monkeypatch.setattr("assistant.main.run_calibrate_gyro", _run_calibrate_gyro)
+    main()
+
+    assert called["calibrate"] == 1
 
 
-def test_assistant_main_dispatches_runtime_when_no_button_is_held() -> None:
+def test_assistant_main_dispatches_pid_identify_when_c8_is_held(monkeypatch) -> None:
     from assistant.main import main
 
-    runtime = main(button_reader=lambda pin: False)
+    called = {"pid": 0}
 
-    assert hasattr(runtime, "step")
+    def _run_pid_identify() -> None:
+        called["pid"] += 1
+
+    monkeypatch.setattr("assistant.main._read_button_state", lambda pin: pin == "C8")
+    monkeypatch.setattr("assistant.main.run_pid_identify", _run_pid_identify)
+    main()
+
+    assert called["pid"] == 1
+
+
+def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
+    monkeypatch,
+) -> None:
+    from assistant.main import _start_runtime
+
+    captured = {"drive_loop": None}
+    uart3 = object()
+    motors = {"m": object()}
+    hw_bundle = {
+        "uart": {"uart3": uart3},
+        "motors": motors,
+        "encoders": {"rear_left": object()},
+        "imu": object(),
+    }
+
+    class DummyLoop:
+        pass
+
+    def _loop_factory(loop_bundle):
+        captured["loop_bundle"] = loop_bundle
+        return DummyLoop()
+
+    def _drive_loop(loop) -> None:
+        captured["drive_loop"] = loop
+
+    monkeypatch.setattr("assistant.main.AssistantRuntimeLoop", _loop_factory)
+    monkeypatch.setattr("assistant.main.build_hw_bundle", lambda: hw_bundle)
+    monkeypatch.setattr("assistant.main._drive_loop", _drive_loop)
+    _start_runtime()
+
+    loop_bundle = captured["loop_bundle"]
+
+    assert loop_bundle is not None
+    assert loop_bundle is hw_bundle
+    assert set(loop_bundle.keys()) == {"uart", "motors", "encoders", "imu"}
+    assert isinstance(captured["drive_loop"], DummyLoop)
 
 
 def test_assistant_app_handles_ping_and_state_query() -> None:

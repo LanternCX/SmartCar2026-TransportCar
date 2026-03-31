@@ -11,7 +11,9 @@ try:
     from assistant.hw.imu import build_imu_bundle
     from assistant.hw.motors import build_motor_bundle
     from assistant.hw.uart import build_uart_bundle
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name != "assistant":
+        raise
     import runtime_params
     from ctrl.chassis import ChassisRuntime
     from protocol import parse_command
@@ -43,21 +45,48 @@ class AssistantRuntimeLoop:
     """
 
     def __init__(self, hw_bundle, app=None):
-        self.hw_bundle = hw_bundle
-        self.app = app or AssistantApp()
-        if hasattr(self.app.runtime, "core"):
-            self.app.runtime.core.hw_bundle = hw_bundle
+        if app is None:
+            app = AssistantApp(hw_bundle=hw_bundle)
+        app_hw_bundle = self._resolve_app_hw_bundle(app)
+        if app_hw_bundle is not hw_bundle:
+            raise ValueError("hw_bundle 与 app 必须引用同一套装配")
+        self.hw_bundle = app_hw_bundle
+        self.app = app
+
+    @staticmethod
+    def _resolve_app_hw_bundle(app):
+        runtime = getattr(app, "runtime", None)
+        runtime_hw_bundle = getattr(runtime, "hw_bundle", None)
+        core = getattr(runtime, "core", None)
+        core_hw_bundle = getattr(core, "hw_bundle", None)
+        app_hw_bundle = getattr(app, "hw_bundle", None)
+        bundles = []
+        for candidate in (core_hw_bundle, runtime_hw_bundle, app_hw_bundle):
+            if candidate is None:
+                continue
+            if all(existing is not candidate for existing in bundles):
+                bundles.append(candidate)
+        if len(bundles) > 1:
+            raise ValueError("app 必须暴露唯一 hw_bundle owner")
+        if core_hw_bundle is not None:
+            return core_hw_bundle
+        if runtime_hw_bundle is not None:
+            return runtime_hw_bundle
+        if app_hw_bundle is not None:
+            return app_hw_bundle
+        raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def step(self, now_ms):
-        line = self.hw_bundle["uart3"].read_line()
+        uart3 = self.hw_bundle["uart"]["uart3"]
+        line = uart3.read_line()
         if line:
             reply = self.app.handle_line(line, now_ms=now_ms)
             if reply:
-                self.hw_bundle["uart3"].write_line(reply)
+                uart3.write_line(reply)
 
         tick_reply = self.app.tick(now_ms=now_ms)
         if tick_reply:
-            self.hw_bundle["uart3"].write_line(tick_reply)
+            uart3.write_line(tick_reply)
         return tick_reply
 
 
@@ -67,10 +96,12 @@ class AssistantApp:
     @brief 对外提供辅车命令处理和周期推进入口
     """
 
-    def __init__(self, timeout_ms=None):
+    def __init__(self, timeout_ms=None, hw_bundle=None):
         if timeout_ms is None:
             timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
-        self.hw_bundle = build_hw_bundle()
+        if hw_bundle is None:
+            hw_bundle = build_hw_bundle()
+        self.hw_bundle = hw_bundle
         # 应用层只保留一个运行时对象, 统一收口命令执行和状态维护
         self.runtime = ChassisRuntime(timeout_ms=timeout_ms, hw_bundle=self.hw_bundle)
         self._timeout_reported = False

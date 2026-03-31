@@ -7,15 +7,15 @@ try:
     from master.app import MasterRuntimeLoop, build_hw_bundle
     from master.script.calibrate_gyro import main as run_calibrate_gyro
     from master.script.pid_identify import main as run_pid_identify
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name != "master":
+        raise
     from app import MasterRuntimeLoop, build_hw_bundle
     from script.calibrate_gyro import main as run_calibrate_gyro
     from script.pid_identify import main as run_pid_identify
 
 
-def _read_button_state(pin_name, button_reader):
-    if button_reader is not None:
-        return bool(button_reader(pin_name))
+def _read_button_state(pin_name):
     try:
         from machine import Pin
 
@@ -24,18 +24,57 @@ def _read_button_state(pin_name, button_reader):
         return False
 
 
-def main(button_reader=None):
-    """创建主车运行循环入口对象
+def _read_now_ms():
+    """读取当前毫秒时钟
 
-    @brief 为启动脚本提供主车主线运行循环
-    @return MasterRuntimeLoop
+    @brief 板端优先使用毫秒时钟, 主机侧回退到系统时间。
     """
 
-    if _read_button_state("C8", button_reader):
-        run_pid_identify()
-        return "pid_identify"
-    if _read_button_state("C9", button_reader):
-        run_calibrate_gyro()
-        return "calibrate_gyro"
+    try:
+        import time
 
+        ticks_ms = getattr(time, "ticks_ms", None)
+        if ticks_ms is not None:
+            return int(ticks_ms())
+        return int(time.time() * 1000)
+    except ImportError:
+        return 0
+
+
+def _drive_loop(loop):
+    """驱动运行循环
+
+    @brief 正常运行分支持续推进主循环。
+    """
+
+    while True:
+        loop.step(_read_now_ms())
+
+
+def _build_runtime_loop():
     return MasterRuntimeLoop(build_hw_bundle()["uart"])
+
+
+def _start_runtime():
+    runtime_loop = _build_runtime_loop()
+    _drive_loop(runtime_loop)
+
+
+def main():
+    """创建并驱动主车运行循环
+
+    @brief 正常启动后直接进入主循环。
+    """
+
+    if _read_button_state("C8"):
+        run_pid_identify()
+        return
+    if _read_button_state("C9"):
+        run_calibrate_gyro()
+        return
+
+    _start_runtime()
+
+
+if __name__ == "__main__":
+    main()
