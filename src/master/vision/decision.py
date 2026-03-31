@@ -3,8 +3,12 @@
 @file src/master/vision/decision.py
 """
 
-from config.params import FOLLOW_CONTROL_KP_X, FOLLOW_CONTROL_KP_Y
-from master.protocol import build_follow_command
+try:
+    from master.protocol import build_follow_command
+    import master.runtime_params as runtime_params
+except ImportError:
+    from protocol import build_follow_command
+    import runtime_params
 
 
 class Decision:
@@ -91,8 +95,8 @@ def decide_from_observation(observation, state_machine=None):
             target_fresh=1,
         )
 
-    dx = float(observation.get("err_x", 0.0)) * FOLLOW_CONTROL_KP_X
-    dy = float(observation.get("err_y", 0.0)) * FOLLOW_CONTROL_KP_Y
+    dx = float(observation.get("err_x", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_X
+    dy = float(observation.get("err_y", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_Y
     assistant_target = {"valid": 1, "dx": dx, "dy": dy}
     assistant_state = {
         "phase": "TRACKING",

@@ -3,14 +3,17 @@
 @file src/master/main.py
 """
 
-from master.app import MasterApp
+try:
+    from master.app import MasterRuntimeLoop, build_hw_bundle
+except ImportError:
+    from app import MasterRuntimeLoop, build_hw_bundle
 
 
 def main():
-    """创建主车应用入口对象
+    """创建主车运行循环入口对象
 
-    @brief 为启动脚本提供主车应用实例
-    @return MasterApp
+    @brief 为启动脚本提供主车主线运行循环
+    @return MasterRuntimeLoop
     """
 
-    return MasterApp()
+    return MasterRuntimeLoop(build_hw_bundle()["uart"])

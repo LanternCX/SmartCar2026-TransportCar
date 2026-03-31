@@ -1,7 +1,56 @@
 def test_assistant_app_module_imports() -> None:
     from assistant.app import AssistantApp
+    from assistant.app import AssistantRuntimeLoop
 
     assert AssistantApp is not None
+    assert AssistantRuntimeLoop is not None
+
+
+def test_assistant_main_returns_runtime_loop() -> None:
+    from assistant.main import main
+    from assistant.app import AssistantRuntimeLoop
+
+    runtime = main()
+
+    assert isinstance(runtime, AssistantRuntimeLoop)
+
+
+def test_assistant_main_can_load_when_assistant_is_device_root() -> None:
+    from pathlib import Path
+    import subprocess
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
+    result = subprocess.run(
+        [
+            "python3",
+            "main.py",
+        ],
+        cwd=str(runtime_root),
+        env={"PYTHONPATH": ""},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_assistant_boot_can_load_when_assistant_is_device_root() -> None:
+    from pathlib import Path
+    import subprocess
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
+    result = subprocess.run(
+        [
+            "python3",
+            "boot.py",
+        ],
+        cwd=str(runtime_root),
+        env={"PYTHONPATH": ""},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_assistant_app_handles_ping_and_state_query() -> None:

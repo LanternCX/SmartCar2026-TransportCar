@@ -3,9 +3,16 @@
 @file src/master/vision/state_machine.py
 """
 
+try:
+    import master.runtime_params as runtime_params
+except ImportError:
+    import runtime_params
+
 
 class MarkerStateMachine:
-    def __init__(self, deadzone_px=8.0):
+    def __init__(self, deadzone_px=None):
+        if deadzone_px is None:
+            deadzone_px = runtime_params.FOLLOW_CENTER_DEADZONE_PX
         self.deadzone_px = float(deadzone_px)
 
     def step(

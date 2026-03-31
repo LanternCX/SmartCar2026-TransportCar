@@ -3,7 +3,10 @@
 @file src/assistant/hw/uart.py
 """
 
-from assistant.config import UART_BAUDRATE, UART_IDS
+try:
+    from assistant.config import UART_BAUDRATE, UART_IDS
+except ImportError:
+    from config import UART_BAUDRATE, UART_IDS
 
 
 class UartPort:
@@ -38,6 +41,17 @@ class UartPort:
     def write(self, payload):
         device = self.ensure_device()
         return device.write(payload)
+
+    def read_line(self):
+        payload = self.read()
+        if payload is None:
+            return None
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8")
+        return str(payload).strip()
+
+    def write_line(self, payload):
+        return self.write("%s\r\n" % str(payload))
 
 
 def build_uart_bundle():

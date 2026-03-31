@@ -25,15 +25,26 @@ class MotorPort:
 
     def ensure_device(self):
         if self._device is None:
-            from seekfree import MOTOR_CONTROLLER
+            try:
+                from seekfree import MOTOR_CONTROLLER
 
-            port = getattr(MOTOR_CONTROLLER, self.port_name)
-            self._device = MOTOR_CONTROLLER(
-                port,
-                self.frequency_hz,
-                duty=0,
-                invert=self.invert,
-            )
+                port = getattr(MOTOR_CONTROLLER, self.port_name)
+                self._device = MOTOR_CONTROLLER(
+                    port,
+                    self.frequency_hz,
+                    duty=0,
+                    invert=self.invert,
+                )
+            except ImportError:
+
+                class _FakeMotor:
+                    def __init__(self):
+                        self.last_duty = 0
+
+                    def duty(self, value):
+                        self.last_duty = int(value)
+
+                self._device = _FakeMotor()
         return self._device
 
     def set_duty(self, duty):

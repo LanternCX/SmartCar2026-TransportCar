@@ -1,0 +1,23 @@
+"""主车当前主线参数入口.
+
+@file src/master/runtime_params.py
+"""
+
+FOLLOW_TIMEOUT_MS = 150
+FOLLOW_CONTROL_KP_X = 1.0
+FOLLOW_CONTROL_KP_Y = 1.0
+FOLLOW_CENTER_DEADZONE_PX = 8.0
+CONTROL_TICK_MS = 5
+FOLLOW_OUTPUT_LIMIT = 10000
+PID_MAP = {
+    "m": (100, 500, 1),
+    "l": (100, 500, 1),
+    "r": (100, 500, 1),
+}
+SPEED_FILTER_WINDOW = 5
+SPEED_DIFF_MAX_DELTA = 5.0
+GYRO_LPF_ALPHA = 0.2
+YAW_KP = 0.16
+YAW_KI = 0.1
+YAW_I_MAX = 100.0
+AUTO_OMEGA_MAX = 15.0

@@ -3,14 +3,19 @@
 @file src/assistant/main.py
 """
 
-from assistant.app import AssistantApp
+try:
+    from assistant.app import AssistantRuntimeLoop, build_hw_bundle
+except ImportError:
+    from app import AssistantRuntimeLoop, build_hw_bundle
 
 
 def main():
-    """创建辅车应用入口对象
+    """创建辅车运行循环入口对象
 
-    @brief 为启动脚本提供辅车应用实例
-    @return AssistantApp
+    @brief 为启动脚本提供辅车主线运行循环
+    @return AssistantRuntimeLoop
     """
 
-    return AssistantApp()
+    hw_bundle = build_hw_bundle()
+    loop_bundle = {"uart3": hw_bundle["uart"]["uart3"], "motors": hw_bundle["motors"]}
+    return AssistantRuntimeLoop(loop_bundle)

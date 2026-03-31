@@ -3,7 +3,7 @@
 @file src/master/vision/parser.py
 """
 
-from config.params import FOLLOW_TARGET_LABEL
+FOLLOW_TARGET_LABEL = "follower"
 
 
 def split_pairs(line):

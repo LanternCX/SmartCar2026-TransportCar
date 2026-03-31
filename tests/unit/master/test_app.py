@@ -1,7 +1,56 @@
 def test_master_app_module_imports() -> None:
     from master.app import MasterApp
+    from master.app import MasterRuntimeLoop
 
     assert MasterApp is not None
+    assert MasterRuntimeLoop is not None
+
+
+def test_master_main_returns_runtime_loop() -> None:
+    from master.main import main
+    from master.app import MasterRuntimeLoop
+
+    runtime = main()
+
+    assert isinstance(runtime, MasterRuntimeLoop)
+
+
+def test_master_main_can_load_when_master_is_device_root() -> None:
+    from pathlib import Path
+    import subprocess
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    result = subprocess.run(
+        [
+            "python3",
+            "main.py",
+        ],
+        cwd=str(runtime_root),
+        env={"PYTHONPATH": ""},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_master_boot_can_load_when_master_is_device_root() -> None:
+    from pathlib import Path
+    import subprocess
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    result = subprocess.run(
+        [
+            "python3",
+            "boot.py",
+        ],
+        cwd=str(runtime_root),
+        env={"PYTHONPATH": ""},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_master_app_only_drives_assistant_in_current_stage() -> None:

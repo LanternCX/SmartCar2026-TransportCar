@@ -5,13 +5,16 @@
 
 import time
 
-from config.params import (
-    FOLLOW_ACTIVE_UART,
-    FOLLOW_RESERVED_UARTS,
-    FOLLOW_TARGET_LABEL,
-    FOLLOW_TIMEOUT_MS,
-)
-from master.vision.parser import parse_vision_line
+try:
+    import master.runtime_params as runtime_params
+    from master.vision.parser import parse_vision_line
+except ImportError:
+    import runtime_params
+    from vision.parser import parse_vision_line
+
+FOLLOW_ACTIVE_UART = "uart6"
+FOLLOW_RESERVED_UARTS = ("uart8",)
+FOLLOW_TARGET_LABEL = "follower"
 
 
 class VisionIngress:
@@ -19,7 +22,7 @@ class VisionIngress:
         self,
         active_uart=FOLLOW_ACTIVE_UART,
         reserved_uarts=None,
-        timeout_ms=FOLLOW_TIMEOUT_MS,
+        timeout_ms=None,
     ):
         self.active_uart = str(active_uart)
         if reserved_uarts is None:
@@ -28,6 +31,8 @@ class VisionIngress:
         self.known_uarts = (self.active_uart,) + tuple(
             uart for uart in self.reserved_uarts if str(uart) != self.active_uart
         )
+        if timeout_ms is None:
+            timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
         self.timeout_ms = int(timeout_ms)
         self.latest_vision_seq = 0
         self.current_target = self._build_idle_observation("missing")

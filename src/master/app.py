@@ -3,14 +3,24 @@
 @file src/master/app.py
 """
 
-from master.hw.encoders import build_encoder_bundle
-from master.hw.imu import build_imu_bundle
-from master.hw.motors import build_motor_bundle
-from master.hw.uart import build_uart_bundle
-from master.motion_runtime import MotionRuntime
-from master.vision.decision import decide_from_observation
-from master.vision.ingress import VisionIngress
-from master.vision.state_machine import MarkerStateMachine
+try:
+    from master.hw.encoders import build_encoder_bundle
+    from master.hw.imu import build_imu_bundle
+    from master.hw.motors import build_motor_bundle
+    from master.hw.uart import build_uart_bundle
+    from master.motion_runtime import MotionRuntime
+    from master.vision.decision import decide_from_observation
+    from master.vision.ingress import VisionIngress
+    from master.vision.state_machine import MarkerStateMachine
+except ImportError:
+    from hw.encoders import build_encoder_bundle
+    from hw.imu import build_imu_bundle
+    from hw.motors import build_motor_bundle
+    from hw.uart import build_uart_bundle
+    from motion_runtime import MotionRuntime
+    from vision.decision import decide_from_observation
+    from vision.ingress import VisionIngress
+    from vision.state_machine import MarkerStateMachine
 
 
 def build_hw_bundle():
@@ -26,6 +36,31 @@ def build_hw_bundle():
         "encoders": build_encoder_bundle(),
         "imu": build_imu_bundle(),
     }
+
+
+class MasterRuntimeLoop:
+    """主车当前主线运行循环.
+
+    @brief 串起双路视觉读入与 UART3 控制输出。
+    """
+
+    def __init__(self, uart_bundle, app=None):
+        self.uart_bundle = uart_bundle
+        self.app = app or MasterApp()
+
+    def step(self, now_ms):
+        for uart_name in ("uart6", "uart8"):
+            line = self.uart_bundle[uart_name].read_line()
+            if line:
+                result = self.app.step(
+                    {"uart": uart_name, "line": line, "now_ms": now_ms}
+                )
+                self.uart_bundle["uart3"].write_line(result["assistant_command"])
+                return result
+
+        result = self.app.step({"now_ms": now_ms})
+        self.uart_bundle["uart3"].write_line(result["assistant_command"])
+        return result
 
 
 class MasterApp:
