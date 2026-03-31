@@ -34,23 +34,20 @@ def test_master_main_can_load_when_master_is_device_root() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_master_boot_can_load_when_master_is_device_root() -> None:
-    from pathlib import Path
-    import subprocess
+def test_master_main_dispatches_pid_identify_when_c8_is_held() -> None:
+    from master.main import main
 
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
-    result = subprocess.run(
-        [
-            "python3",
-            "boot.py",
-        ],
-        cwd=str(runtime_root),
-        env={"PYTHONPATH": ""},
-        capture_output=True,
-        text=True,
-    )
+    result = main(button_reader=lambda pin: pin == "C8")
 
-    assert result.returncode == 0, result.stderr
+    assert result == "pid_identify"
+
+
+def test_master_main_dispatches_runtime_when_no_button_is_held() -> None:
+    from master.main import main
+
+    runtime = main(button_reader=lambda pin: False)
+
+    assert hasattr(runtime, "step")
 
 
 def test_master_app_only_drives_assistant_in_current_stage() -> None:

@@ -6,11 +6,13 @@
 try:
     from assistant.runtime_params import FOLLOW_TIMEOUT_MS
     import assistant.runtime_params as runtime_params
+    from assistant.ctrl.kinematics import inverse_kinematics
     from assistant.safety import SafetyGuard
     from assistant.status import AssistantState, render_state
 except ImportError:
     from runtime_params import FOLLOW_TIMEOUT_MS
     import runtime_params
+    from ctrl.kinematics import inverse_kinematics
     from safety import SafetyGuard
     from status import AssistantState, render_state
 
@@ -35,19 +37,55 @@ class ChassisRuntime:
         self.speed_filter_window = int(runtime_params.SPEED_FILTER_WINDOW)
         self.speed_diff_max_delta = float(runtime_params.SPEED_DIFF_MAX_DELTA)
         self.gyro_lpf_alpha = float(runtime_params.GYRO_LPF_ALPHA)
+        self.yaw_kp = float(runtime_params.YAW_KP)
+        self.yaw_ki = float(runtime_params.YAW_KI)
+        self.yaw_i_max = float(runtime_params.YAW_I_MAX)
+        self.auto_omega_max = float(runtime_params.AUTO_OMEGA_MAX)
+        self.target_heading_deg = 0.0
+        self._yaw_integral = 0.0
 
     def _motor_bundle(self):
         if self.core.hw_bundle is None:
             return None
         return self.core.hw_bundle.get("motors")
 
-    def _apply_motor_output(self, dx, dy):
+    def _imu_bundle(self):
+        if self.core.hw_bundle is None:
+            return None
+        return self.core.hw_bundle.get("imu")
+
+    def _read_heading_deg(self):
+        imu = self._imu_bundle()
+        if imu is None:
+            return 0.0
+        getter = getattr(imu, "heading_deg", None)
+        if getter is not None:
+            return float(getter())
+        getter = getattr(imu, "get", None)
+        if getter is not None:
+            return float(getter("heading_deg", 0.0))
+        return 0.0
+
+    def _compute_heading_correction(self):
+        heading_deg = self._read_heading_deg()
+        self.state.heading_deg = heading_deg
+        error = self.target_heading_deg - heading_deg
+        self._yaw_integral += error
+        self._yaw_integral = max(
+            -self.yaw_i_max, min(self.yaw_i_max, self._yaw_integral)
+        )
+        omega = error * self.yaw_kp + self._yaw_integral * self.yaw_ki
+        return max(-self.auto_omega_max, min(self.auto_omega_max, omega))
+
+    def _apply_motor_output(self, dx, dy, omega):
         motors = self._motor_bundle()
         if motors is None:
             return
-        raw = max(abs(float(dx)), abs(float(dy))) * 1000
-        duty = int(min(float(runtime_params.FOLLOW_OUTPUT_LIMIT), raw))
-        for motor in motors.values():
+        wheel_targets = inverse_kinematics(dx, dy, omega)
+        limit = float(runtime_params.FOLLOW_OUTPUT_LIMIT)
+        for name, motor in motors.items():
+            raw = float(wheel_targets.get(name, 0.0))
+            duty = int(max(-limit, min(limit, raw)))
             motor.set_duty(duty)
 
     def _stop_motors(self):
@@ -116,8 +154,32 @@ class ChassisRuntime:
             -float(runtime_params.FOLLOW_OUTPUT_LIMIT),
             min(float(runtime_params.FOLLOW_OUTPUT_LIMIT), float(command.dy)),
         )
-        self.state.velocity_command = (limited_dx, limited_dy, 0.0)
-        self._apply_motor_output(limited_dx, limited_dy)
+        self.state.velocity_command = (
+            limited_dx,
+            limited_dy,
+            self._compute_heading_correction(),
+        )
+        self._apply_motor_output(
+            self.state.velocity_command[0],
+            self.state.velocity_command[1],
+            self.state.velocity_command[2],
+        )
+        return "BUSY"
+
+    def _apply_velocity(self, command, now_ms):
+        self.safety.mark_command(now_ms)
+        self.safety.clear_estop()
+        self.state.last_error = ""
+        self.state.timeout = False
+        self.state.follow_active = True
+        self.state.state_label = "BUSY"
+        omega = float(command.omega) + self._compute_heading_correction()
+        limited_omega = max(-self.auto_omega_max, min(self.auto_omega_max, omega))
+        self.state.velocity_command = (
+            float(command.vx),
+            float(command.vy),
+            limited_omega,
+        )
         return "BUSY"
 
     def apply_command(self, command, now_ms):
@@ -166,7 +228,7 @@ class ChassisRuntime:
             self.safety.clear_estop()
             return "DONE"
         if command.kind == "vel":
-            return self._reject_unsupported_command()
+            return self._apply_velocity(command, now_ms)
         if command.kind == "move":
             return self._reject_unsupported_command()
         return self._reject_unsupported_command()

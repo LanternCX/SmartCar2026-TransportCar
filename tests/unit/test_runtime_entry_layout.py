@@ -10,13 +10,13 @@ import re
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_master_and_assistant_keep_legacy_entry_shape() -> None:
-    """新运行时应保留与旧系统一致的入口层级."""
+def test_master_and_assistant_only_keep_main_entry() -> None:
+    """新运行时只保留 main.py 作为公开入口."""
 
     for runtime_name in ("master", "assistant"):
         runtime_root = PROJECT_ROOT / "src" / runtime_name
-        assert (runtime_root / "boot.py").exists()
         assert (runtime_root / "main.py").exists()
+        assert not (runtime_root / "boot.py").exists()
 
 
 def test_master_and_assistant_expose_new_structure_directories() -> None:

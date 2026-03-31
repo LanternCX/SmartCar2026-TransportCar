@@ -20,6 +20,7 @@ class UartPort:
         self.uart_id = int(uart_id)
         self.baudrate = int(baudrate)
         self._device = None
+        self._read_buffer = ""
 
     def ensure_device(self):
         if self._device is None:
@@ -44,11 +45,14 @@ class UartPort:
 
     def read_line(self):
         payload = self.read()
-        if payload is None:
+        if payload is not None:
+            if isinstance(payload, bytes):
+                payload = payload.decode("utf-8")
+            self._read_buffer += str(payload)
+        if "\n" not in self._read_buffer:
             return None
-        if isinstance(payload, bytes):
-            payload = payload.decode("utf-8")
-        return str(payload).strip()
+        line, self._read_buffer = self._read_buffer.split("\n", 1)
+        return line.strip("\r")
 
     def write_line(self, payload):
         return self.write("%s\r\n" % str(payload))

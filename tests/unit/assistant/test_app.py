@@ -34,23 +34,20 @@ def test_assistant_main_can_load_when_assistant_is_device_root() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_assistant_boot_can_load_when_assistant_is_device_root() -> None:
-    from pathlib import Path
-    import subprocess
+def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held() -> None:
+    from assistant.main import main
 
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    result = subprocess.run(
-        [
-            "python3",
-            "boot.py",
-        ],
-        cwd=str(runtime_root),
-        env={"PYTHONPATH": ""},
-        capture_output=True,
-        text=True,
-    )
+    result = main(button_reader=lambda pin: pin == "C9")
 
-    assert result.returncode == 0, result.stderr
+    assert result == "calibrate_gyro"
+
+
+def test_assistant_main_dispatches_runtime_when_no_button_is_held() -> None:
+    from assistant.main import main
+
+    runtime = main(button_reader=lambda pin: False)
+
+    assert hasattr(runtime, "step")
 
 
 def test_assistant_app_handles_ping_and_state_query() -> None:
@@ -126,7 +123,7 @@ def test_assistant_app_returns_err_for_malformed_or_unknown_packets() -> None:
     assert follow_reply == ""
 
 
-def test_assistant_app_rejects_legacy_vel_and_move_without_ack() -> None:
+def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
     from assistant.app import AssistantApp
 
     app = AssistantApp(timeout_ms=100)
@@ -134,5 +131,5 @@ def test_assistant_app_rejects_legacy_vel_and_move_without_ack() -> None:
     vel_reply = app.handle_line("VEL 0.1 0.2 0.3", now_ms=10)
     move_reply = app.handle_line("MOVE 0.1 0.2 15", now_ms=11)
 
-    assert vel_reply == "ERR"
+    assert vel_reply == "ACK,last_seq=0"
     assert move_reply == "ERR"
