@@ -13,51 +13,54 @@ def test_master_main_starts_runtime_when_no_button_is_held(monkeypatch) -> None:
     assert started["count"] == 1
 
 
-def _install_device_root_stub_modules(monkeypatch, sys, app_module) -> None:
-    import types
+def test_master_read_button_state_propagates_import_error(monkeypatch) -> None:
+    import builtins
+    import pytest
 
-    monkeypatch.setitem(sys.modules, "app", app_module)
+    from master.main import _read_button_state
 
-    script_pkg = types.ModuleType("script")
-    monkeypatch.setitem(sys.modules, "script", script_pkg)
-    pid_identify = types.ModuleType("script.pid_identify")
-    setattr(pid_identify, "main", lambda: None)
-    monkeypatch.setitem(sys.modules, "script.pid_identify", pid_identify)
-    calibrate_gyro = types.ModuleType("script.calibrate_gyro")
-    setattr(calibrate_gyro, "main", lambda: None)
-    monkeypatch.setitem(sys.modules, "script.calibrate_gyro", calibrate_gyro)
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "machine":
+            raise ImportError("缺少 machine 模块")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+
+    with pytest.raises(ImportError, match="缺少 machine 模块"):
+        _read_button_state("C8")
 
 
-def test_master_main_executes_runtime_loop_when_executed_as_device_root(
+def test_master_read_now_ms_propagates_import_error(monkeypatch) -> None:
+    import builtins
+    import pytest
+
+    from master.main import _read_now_ms
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "time":
+            raise ImportError("缺少 time 模块")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+
+    with pytest.raises(ImportError, match="缺少 time 模块"):
+        _read_now_ms()
+
+
+def test_master_main_rejects_device_root_execution_without_package_path(
     monkeypatch,
 ) -> None:
     import importlib.util
     from pathlib import Path
     import sys
-    import types
     import pytest
 
     runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
     src_root = runtime_root.parent
-
-    app = types.ModuleType("app")
-
-    class DummyLoop:
-        def __init__(self, uart_bundle):
-            self.uart_bundle = uart_bundle
-
-        def step(self, now_ms):
-            step_calls.append((self.uart_bundle, now_ms))
-            raise SystemExit(0)
-
-    step_calls = []
-    setattr(app, "MasterRuntimeLoop", DummyLoop)
-    setattr(
-        app,
-        "build_hw_bundle",
-        lambda: {"uart": {"uart3": object(), "uart6": object(), "uart8": object()}},
-    )
-    _install_device_root_stub_modules(monkeypatch, sys, app)
 
     for module_name in list(sys.modules):
         if module_name == "master" or module_name.startswith("master."):
@@ -78,13 +81,10 @@ def test_master_main_executes_runtime_loop_when_executed_as_device_root(
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(ModuleNotFoundError, match="master") as exc_info:
         spec.loader.exec_module(module)
 
-    assert exc_info.value.code == 0
-    assert len(step_calls) == 1
-    assert set(step_calls[0][0]) == {"uart3", "uart6", "uart8"}
-    assert isinstance(step_calls[0][1], int)
+    assert exc_info.value.name == "master"
 
 
 def test_master_main_does_not_swallow_real_package_import_error(monkeypatch) -> None:
@@ -92,16 +92,10 @@ def test_master_main_does_not_swallow_real_package_import_error(monkeypatch) -> 
     import importlib.util
     from pathlib import Path
     import sys
-    import types
     import pytest
 
     runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
     src_root = runtime_root.parent
-
-    fallback_app = types.ModuleType("app")
-    setattr(fallback_app, "MasterRuntimeLoop", object)
-    setattr(fallback_app, "build_hw_bundle", lambda: {"uart": {}})
-    _install_device_root_stub_modules(monkeypatch, sys, fallback_app)
 
     for module_name in list(sys.modules):
         if module_name == "master" or module_name.startswith("master."):
@@ -137,67 +131,76 @@ def test_master_main_does_not_swallow_real_package_import_error(monkeypatch) -> 
     assert exc_info.value.name == "missing_dependency"
 
 
-def _install_master_app_device_root_stub_modules(monkeypatch, sys) -> None:
-    import types
+def test_master_main_does_not_fallback_without_module_not_found_error_name(
+    monkeypatch,
+) -> None:
+    import builtins
+    from pathlib import Path
+    import pytest
 
-    hw_pkg = types.ModuleType("hw")
-    monkeypatch.setitem(sys.modules, "hw", hw_pkg)
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    source = (runtime_root / "main.py").read_text(encoding="utf-8")
 
-    encoders = types.ModuleType("hw.encoders")
-    setattr(encoders, "build_encoder_bundle", lambda: {})
-    monkeypatch.setitem(sys.modules, "hw.encoders", encoders)
+    original_import = builtins.__import__
 
-    imu = types.ModuleType("hw.imu")
-    setattr(imu, "build_imu_bundle", lambda: object())
-    monkeypatch.setitem(sys.modules, "hw.imu", imu)
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("master"):
+            raise ImportError("No module named 'master'")
+        return original_import(name, globals, locals, fromlist, level)
 
-    motors = types.ModuleType("hw.motors")
-    setattr(motors, "build_motor_bundle", lambda: {})
-    monkeypatch.setitem(sys.modules, "hw.motors", motors)
+    builtins_dict = dict(vars(builtins))
+    builtins_dict.pop("ModuleNotFoundError", None)
+    builtins_dict["__import__"] = _import
+    module_globals = {
+        "__builtins__": builtins_dict,
+        "__file__": str(runtime_root / "main.py"),
+        "__name__": "__main__",
+    }
 
-    uart = types.ModuleType("hw.uart")
-    setattr(
-        uart,
-        "build_uart_bundle",
-        lambda: {"uart3": object(), "uart6": object(), "uart8": object()},
-    )
-    monkeypatch.setitem(sys.modules, "hw.uart", uart)
-
-    motion_runtime = types.ModuleType("motion_runtime")
-    setattr(motion_runtime, "MotionRuntime", type("MotionRuntime", (), {}))
-    monkeypatch.setitem(sys.modules, "motion_runtime", motion_runtime)
-
-    vision_pkg = types.ModuleType("vision")
-    monkeypatch.setitem(sys.modules, "vision", vision_pkg)
-
-    decision = types.ModuleType("vision.decision")
-    setattr(decision, "decide_from_observation", lambda observation: object())
-    monkeypatch.setitem(sys.modules, "vision.decision", decision)
-
-    ingress = types.ModuleType("vision.ingress")
-    setattr(ingress, "VisionIngress", type("VisionIngress", (), {}))
-    monkeypatch.setitem(sys.modules, "vision.ingress", ingress)
-
-    state_machine = types.ModuleType("vision.state_machine")
-    setattr(
-        state_machine,
-        "MarkerStateMachine",
-        type("MarkerStateMachine", (), {}),
-    )
-    monkeypatch.setitem(sys.modules, "vision.state_machine", state_machine)
+    with pytest.raises(ImportError, match="No module named 'master'"):
+        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
 
 
-def test_master_app_imports_device_root_modules_when_master_package_is_missing(
+def test_master_main_does_not_fallback_when_import_error_names_full_module(
+    monkeypatch,
+) -> None:
+    import builtins
+    from pathlib import Path
+    import pytest
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    source = (runtime_root / "main.py").read_text(encoding="utf-8")
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("master"):
+            raise ImportError("No module named 'master.app'", name="master.app")
+        return original_import(name, globals, locals, fromlist, level)
+
+    module_globals = {
+        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
+        "__file__": str(runtime_root / "main.py"),
+        "__name__": "__main__",
+    }
+
+    with pytest.raises(ImportError, match="No module named 'master.app'") as exc_info:
+        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
+
+    assert exc_info.value.name == "master.app"
+
+
+def test_master_app_rejects_device_root_import_when_master_package_is_missing(
     monkeypatch,
 ) -> None:
     import importlib
     from pathlib import Path
     import sys
+    import pytest
 
     runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
     src_root = runtime_root.parent
 
-    _install_master_app_device_root_stub_modules(monkeypatch, sys)
     monkeypatch.syspath_prepend(str(runtime_root))
     monkeypatch.setattr(
         sys,
@@ -213,9 +216,74 @@ def test_master_app_imports_device_root_modules_when_master_package_is_missing(
         if module_name == "master.app" or module_name.startswith("master.app."):
             sys.modules.pop(module_name, None)
 
-    app_module = importlib.import_module("app")
+    with pytest.raises(ModuleNotFoundError, match="master") as exc_info:
+        importlib.import_module("app")
 
-    assert app_module.build_hw_bundle()["uart"].keys() == {"uart3", "uart6", "uart8"}
+    assert exc_info.value.name == "master"
+
+
+def test_master_app_does_not_fallback_without_module_not_found_error_name(
+    monkeypatch,
+) -> None:
+    import builtins
+    from pathlib import Path
+    import pytest
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    source = (runtime_root / "app.py").read_text(encoding="utf-8")
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("master"):
+            raise ImportError("No module named 'master'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    builtins_dict = dict(vars(builtins))
+    builtins_dict.pop("ModuleNotFoundError", None)
+    builtins_dict["__import__"] = _import
+    module_globals = {
+        "__builtins__": builtins_dict,
+        "__file__": str(runtime_root / "app.py"),
+        "__name__": "app",
+    }
+
+    with pytest.raises(ImportError, match="No module named 'master'"):
+        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
+
+
+def test_master_app_does_not_fallback_when_import_error_names_full_module(
+    monkeypatch,
+) -> None:
+    import builtins
+    from pathlib import Path
+    import pytest
+
+    runtime_root = Path(__file__).resolve().parents[3] / "src" / "master"
+    source = (runtime_root / "app.py").read_text(encoding="utf-8")
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("master"):
+            raise ImportError(
+                "No module named 'master.hw.encoders'",
+                name="master.hw.encoders",
+            )
+        return original_import(name, globals, locals, fromlist, level)
+
+    module_globals = {
+        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
+        "__file__": str(runtime_root / "app.py"),
+        "__name__": "app",
+    }
+
+    with pytest.raises(
+        ImportError, match="No module named 'master.hw.encoders'"
+    ) as exc_info:
+        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
+
+    assert exc_info.value.name == "master.hw.encoders"
 
 
 def test_master_app_does_not_swallow_real_package_import_error(monkeypatch) -> None:

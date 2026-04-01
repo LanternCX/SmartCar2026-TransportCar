@@ -3,10 +3,7 @@
 @file src/master/motion_runtime.py
 """
 
-try:
-    import master.runtime_params as runtime_params
-except ImportError:
-    import runtime_params
+import master.runtime_params as runtime_params
 
 
 class MotionRuntime:

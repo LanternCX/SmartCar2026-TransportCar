@@ -3,18 +3,11 @@
 @file src/assistant/ctrl/chassis.py
 """
 
-try:
-    from assistant.runtime_params import FOLLOW_TIMEOUT_MS
-    import assistant.runtime_params as runtime_params
-    from assistant.ctrl.kinematics import inverse_kinematics
-    from assistant.safety import SafetyGuard
-    from assistant.status import AssistantState, render_state
-except ImportError:
-    from runtime_params import FOLLOW_TIMEOUT_MS
-    import runtime_params
-    from ctrl.kinematics import inverse_kinematics
-    from safety import SafetyGuard
-    from status import AssistantState, render_state
+from assistant.runtime_params import FOLLOW_TIMEOUT_MS
+import assistant.runtime_params as runtime_params
+from assistant.ctrl.kinematics import inverse_kinematics
+from assistant.safety import SafetyGuard
+from assistant.status import AssistantState, render_state
 
 
 class CoreRuntime:

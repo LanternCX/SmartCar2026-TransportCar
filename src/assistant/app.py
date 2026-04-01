@@ -3,24 +3,13 @@
 @file src/assistant/app.py
 """
 
-try:
-    import assistant.runtime_params as runtime_params
-    from assistant.ctrl.chassis import ChassisRuntime
-    from assistant.protocol import parse_command
-    from assistant.hw.encoders import build_encoder_bundle
-    from assistant.hw.imu import build_imu_bundle
-    from assistant.hw.motors import build_motor_bundle
-    from assistant.hw.uart import build_uart_bundle
-except ModuleNotFoundError as exc:
-    if exc.name != "assistant":
-        raise
-    import runtime_params
-    from ctrl.chassis import ChassisRuntime
-    from protocol import parse_command
-    from hw.encoders import build_encoder_bundle
-    from hw.imu import build_imu_bundle
-    from hw.motors import build_motor_bundle
-    from hw.uart import build_uart_bundle
+import assistant.runtime_params as runtime_params
+from assistant.ctrl.chassis import ChassisRuntime
+from assistant.protocol import parse_command
+from assistant.hw.encoders import build_encoder_bundle
+from assistant.hw.imu import build_imu_bundle
+from assistant.hw.motors import build_motor_bundle
+from assistant.hw.uart import build_uart_bundle
 
 
 def build_hw_bundle():

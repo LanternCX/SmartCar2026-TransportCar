@@ -3,10 +3,7 @@
 @file src/master/vision/state_machine.py
 """
 
-try:
-    import master.runtime_params as runtime_params
-except ImportError:
-    import runtime_params
+import master.runtime_params as runtime_params
 
 
 class MarkerStateMachine:

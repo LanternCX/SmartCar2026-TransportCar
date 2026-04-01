@@ -3,10 +3,7 @@
 @file src/master/hw/uart.py
 """
 
-try:
-    from master.config import UART_BAUDRATE, UART_IDS
-except ImportError:
-    from config import UART_BAUDRATE, UART_IDS
+from master.config import UART_BAUDRATE, UART_IDS
 
 
 class UartPort:

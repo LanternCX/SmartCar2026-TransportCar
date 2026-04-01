@@ -3,10 +3,7 @@
 @file src/assistant/hw/uart.py
 """
 
-try:
-    from assistant.config import UART_BAUDRATE, UART_IDS
-except ImportError:
-    from config import UART_BAUDRATE, UART_IDS
+from assistant.config import UART_BAUDRATE, UART_IDS
 
 
 class UartPort:

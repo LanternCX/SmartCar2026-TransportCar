@@ -3,25 +3,15 @@
 @file src/assistant/main.py
 """
 
-try:
-    from assistant.app import AssistantRuntimeLoop, build_hw_bundle
-    from assistant.script.calibrate_gyro import main as run_calibrate_gyro
-    from assistant.script.pid_identify import main as run_pid_identify
-except ModuleNotFoundError as exc:
-    if exc.name != "assistant":
-        raise
-    from app import AssistantRuntimeLoop, build_hw_bundle
-    from script.calibrate_gyro import main as run_calibrate_gyro
-    from script.pid_identify import main as run_pid_identify
+from assistant.app import AssistantRuntimeLoop, build_hw_bundle
+from assistant.script.calibrate_gyro import main as run_calibrate_gyro
+from assistant.script.pid_identify import main as run_pid_identify
 
 
 def _read_button_state(pin_name):
-    try:
-        from machine import Pin
+    from machine import Pin
 
-        return Pin(pin_name, Pin.IN, Pin.PULL_UP).value() == 0
-    except ImportError:
-        return False
+    return Pin(pin_name, Pin.IN, Pin.PULL_UP).value() == 0
 
 
 def _read_now_ms():
@@ -30,15 +20,12 @@ def _read_now_ms():
     @brief 板端优先使用毫秒时钟, 主机侧回退到系统时间。
     """
 
-    try:
-        import time
+    import time
 
-        ticks_ms = getattr(time, "ticks_ms", None)
-        if ticks_ms is not None:
-            return int(ticks_ms())
-        return int(time.time() * 1000)
-    except ImportError:
-        return 0
+    ticks_ms = getattr(time, "ticks_ms", None)
+    if ticks_ms is not None:
+        return int(ticks_ms())
+    return int(time.time() * 1000)
 
 
 def _drive_loop(loop):

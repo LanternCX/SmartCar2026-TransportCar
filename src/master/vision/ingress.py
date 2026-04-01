@@ -5,12 +5,8 @@
 
 import time
 
-try:
-    import master.runtime_params as runtime_params
-    from master.vision.parser import parse_vision_line
-except ImportError:
-    import runtime_params
-    from vision.parser import parse_vision_line
+import master.runtime_params as runtime_params
+from master.vision.parser import parse_vision_line
 
 FOLLOW_ACTIVE_UART = "uart6"
 FOLLOW_RESERVED_UARTS = ("uart8",)

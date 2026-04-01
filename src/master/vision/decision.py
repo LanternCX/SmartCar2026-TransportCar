@@ -3,12 +3,8 @@
 @file src/master/vision/decision.py
 """
 
-try:
-    from master.protocol import build_follow_command
-    import master.runtime_params as runtime_params
-except ImportError:
-    from protocol import build_follow_command
-    import runtime_params
+from master.protocol import build_follow_command
+import master.runtime_params as runtime_params
 
 
 class Decision:

@@ -3,26 +3,14 @@
 @file src/master/app.py
 """
 
-try:
-    from master.hw.encoders import build_encoder_bundle
-    from master.hw.imu import build_imu_bundle
-    from master.hw.motors import build_motor_bundle
-    from master.hw.uart import build_uart_bundle
-    from master.motion_runtime import MotionRuntime
-    from master.vision.decision import decide_from_observation
-    from master.vision.ingress import VisionIngress
-    from master.vision.state_machine import MarkerStateMachine
-except ModuleNotFoundError as exc:
-    if exc.name != "master":
-        raise
-    from hw.encoders import build_encoder_bundle
-    from hw.imu import build_imu_bundle
-    from hw.motors import build_motor_bundle
-    from hw.uart import build_uart_bundle
-    from motion_runtime import MotionRuntime
-    from vision.decision import decide_from_observation
-    from vision.ingress import VisionIngress
-    from vision.state_machine import MarkerStateMachine
+from master.hw.encoders import build_encoder_bundle
+from master.hw.imu import build_imu_bundle
+from master.hw.motors import build_motor_bundle
+from master.hw.uart import build_uart_bundle
+from master.motion_runtime import MotionRuntime
+from master.vision.decision import decide_from_observation
+from master.vision.ingress import VisionIngress
+from master.vision.state_machine import MarkerStateMachine
 
 
 def build_hw_bundle():
