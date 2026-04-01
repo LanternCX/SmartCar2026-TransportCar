@@ -44,3 +44,28 @@ def build_follow_command(seq, valid, dx, dy):
         float(dx),
         float(dy),
     )
+
+
+def parse_assistant_state(line):
+    payload = {}
+    for item in str(line).strip().split(","):
+        field = item.strip()
+        if not field:
+            continue
+        if "=" not in field:
+            return None
+        key, value = field.split("=", 1)
+        payload[key.strip().lower()] = value.strip()
+    if payload.get("state") != "1":
+        return None
+    return {
+        "state_label": str(payload.get("state_label", "IDLE")).upper(),
+        "last_seq": int(payload.get("last_seq", 0) or 0),
+        "follow_active": 1 if int(payload.get("follow_active", 0) or 0) else 0,
+        "heading_deg": float(payload.get("heading_deg", 0.0) or 0.0),
+        "target_heading_deg": float(payload.get("target_heading_deg", 0.0) or 0.0),
+        "yaw_rate_deg_s": float(payload.get("yaw_rate_deg_s", 0.0) or 0.0),
+        "odom_x": float(payload.get("odom_x", 0.0) or 0.0),
+        "odom_y": float(payload.get("odom_y", 0.0) or 0.0),
+        "base_ok": 1 if int(payload.get("base_ok", 0) or 0) else 0,
+    }

@@ -31,7 +31,7 @@ def test_master_assistant_invalid_target_contract() -> None:
     assert parsed.dy == 0.0
 
 
-def test_assistant_state_reply_keeps_minimal_fields() -> None:
+def test_assistant_state_reply_keeps_minimal_status_payload() -> None:
     from assistant.status import AssistantState, render_state
 
     state = AssistantState()
@@ -41,4 +41,5 @@ def test_assistant_state_reply_keeps_minimal_fields() -> None:
 
     line = render_state(state)
 
-    assert line == "state=1,state_label=BUSY,last_seq=7,follow_active=1"
+    assert line.startswith("state=1,state_label=BUSY,last_seq=7,follow_active=1,")
+    assert "base_ok=0" in line

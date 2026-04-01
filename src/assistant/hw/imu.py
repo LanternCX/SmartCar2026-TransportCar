@@ -13,6 +13,8 @@ class ImuPort:
     def __init__(self):
         self.offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self._device = None
+        self.last_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.last_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def ensure_device(self):
         if self._device is None:
@@ -25,11 +27,29 @@ class ImuPort:
         device = self.ensure_device()
         getter = getattr(device, "get", None)
         if getter is None:
-            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        return tuple(getter())
+            raise RuntimeError("IMU 硬件接口缺少 get()")
+        raw = getter()
+        if raw is None:
+            raise RuntimeError("IMU 硬件接口返回空读数")
+        values = tuple(raw)
+        if len(values) != 6:
+            raise RuntimeError("IMU 硬件接口返回的轴数量不正确")
+        self.last_raw = tuple(float(value) for value in values)
+        return self.last_raw
+
+    def read_calibrated(self):
+        raw = self.read_raw()
+        calibrated = []
+        for index, value in enumerate(raw):
+            calibrated.append(float(value) - float(self.offsets[index]))
+        self.last_calibrated = tuple(calibrated)
+        return self.last_calibrated
 
     def apply_offsets(self, offsets):
-        self.offsets = tuple(offsets)
+        prepared = [0.0] * 6
+        for index, value in enumerate(tuple(offsets)[:6]):
+            prepared[index] = float(value)
+        self.offsets = tuple(prepared)
 
 
 def build_imu_bundle():

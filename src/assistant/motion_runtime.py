@@ -1,9 +1,839 @@
-"""辅车运行时执行闭环
+"""辅车底座主数据链运行时.
 
 @file src/assistant/motion_runtime.py
 """
 
-from assistant.ctrl.chassis import MotionRuntime
+import math
+
+from . import runtime_params
+from .safety import SafetyGuard
+from .stability.kinematics import rotate_body_delta_to_world
+from .status import AssistantState, render_state
 
 
-__all__ = ["MotionRuntime"]
+def _clamp(value, lower, upper):
+    if value < lower:
+        return lower
+    if value > upper:
+        return upper
+    return value
+
+
+def _load_ident_lookup(path):
+    lookup = {}
+    try:
+        with open(path, "r") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    lookup[str(parts[0])] = (float(parts[1]), float(parts[2]))
+                except ValueError:
+                    continue
+    except OSError:
+        return {}
+    return lookup
+
+
+def _load_gyro_offsets(path):
+    offsets = [0.0] * 6
+    try:
+        with open(path, "r") as handle:
+            content = handle.read().strip()
+    except OSError:
+        return tuple(offsets)
+    if not content:
+        return tuple(offsets)
+    parts = content.split(",")
+    try:
+        if len(parts) == 6:
+            for index in range(6):
+                offsets[index] = float(parts[index])
+        else:
+            offsets[5] = float(content)
+    except ValueError:
+        return tuple([0.0] * 6)
+    return tuple(offsets)
+
+
+class _LowPassFilter:
+    def __init__(self, alpha, initial=0.0):
+        self.alpha = float(alpha)
+        self.state = float(initial)
+        self.initialized = False
+
+    def update(self, value):
+        value = float(value)
+        if not self.initialized:
+            self.state = value
+            self.initialized = True
+            return self.state
+        self.state = ((1.0 - self.alpha) * self.state) + (self.alpha * value)
+        return self.state
+
+
+class _SpikeMedianFilter:
+    def __init__(self, window):
+        self.window = max(3, int(window) or 3)
+        if self.window % 2 == 0:
+            self.window += 1
+        self.buf = []
+
+    def update(self, value):
+        if len(self.buf) >= self.window:
+            self.buf.pop(0)
+        self.buf.append(float(value))
+        ordered = sorted(self.buf)
+        return ordered[len(ordered) // 2]
+
+
+class _DiffLimitFilter:
+    def __init__(self, max_delta):
+        self.max_delta = abs(float(max_delta))
+        self.prev = None
+
+    def update(self, value):
+        value = float(value)
+        if self.prev is None:
+            self.prev = value
+            return value
+        lower = self.prev - self.max_delta
+        upper = self.prev + self.max_delta
+        value = _clamp(value, lower, upper)
+        self.prev = value
+        return value
+
+
+class _DualWindowRegressionFilter:
+    def __init__(self, tick_ms, long_window, short_window, combine_w=0.65):
+        self.tick_ms = int(tick_ms)
+        self.long_window = int(long_window)
+        self.short_window = int(short_window)
+        self.combine_w = float(combine_w)
+        self.sample_idx = 0
+        self.long_values = []
+        self.short_values = []
+
+    @staticmethod
+    def _predict(window, next_t):
+        count = len(window)
+        if count == 0:
+            return 0.0
+        if count == 1:
+            return float(window[0][1])
+        sum_t = 0.0
+        sum_t2 = 0.0
+        sum_y = 0.0
+        sum_ty = 0.0
+        for stamp, value in window:
+            stamp = float(stamp)
+            value = float(value)
+            sum_t += stamp
+            sum_t2 += stamp * stamp
+            sum_y += value
+            sum_ty += stamp * value
+        denom = (count * sum_t2) - (sum_t * sum_t)
+        if denom == 0.0:
+            return float(window[-1][1])
+        slope = ((count * sum_ty) - (sum_t * sum_y)) / denom
+        intercept = (sum_y - (slope * sum_t)) / count
+        return (slope * next_t) + intercept
+
+    def update(self, value):
+        stamp = float(self.sample_idx * self.tick_ms)
+        self.sample_idx += 1
+        pair = (stamp, float(value))
+        self.long_values.append(pair)
+        self.short_values.append(pair)
+        if len(self.long_values) > self.long_window:
+            self.long_values.pop(0)
+        if len(self.short_values) > self.short_window:
+            self.short_values.pop(0)
+        next_t = float(self.sample_idx * self.tick_ms)
+        long_pred = self._predict(self.long_values, next_t)
+        short_pred = self._predict(self.short_values, next_t)
+        return (short_pred * self.combine_w) + (long_pred * (1.0 - self.combine_w))
+
+
+class _Quaternion:
+    def __init__(self):
+        self.w = 1.0
+        self.x = 0.0
+        self.y = 0.0
+        self.z = 0.0
+
+    def update(self, gx, gy, gz, dt_s):
+        q0 = self.w
+        q1 = self.x
+        q2 = self.y
+        q3 = self.z
+        dq0 = 0.5 * (-q1 * gx - q2 * gy - q3 * gz)
+        dq1 = 0.5 * (q0 * gx + q2 * gz - q3 * gy)
+        dq2 = 0.5 * (q0 * gy - q1 * gz + q3 * gx)
+        dq3 = 0.5 * (q0 * gz + q1 * gy - q2 * gx)
+        self.w += dq0 * dt_s
+        self.x += dq1 * dt_s
+        self.y += dq2 * dt_s
+        self.z += dq3 * dt_s
+        norm = math.sqrt(
+            (self.w * self.w)
+            + (self.x * self.x)
+            + (self.y * self.y)
+            + (self.z * self.z)
+        )
+        if norm == 0.0:
+            self.w = 1.0
+            self.x = 0.0
+            self.y = 0.0
+            self.z = 0.0
+            return
+        inv_norm = 1.0 / norm
+        self.w *= inv_norm
+        self.x *= inv_norm
+        self.y *= inv_norm
+        self.z *= inv_norm
+
+    def yaw_rad(self):
+        return math.atan2(
+            2.0 * ((self.w * self.z) + (self.x * self.y)),
+            1.0 - (2.0 * ((self.y * self.y) + (self.z * self.z))),
+        )
+
+
+class _OmniKinematics:
+    def __init__(self):
+        self.wheel_diameter = 0.060
+        self.gear_ratio = 30.0
+        self.encoder_ppr = 7.0
+        self.counts_per_rev = self.encoder_ppr * self.gear_ratio * 4.0
+        self.m_per_pulse = (self.wheel_diameter * math.pi) / self.counts_per_rev
+
+    def pulses_to_m(self, pulses):
+        return float(pulses) * self.m_per_pulse
+
+    def velocity_pulses_to_m_s(self, pulse_speed, dt_s):
+        return self.pulses_to_m(pulse_speed) / float(dt_s)
+
+    def forward_kinematics(self, vm, vl, vr):
+        vx = (0.5 * (float(vl) + float(vr))) - float(vm)
+        vy = (math.sqrt(3.0) * 0.5) * (float(vl) - float(vr))
+        omega = float(vl) + float(vr) + float(vm)
+        return (vx, vy, omega)
+
+    def inverse_kinematics(self, vx, vy, omega):
+        inv_3 = 1.0 / 3.0
+        sqrt3_3 = math.sqrt(3.0) * inv_3
+        return {
+            "m": (-2.0 * inv_3 * float(vx)) + (float(omega) * inv_3),
+            "l": (float(vx) * inv_3) + (sqrt3_3 * float(vy)) + (float(omega) * inv_3),
+            "r": (float(vx) * inv_3) - (sqrt3_3 * float(vy)) + (float(omega) * inv_3),
+        }
+
+
+class _Odometry:
+    def __init__(self):
+        self.x = 0.0
+        self.y = 0.0
+
+    def update(self, vx_robot, vy_robot, heading_rad, dt_s):
+        cos_heading = math.cos(float(heading_rad))
+        sin_heading = math.sin(float(heading_rad))
+        world_x = (float(vx_robot) * cos_heading) - (float(vy_robot) * sin_heading)
+        world_y = (float(vx_robot) * sin_heading) + (float(vy_robot) * cos_heading)
+        self.x += world_x * float(dt_s)
+        self.y += world_y * float(dt_s)
+        return (self.x, self.y)
+
+
+class _SpeedController:
+    def __init__(self, output_limit, plant_gain=None, plant_tau=None):
+        self.output_limit = float(output_limit)
+        self.plant_gain = plant_gain
+        self.plant_tau = plant_tau
+        self.kp = 0.0
+        self.ki = 0.0
+        self.ki2 = 0.0
+        self.output = 0.0
+        self.prev_error = 0.0
+        self.prev_target = 0.0
+
+    def set_gains(self, kp, ki, ki2=0.0):
+        self.kp = float(kp)
+        self.ki = float(ki)
+        self.ki2 = float(ki2)
+
+    def _feedforward(self, target, dt_s):
+        if self.plant_gain is None or float(self.plant_gain) <= 0.0:
+            return 0.0
+        if dt_s <= 0.0:
+            dt_s = 1.0
+        dr_dt = (float(target) - self.prev_target) / float(dt_s)
+        tau_term = (float(self.plant_tau or 0.0)) * dr_dt
+        return (float(target) + tau_term) / float(self.plant_gain)
+
+    def update(self, target, now, dt_s):
+        if dt_s <= 0.0:
+            dt_s = 1.0
+        err = float(target) - float(now)
+        dp = self.kp * (err - self.prev_error)
+        di = self.ki * err * float(dt_s)
+        i2 = self.ki2 * (err * abs(err))
+        self.output = _clamp(
+            self.output + dp + di + i2,
+            -self.output_limit,
+            self.output_limit,
+        )
+        total = _clamp(
+            self.output + self._feedforward(target, dt_s),
+            -self.output_limit,
+            self.output_limit,
+        )
+        self.prev_error = err
+        self.prev_target = float(target)
+        return total
+
+    def reset(self):
+        self.output = 0.0
+        self.prev_error = 0.0
+        self.prev_target = 0.0
+
+
+class CoreRuntime:
+    def __init__(self, timeout_ms=None, hw_bundle=None):
+        if timeout_ms is None:
+            timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
+        self.hw_bundle = hw_bundle
+        self.state = AssistantState()
+        self.safety = SafetyGuard(timeout_ms=timeout_ms)
+
+
+class MotionRuntime:
+    """负责辅车底座主数据链 owner.
+
+    @brief 持有 IMU、编码器、里程和航向角保持链路，并继续收口协议执行。
+    """
+
+    def __init__(self, timeout_ms=None, hw_bundle=None):
+        self.core = CoreRuntime(timeout_ms=timeout_ms, hw_bundle=hw_bundle)
+        self.hw_bundle = self.core.hw_bundle
+        self.state = self.core.state
+        self.safety = self.core.safety
+        self.pid_map = dict(runtime_params.PID_MAP)
+        self.speed_filter_window = int(runtime_params.SPEED_FILTER_WINDOW)
+        self.speed_diff_max_delta = float(runtime_params.SPEED_DIFF_MAX_DELTA)
+        self.gyro_lpf_alpha = float(runtime_params.GYRO_LPF_ALPHA)
+        self.yaw_kp = float(runtime_params.YAW_KP)
+        self.yaw_ki = float(runtime_params.YAW_KI)
+        self.yaw_i_max = float(runtime_params.YAW_I_MAX)
+        self.auto_omega_max = float(runtime_params.AUTO_OMEGA_MAX)
+        self.follow_position_kp = float(runtime_params.FOLLOW_POSITION_KP)
+        self.follow_position_max_speed = float(runtime_params.FOLLOW_POSITION_MAX_SPEED)
+        self.tick_ms = int(runtime_params.CONTROL_TICK_MS)
+        self.tick_s = float(self.tick_ms) / 1000.0
+        self.gyro_scale = float(runtime_params.GYRO_SCALE)
+        self.target_heading_deg = 0.0
+        self._yaw_integral = 0.0
+        self._heading_target_ready = False
+        self.ident_lookup = _load_ident_lookup(runtime_params.IDENT_RESULTS_FILE)
+        self.imu_offsets = _load_gyro_offsets(runtime_params.GYRO_OFFSET_FILE)
+        self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.encoder_ticks = {"m": 0.0, "l": 0.0, "r": 0.0}
+        self.wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
+        self.target_wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
+        self.motor_duties = {"m": 0, "l": 0, "r": 0}
+        self.heading_est_deg = 0.0
+        self.yaw_rate_deg_s = 0.0
+        self.q_est = _Quaternion()
+        self.kinematics = _OmniKinematics()
+        self.odometry = _Odometry()
+        self.gyro_lpf = _LowPassFilter(runtime_params.GYRO_LPF_ALPHA, initial=0.0)
+        self._wheel_filters = {}
+        self._wheel_controllers = {}
+        for name in ("m", "l", "r"):
+            gains = self.pid_map.get(name, (0.0, 0.0, 0.0))
+            plant_gain, plant_tau = self.ident_lookup.get(name, (None, None))
+            self._wheel_filters[name] = {
+                "spike": _SpikeMedianFilter(runtime_params.SPEED_FILTER_WINDOW),
+                "diff": _DiffLimitFilter(runtime_params.SPEED_DIFF_MAX_DELTA),
+                "reg": _DualWindowRegressionFilter(
+                    tick_ms=self.tick_ms,
+                    long_window=runtime_params.LONG_WINDOW,
+                    short_window=runtime_params.SHORT_WINDOW,
+                ),
+            }
+            controller = _SpeedController(
+                output_limit=runtime_params.MAX_DUTY,
+                plant_gain=plant_gain,
+                plant_tau=plant_tau,
+            )
+            controller.set_gains(gains[0], gains[1], gains[2])
+            self._wheel_controllers[name] = controller
+        self._last_yaw_rad = 0.0
+        self._last_cycle_token = None
+        self._last_base_snapshot = None
+        self._last_control_cycle_token = None
+        self._follow_target_world = None
+        self.state.odom = [0.0, 0.0]
+        self.state.heading_deg = 0.0
+        self.state.target_heading_deg = 0.0
+        self.state.yaw_rate_deg_s = 0.0
+        self.state.base_ok = False
+        imu = self._imu_bundle()
+        if imu is not None:
+            apply_offsets = getattr(imu, "apply_offsets", None)
+            if apply_offsets is not None:
+                apply_offsets(self.imu_offsets)
+
+    def _motor_bundle(self):
+        if self.core.hw_bundle is None:
+            return None
+        return self.core.hw_bundle.get("motors")
+
+    def _imu_bundle(self):
+        if self.core.hw_bundle is None:
+            return None
+        return self.core.hw_bundle.get("imu")
+
+    def _encoder_bundle(self):
+        if self.core.hw_bundle is None:
+            return None
+        return self.core.hw_bundle.get("encoders")
+
+    def _capture_heading_target(self):
+        self.target_heading_deg = float(self.heading_est_deg)
+        self._yaw_integral = 0.0
+        self._heading_target_ready = True
+
+    def _ensure_heading_target(self):
+        if not self._heading_target_ready:
+            self._capture_heading_target()
+
+    def _mark_control_applied(self, cycle_token=None):
+        self._last_control_cycle_token = cycle_token
+
+    def _control_already_applied(self, cycle_token=None):
+        return cycle_token is not None and cycle_token is self._last_control_cycle_token
+
+    def _heading_chain_ready(self):
+        imu = self._imu_bundle()
+        if imu is None:
+            return False
+        return any(
+            getattr(imu, name, None) is not None
+            for name in ("read_calibrated", "heading_deg", "read_raw")
+        )
+
+    def _encoder_chain_ready(self):
+        encoders = self._encoder_bundle()
+        if encoders is None:
+            return False
+        for name in ("m", "l", "r"):
+            port = encoders.get(name)
+            if port is None:
+                return False
+            if (
+                getattr(port, "read_and_clear", None) is None
+                and getattr(port, "read", None) is None
+            ):
+                return False
+        return True
+
+    def _update_base_ok(self):
+        self.state.base_ok = self._heading_chain_ready() and self._encoder_chain_ready()
+
+    def _clear_follow_target(self):
+        self._follow_target_world = None
+
+    def _capture_follow_target(self, dx, dy):
+        offset_x, offset_y = rotate_body_delta_to_world(
+            dx,
+            dy,
+            self.state.heading_deg,
+        )
+        self._follow_target_world = (
+            float(self.state.odom[0]) + float(offset_x),
+            float(self.state.odom[1]) + float(offset_y),
+        )
+
+    def _resolve_follow_velocity(self):
+        if self._follow_target_world is None:
+            return (0.0, 0.0)
+        err_world_x = float(self._follow_target_world[0]) - float(self.state.odom[0])
+        err_world_y = float(self._follow_target_world[1]) - float(self.state.odom[1])
+        v_world_x = err_world_x * self.follow_position_kp
+        v_world_y = err_world_y * self.follow_position_kp
+        speed = math.sqrt((v_world_x * v_world_x) + (v_world_y * v_world_y))
+        if speed > self.follow_position_max_speed and speed > 0.0:
+            scale = self.follow_position_max_speed / speed
+            v_world_x *= scale
+            v_world_y *= scale
+        theta_rad = math.radians(float(self.state.heading_deg))
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+        body_dx = (v_world_x * cos_t) - (v_world_y * sin_t)
+        body_dy = (v_world_x * sin_t) + (v_world_y * cos_t)
+        return (body_dx, body_dy)
+
+    def _read_imu_sample(self):
+        imu = self._imu_bundle()
+        heading_override = None
+        if imu is None:
+            self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            return heading_override
+
+        read_calibrated = getattr(imu, "read_calibrated", None)
+        if read_calibrated is not None:
+            self.imu_calibrated = tuple(read_calibrated())
+            self.imu_raw = tuple(getattr(imu, "last_raw", self.imu_calibrated))
+            return heading_override
+        if hasattr(imu, "heading_deg"):
+            heading_override = float(imu.heading_deg())
+            self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            self.imu_calibrated = self.imu_raw
+            return heading_override
+        read_raw = getattr(imu, "read_raw", None)
+        if read_raw is None:
+            self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            self.imu_calibrated = self.imu_raw
+            return heading_override
+        self.imu_raw = tuple(read_raw())
+        calibrated = []
+        for index, value in enumerate(self.imu_raw):
+            calibrated.append(float(value) - float(self.imu_offsets[index]))
+        self.imu_calibrated = tuple(calibrated)
+        return heading_override
+
+    def _read_encoder_ticks(self):
+        encoders = self._encoder_bundle()
+        if encoders is None:
+            return {"m": 0.0, "l": 0.0, "r": 0.0}
+
+        raw_ticks = {}
+        for name in ("m", "l", "r"):
+            port = encoders.get(name)
+            if port is None:
+                raw_ticks[name] = 0.0
+                continue
+            reader = getattr(port, "read_and_clear", None)
+            if reader is not None:
+                raw_ticks[name] = float(reader())
+                continue
+            read_ticks = getattr(port, "read", None)
+            if read_ticks is None:
+                raw_ticks[name] = 0.0
+                continue
+            raw_ticks[name] = float(read_ticks())
+            clearer = getattr(port, "clear", None)
+            if clearer is not None:
+                clearer()
+        return raw_ticks
+
+    def _refresh_base_chain(self, cycle_token=None):
+        if cycle_token is not None and cycle_token is self._last_cycle_token:
+            if self._last_base_snapshot is None:
+                return {}
+            return dict(self._last_base_snapshot)
+
+        self._update_base_ok()
+
+        heading_override = self._read_imu_sample()
+        gx_raw = float(self.imu_calibrated[3])
+        gy_raw = float(self.imu_calibrated[4])
+        gz_raw = float(self.imu_calibrated[5])
+        gx_rad_s = math.radians(gx_raw / self.gyro_scale)
+        gy_rad_s = math.radians(gy_raw / self.gyro_scale)
+        gz_rad_s = math.radians(gz_raw / self.gyro_scale)
+        self.q_est.update(gx_rad_s, gy_rad_s, gz_rad_s, self.tick_s)
+        curr_yaw_rad = self.q_est.yaw_rad()
+        delta_yaw = curr_yaw_rad - self._last_yaw_rad
+        if delta_yaw > math.pi:
+            delta_yaw -= 2.0 * math.pi
+        elif delta_yaw < -math.pi:
+            delta_yaw += 2.0 * math.pi
+        self._last_yaw_rad = curr_yaw_rad
+        self.heading_est_deg += math.degrees(delta_yaw)
+        self.yaw_rate_deg_s = self.gyro_lpf.update(gz_raw / self.gyro_scale)
+        if heading_override is not None:
+            self.heading_est_deg = float(heading_override)
+            self._last_yaw_rad = math.radians(self.heading_est_deg)
+        self._ensure_heading_target()
+
+        raw_ticks = self._read_encoder_ticks()
+        self.encoder_ticks = dict(raw_ticks)
+
+        for name in ("m", "l", "r"):
+            filtered = self._wheel_filters[name]["spike"].update(raw_ticks[name])
+            filtered = self._wheel_filters[name]["diff"].update(filtered)
+            filtered = self._wheel_filters[name]["reg"].update(filtered)
+            self.wheel_speeds[name] = float(filtered)
+
+        vm = self.kinematics.velocity_pulses_to_m_s(self.wheel_speeds["m"], self.tick_s)
+        vl = self.kinematics.velocity_pulses_to_m_s(self.wheel_speeds["l"], self.tick_s)
+        vr = self.kinematics.velocity_pulses_to_m_s(self.wheel_speeds["r"], self.tick_s)
+        vx_robot, vy_robot, _ = self.kinematics.forward_kinematics(vm, vl, vr)
+        odom_x, odom_y = self.odometry.update(
+            vx_robot,
+            vy_robot,
+            math.radians(self.heading_est_deg),
+            self.tick_s,
+        )
+        self.state.odom[0] = odom_x
+        self.state.odom[1] = odom_y
+        self.state.heading_deg = float(self.heading_est_deg)
+        self.state.target_heading_deg = float(self.target_heading_deg)
+        self.state.yaw_rate_deg_s = float(self.yaw_rate_deg_s)
+        snapshot = {
+            "imu_raw": tuple(self.imu_raw),
+            "encoder_ticks": dict(self.encoder_ticks),
+            "heading_est_deg": float(self.heading_est_deg),
+            "odom": (float(self.state.odom[0]), float(self.state.odom[1])),
+            "yaw_rate_deg_s": float(self.yaw_rate_deg_s),
+            "base_ok": 1 if self.state.base_ok else 0,
+        }
+        self._last_cycle_token = cycle_token
+        self._last_base_snapshot = dict(snapshot)
+        return snapshot
+
+    def _compute_heading_correction(self):
+        error = float(self.target_heading_deg) - float(self.state.heading_deg)
+        self._yaw_integral += error
+        self._yaw_integral = _clamp(self._yaw_integral, -self.yaw_i_max, self.yaw_i_max)
+        omega = (error * self.yaw_kp) + (self._yaw_integral * self.yaw_ki)
+        return _clamp(omega, -self.auto_omega_max, self.auto_omega_max)
+
+    def _apply_motor_output(self, dx, dy, omega):
+        wheel_targets = self.kinematics.inverse_kinematics(
+            float(dy), float(dx), float(omega)
+        )
+        limit = float(runtime_params.FOLLOW_OUTPUT_LIMIT)
+        motors = self._motor_bundle()
+        for name in ("m", "l", "r"):
+            raw = _clamp(float(wheel_targets.get(name, 0.0)), -limit, limit)
+            self.target_wheel_speeds[name] = raw
+            duty = int(
+                self._wheel_controllers[name].update(
+                    raw,
+                    self.wheel_speeds.get(name, 0.0),
+                    self.tick_s,
+                )
+            )
+            self.motor_duties[name] = duty
+            if motors is None:
+                continue
+            motor = motors.get(name)
+            if motor is not None:
+                motor.set_duty(duty)
+
+    def _reset_speed_loop(self):
+        for name in ("m", "l", "r"):
+            self.target_wheel_speeds[name] = 0.0
+            self.motor_duties[name] = 0
+            self._wheel_controllers[name].reset()
+
+    def _stop_motors(self):
+        self._reset_speed_loop()
+        motors = self._motor_bundle()
+        if motors is None:
+            return
+        for motor in motors.values():
+            stop = getattr(motor, "stop", None)
+            if stop is not None:
+                stop()
+            else:
+                motor.set_duty(0)
+
+    def _stop(self, reason="", cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        self.state.follow_active = False
+        self.state.state_label = "TIMEOUT" if reason == "timeout_stop" else "IDLE"
+        self.state.velocity_command = (0.0, 0.0, 0.0)
+        self.state.timeout = reason == "timeout_stop"
+        self._clear_follow_target()
+        self._capture_heading_target()
+        self._stop_motors()
+        self._mark_control_applied(cycle_token=cycle_token)
+        if reason:
+            self.state.last_error = reason
+
+    def _preserve_timeout_stop(self, cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        self.state.follow_active = False
+        self.state.velocity_command = (0.0, 0.0, 0.0)
+        self.state.state_label = "TIMEOUT"
+        self.state.timeout = True
+        self._clear_follow_target()
+        self._capture_heading_target()
+        self._stop_motors()
+        self._mark_control_applied(cycle_token=cycle_token)
+        self.state.last_error = "timeout_stop"
+
+    def _is_timeout_locked(self):
+        return bool(self.state.timeout) or self.state.state_label == "TIMEOUT"
+
+    def _clear_follow_deadline(self):
+        self.safety.last_command_ms = None
+
+    def _reject_unsupported_command(self, cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        if not self._is_timeout_locked():
+            self.state.timeout = False
+        self.state.last_error = "unsupported_command"
+        return "ERR"
+
+    def _apply_follow(self, command, now_ms, cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        if int(command.seq) <= int(self.state.last_seq):
+            return "IGNORED"
+        self.safety.mark_command(now_ms)
+        self.safety.clear_estop()
+        self.state.last_error = ""
+        self.state.timeout = False
+        self.state.last_seq = int(command.seq)
+        if not command.valid:
+            self.state.follow_active = False
+            self.state.state_label = "IDLE"
+            self.state.velocity_command = (0.0, 0.0, 0.0)
+            self._clear_follow_target()
+            self._capture_heading_target()
+            self._stop_motors()
+            self._mark_control_applied(cycle_token=cycle_token)
+            return "HOLD"
+        self.state.follow_active = True
+        self.state.state_label = "BUSY"
+        target_dx = _clamp(
+            float(command.dx),
+            -float(runtime_params.FOLLOW_OUTPUT_LIMIT),
+            float(runtime_params.FOLLOW_OUTPUT_LIMIT),
+        )
+        target_dy = _clamp(
+            float(command.dy),
+            -float(runtime_params.FOLLOW_OUTPUT_LIMIT),
+            float(runtime_params.FOLLOW_OUTPUT_LIMIT),
+        )
+        self._capture_follow_target(target_dx, target_dy)
+        control_dx, control_dy = self._resolve_follow_velocity()
+        omega = self._compute_heading_correction()
+        self.state.velocity_command = (control_dx, control_dy, omega)
+        self._apply_motor_output(control_dx, control_dy, omega)
+        self._mark_control_applied(cycle_token=cycle_token)
+        return "BUSY"
+
+    def _apply_velocity(self, command, now_ms, cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        self.safety.mark_command(now_ms)
+        self.safety.clear_estop()
+        self.state.last_error = ""
+        self.state.timeout = False
+        self.state.follow_active = True
+        self.state.state_label = "BUSY"
+        self._clear_follow_target()
+        omega = float(command.omega) + self._compute_heading_correction()
+        limited_omega = _clamp(omega, -self.auto_omega_max, self.auto_omega_max)
+        self.state.velocity_command = (
+            float(command.vx),
+            float(command.vy),
+            limited_omega,
+        )
+        self._apply_motor_output(
+            self.state.velocity_command[0],
+            self.state.velocity_command[1],
+            self.state.velocity_command[2],
+        )
+        self._mark_control_applied(cycle_token=cycle_token)
+        return "BUSY"
+
+    def apply_command(self, command, now_ms, cycle_token=None):
+        if command.kind == "ping":
+            return "ACK"
+        if command.kind == "state_query":
+            return self.state_line()
+        if command.kind == "follow":
+            return self._apply_follow(command, now_ms, cycle_token=cycle_token)
+        if command.kind == "arm":
+            self._refresh_base_chain(cycle_token=cycle_token)
+            self._capture_heading_target()
+            return "ACK"
+        if command.kind == "disarm":
+            self._clear_follow_deadline()
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop(cycle_token=cycle_token)
+            else:
+                self._stop(cycle_token=cycle_token)
+            return "ACK"
+        if command.kind == "stop":
+            self.safety.trigger_estop()
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop(cycle_token=cycle_token)
+            else:
+                self._stop("estop", cycle_token=cycle_token)
+            return "DONE"
+        if command.kind == "reset_odom":
+            self._clear_follow_deadline()
+            self.odometry = _Odometry()
+            self.state.odom[0] = 0.0
+            self.state.odom[1] = 0.0
+            self.state.heading_deg = 0.0
+            self.heading_est_deg = 0.0
+            self.state.target_heading_deg = 0.0
+            self.state.yaw_rate_deg_s = 0.0
+            self._last_yaw_rad = 0.0
+            self.q_est = _Quaternion()
+            self.state.follow_active = False
+            self.state.state_label = "IDLE"
+            self.state.velocity_command = (0.0, 0.0, 0.0)
+            self.state.timeout = False
+            self.state.last_error = ""
+            self._clear_follow_target()
+            self._capture_heading_target()
+            self._stop_motors()
+            self._mark_control_applied(cycle_token=cycle_token)
+            self.safety.clear_estop()
+            return "ACK"
+        if command.kind == "hold":
+            self._clear_follow_deadline()
+            self.state.follow_active = False
+            if not self._is_timeout_locked():
+                self.state.state_label = "IDLE"
+            self.state.velocity_command = (0.0, 0.0, 0.0)
+            self._clear_follow_target()
+            self._capture_heading_target()
+            self._stop_motors()
+            self._mark_control_applied(cycle_token=cycle_token)
+            self.safety.clear_estop()
+            return "DONE"
+        if command.kind == "vel":
+            return self._apply_velocity(command, now_ms, cycle_token=cycle_token)
+        if command.kind == "move":
+            return self._reject_unsupported_command(cycle_token=cycle_token)
+        return self._reject_unsupported_command(cycle_token=cycle_token)
+
+    def tick(self, now_ms, cycle_token=None):
+        self._refresh_base_chain(cycle_token=cycle_token)
+        if self.safety.should_stop(now_ms):
+            if self._is_timeout_locked():
+                self._preserve_timeout_stop(cycle_token=cycle_token)
+            else:
+                reason = "estop" if self.safety.estop_active else "timeout_stop"
+                self._stop(reason, cycle_token=cycle_token)
+            return "DONE"
+        if self._control_already_applied(cycle_token=cycle_token):
+            return "BUSY" if self.state.follow_active else "ACK"
+        if self.state.follow_active:
+            dx, dy = self._resolve_follow_velocity()
+            omega = self._compute_heading_correction()
+            self.state.velocity_command = (dx, dy, omega)
+            self._apply_motor_output(dx, dy, omega)
+            self._mark_control_applied(cycle_token=cycle_token)
+            return "BUSY"
+        self._apply_motor_output(0.0, 0.0, self._compute_heading_correction())
+        self._mark_control_applied(cycle_token=cycle_token)
+        return "ACK"
+
+    def state_line(self):
+        return render_state(self.state)

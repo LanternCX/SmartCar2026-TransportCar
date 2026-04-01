@@ -3,14 +3,29 @@
 @file src/master/app.py
 """
 
-from master.hw.encoders import build_encoder_bundle
-from master.hw.imu import build_imu_bundle
-from master.hw.motors import build_motor_bundle
-from master.hw.uart import build_uart_bundle
-from master.motion_runtime import MotionRuntime
-from master.vision.decision import decide_from_observation
-from master.vision.ingress import VisionIngress
-from master.vision.state_machine import MarkerStateMachine
+import sys
+import types
+import os.path
+
+if __package__ in ("", None):
+    _PACKAGE_NAME = "master"
+    _PACKAGE_PATH = os.path.dirname(__file__)
+    _package = sys.modules.get(_PACKAGE_NAME)
+    if _package is None:
+        _package = types.ModuleType(_PACKAGE_NAME)
+        _package.__path__ = [_PACKAGE_PATH]
+        sys.modules[_PACKAGE_NAME] = _package
+    __package__ = _PACKAGE_NAME
+
+from .hw.encoders import build_encoder_bundle
+from .hw.imu import build_imu_bundle
+from .hw.motors import build_motor_bundle
+from .hw.uart import build_uart_bundle
+from .motion_runtime import MotionRuntime, base_chain_ready
+from .protocol import parse_assistant_state
+from .vision.decision import decide_from_observation
+from .vision.ingress import VisionIngress
+from .vision.state_machine import MarkerStateMachine
 
 
 def build_hw_bundle():
@@ -34,24 +49,63 @@ class MasterRuntimeLoop:
     @brief 串起双路视觉读入与 UART3 控制输出。
     """
 
-    def __init__(self, uart_bundle, app=None):
-        self.uart_bundle = uart_bundle
-        self.app = app or MasterApp(uart_bundle=uart_bundle)
+    def __init__(self, hw_bundle, app=None):
+        if app is None:
+            app = MasterApp(hw_bundle=hw_bundle)
+        app_hw_bundle = self._resolve_app_hw_bundle(app)
+        if app_hw_bundle is not hw_bundle:
+            raise ValueError("hw_bundle 与 app 必须引用同一套完整装配")
+        self.hw_bundle = hw_bundle
+        self.uart_bundle = hw_bundle["uart"]
+        self.app = app
+
+    @staticmethod
+    def _resolve_app_hw_bundle(app):
+        runtime = getattr(app, "runtime", None)
+        runtime_hw_bundle = getattr(runtime, "hw_bundle", None)
+        core = getattr(runtime, "core", None)
+        core_hw_bundle = getattr(core, "hw_bundle", None)
+        app_hw_bundle = getattr(app, "hw_bundle", None)
+        bundles = []
+        for candidate in (core_hw_bundle, runtime_hw_bundle, app_hw_bundle):
+            if candidate is None:
+                continue
+            if all(existing is not candidate for existing in bundles):
+                bundles.append(candidate)
+        if len(bundles) > 1:
+            raise ValueError("app 必须暴露唯一 hw_bundle owner")
+        if core_hw_bundle is not None:
+            return core_hw_bundle
+        if runtime_hw_bundle is not None:
+            return runtime_hw_bundle
+        if app_hw_bundle is not None:
+            return app_hw_bundle
+        raise ValueError("app 必须暴露唯一 hw_bundle owner")
+
+    def _read_assistant_feedback(self):
+        latest_state = None
+        while True:
+            line = self.uart_bundle["uart3"].read_line()
+            if not line:
+                return latest_state
+            parsed = parse_assistant_state(line)
+            if parsed is not None:
+                latest_state = parsed
 
     def step(self, now_ms):
-        last_result = None
+        assistant_feedback = self._read_assistant_feedback()
+        observations = []
         for uart_name in ("uart6", "uart8"):
             line = self.uart_bundle[uart_name].read_line()
             if line:
-                last_result = self.app.step(
-                    {"uart": uart_name, "line": line, "now_ms": now_ms}
-                )
+                observations.append({"uart": uart_name, "line": line})
 
-        if last_result is not None:
-            self.uart_bundle["uart3"].write_line(last_result["assistant_command"])
-            return last_result
-
-        result = self.app.step({"now_ms": now_ms})
+        step_input = {"now_ms": now_ms, "run_motion": True, "cycle_token": object()}
+        if assistant_feedback is not None:
+            step_input["assistant_feedback"] = assistant_feedback
+        if observations:
+            step_input["observations"] = observations
+        result = self.app.step(step_input)
         self.uart_bundle["uart3"].write_line(result["assistant_command"])
         return result
 
@@ -67,17 +121,7 @@ class MasterApp:
         active_uart="uart6",
         reserved_uarts=("uart8",),
         hw_bundle=None,
-        uart_bundle=None,
     ):
-        if hw_bundle is not None and uart_bundle is not None:
-            if hw_bundle.get("uart") is not uart_bundle:
-                raise ValueError("hw_bundle 与 uart_bundle 必须引用同一套串口装配")
-        elif hw_bundle is None:
-            if uart_bundle is None:
-                hw_bundle = build_hw_bundle()
-            else:
-                hw_bundle = {"uart": uart_bundle}
-
         self.hw_bundle = hw_bundle
         self.ingress = VisionIngress(
             active_uart=active_uart,
@@ -86,45 +130,56 @@ class MasterApp:
         self.state_machine = MarkerStateMachine()
         self.motion_runtime = None
         self._control_seq = 0
-        self._last_self_target = {"kind": "hold"}
         self._last_state_output = {"phase": "MARKER_MISSING", "hold": True}
         self._last_has_target = False
         self.last_assistant_command = ""
+        self._last_self_target = {"kind": "hold"}
+        self._last_self_base_state = {
+            "heading_deg": 0.0,
+            "yaw_rate_deg_s": 0.0,
+            "odom_x": 0.0,
+            "odom_y": 0.0,
+            "base_ok": 0,
+        }
+        self._last_assistant_feedback = None
         self.last_result = {
             "selected_target": "idle",
             "phase": "MARKER_MISSING",
             "active_uart": active_uart,
             "reserved_uarts": tuple(reserved_uarts),
             "self_target": {"kind": "hold"},
+            "self_base_state": dict(self._last_self_base_state),
+            "assistant_feedback": None,
             "assistant_command": "",
         }
 
     def _next_control_seq(self):
-        if self.motion_runtime is not None:
-            return self.motion_runtime.next_control_seq()
         self._control_seq += 1
         return self._control_seq
 
     def _ensure_motion_runtime(self):
         if self.motion_runtime is None:
-            runtime = MotionRuntime()
-            runtime._control_seq = self._control_seq
-            runtime.last_target = dict(self._last_self_target)
-            self.motion_runtime = runtime
+            self.motion_runtime = MotionRuntime(hw_bundle=self.hw_bundle)
         return self.motion_runtime
 
     def _apply_self_target(self, target):
         prepared_target = dict(target)
-        if (
-            prepared_target.get("kind", "hold") == "hold"
-            and self.motion_runtime is None
-        ):
-            self._last_self_target = prepared_target
-            return dict(self._last_self_target)
-        self._last_self_target = self._ensure_motion_runtime().apply_self_target(
-            prepared_target
-        )
+        if str(prepared_target.get("kind", "hold")) == "vel":
+            self._last_self_target = self._ensure_motion_runtime().apply_self_target(
+                prepared_target
+            )
+        else:
+            self._last_self_target = {"kind": "hold"}
+            if self.motion_runtime is not None:
+                self.motion_runtime.apply_self_target(self._last_self_target)
         return dict(self._last_self_target)
+
+    def _refresh_self_base_state(self, cycle_token=None):
+        if self.motion_runtime is None:
+            snapshot = dict(self._last_self_base_state)
+            snapshot["base_ok"] = 1 if base_chain_ready(self.hw_bundle) else 0
+            return snapshot
+        return self.motion_runtime.refresh_base_chain(cycle_token=cycle_token)
 
     def step(self, observation=None):
         """推进一次主车流程.
@@ -135,16 +190,34 @@ class MasterApp:
         """
 
         now_ms = None
+        cycle_token = None
+        run_motion = False
         prepared_observation = observation
         if isinstance(observation, dict):
             now_ms = observation.get("now_ms")
+            cycle_token = observation.get("cycle_token")
+            run_motion = bool(observation.get("run_motion", False))
             prepared_observation = dict(observation)
             prepared_observation.pop("now_ms", None)
+            prepared_observation.pop("cycle_token", None)
+            prepared_observation.pop("run_motion", None)
+            self._last_assistant_feedback = prepared_observation.pop(
+                "assistant_feedback", self._last_assistant_feedback
+            )
             if not prepared_observation:
                 prepared_observation = None
 
+        base_snapshot = self._refresh_self_base_state(cycle_token=cycle_token)
+
         self.ingress.begin_frame(now_ms=now_ms)
-        self.ingress.prepare_observation(prepared_observation, now_ms=now_ms)
+        if (
+            isinstance(prepared_observation, dict)
+            and "observations" in prepared_observation
+        ):
+            for item in tuple(prepared_observation.get("observations", ())):
+                self.ingress.prepare_observation(item, now_ms=now_ms)
+        else:
+            self.ingress.prepare_observation(prepared_observation, now_ms=now_ms)
         selected_observation = self.ingress.select_current_target(now_ms=now_ms)
         has_target = (
             int(selected_observation.get("valid", 0)) == 1
@@ -163,10 +236,14 @@ class MasterApp:
 
         selected = dict(selected_observation)
         selected.update(state_output)
+        selected.update(base_snapshot)
         selected["control_seq"] = self._next_control_seq()
 
         decision = decide_from_observation(selected)
+        self._last_self_base_state = dict(decision.self_base_state)
         self_target = self._apply_self_target(decision.self_target)
+        if run_motion:
+            self._ensure_motion_runtime().execute_control_loop(cycle_token=cycle_token)
         self.last_assistant_command = decision.assistant_command
         active_uart = str(selected_observation.get("source_uart", "")).strip()
         if not active_uart:
@@ -180,7 +257,9 @@ class MasterApp:
             "active_uart": active_uart,
             "reserved_uarts": selected_observation.get("reserved_uarts"),
             "self_target": self_target,
+            "self_base_state": dict(self._last_self_base_state),
             "assistant_state": decision.assistant_state,
+            "assistant_feedback": self._last_assistant_feedback,
             "assistant_command": self.last_assistant_command,
         }
         return dict(self.last_result)

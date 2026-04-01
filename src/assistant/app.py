@@ -3,13 +3,27 @@
 @file src/assistant/app.py
 """
 
-import assistant.runtime_params as runtime_params
-from assistant.ctrl.chassis import ChassisRuntime
-from assistant.protocol import parse_command
-from assistant.hw.encoders import build_encoder_bundle
-from assistant.hw.imu import build_imu_bundle
-from assistant.hw.motors import build_motor_bundle
-from assistant.hw.uart import build_uart_bundle
+import os.path
+import sys
+import types
+
+if __package__ in ("", None):
+    _PACKAGE_NAME = "assistant"
+    _PACKAGE_PATH = os.path.dirname(__file__)
+    _package = sys.modules.get(_PACKAGE_NAME)
+    if _package is None:
+        _package = types.ModuleType(_PACKAGE_NAME)
+        _package.__path__ = [_PACKAGE_PATH]
+        sys.modules[_PACKAGE_NAME] = _package
+    __package__ = _PACKAGE_NAME
+
+from . import runtime_params
+from .motion_runtime import MotionRuntime
+from .protocol import parse_command
+from .hw.encoders import build_encoder_bundle
+from .hw.imu import build_imu_bundle
+from .hw.motors import build_motor_bundle
+from .hw.uart import build_uart_bundle
 
 
 def build_hw_bundle():
@@ -66,14 +80,15 @@ class AssistantRuntimeLoop:
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def step(self, now_ms):
+        cycle_token = object()
         uart3 = self.hw_bundle["uart"]["uart3"]
         line = uart3.read_line()
         if line:
-            reply = self.app.handle_line(line, now_ms=now_ms)
+            reply = self.app.handle_line(line, now_ms=now_ms, cycle_token=cycle_token)
             if reply:
                 uart3.write_line(reply)
 
-        tick_reply = self.app.tick(now_ms=now_ms)
+        tick_reply = self.app.tick(now_ms=now_ms, cycle_token=cycle_token)
         if tick_reply:
             uart3.write_line(tick_reply)
         return tick_reply
@@ -88,11 +103,9 @@ class AssistantApp:
     def __init__(self, timeout_ms=None, hw_bundle=None):
         if timeout_ms is None:
             timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
-        if hw_bundle is None:
-            hw_bundle = build_hw_bundle()
         self.hw_bundle = hw_bundle
         # 应用层只保留一个运行时对象, 统一收口命令执行和状态维护
-        self.runtime = ChassisRuntime(timeout_ms=timeout_ms, hw_bundle=self.hw_bundle)
+        self.runtime = MotionRuntime(timeout_ms=timeout_ms, hw_bundle=self.hw_bundle)
         self._timeout_reported = False
 
     def _render_ack(self):
@@ -113,7 +126,7 @@ class AssistantApp:
 
         return "TIMEOUT,last_seq=%d" % int(self.runtime.state.last_seq)
 
-    def handle_line(self, line, now_ms):
+    def handle_line(self, line, now_ms, cycle_token=None):
         """处理一条主车输入
 
         @brief 解析文本协议并交给运行时执行
@@ -126,7 +139,11 @@ class AssistantApp:
             command = parse_command(line)
         except (TypeError, ValueError):
             return "ERR"
-        reply = self.runtime.apply_command(command, now_ms=now_ms)
+        reply = self.runtime.apply_command(
+            command,
+            now_ms=now_ms,
+            cycle_token=cycle_token,
+        )
 
         if not bool(self.runtime.state.timeout):
             self._timeout_reported = False
@@ -137,7 +154,7 @@ class AssistantApp:
             return ""
         return self._render_ack()
 
-    def tick(self, now_ms):
+    def tick(self, now_ms, cycle_token=None):
         """推进辅车应用循环
 
         @brief 触发周期性安全检查和状态推进
@@ -145,14 +162,13 @@ class AssistantApp:
         @return str
         """
 
-        reply = self.runtime.tick(now_ms=now_ms)
+        reply = self.runtime.tick(now_ms=now_ms, cycle_token=cycle_token)
         if not bool(self.runtime.state.timeout):
             self._timeout_reported = False
-        if (
-            str(reply) == "DONE"
-            and bool(self.runtime.state.timeout)
-            and not self._timeout_reported
-        ):
+            return ""
+        if str(reply) == "DONE" and bool(self.runtime.state.timeout):
+            if self._timeout_reported:
+                return ""
             self._timeout_reported = True
             return self._render_timeout()
         return ""

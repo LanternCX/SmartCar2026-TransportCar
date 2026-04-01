@@ -3,9 +3,50 @@
 @file src/assistant/main.py
 """
 
-from assistant.app import AssistantRuntimeLoop, build_hw_bundle
-from assistant.script.calibrate_gyro import main as run_calibrate_gyro
-from assistant.script.pid_identify import main as run_pid_identify
+import os.path
+import sys
+import types
+
+if __package__ in ("", None):
+    _PACKAGE_NAME = "assistant"
+    _PACKAGE_PATH = os.path.dirname(__file__)
+    _package = sys.modules.get(_PACKAGE_NAME)
+    if _package is None:
+        _package = types.ModuleType(_PACKAGE_NAME)
+        _package.__path__ = [_PACKAGE_PATH]
+        sys.modules[_PACKAGE_NAME] = _package
+    __package__ = _PACKAGE_NAME
+
+
+def build_hw_bundle():
+    from .app import build_hw_bundle as _build_hw_bundle
+
+    return _build_hw_bundle()
+
+
+def __getattr__(name):
+    if name == "AssistantRuntimeLoop":
+        from .app import AssistantRuntimeLoop
+
+        return AssistantRuntimeLoop
+    raise AttributeError(name)
+
+
+def _build_runtime_loop_impl():
+    runtime_loop_class = getattr(sys.modules[__name__], "AssistantRuntimeLoop")
+    return runtime_loop_class(build_hw_bundle())
+
+
+def run_calibrate_gyro():
+    from .script.calibrate_gyro import main
+
+    return main()
+
+
+def run_pid_identify():
+    from .script.pid_identify import main
+
+    return main()
 
 
 def _read_button_state(pin_name):
@@ -28,19 +69,43 @@ def _read_now_ms():
     return int(time.time() * 1000)
 
 
+def _sleep_ms(delay_ms):
+    import time
+
+    sleep_ms = getattr(time, "sleep_ms", None)
+    if sleep_ms is not None:
+        sleep_ms(int(delay_ms))
+        return
+    time.sleep(float(delay_ms) / 1000.0)
+
+
+def _control_tick_ms():
+    from . import runtime_params
+
+    return int(runtime_params.CONTROL_TICK_MS)
+
+
 def _drive_loop(loop):
     """驱动运行循环
 
     @brief 正常运行分支持续推进主循环。
     """
 
+    tick_ms = _control_tick_ms()
+    next_tick_ms = None
     while True:
-        loop.step(_read_now_ms())
+        now_ms = _read_now_ms()
+        if next_tick_ms is not None:
+            remaining_ms = int(next_tick_ms) - int(now_ms)
+            if remaining_ms > 0:
+                _sleep_ms(remaining_ms)
+                continue
+        loop.step(now_ms)
+        next_tick_ms = int(now_ms) + tick_ms
 
 
 def _build_runtime_loop():
-    hw_bundle = build_hw_bundle()
-    return AssistantRuntimeLoop(hw_bundle)
+    return _build_runtime_loop_impl()
 
 
 def _start_runtime():
@@ -64,5 +129,5 @@ def main():
     _start_runtime()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and __spec__ is None:
     main()

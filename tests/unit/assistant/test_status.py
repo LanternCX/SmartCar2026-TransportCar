@@ -7,7 +7,13 @@ def test_assistant_state_reply_keeps_minimal_fields() -> None:
 
     line = render_state(state)
 
-    assert line == "state=1,state_label=BUSY,last_seq=7,follow_active=1"
+    assert line.startswith("state=1,state_label=BUSY,last_seq=7,follow_active=1,")
+    assert "heading_deg=" in line
+    assert "target_heading_deg=" in line
+    assert "yaw_rate_deg_s=" in line
+    assert "odom_x=" in line
+    assert "odom_y=" in line
+    assert "base_ok=0" in line
 
 
 def test_assistant_state_contract_keeps_last_seq_and_state_label() -> None:
@@ -50,4 +56,10 @@ def test_assistant_state_reply_only_uses_supported_state_labels() -> None:
 
     line = render_state(state)
 
-    assert line == "state=1,state_label=TIMEOUT,last_seq=4,follow_active=0"
+    assert line.startswith("state=1,state_label=TIMEOUT,last_seq=4,follow_active=0,")
+    assert "heading_deg=" in line
+    assert "target_heading_deg=" in line
+    assert "yaw_rate_deg_s=" in line
+    assert "odom_x=" in line
+    assert "odom_y=" in line
+    assert "base_ok=0" in line

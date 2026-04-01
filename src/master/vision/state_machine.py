@@ -3,7 +3,7 @@
 @file src/master/vision/state_machine.py
 """
 
-import master.runtime_params as runtime_params
+from .. import runtime_params
 
 
 class MarkerStateMachine:
@@ -11,6 +11,7 @@ class MarkerStateMachine:
         if deadzone_px is None:
             deadzone_px = runtime_params.FOLLOW_CENTER_DEADZONE_PX
         self.deadzone_px = float(deadzone_px)
+        self.phase = "MARKER_MISSING"
 
     def step(
         self,
@@ -24,13 +25,16 @@ class MarkerStateMachine:
         if has_target is None:
             has_target = int(valid) == 1
         if not has_target:
-            return {"phase": "MARKER_MISSING", "hold": True}
+            self.phase = "MARKER_MISSING"
+            return {"phase": self.phase, "hold": True}
         if (
             abs(float(err_x)) <= self.deadzone_px
             and abs(float(err_y)) <= self.deadzone_px
         ):
-            return {"phase": "CENTER_HOLD", "hold": True}
-        return {"phase": "TRACKING", "hold": False}
+            self.phase = "CENTER_HOLD"
+            return {"phase": self.phase, "hold": True}
+        self.phase = "TRACKING"
+        return {"phase": self.phase, "hold": False}
 
 
 VisionStateMachine = MarkerStateMachine

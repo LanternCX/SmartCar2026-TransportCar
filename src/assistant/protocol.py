@@ -34,6 +34,24 @@ class Command:
         self.dtheta = float(dtheta)
 
 
+def render_state_line(state):
+    return (
+        "state=1,state_label=%s,last_seq=%d,follow_active=%d,"
+        "heading_deg=%.3f,target_heading_deg=%.3f,yaw_rate_deg_s=%.3f,"
+        "odom_x=%.4f,odom_y=%.4f,base_ok=%d"
+    ) % (
+        str(state.state_label),
+        int(state.last_seq),
+        1 if state.follow_active else 0,
+        float(state.heading_deg),
+        float(state.target_heading_deg),
+        float(state.yaw_rate_deg_s),
+        float(state.odom[0]),
+        float(state.odom[1]),
+        1 if state.base_ok else 0,
+    )
+
+
 def _split_fields(line):
     """标准化命令行
 

@@ -5,8 +5,8 @@
 
 import time
 
-import master.runtime_params as runtime_params
-from master.vision.parser import parse_vision_line
+from .. import runtime_params
+from .parser import parse_vision_line
 
 FOLLOW_ACTIVE_UART = "uart6"
 FOLLOW_RESERVED_UARTS = ("uart8",)
@@ -68,6 +68,8 @@ class VisionIngress:
             "fresh": 0,
             "stale": 0,
             "has_new_input": 0,
+            "target_age_ms": self.timeout_ms + 1,
+            "control_valid": 0,
             "err_x": 0.0,
             "err_y": 0.0,
         }
@@ -81,9 +83,13 @@ class VisionIngress:
         if is_valid:
             age_ms = int(now_ms) - int(marked.get("last_seen_ms", now_ms))
             is_fresh = age_ms <= self.timeout_ms
+        else:
+            age_ms = self.timeout_ms + 1
         marked["fresh"] = 1 if is_fresh else 0
         marked["stale"] = 0 if is_fresh else 1
         marked["has_new_input"] = 1 if has_new_input else 0
+        marked["target_age_ms"] = int(age_ms)
+        marked["control_valid"] = 1 if is_valid and is_fresh else 0
         return marked
 
     def prepare_observation(self, observation=None, now_ms=None):

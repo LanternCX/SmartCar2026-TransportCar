@@ -1,3 +1,55 @@
+import importlib.util
+from pathlib import Path
+import sys
+
+import pytest
+
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[3] / "src" / "assistant"
+SRC_ROOT = RUNTIME_ROOT.parent
+RUNTIME_MODULES = {
+    "app",
+    "config",
+    "main",
+    "motion_runtime",
+    "protocol",
+    "runtime_params",
+    "safety",
+    "status",
+}
+RUNTIME_PACKAGES = {"ctrl", "hw", "script", "stability"}
+
+
+def _clear_assistant_runtime_modules() -> None:
+    for module_name in list(sys.modules):
+        if module_name == "assistant" or module_name.startswith("assistant."):
+            sys.modules.pop(module_name, None)
+            continue
+        if module_name in RUNTIME_MODULES:
+            sys.modules.pop(module_name, None)
+            continue
+        if module_name.split(".", 1)[0] in RUNTIME_PACKAGES:
+            sys.modules.pop(module_name, None)
+
+
+def _load_runtime_file(module_name: str, file_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, RUNTIME_ROOT / file_name)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _prepare_assistant_runtime_imports(monkeypatch):
+    _clear_assistant_runtime_modules()
+    monkeypatch.syspath_prepend(str(SRC_ROOT))
+    monkeypatch.syspath_prepend(str(RUNTIME_ROOT))
+    yield
+    _clear_assistant_runtime_modules()
+
+
 def _build_fake_hw_bundle() -> dict:
     class FakeMotor:
         def __init__(self) -> None:
@@ -10,11 +62,14 @@ def _build_fake_hw_bundle() -> dict:
             self.last_duty = 0
 
     return {
+        "uart": {"uart3": object()},
         "motors": {
             "m": FakeMotor(),
             "l": FakeMotor(),
             "r": FakeMotor(),
-        }
+        },
+        "encoders": {"rear_left": object()},
+        "imu": object(),
     }
 
 
@@ -71,244 +126,122 @@ def test_assistant_read_now_ms_propagates_import_error(monkeypatch) -> None:
         _read_now_ms()
 
 
-def test_assistant_main_rejects_device_root_execution_without_package_path(
-    monkeypatch,
-) -> None:
-    import importlib.util
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant" or module_name.startswith("assistant."):
-            sys.modules.pop(module_name, None)
-
-    monkeypatch.syspath_prepend(str(runtime_root))
+def test_assistant_main_supports_device_root_execution(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,
         "path",
         [
             entry
             for entry in sys.path
-            if Path(entry or ".").resolve() != src_root.resolve()
+            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
         ],
     )
-    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
 
-    with pytest.raises(ModuleNotFoundError, match="assistant") as exc_info:
-        spec.loader.exec_module(module)
+    module = _load_runtime_file("__main__", "main.py")
 
-    assert exc_info.value.name == "assistant"
+    assert callable(module.main)
+    assert callable(module.build_hw_bundle)
 
 
-def test_assistant_main_does_not_swallow_real_package_import_error(monkeypatch) -> None:
-    import builtins
-    import importlib.util
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant" or module_name.startswith("assistant."):
-            sys.modules.pop(module_name, None)
-
-    monkeypatch.syspath_prepend(str(runtime_root))
+def test_assistant_app_supports_device_root_import(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,
         "path",
         [
             entry
             for entry in sys.path
-            if Path(entry or ".").resolve() != src_root.resolve()
+            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
         ],
     )
 
-    original_import = builtins.__import__
+    module = _load_runtime_file("app", "app.py")
 
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "assistant.app":
-            raise ModuleNotFoundError("缺少依赖", name="missing_dependency")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-
-    with pytest.raises(ModuleNotFoundError, match="缺少依赖") as exc_info:
-        spec.loader.exec_module(module)
-
-    assert exc_info.value.name == "missing_dependency"
+    assert callable(module.build_hw_bundle)
+    assert module.AssistantRuntimeLoop is not None
 
 
-def test_assistant_main_does_not_fallback_without_module_not_found_error_name(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
+def test_assistant_build_hw_bundle_keeps_legacy_encoder_mapping() -> None:
+    from assistant.app import build_hw_bundle
 
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "main.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError("No module named 'assistant'")
-        return original_import(name, globals, locals, fromlist, level)
-
-    builtins_dict = dict(vars(builtins))
-    builtins_dict.pop("ModuleNotFoundError", None)
-    builtins_dict["__import__"] = _import
-    module_globals = {
-        "__builtins__": builtins_dict,
-        "__file__": str(runtime_root / "main.py"),
-        "__name__": "__main__",
+    hw_bundle = build_hw_bundle()
+    encoder_pins = {
+        name: (port.phase_a_pin, port.phase_b_pin, port.invert)
+        for name, port in hw_bundle["encoders"].items()
     }
 
-    with pytest.raises(ImportError, match="No module named 'assistant'"):
-        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
-
-
-def test_assistant_main_does_not_fallback_when_import_error_names_full_module(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "main.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError(
-                "No module named 'assistant.app'",
-                name="assistant.app",
-            )
-        return original_import(name, globals, locals, fromlist, level)
-
-    module_globals = {
-        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
-        "__file__": str(runtime_root / "main.py"),
-        "__name__": "__main__",
+    assert encoder_pins == {
+        "m": ("D15", "D16", True),
+        "l": ("C0", "C1", True),
+        "r": ("C2", "C3", True),
     }
 
-    with pytest.raises(
-        ImportError, match="No module named 'assistant.app'"
-    ) as exc_info:
-        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
 
-    assert exc_info.value.name == "assistant.app"
+def test_assistant_build_hw_bundle_supports_package_only_import(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != RUNTIME_ROOT.resolve()
+        ],
+    )
+
+    from assistant.app import build_hw_bundle
+
+    hw_bundle = build_hw_bundle()
+
+    assert set(hw_bundle["uart"]) == {"uart3"}
 
 
-def test_assistant_app_does_not_swallow_real_package_import_error(monkeypatch) -> None:
+def test_assistant_ctrl_chassis_supports_package_import(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != RUNTIME_ROOT.resolve()
+        ],
+    )
+
+    import assistant.ctrl.chassis as module
+
+    assert module.ChassisRuntime is not None
+
+
+def test_assistant_runtime_loop_uses_same_full_hw_bundle_owner() -> None:
+    from assistant.app import AssistantRuntimeLoop
+
+    hw_bundle = {
+        "uart": {"uart3": object()},
+        "motors": {"m": object()},
+        "encoders": {"rear_left": object()},
+        "imu": object(),
+    }
+
+    loop = AssistantRuntimeLoop(hw_bundle)
+
+    assert loop.hw_bundle is hw_bundle
+    assert loop.app.hw_bundle is hw_bundle
+
+
+def test_assistant_main_import_does_not_load_script_modules(monkeypatch) -> None:
     import builtins
     import importlib
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    monkeypatch.syspath_prepend(str(runtime_root))
-    monkeypatch.syspath_prepend(str(src_root))
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant.app" or module_name.startswith("assistant.app."):
-            sys.modules.pop(module_name, None)
 
     original_import = builtins.__import__
 
     def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "assistant.protocol":
-            raise ModuleNotFoundError("缺少协议依赖", name="missing_dependency")
+        if name == "script.calibrate_gyro" or name == "script.pid_identify":
+            raise AssertionError("主机侧导入 main 时不应拉起脚本模块")
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _import)
 
-    with pytest.raises(ModuleNotFoundError, match="缺少协议依赖") as exc_info:
-        importlib.import_module("assistant.app")
+    module = importlib.import_module("assistant.main")
 
-    assert exc_info.value.name == "missing_dependency"
-
-
-def test_assistant_app_does_not_fallback_without_module_not_found_error_name(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "app.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError("No module named 'assistant'")
-        return original_import(name, globals, locals, fromlist, level)
-
-    builtins_dict = dict(vars(builtins))
-    builtins_dict.pop("ModuleNotFoundError", None)
-    builtins_dict["__import__"] = _import
-    module_globals = {
-        "__builtins__": builtins_dict,
-        "__file__": str(runtime_root / "app.py"),
-        "__name__": "app",
-    }
-
-    with pytest.raises(ImportError, match="No module named 'assistant'"):
-        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
-
-
-def test_assistant_app_does_not_fallback_when_import_error_names_full_module(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "app.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError(
-                "No module named 'assistant.runtime_params'",
-                name="assistant.runtime_params",
-            )
-        return original_import(name, globals, locals, fromlist, level)
-
-    module_globals = {
-        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
-        "__file__": str(runtime_root / "app.py"),
-        "__name__": "app",
-    }
-
-    with pytest.raises(
-        ImportError, match="No module named 'assistant.runtime_params'"
-    ) as exc_info:
-        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
-
-    assert exc_info.value.name == "assistant.runtime_params"
+    assert callable(module.main)
 
 
 def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> None:
@@ -379,6 +312,34 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     assert isinstance(captured["drive_loop"], DummyLoop)
 
 
+def test_assistant_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
+    import pytest
+
+    from assistant.main import _drive_loop
+
+    step_calls = []
+    sleep_calls = []
+    now_values = iter((200, 200, 203, 205, 205))
+
+    class DummyLoop:
+        def step(self, now_ms):
+            step_calls.append(now_ms)
+            if len(step_calls) == 2:
+                raise SystemExit(0)
+
+    monkeypatch.setattr("assistant.main._read_now_ms", lambda: next(now_values))
+    monkeypatch.setattr(
+        "assistant.main._sleep_ms", lambda delay_ms: sleep_calls.append(delay_ms)
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _drive_loop(DummyLoop())
+
+    assert exc_info.value.code == 0
+    assert step_calls == [200, 205]
+    assert sleep_calls == [5, 2]
+
+
 def test_assistant_app_handles_ping_and_state_query() -> None:
     from assistant.app import AssistantApp
 
@@ -433,7 +394,10 @@ def test_assistant_app_reports_timeout_only_once_until_state_query() -> None:
 
     assert first_timeout_reply == "TIMEOUT,last_seq=8"
     assert repeated_timeout_reply == ""
-    assert state_reply == "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0"
+    assert state_reply.startswith(
+        "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0,"
+    )
+    assert "base_ok=0" in state_reply
 
 
 def test_assistant_app_returns_err_for_malformed_or_unknown_packets() -> None:

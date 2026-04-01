@@ -17,6 +17,9 @@ class AssistantState:
         self.last_seq = 0
         self.odom = [0.0, 0.0]
         self.heading_deg = 0.0
+        self.target_heading_deg = 0.0
+        self.yaw_rate_deg_s = 0.0
+        self.base_ok = False
         self.velocity_command = (0.0, 0.0, 0.0)
         self.timeout = False
         self.last_error = ""
@@ -48,8 +51,7 @@ def render_state(state):
     @return str
     """
 
-    return "state=1,state_label=%s,last_seq=%d,follow_active=%d" % (
-        _normalize_state_label(state),
-        int(state.last_seq),
-        1 if state.follow_active else 0,
-    )
+    state.state_label = _normalize_state_label(state)
+    from .protocol import render_state_line
+
+    return render_state_line(state)
