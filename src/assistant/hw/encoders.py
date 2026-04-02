@@ -44,16 +44,7 @@ class EncoderPort:
         return self.last_ticks
 
     def read_and_clear(self):
-        ticks = self.read()
-        self.clear()
-        return ticks
-
-    def clear(self):
-        device = self.ensure_device()
-        clearer = getattr(device, "clear", None)
-        if clearer is None:
-            raise RuntimeError("编码器硬件接口缺少 clear()")
-        clearer()
+        return self.read()
 
 
 def build_encoder_bundle():

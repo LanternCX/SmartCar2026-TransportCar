@@ -61,9 +61,7 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
     class DummyApp:
         def __init__(self, hw_bundle):
             captured["app_bundle"] = hw_bundle
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=hw_bundle)
-            )
+            self.runtime_state = types.SimpleNamespace(hw_bundle=hw_bundle)
 
         def handle_line(self, line, now_ms):
             return ""
@@ -82,7 +80,7 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
     loop = AssistantRuntimeLoop(hw_bundle)
 
     assert captured["app_bundle"] is hw_bundle
-    assert loop.app.runtime.core.hw_bundle is hw_bundle
+    assert loop.app.runtime_state.hw_bundle is hw_bundle
 
 
 def test_assistant_runtime_loop_rejects_mismatched_app_and_hw_bundle() -> None:
@@ -128,9 +126,7 @@ def test_assistant_runtime_loop_rejects_runtime_owner_drift_under_same_app_bundl
     class DummyApp:
         def __init__(self, app_hw_bundle, runtime_hw_bundle):
             self.hw_bundle = app_hw_bundle
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
-            )
+            self.runtime_state = types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
 
         def handle_line(self, line, now_ms):
             return ""

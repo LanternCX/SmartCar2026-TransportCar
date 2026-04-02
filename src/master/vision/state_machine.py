@@ -3,7 +3,12 @@
 @file src/master/vision/state_machine.py
 """
 
-from .. import runtime_params
+_package_name = str(globals().get("__package__", ""))
+
+if "." in _package_name:
+    from .. import runtime_params
+else:
+    import runtime_params
 
 
 class MarkerStateMachine:

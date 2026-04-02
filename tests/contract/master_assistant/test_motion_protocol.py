@@ -34,6 +34,7 @@ def test_master_assistant_invalid_target_contract() -> None:
 def test_assistant_state_reply_keeps_minimal_status_payload() -> None:
     from assistant.state import AssistantState
     from assistant.status import render_state
+    from master.protocol import parse_assistant_state
 
     state = AssistantState()
     state.follow_active = True
@@ -47,3 +48,17 @@ def test_assistant_state_reply_keeps_minimal_status_payload() -> None:
         "heading_deg=0.000,target_heading_deg=0.000,yaw_rate_deg_s=0.000,"
         "odom_x=0.0000,odom_y=0.0000,base_ok=0"
     )
+    payload = parse_assistant_state(line)
+
+    assert payload is not None
+    assert sorted(payload.keys()) == [
+        "base_ok",
+        "follow_active",
+        "heading_deg",
+        "last_seq",
+        "odom_x",
+        "odom_y",
+        "state_label",
+        "target_heading_deg",
+        "yaw_rate_deg_s",
+    ]

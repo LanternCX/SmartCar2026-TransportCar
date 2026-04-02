@@ -25,12 +25,12 @@ def _normalize_state_label(state):
 def render_state(state):
     """序列化辅车最小状态回包
 
-    @brief 这里只负责最小状态文本, 不持有长期状态 owner
+    @brief 这里只读取状态对象并生成对外回包, 不回写运行时内部状态
     @param state 当前辅车运行时状态
     @return str
     """
 
-    state.state_label = _normalize_state_label(state)
     from .protocol import render_state_line
 
-    return render_state_line(state)
+    # 对外只暴露协议约定字段, 避免运行时内部标签直接外溢
+    return render_state_line(state, state_label=_normalize_state_label(state))

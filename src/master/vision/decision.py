@@ -3,8 +3,14 @@
 @file src/master/vision/decision.py
 """
 
-from .. import runtime_params
-from ..protocol import build_follow_command
+_package_name = str(globals().get("__package__", ""))
+
+if "." in _package_name:
+    from .. import runtime_params
+    from ..protocol import build_follow_command
+else:
+    import runtime_params
+    from protocol import build_follow_command
 
 
 class Decision:

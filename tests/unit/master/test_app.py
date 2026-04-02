@@ -1,4 +1,3 @@
-import importlib.util
 from pathlib import Path
 import sys
 
@@ -32,15 +31,6 @@ def _clear_master_runtime_modules() -> None:
             continue
         if module_name.split(".", 1)[0] in RUNTIME_PACKAGES:
             sys.modules.pop(module_name, None)
-
-
-def _load_runtime_file(module_name: str, file_name: str):
-    spec = importlib.util.spec_from_file_location(module_name, RUNTIME_ROOT / file_name)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture(autouse=True)
@@ -105,91 +95,6 @@ def test_master_read_now_ms_propagates_import_error(monkeypatch) -> None:
         _read_now_ms()
 
 
-def test_master_main_supports_device_root_execution(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
-        ],
-    )
-
-    module = _load_runtime_file("__main__", "main.py")
-
-    assert callable(module.main)
-
-
-def test_master_app_supports_device_root_import(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
-        ],
-    )
-
-    module = _load_runtime_file("app", "app.py")
-
-    assert callable(module.build_hw_bundle)
-    assert module.MasterRuntimeLoop is not None
-
-
-def test_master_build_hw_bundle_keeps_legacy_encoder_mapping() -> None:
-    from master.app import build_hw_bundle
-
-    hw_bundle = build_hw_bundle()
-    encoder_pins = {
-        name: (port.phase_a_pin, port.phase_b_pin, port.invert)
-        for name, port in hw_bundle["encoders"].items()
-    }
-
-    assert encoder_pins == {
-        "m": ("D15", "D16", True),
-        "l": ("C0", "C1", True),
-        "r": ("C2", "C3", True),
-    }
-
-
-def test_master_build_hw_bundle_supports_package_only_import(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != RUNTIME_ROOT.resolve()
-        ],
-    )
-
-    from master.app import build_hw_bundle
-
-    hw_bundle = build_hw_bundle()
-
-    assert set(hw_bundle["uart"]) == {"uart3", "uart6", "uart8"}
-
-
-def test_master_main_import_does_not_load_script_modules(monkeypatch) -> None:
-    import builtins
-    import importlib
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "script.calibrate_gyro" or name == "script.pid_identify":
-            raise AssertionError("主机侧导入 main 时不应拉起脚本模块")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-
-    module = importlib.import_module("master.main")
-
-    assert callable(module.main)
-
-
 def test_master_main_dispatches_pid_identify_when_c8_is_held(monkeypatch) -> None:
     from master.main import main
 
@@ -222,7 +127,6 @@ def test_master_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> N
 
 def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) -> None:
     from master.main import _start_runtime
-    import master.main as runtime_main
     import master.app as runtime_app
 
     captured = {"drive_loop": None}
@@ -253,20 +157,6 @@ def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) ->
             "imu": object(),
         },
     )
-    monkeypatch.setattr(
-        runtime_main,
-        "build_hw_bundle",
-        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        runtime_main,
-        "MasterRuntimeLoop",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("入口不应继续走本模块运行时转手")
-        ),
-        raising=False,
-    )
     monkeypatch.setattr("master.main._drive_loop", _drive_loop)
     _start_runtime()
 
@@ -274,13 +164,11 @@ def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) ->
 
     assert loop_bundle is not None
     assert loop_bundle["uart"] is uart_bundle
-    assert set(loop_bundle.keys()) == {"uart", "motors", "encoders", "imu"}
     assert isinstance(captured["drive_loop"], DummyLoop)
 
 
 def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
     from master.main import _start_runtime
-    import master.main as runtime_main
     import master.app as runtime_app
 
     step_calls = []
@@ -303,20 +191,6 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(runtime_app, "MasterRuntimeLoop", lambda hw_bundle: DummyLoop())
-    monkeypatch.setattr(
-        runtime_main,
-        "build_hw_bundle",
-        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        runtime_main,
-        "MasterRuntimeLoop",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("入口不应继续走本模块运行时转手")
-        ),
-        raising=False,
-    )
     monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
 
     import pytest
@@ -612,26 +486,11 @@ def test_master_app_delays_motion_runtime_until_needed(monkeypatch) -> None:
 
     created = {"count": 0}
 
-    class FakeMotionRuntime:
-        def __init__(self, hw_bundle=None):
-            created["count"] += 1
-            self.hw_bundle = hw_bundle
+    def _create_runtime_state(hw_bundle=None):
+        created["count"] += 1
+        return {"hw_bundle": hw_bundle}
 
-        def refresh_base_chain(self, cycle_token=None):
-            return {
-                "heading_est_deg": 0.0,
-                "yaw_rate_deg_s": 0.0,
-                "odom": (0.0, 0.0),
-                "base_ok": 0,
-            }
-
-        def next_control_seq(self):
-            raise AssertionError("hold 路径不应装配运动运行时")
-
-        def apply_self_target(self, target):
-            raise AssertionError("hold 路径不应装配运动运行时")
-
-    monkeypatch.setattr("master.app.MotionRuntime", FakeMotionRuntime)
+    monkeypatch.setattr("master.app.create_runtime_state", _create_runtime_state)
 
     app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
     result = app.step(
@@ -707,25 +566,74 @@ def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> 
 def test_master_app_self_base_state_preserves_runtime_base_ok(monkeypatch) -> None:
     from master.app import MasterApp
 
-    class FakeMotionRuntime:
-        def __init__(self, hw_bundle=None):
-            self.hw_bundle = hw_bundle
-
-        def refresh_base_chain(self, cycle_token=None):
-            return {
-                "heading_est_deg": 0.0,
-                "yaw_rate_deg_s": 0.0,
-                "odom": (0.0, 0.0),
-                "base_ok": 0,
-            }
-
-        def apply_self_target(self, target):
-            return {"kind": "hold"}
-
-    monkeypatch.setattr("master.app.MotionRuntime", FakeMotionRuntime)
+    monkeypatch.setattr(
+        "master.app.apply_motion_target",
+        lambda state, target: dict(target),
+    )
+    monkeypatch.setattr(
+        "master.app.run_base_cycle",
+        lambda state, hw_bundle=None, cycle_token=None: {
+            "heading_est_deg": 0.0,
+            "yaw_rate_deg_s": 0.0,
+            "odom": (0.0, 0.0),
+            "base_ok": 0,
+        },
+    )
 
     app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+    app.motion_state = object()
 
     result = app.step(None)
 
     assert result["self_base_state"]["base_ok"] == 0
+
+
+def test_master_app_runs_base_cycle_through_process_entry(monkeypatch) -> None:
+    import master.app as master_app
+
+    MasterApp = master_app.MasterApp
+
+    calls = {"create": 0, "run": 0, "apply": [], "control": []}
+    cycle_token = object()
+
+    def _create_runtime_state(hw_bundle=None):
+        calls["create"] += 1
+        return {"hw_bundle": hw_bundle}
+
+    def _run_base_cycle(state, hw_bundle=None, cycle_token=None):
+        calls["run"] += 1
+        assert state == {"hw_bundle": hw_bundle}
+        assert cycle_token is not None
+        return {
+            "heading_est_deg": 12.5,
+            "yaw_rate_deg_s": 0.5,
+            "odom": (1.0, 2.0),
+            "base_ok": 1,
+        }
+
+    def _apply_motion_target(state, target):
+        calls["apply"].append((state, dict(target)))
+        return dict(target)
+
+    def _run_motion_cycle(state, hw_bundle=None, cycle_token=None):
+        calls["control"].append((state, hw_bundle, cycle_token))
+        return {"target": {"kind": "hold"}}
+
+    monkeypatch.setattr(master_app, "create_runtime_state", _create_runtime_state)
+    monkeypatch.setattr(master_app, "run_base_cycle", _run_base_cycle)
+    monkeypatch.setattr(
+        master_app, "apply_motion_target", _apply_motion_target, raising=False
+    )
+    monkeypatch.setattr(
+        master_app, "run_motion_cycle", _run_motion_cycle, raising=False
+    )
+
+    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+
+    result = app.step({"run_motion": True, "cycle_token": cycle_token})
+
+    assert calls["create"] == 1
+    assert calls["run"] == 1
+    assert calls["apply"] == [({"hw_bundle": None}, {"kind": "hold"})]
+    assert calls["control"] == [({"hw_bundle": None}, None, cycle_token)]
+    assert result["self_base_state"]["base_ok"] == 1

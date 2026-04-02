@@ -5,8 +5,14 @@
 
 import time
 
-from .. import runtime_params
-from .parser import parse_vision_line
+_package_name = str(globals().get("__package__", ""))
+
+if "." in _package_name:
+    from .. import runtime_params
+    from .parser import parse_vision_line
+else:
+    import runtime_params
+    from vision.parser import parse_vision_line
 
 FOLLOW_ACTIVE_UART = "uart6"
 FOLLOW_RESERVED_UARTS = ("uart8",)

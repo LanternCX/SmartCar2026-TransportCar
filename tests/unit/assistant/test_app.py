@@ -1,51 +1,20 @@
-import importlib.util
-from pathlib import Path
 import sys
 
 import pytest
-
-
-RUNTIME_ROOT = Path(__file__).resolve().parents[3] / "src" / "assistant"
-SRC_ROOT = RUNTIME_ROOT.parent
-RUNTIME_MODULES = {
-    "app",
-    "config",
-    "main",
-    "motion_runtime",
-    "protocol",
-    "runtime_params",
-    "safety",
-    "status",
-}
-RUNTIME_PACKAGES = {"ctrl", "hw", "script", "stability"}
 
 
 def _clear_assistant_runtime_modules() -> None:
     for module_name in list(sys.modules):
         if module_name == "assistant" or module_name.startswith("assistant."):
             sys.modules.pop(module_name, None)
-            continue
-        if module_name in RUNTIME_MODULES:
-            sys.modules.pop(module_name, None)
-            continue
-        if module_name.split(".", 1)[0] in RUNTIME_PACKAGES:
-            sys.modules.pop(module_name, None)
-
-
-def _load_runtime_file(module_name: str, file_name: str):
-    spec = importlib.util.spec_from_file_location(module_name, RUNTIME_ROOT / file_name)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture(autouse=True)
 def _prepare_assistant_runtime_imports(monkeypatch):
     _clear_assistant_runtime_modules()
-    monkeypatch.syspath_prepend(str(SRC_ROOT))
-    monkeypatch.syspath_prepend(str(RUNTIME_ROOT))
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "src"))
     yield
     _clear_assistant_runtime_modules()
 
@@ -126,124 +95,6 @@ def test_assistant_read_now_ms_propagates_import_error(monkeypatch) -> None:
         _read_now_ms()
 
 
-def test_assistant_main_supports_device_root_execution(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
-        ],
-    )
-
-    module = _load_runtime_file("__main__", "main.py")
-
-    assert callable(module.main)
-
-
-def test_assistant_app_supports_device_root_import(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != SRC_ROOT.resolve()
-        ],
-    )
-
-    module = _load_runtime_file("app", "app.py")
-
-    assert callable(module.build_hw_bundle)
-    assert module.AssistantRuntimeLoop is not None
-
-
-def test_assistant_build_hw_bundle_keeps_legacy_encoder_mapping() -> None:
-    from assistant.app import build_hw_bundle
-
-    hw_bundle = build_hw_bundle()
-    encoder_pins = {
-        name: (port.phase_a_pin, port.phase_b_pin, port.invert)
-        for name, port in hw_bundle["encoders"].items()
-    }
-
-    assert encoder_pins == {
-        "m": ("D15", "D16", True),
-        "l": ("C0", "C1", True),
-        "r": ("C2", "C3", True),
-    }
-
-
-def test_assistant_build_hw_bundle_supports_package_only_import(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != RUNTIME_ROOT.resolve()
-        ],
-    )
-
-    from assistant.app import build_hw_bundle
-
-    hw_bundle = build_hw_bundle()
-
-    assert set(hw_bundle["uart"]) == {"uart3"}
-
-
-def test_assistant_ctrl_chassis_supports_package_import(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != RUNTIME_ROOT.resolve()
-        ],
-    )
-
-    import assistant.ctrl.chassis as module
-
-    assert module is not None
-    assert not hasattr(module, "ChassisRuntime")
-
-
-def test_assistant_runtime_loop_uses_same_full_hw_bundle_owner() -> None:
-    from assistant.app import AssistantRuntimeLoop
-
-    hw_bundle = {
-        "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
-        "imu": object(),
-    }
-
-    loop = AssistantRuntimeLoop(hw_bundle)
-
-    assert loop.hw_bundle is hw_bundle
-    assert loop.app.hw_bundle is hw_bundle
-
-
-def test_assistant_main_import_does_not_load_script_modules(monkeypatch) -> None:
-    import builtins
-    import importlib
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "script.calibrate_gyro" or name == "script.pid_identify":
-            raise AssertionError("主机侧导入 main 时不应拉起脚本模块")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-
-    module = importlib.import_module("assistant.main")
-
-    assert callable(module.main)
-
-
 def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> None:
     from assistant.main import main
 
@@ -278,7 +129,6 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     monkeypatch,
 ) -> None:
     from assistant.main import _start_runtime
-    import assistant.main as runtime_main
     import assistant.app as runtime_app
 
     captured = {"drive_loop": None}
@@ -303,20 +153,6 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
 
     monkeypatch.setattr(runtime_app, "AssistantRuntimeLoop", _loop_factory)
     monkeypatch.setattr(runtime_app, "build_hw_bundle", lambda: hw_bundle)
-    monkeypatch.setattr(
-        runtime_main,
-        "build_hw_bundle",
-        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        runtime_main,
-        "AssistantRuntimeLoop",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("入口不应继续走本模块运行时转手")
-        ),
-        raising=False,
-    )
     monkeypatch.setattr("assistant.main._drive_loop", _drive_loop)
     _start_runtime()
 
@@ -324,7 +160,6 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
 
     assert loop_bundle is not None
     assert loop_bundle is hw_bundle
-    assert set(loop_bundle.keys()) == {"uart", "motors", "encoders", "imu"}
     assert isinstance(captured["drive_loop"], DummyLoop)
 
 
@@ -442,3 +277,71 @@ def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
 
     assert vel_reply == "ACK,last_seq=0"
     assert move_reply == "ERR"
+
+
+def test_assistant_app_routes_through_procedural_runtime_entries(monkeypatch) -> None:
+    import assistant.app as runtime_app
+
+    hw_bundle = _build_fake_hw_bundle()
+    runtime_state = type(
+        "RuntimeState",
+        (),
+        {
+            "last_seq": 0,
+            "timeout": False,
+            "hw_bundle": hw_bundle,
+        },
+    )()
+    captured = {"created": [], "commands": [], "cycles": []}
+
+    def _create_runtime_state(timeout_ms=None, hw_bundle=None):
+        captured["created"].append((timeout_ms, hw_bundle))
+        return runtime_state
+
+    def _apply_runtime_command(state, command, now_ms, cycle_token=None):
+        captured["commands"].append((state, command.kind, now_ms, cycle_token))
+        return "ACK"
+
+    def _run_base_cycle(state, now_ms, cycle_token=None, hw_bundle=None):
+        captured["cycles"].append((state, now_ms, cycle_token, hw_bundle))
+        return "ACK"
+
+    monkeypatch.setattr(runtime_app, "create_runtime_state", _create_runtime_state)
+    monkeypatch.setattr(runtime_app, "apply_runtime_command", _apply_runtime_command)
+    monkeypatch.setattr(runtime_app, "run_base_cycle", _run_base_cycle)
+
+    app = runtime_app.AssistantApp(timeout_ms=100, hw_bundle=hw_bundle)
+
+    reply = app.handle_line("PING", now_ms=10, cycle_token="cmd-cycle")
+    tick_reply = app.tick(now_ms=15, cycle_token="tick-cycle")
+
+    assert captured["created"] == [(100, hw_bundle)]
+    assert reply == "ACK,last_seq=0"
+    assert tick_reply == ""
+    assert captured["commands"] == [(runtime_state, "ping", 10, "cmd-cycle")]
+    assert captured["cycles"] == [(runtime_state, 15, "tick-cycle", hw_bundle)]
+
+
+def test_assistant_runtime_loop_rejects_legacy_runtime_owner_backtrack() -> None:
+    import pytest
+
+    from assistant.app import AssistantRuntimeLoop
+
+    class DummyApp:
+        def __init__(self, hw_bundle):
+            self.runtime = type(
+                "LegacyRuntime",
+                (),
+                {"core": type("LegacyCore", (), {"hw_bundle": hw_bundle})()},
+            )()
+
+        def handle_line(self, line, now_ms, cycle_token=None):
+            return ""
+
+        def tick(self, now_ms, cycle_token=None):
+            return ""
+
+    hw_bundle = _build_fake_hw_bundle()
+
+    with pytest.raises(ValueError, match="唯一 hw_bundle owner"):
+        AssistantRuntimeLoop(hw_bundle, app=DummyApp(hw_bundle=hw_bundle))

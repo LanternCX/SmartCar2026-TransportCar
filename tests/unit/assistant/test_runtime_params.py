@@ -77,13 +77,18 @@ def test_assistant_runtime_uses_runtime_param_follow_timeout() -> None:
 
 def test_assistant_runtime_default_chassis_timeout_reads_runtime_params() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.motion_runtime import MotionRuntime
+    from assistant.motion_runtime import (
+        apply_runtime_command,
+        create_runtime_state,
+        run_base_cycle,
+    )
 
     old_timeout = runtime_params.FOLLOW_TIMEOUT_MS
     runtime_params.FOLLOW_TIMEOUT_MS = 10
     try:
-        runtime = MotionRuntime()
-        runtime.apply_command(
+        state = create_runtime_state()
+        apply_runtime_command(
+            state,
             type(
                 "Cmd",
                 (),
@@ -91,35 +96,35 @@ def test_assistant_runtime_default_chassis_timeout_reads_runtime_params() -> Non
             )(),
             now_ms=0,
         )
-        reply = runtime.tick(now_ms=20)
+        reply = run_base_cycle(state, now_ms=20)
     finally:
         runtime_params.FOLLOW_TIMEOUT_MS = old_timeout
 
     assert reply == "DONE"
-    assert runtime.state.timeout is True
+    assert state.timeout is True
 
 
 def test_assistant_runtime_uses_runtime_param_output_limit() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.motion_runtime import MotionRuntime
+    from assistant.motion_runtime import apply_runtime_command, create_runtime_state
     from assistant.protocol import parse_command
 
     old_limit = runtime_params.FOLLOW_OUTPUT_LIMIT
     runtime_params.FOLLOW_OUTPUT_LIMIT = 123
     try:
-        runtime = MotionRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
-        runtime.apply_command(
-            parse_command("follow=1,seq=1,valid=1,dx=999.0,dy=0.0"), now_ms=0
+        state = create_runtime_state(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
+        apply_runtime_command(
+            state, parse_command("follow=1,seq=1,valid=1,dx=999.0,dy=0.0"), now_ms=0
         )
     finally:
         runtime_params.FOLLOW_OUTPUT_LIMIT = old_limit
 
-    assert runtime.state.velocity_command[0] <= 123
+    assert state.velocity_command[0] <= 123
 
 
 def test_assistant_runtime_reads_runtime_pid_and_filter_params() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.motion_runtime import MotionRuntime
+    from assistant.motion_runtime import create_runtime_state
 
     old_pid_map = runtime_params.PID_MAP
     old_window = runtime_params.SPEED_FILTER_WINDOW
@@ -130,14 +135,14 @@ def test_assistant_runtime_reads_runtime_pid_and_filter_params() -> None:
     runtime_params.SPEED_DIFF_MAX_DELTA = 1.5
     runtime_params.GYRO_LPF_ALPHA = 0.5
     try:
-        runtime = MotionRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
+        state = create_runtime_state(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
     finally:
         runtime_params.PID_MAP = old_pid_map
         runtime_params.SPEED_FILTER_WINDOW = old_window
         runtime_params.SPEED_DIFF_MAX_DELTA = old_diff
         runtime_params.GYRO_LPF_ALPHA = old_alpha
 
-    assert runtime.pid_map == {"m": (1, 2, 3), "l": (4, 5, 6), "r": (7, 8, 9)}
-    assert runtime.speed_filter_window == 9
-    assert runtime.speed_diff_max_delta == 1.5
-    assert runtime.gyro_lpf_alpha == 0.5
+    assert state.pid_map == {"m": (1, 2, 3), "l": (4, 5, 6), "r": (7, 8, 9)}
+    assert state.speed_filter_window == 9
+    assert state.speed_diff_max_delta == 1.5
+    assert state.gyro_lpf_alpha == 0.5

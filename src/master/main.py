@@ -3,29 +3,23 @@
 @file src/master/main.py
 """
 
-import os.path
-import sys
-import types
-
-if __package__ in ("", None):
-    _PACKAGE_NAME = "master"
-    _PACKAGE_PATH = os.path.dirname(__file__)
-    _package = sys.modules.get(_PACKAGE_NAME)
-    if _package is None:
-        _package = types.ModuleType(_PACKAGE_NAME)
-        _package.__path__ = [_PACKAGE_PATH]
-        sys.modules[_PACKAGE_NAME] = _package
-    __package__ = _PACKAGE_NAME
+_USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 
 
 def run_calibrate_gyro():
-    from .script.calibrate_gyro import main
+    if _USE_DIRECT_IMPORTS:
+        from script.calibrate_gyro import main
+    else:
+        from .script.calibrate_gyro import main
 
     return main()
 
 
 def run_pid_identify():
-    from .script.pid_identify import main
+    if _USE_DIRECT_IMPORTS:
+        from script.pid_identify import main
+    else:
+        from .script.pid_identify import main
 
     return main()
 
@@ -61,7 +55,10 @@ def _sleep_ms(delay_ms):
 
 
 def _control_tick_ms():
-    from . import runtime_params
+    if _USE_DIRECT_IMPORTS:
+        import runtime_params
+    else:
+        from . import runtime_params
 
     return int(runtime_params.CONTROL_TICK_MS)
 
@@ -86,7 +83,10 @@ def _drive_loop(loop):
 
 
 def _start_runtime():
-    from .app import MasterRuntimeLoop, build_hw_bundle
+    if _USE_DIRECT_IMPORTS:
+        from app import MasterRuntimeLoop, build_hw_bundle
+    else:
+        from .app import MasterRuntimeLoop, build_hw_bundle
 
     runtime_loop = MasterRuntimeLoop(build_hw_bundle())
     _drive_loop(runtime_loop)
@@ -108,5 +108,5 @@ def main():
     _start_runtime()
 
 
-if __name__ == "__main__" and __spec__ is None:
+if __name__ == "__main__" and globals().get("__spec__") is None:
     main()

@@ -3,29 +3,40 @@
 @file src/master/app.py
 """
 
-import sys
-import types
-import os.path
+_USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 
-if __package__ in ("", None):
-    _PACKAGE_NAME = "master"
-    _PACKAGE_PATH = os.path.dirname(__file__)
-    _package = sys.modules.get(_PACKAGE_NAME)
-    if _package is None:
-        _package = types.ModuleType(_PACKAGE_NAME)
-        _package.__path__ = [_PACKAGE_PATH]
-        sys.modules[_PACKAGE_NAME] = _package
-    __package__ = _PACKAGE_NAME
-
-from .hw.encoders import build_encoder_bundle
-from .hw.imu import build_imu_bundle
-from .hw.motors import build_motor_bundle
-from .hw.uart import build_uart_bundle
-from .motion_runtime import MotionRuntime, base_chain_ready
-from .protocol import parse_assistant_state
-from .vision.decision import decide_from_observation
-from .vision.ingress import VisionIngress
-from .vision.state_machine import MarkerStateMachine
+if _USE_DIRECT_IMPORTS:
+    from hw.encoders import build_encoder_bundle
+    from hw.imu import build_imu_bundle
+    from hw.motors import build_motor_bundle
+    from hw.uart import build_uart_bundle
+    from motion_runtime import (
+        apply_motion_target,
+        base_chain_ready,
+        create_runtime_state,
+        run_base_cycle,
+        run_motion_cycle,
+    )
+    from protocol import parse_assistant_state
+    from vision.decision import decide_from_observation
+    from vision.ingress import VisionIngress
+    from vision.state_machine import MarkerStateMachine
+else:
+    from .hw.encoders import build_encoder_bundle
+    from .hw.imu import build_imu_bundle
+    from .hw.motors import build_motor_bundle
+    from .hw.uart import build_uart_bundle
+    from .motion_runtime import (
+        apply_motion_target,
+        base_chain_ready,
+        create_runtime_state,
+        run_base_cycle,
+        run_motion_cycle,
+    )
+    from .protocol import parse_assistant_state
+    from .vision.decision import decide_from_observation
+    from .vision.ingress import VisionIngress
+    from .vision.state_machine import MarkerStateMachine
 
 
 def build_hw_bundle():
@@ -61,23 +72,19 @@ class MasterRuntimeLoop:
 
     @staticmethod
     def _resolve_app_hw_bundle(app):
-        runtime = getattr(app, "runtime", None)
-        runtime_hw_bundle = getattr(runtime, "hw_bundle", None)
-        core = getattr(runtime, "core", None)
-        core_hw_bundle = getattr(core, "hw_bundle", None)
+        motion_state = getattr(app, "motion_state", None)
+        state_hw_bundle = getattr(motion_state, "hw_bundle", None)
         app_hw_bundle = getattr(app, "hw_bundle", None)
         bundles = []
-        for candidate in (core_hw_bundle, runtime_hw_bundle, app_hw_bundle):
+        for candidate in (state_hw_bundle, app_hw_bundle):
             if candidate is None:
                 continue
             if all(existing is not candidate for existing in bundles):
                 bundles.append(candidate)
         if len(bundles) > 1:
             raise ValueError("app 必须暴露唯一 hw_bundle owner")
-        if core_hw_bundle is not None:
-            return core_hw_bundle
-        if runtime_hw_bundle is not None:
-            return runtime_hw_bundle
+        if state_hw_bundle is not None:
+            return state_hw_bundle
         if app_hw_bundle is not None:
             return app_hw_bundle
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
@@ -113,7 +120,7 @@ class MasterRuntimeLoop:
 class MasterApp:
     """负责串联视觉输入、决策输出和运行时状态.
 
-    @brief 对外提供主车流程的单步推进入口, 视觉状态机只负责阶段切换, 底座状态仍由 MotionRuntime 持有。
+    @brief 对外提供主车流程的单步推进入口, 视觉状态机只负责阶段切换, 底座状态由过程式状态容器承接。
     """
 
     def __init__(
@@ -128,7 +135,7 @@ class MasterApp:
             reserved_uarts=reserved_uarts,
         )
         self.state_machine = MarkerStateMachine()
-        self.motion_runtime = None
+        self.motion_state = None
         self._control_seq = 0
         self._last_state_output = {"phase": "MARKER_MISSING", "hold": True}
         self._last_has_target = False
@@ -157,29 +164,34 @@ class MasterApp:
         self._control_seq += 1
         return self._control_seq
 
-    def _ensure_motion_runtime(self):
-        if self.motion_runtime is None:
-            self.motion_runtime = MotionRuntime(hw_bundle=self.hw_bundle)
-        return self.motion_runtime
+    def _ensure_motion_state(self):
+        if self.motion_state is None:
+            self.motion_state = create_runtime_state(hw_bundle=self.hw_bundle)
+        return self.motion_state
 
     def _apply_self_target(self, target):
         prepared_target = dict(target)
         if str(prepared_target.get("kind", "hold")) == "vel":
-            self._last_self_target = self._ensure_motion_runtime().apply_self_target(
-                prepared_target
+            self._last_self_target = apply_motion_target(
+                self._ensure_motion_state(),
+                prepared_target,
             )
         else:
             self._last_self_target = {"kind": "hold"}
-            if self.motion_runtime is not None:
-                self.motion_runtime.apply_self_target(self._last_self_target)
+            if self.motion_state is not None:
+                apply_motion_target(self.motion_state, self._last_self_target)
         return dict(self._last_self_target)
 
     def _refresh_self_base_state(self, cycle_token=None):
-        if self.motion_runtime is None:
+        if self.motion_state is None:
             snapshot = dict(self._last_self_base_state)
             snapshot["base_ok"] = 1 if base_chain_ready(self.hw_bundle) else 0
             return snapshot
-        return self.motion_runtime.refresh_base_chain(cycle_token=cycle_token)
+        return run_base_cycle(
+            self.motion_state,
+            hw_bundle=self.hw_bundle,
+            cycle_token=cycle_token,
+        )
 
     def step(self, observation=None):
         """推进一次主车流程.
@@ -206,6 +218,9 @@ class MasterApp:
             )
             if not prepared_observation:
                 prepared_observation = None
+
+        if run_motion:
+            self._ensure_motion_state()
 
         base_snapshot = self._refresh_self_base_state(cycle_token=cycle_token)
 
@@ -243,7 +258,11 @@ class MasterApp:
         self._last_self_base_state = dict(decision.self_base_state)
         self_target = self._apply_self_target(decision.self_target)
         if run_motion:
-            self._ensure_motion_runtime().execute_control_loop(cycle_token=cycle_token)
+            run_motion_cycle(
+                self._ensure_motion_state(),
+                hw_bundle=self.hw_bundle,
+                cycle_token=cycle_token,
+            )
         self.last_assistant_command = decision.assistant_command
         active_uart = str(selected_observation.get("source_uart", "")).strip()
         if not active_uart:

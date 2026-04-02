@@ -34,13 +34,15 @@ class Command:
         self.dtheta = float(dtheta)
 
 
-def render_state_line(state):
+def render_state_line(state, state_label=None):
+    if state_label is None:
+        state_label = state.state_label
     return (
         "state=1,state_label=%s,last_seq=%d,follow_active=%d,"
         "heading_deg=%.3f,target_heading_deg=%.3f,yaw_rate_deg_s=%.3f,"
         "odom_x=%.4f,odom_y=%.4f,base_ok=%d"
     ) % (
-        str(state.state_label),
+        str(state_label),
         int(state.last_seq),
         1 if state.follow_active else 0,
         float(state.heading_deg),

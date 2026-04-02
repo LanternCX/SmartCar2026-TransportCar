@@ -68,21 +68,37 @@ def test_assistant_state_reply_only_uses_supported_state_labels() -> None:
     )
 
 
+def test_assistant_state_reply_does_not_write_back_runtime_internal_label() -> None:
+    from assistant.state import AssistantState
+    from assistant.status import render_state
+
+    state = AssistantState()
+    state.state_label = "CONTROL_LOOP"
+
+    line = render_state(state)
+
+    assert "state_label=IDLE" in line
+    assert state.state_label == "CONTROL_LOOP"
+
+
 def test_assistant_state_owner_and_serializer_boundary() -> None:
-    import assistant.ctrl.chassis as chassis_module
-    from assistant.motion_runtime import MotionRuntime
+    from assistant.motion_runtime import create_runtime_state
 
-    assert not hasattr(chassis_module, "ChassisRuntime"), (
-        "控制层不应继续暴露整周期运行时 owner"
-    )
-    assert not hasattr(chassis_module, "CoreRuntime"), (
-        "控制层不应继续暴露长期状态 owner 的别名"
-    )
+    state = create_runtime_state(timeout_ms=50)
+    state_line = getattr(state, "state_line")
 
-    runtime = MotionRuntime(timeout_ms=50)
-
-    assert runtime.state_line() == (
+    assert state_line() == (
         "state=1,state_label=IDLE,last_seq=0,follow_active=0,"
         "heading_deg=0.000,target_heading_deg=0.000,yaw_rate_deg_s=0.000,"
         "odom_x=0.0000,odom_y=0.0000,base_ok=0"
     )
+
+
+def test_assistant_state_module_exposes_runtime_and_control_state() -> None:
+    from assistant.state import AssistantControlState, MotionRuntimeState
+
+    state = MotionRuntimeState()
+    control_state = AssistantControlState()
+
+    assert type(state).__name__ == "MotionRuntimeState"
+    assert hasattr(control_state, "follow_target_world")

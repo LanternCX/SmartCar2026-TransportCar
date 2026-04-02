@@ -1,30 +1,30 @@
-"""辅车跨周期状态入口.
+"""主车跨周期状态入口.
 
-@file src/assistant/state/__init__.py
+@file src/master/state/__init__.py
 """
 
-from typing import Callable, Optional, Tuple
 
-
-class AssistantState:
-    """保存辅车跨周期最小运行状态."""
+class MasterRuntimeState:
+    """保存主车跨周期业务状态."""
 
     def __init__(self):
-        self.follow_active = False
-        self.state_label = "IDLE"
-        self.last_seq = 0
-        self.odom = [0.0, 0.0]
+        self.last_target = {"kind": "hold"}
+        self.last_applied_target = {
+            "kind": "hold",
+            "vx": 0.0,
+            "vy": 0.0,
+            "omega": 0.0,
+        }
         self.heading_deg = 0.0
-        self.target_heading_deg = 0.0
         self.yaw_rate_deg_s = 0.0
-        self.base_ok = False
-        self.velocity_command = (0.0, 0.0, 0.0)
-        self.timeout = False
-        self.last_error = ""
+        self.odom = [0.0, 0.0]
+        self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.encoder_ticks = {"m": 0.0, "l": 0.0, "r": 0.0}
 
 
-class AssistantControlState:
-    """保存辅车控制链跨周期内部状态."""
+class MasterControlState:
+    """保存主车控制链跨周期内部状态."""
 
     def __init__(
         self,
@@ -35,9 +35,9 @@ class AssistantControlState:
         wheel_filters=None,
         wheel_controllers=None,
     ):
+        self.target_heading_deg = 0.0
         self.yaw_integral = 0.0
         self.heading_target_ready = False
-        self.follow_target_world = None
         self.wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
         self.target_wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
         self.motor_duties = {"m": 0, "l": 0, "r": 0}
@@ -52,44 +52,35 @@ class AssistantControlState:
         self.last_yaw_rad = 0.0
 
 
-class MotionRuntimeState(AssistantState):
-    """辅车过程式主线使用的运行时状态容器."""
+class MotionRuntimeState(MasterRuntimeState):
+    """主车过程式运行时使用的状态对象."""
 
     def __init__(self):
-        AssistantState.__init__(self)
-        self.control = AssistantControlState()
+        MasterRuntimeState.__init__(self)
+        self.control = MasterControlState()
         self.hw_bundle = None
-        self.safety: Optional[object] = None
+        self._control_seq = 0
         self.pid_map = {}
-        self.speed_filter_window = 0
-        self.speed_diff_max_delta = 0.0
-        self.gyro_lpf_alpha = 0.0
         self.heading_hold_enabled = True
         self.yaw_kp = 0.0
         self.yaw_ki = 0.0
         self.yaw_i_max = 0.0
         self.auto_omega_max = 0.0
-        self.follow_position_kp = 0.0
-        self.follow_position_max_speed = 0.0
         self.tick_ms = 0
         self.tick_s = 0.0
         self.gyro_scale = 1.0
         self.ident_lookup = {}
-        self.imu_offsets: Tuple[float, float, float, float, float, float] = (
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-        self.encoder_ticks = {"m": 0.0, "l": 0.0, "r": 0.0}
-        self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.imu_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self._last_cycle_token = None
         self._last_base_snapshot = None
-        self._last_control_cycle_token = None
-        self.state_line: Optional[Callable[[], str]] = None
+
+    @property
+    def target_heading_deg(self):
+        return self.control.target_heading_deg
+
+    @target_heading_deg.setter
+    def target_heading_deg(self, value):
+        self.control.target_heading_deg = value
 
     @property
     def yaw_integral(self):
@@ -106,14 +97,6 @@ class MotionRuntimeState(AssistantState):
     @heading_target_ready.setter
     def heading_target_ready(self, value):
         self.control.heading_target_ready = value
-
-    @property
-    def follow_target_world(self):
-        return self.control.follow_target_world
-
-    @follow_target_world.setter
-    def follow_target_world(self, value):
-        self.control.follow_target_world = value
 
     @property
     def wheel_speeds(self):
