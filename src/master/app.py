@@ -46,7 +46,7 @@ def build_hw_bundle():
 class MasterRuntimeLoop:
     """主车当前主线运行循环.
 
-    @brief 串起双路视觉读入与 UART3 控制输出。
+    @brief 串起双路视觉读入与 UART3 控制输出, 自身不持有底座长期状态。
     """
 
     def __init__(self, hw_bundle, app=None):
@@ -113,7 +113,7 @@ class MasterRuntimeLoop:
 class MasterApp:
     """负责串联视觉输入、决策输出和运行时状态.
 
-    @brief 对外提供主车流程的单步推进入口。
+    @brief 对外提供主车流程的单步推进入口, 视觉状态机只负责阶段切换, 底座状态仍由 MotionRuntime 持有。
     """
 
     def __init__(

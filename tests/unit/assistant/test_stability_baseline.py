@@ -1,21 +1,7 @@
-def test_assistant_stability_baseline_keeps_attitude_and_kinematics_contract() -> None:
-    from assistant.stability.kinematics import body_axis_semantics
-    from assistant.stability.attitude import euler_to_quaternion, quaternion_to_euler
+def test_assistant_follow_offset_rotation_belongs_to_control_math() -> None:
+    from assistant.ctrl.kinematics import rotate_body_delta_to_world
 
-    semantics = body_axis_semantics()
+    world_x, world_y = rotate_body_delta_to_world(10.0, 0.0, 90.0)
 
-    assert semantics["x_positive"] == "right"
-    assert semantics["y_positive"] == "forward"
-    quat = euler_to_quaternion(0.0, 0.0, 10.0)
-    yaw_deg = quaternion_to_euler(quat)[2]
-    assert abs(yaw_deg - 10.0) < 1e-3
-
-
-def test_assistant_stability_baseline_keeps_filter_chain_contract() -> None:
-    from assistant.stability.filtering import build_speed_filter_chain
-
-    chain = build_speed_filter_chain()
-    filtered = chain.update(0.0)
-    filtered = chain.update(100.0)
-
-    assert filtered == 5.0
+    assert abs(world_x) < 1e-6
+    assert abs(world_y + 10.0) < 1e-6

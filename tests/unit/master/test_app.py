@@ -119,7 +119,6 @@ def test_master_main_supports_device_root_execution(monkeypatch) -> None:
     module = _load_runtime_file("__main__", "main.py")
 
     assert callable(module.main)
-    assert callable(module.build_hw_bundle)
 
 
 def test_master_app_supports_device_root_import(monkeypatch) -> None:
@@ -223,6 +222,8 @@ def test_master_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> N
 
 def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) -> None:
     from master.main import _start_runtime
+    import master.main as runtime_main
+    import master.app as runtime_app
 
     captured = {"drive_loop": None}
     uart_bundle = {
@@ -241,15 +242,30 @@ def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) ->
     def _drive_loop(loop) -> None:
         captured["drive_loop"] = loop
 
-    monkeypatch.setattr("master.main.MasterRuntimeLoop", _loop_factory)
+    monkeypatch.setattr(runtime_app, "MasterRuntimeLoop", _loop_factory)
     monkeypatch.setattr(
-        "master.main.build_hw_bundle",
+        runtime_app,
+        "build_hw_bundle",
         lambda: {
             "uart": uart_bundle,
             "motors": {"m": object()},
             "encoders": {"rear_left": object()},
             "imu": object(),
         },
+    )
+    monkeypatch.setattr(
+        runtime_main,
+        "build_hw_bundle",
+        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_main,
+        "MasterRuntimeLoop",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("入口不应继续走本模块运行时转手")
+        ),
+        raising=False,
     )
     monkeypatch.setattr("master.main._drive_loop", _drive_loop)
     _start_runtime()
@@ -264,6 +280,8 @@ def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) ->
 
 def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
     from master.main import _start_runtime
+    import master.main as runtime_main
+    import master.app as runtime_app
 
     step_calls = []
     now_values = iter((100, 120, 140))
@@ -275,7 +293,8 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
                 raise SystemExit(0)
 
     monkeypatch.setattr(
-        "master.main.build_hw_bundle",
+        runtime_app,
+        "build_hw_bundle",
         lambda: {
             "uart": {"uart3": object(), "uart6": object(), "uart8": object()},
             "motors": {"m": object()},
@@ -283,7 +302,21 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
             "imu": object(),
         },
     )
-    monkeypatch.setattr("master.main.MasterRuntimeLoop", lambda hw_bundle: DummyLoop())
+    monkeypatch.setattr(runtime_app, "MasterRuntimeLoop", lambda hw_bundle: DummyLoop())
+    monkeypatch.setattr(
+        runtime_main,
+        "build_hw_bundle",
+        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_main,
+        "MasterRuntimeLoop",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("入口不应继续走本模块运行时转手")
+        ),
+        raising=False,
+    )
     monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
 
     import pytest

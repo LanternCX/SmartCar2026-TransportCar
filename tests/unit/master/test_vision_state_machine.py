@@ -1,5 +1,5 @@
 def test_state_machine_marks_missing_when_target_is_invalid() -> None:
-    from master.vision_state_machine import MarkerStateMachine
+    from master.vision.state_machine import MarkerStateMachine
 
     machine = MarkerStateMachine(deadzone_px=8.0)
 
@@ -10,7 +10,7 @@ def test_state_machine_marks_missing_when_target_is_invalid() -> None:
 
 
 def test_state_machine_enters_center_hold_when_error_is_inside_deadzone() -> None:
-    from master.vision_state_machine import MarkerStateMachine
+    from master.vision.state_machine import MarkerStateMachine
 
     machine = MarkerStateMachine(deadzone_px=8.0)
 
@@ -21,7 +21,7 @@ def test_state_machine_enters_center_hold_when_error_is_inside_deadzone() -> Non
 
 
 def test_state_machine_tracks_when_error_is_outside_deadzone() -> None:
-    from master.vision_state_machine import MarkerStateMachine
+    from master.vision.state_machine import MarkerStateMachine
 
     machine = MarkerStateMachine(deadzone_px=8.0)
 
@@ -31,10 +31,29 @@ def test_state_machine_tracks_when_error_is_outside_deadzone() -> None:
     assert result["hold"] is False
 
 
+def test_state_machine_keeps_current_public_inputs_while_only_returning_phase_state() -> (
+    None
+):
+    from master.vision.state_machine import MarkerStateMachine
+
+    machine = MarkerStateMachine(deadzone_px=8.0)
+    result = machine.step(
+        valid=1,
+        err_x=12.0,
+        err_y=-4.0,
+        has_target=True,
+        has_new_input=False,
+    )
+
+    assert result["phase"] == "TRACKING"
+    assert result["hold"] is False
+    assert set(result.keys()) <= {"phase", "hold"}
+
+
 def test_state_machine_ignores_whether_input_is_new_when_target_is_still_available() -> (
     None
 ):
-    from master.vision_state_machine import MarkerStateMachine
+    from master.vision.state_machine import MarkerStateMachine
 
     machine = MarkerStateMachine(deadzone_px=8.0)
 

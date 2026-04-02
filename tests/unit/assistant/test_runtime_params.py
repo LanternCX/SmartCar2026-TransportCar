@@ -15,6 +15,50 @@ def test_assistant_runtime_params_exposes_required_keys() -> None:
     assert set(runtime_params.PID_MAP.keys()) == {"m", "l", "r"}
 
 
+def test_assistant_runtime_params_does_not_expose_gyro_scale_board_fact() -> None:
+    import assistant.config as config
+    import assistant.runtime_params as runtime_params
+
+    assert (hasattr(config, "GYRO_SCALE"), hasattr(runtime_params, "GYRO_SCALE")) == (
+        True,
+        False,
+    ), (
+        "GYRO_SCALE 应由 config 承载，且不应继续暴露在 runtime_params；"
+        f"当前 config={hasattr(config, 'GYRO_SCALE')}, "
+        f"runtime_params={hasattr(runtime_params, 'GYRO_SCALE')}"
+    )
+
+
+def test_assistant_runtime_params_does_not_expose_gyro_offset_file_board_fact() -> None:
+    import assistant.config as config
+    import assistant.runtime_params as runtime_params
+
+    assert (
+        hasattr(config, "GYRO_OFFSET_FILE"),
+        hasattr(runtime_params, "GYRO_OFFSET_FILE"),
+    ) == (True, False), (
+        "GYRO_OFFSET_FILE 应由 config 承载，且不应继续暴露在 runtime_params；"
+        f"当前 config={hasattr(config, 'GYRO_OFFSET_FILE')}, "
+        f"runtime_params={hasattr(runtime_params, 'GYRO_OFFSET_FILE')}"
+    )
+
+
+def test_assistant_runtime_params_does_not_expose_ident_results_file_board_fact() -> (
+    None
+):
+    import assistant.config as config
+    import assistant.runtime_params as runtime_params
+
+    assert (
+        hasattr(config, "IDENT_RESULTS_FILE"),
+        hasattr(runtime_params, "IDENT_RESULTS_FILE"),
+    ) == (True, False), (
+        "IDENT_RESULTS_FILE 应由 config 承载，且不应继续暴露在 runtime_params；"
+        f"当前 config={hasattr(config, 'IDENT_RESULTS_FILE')}, "
+        f"runtime_params={hasattr(runtime_params, 'IDENT_RESULTS_FILE')}"
+    )
+
+
 def test_assistant_runtime_uses_runtime_param_follow_timeout() -> None:
     import assistant.runtime_params as runtime_params
     from assistant.app import AssistantApp
@@ -33,12 +77,12 @@ def test_assistant_runtime_uses_runtime_param_follow_timeout() -> None:
 
 def test_assistant_runtime_default_chassis_timeout_reads_runtime_params() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.ctrl.chassis import ChassisRuntime
+    from assistant.motion_runtime import MotionRuntime
 
     old_timeout = runtime_params.FOLLOW_TIMEOUT_MS
     runtime_params.FOLLOW_TIMEOUT_MS = 10
     try:
-        runtime = ChassisRuntime()
+        runtime = MotionRuntime()
         runtime.apply_command(
             type(
                 "Cmd",
@@ -57,13 +101,13 @@ def test_assistant_runtime_default_chassis_timeout_reads_runtime_params() -> Non
 
 def test_assistant_runtime_uses_runtime_param_output_limit() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.ctrl.chassis import ChassisRuntime
+    from assistant.motion_runtime import MotionRuntime
     from assistant.protocol import parse_command
 
     old_limit = runtime_params.FOLLOW_OUTPUT_LIMIT
     runtime_params.FOLLOW_OUTPUT_LIMIT = 123
     try:
-        runtime = ChassisRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
+        runtime = MotionRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
         runtime.apply_command(
             parse_command("follow=1,seq=1,valid=1,dx=999.0,dy=0.0"), now_ms=0
         )
@@ -75,7 +119,7 @@ def test_assistant_runtime_uses_runtime_param_output_limit() -> None:
 
 def test_assistant_runtime_reads_runtime_pid_and_filter_params() -> None:
     import assistant.runtime_params as runtime_params
-    from assistant.ctrl.chassis import ChassisRuntime
+    from assistant.motion_runtime import MotionRuntime
 
     old_pid_map = runtime_params.PID_MAP
     old_window = runtime_params.SPEED_FILTER_WINDOW
@@ -86,7 +130,7 @@ def test_assistant_runtime_reads_runtime_pid_and_filter_params() -> None:
     runtime_params.SPEED_DIFF_MAX_DELTA = 1.5
     runtime_params.GYRO_LPF_ALPHA = 0.5
     try:
-        runtime = ChassisRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
+        runtime = MotionRuntime(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
     finally:
         runtime_params.PID_MAP = old_pid_map
         runtime_params.SPEED_FILTER_WINDOW = old_window

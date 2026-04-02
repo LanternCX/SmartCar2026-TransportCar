@@ -18,25 +18,6 @@ if __package__ in ("", None):
     __package__ = _PACKAGE_NAME
 
 
-def build_hw_bundle():
-    from .app import build_hw_bundle as _build_hw_bundle
-
-    return _build_hw_bundle()
-
-
-def __getattr__(name):
-    if name == "AssistantRuntimeLoop":
-        from .app import AssistantRuntimeLoop
-
-        return AssistantRuntimeLoop
-    raise AttributeError(name)
-
-
-def _build_runtime_loop_impl():
-    runtime_loop_class = getattr(sys.modules[__name__], "AssistantRuntimeLoop")
-    return runtime_loop_class(build_hw_bundle())
-
-
 def run_calibrate_gyro():
     from .script.calibrate_gyro import main
 
@@ -104,12 +85,10 @@ def _drive_loop(loop):
         next_tick_ms = int(now_ms) + tick_ms
 
 
-def _build_runtime_loop():
-    return _build_runtime_loop_impl()
-
-
 def _start_runtime():
-    runtime_loop = _build_runtime_loop()
+    from .app import AssistantRuntimeLoop, build_hw_bundle
+
+    runtime_loop = AssistantRuntimeLoop(build_hw_bundle())
     _drive_loop(runtime_loop)
 
 

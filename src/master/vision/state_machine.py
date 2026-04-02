@@ -7,6 +7,11 @@ from .. import runtime_params
 
 
 class MarkerStateMachine:
+    """主车视觉阶段切换器
+
+    @brief 这里只根据目标可见性和死区切换阶段, 不持有跨周期底座状态, 也不生成控制输出
+    """
+
     def __init__(self, deadzone_px=None):
         if deadzone_px is None:
             deadzone_px = runtime_params.FOLLOW_CENTER_DEADZONE_PX

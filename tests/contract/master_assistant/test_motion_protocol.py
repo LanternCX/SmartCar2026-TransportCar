@@ -32,7 +32,8 @@ def test_master_assistant_invalid_target_contract() -> None:
 
 
 def test_assistant_state_reply_keeps_minimal_status_payload() -> None:
-    from assistant.status import AssistantState, render_state
+    from assistant.state import AssistantState
+    from assistant.status import render_state
 
     state = AssistantState()
     state.follow_active = True
@@ -41,5 +42,8 @@ def test_assistant_state_reply_keeps_minimal_status_payload() -> None:
 
     line = render_state(state)
 
-    assert line.startswith("state=1,state_label=BUSY,last_seq=7,follow_active=1,")
-    assert "base_ok=0" in line
+    assert (
+        line == "state=1,state_label=BUSY,last_seq=7,follow_active=1,"
+        "heading_deg=0.000,target_heading_deg=0.000,yaw_rate_deg_s=0.000,"
+        "odom_x=0.0000,odom_y=0.0000,base_ok=0"
+    )

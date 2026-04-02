@@ -5,10 +5,11 @@
 
 import math
 
-from . import runtime_params
+from . import config, runtime_params
 from .safety import SafetyGuard
-from .stability.kinematics import rotate_body_delta_to_world
-from .status import AssistantState, render_state
+from .state import AssistantState
+from .ctrl.kinematics import rotate_body_delta_to_world
+from .status import render_state
 
 
 def _clamp(value, lower, upper):
@@ -303,6 +304,11 @@ class _SpeedController:
 
 
 class CoreRuntime:
+    """辅车跨周期状态与安全门禁容器
+
+    @brief 这里只保存长期状态和安全对象, 不承担控制计算、协议解析或串口编排
+    """
+
     def __init__(self, timeout_ms=None, hw_bundle=None):
         if timeout_ms is None:
             timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
@@ -314,7 +320,7 @@ class CoreRuntime:
 class MotionRuntime:
     """负责辅车底座主数据链 owner.
 
-    @brief 持有 IMU、编码器、里程和航向角保持链路，并继续收口协议执行。
+    @brief 持有 IMU、编码器、里程和航向角保持链路, 并驱动 CoreRuntime 中的长期状态, 不把 owner 外溢到 ctrl 层。
     """
 
     def __init__(self, timeout_ms=None, hw_bundle=None):
@@ -334,12 +340,12 @@ class MotionRuntime:
         self.follow_position_max_speed = float(runtime_params.FOLLOW_POSITION_MAX_SPEED)
         self.tick_ms = int(runtime_params.CONTROL_TICK_MS)
         self.tick_s = float(self.tick_ms) / 1000.0
-        self.gyro_scale = float(runtime_params.GYRO_SCALE)
+        self.gyro_scale = float(config.GYRO_SCALE)
         self.target_heading_deg = 0.0
         self._yaw_integral = 0.0
         self._heading_target_ready = False
-        self.ident_lookup = _load_ident_lookup(runtime_params.IDENT_RESULTS_FILE)
-        self.imu_offsets = _load_gyro_offsets(runtime_params.GYRO_OFFSET_FILE)
+        self.ident_lookup = _load_ident_lookup(config.IDENT_RESULTS_FILE)
+        self.imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
         self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.encoder_ticks = {"m": 0.0, "l": 0.0, "r": 0.0}

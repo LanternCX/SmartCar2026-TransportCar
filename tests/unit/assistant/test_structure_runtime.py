@@ -4,13 +4,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_assistant_runtime_exposes_new_structure_packages() -> None:
-    runtime_root = PROJECT_ROOT / "src" / "assistant"
-
-    for name in ("hw", "ctrl", "script"):
-        assert (runtime_root / name).is_dir()
-
-
 def test_assistant_hw_modules_and_bundle_entry_are_importable() -> None:
     from assistant.app import build_hw_bundle
     from assistant.hw import encoders, imu, motors, uart
@@ -49,11 +42,15 @@ def test_assistant_script_entries_exist() -> None:
     assert calibrate_gyro is not None
 
 
-def test_assistant_ctrl_chassis_is_importable() -> None:
-    from assistant.ctrl.chassis import ChassisRuntime, CoreRuntime
+def test_assistant_control_layer_does_not_own_cross_cycle_state() -> None:
+    import assistant.ctrl.chassis as chassis_module
 
-    assert CoreRuntime is not None
-    assert ChassisRuntime is not None
+    assert not hasattr(chassis_module, "ChassisRuntime"), (
+        "控制层只保留单周期控制，不应继续暴露整周期运行时"
+    )
+    assert not hasattr(chassis_module, "CoreRuntime"), (
+        "控制层不应继续暴露长期状态 owner"
+    )
 
 
 def test_assistant_ctrl_modules_are_importable() -> None:

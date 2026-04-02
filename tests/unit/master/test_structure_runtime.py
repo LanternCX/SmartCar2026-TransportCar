@@ -1,16 +1,3 @@
-from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-
-
-def test_master_runtime_exposes_new_structure_packages() -> None:
-    runtime_root = PROJECT_ROOT / "src" / "master"
-
-    for name in ("hw", "ctrl", "vision", "script"):
-        assert (runtime_root / name).is_dir()
-
-
 def test_master_hw_modules_and_bundle_entry_are_importable() -> None:
     from master.app import build_hw_bundle
     from master.hw import encoders, imu, motors, uart
@@ -42,27 +29,3 @@ def test_master_hw_bundle_uses_legacy_confirmed_mapping() -> None:
         "l": ("C0", "C1", True),
         "r": ("C2", "C3", True),
     }
-
-
-def test_master_vision_modules_are_importable() -> None:
-    from master.vision import decision, ingress, parser, state_machine
-
-    assert parser is not None
-    assert ingress is not None
-    assert state_machine is not None
-    assert decision is not None
-
-
-def test_master_ctrl_and_script_modules_are_importable() -> None:
-    from master.ctrl import attitude, chassis, filters, ident, kinematics, pid, storage
-    from master.script import calibrate_gyro, pid_identify
-
-    assert filters is not None
-    assert pid is not None
-    assert kinematics is not None
-    assert attitude is not None
-    assert chassis is not None
-    assert ident is not None
-    assert storage is not None
-    assert pid_identify is not None
-    assert calibrate_gyro is not None

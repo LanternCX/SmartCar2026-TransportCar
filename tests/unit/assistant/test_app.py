@@ -140,7 +140,6 @@ def test_assistant_main_supports_device_root_execution(monkeypatch) -> None:
     module = _load_runtime_file("__main__", "main.py")
 
     assert callable(module.main)
-    assert callable(module.build_hw_bundle)
 
 
 def test_assistant_app_supports_device_root_import(monkeypatch) -> None:
@@ -207,7 +206,8 @@ def test_assistant_ctrl_chassis_supports_package_import(monkeypatch) -> None:
 
     import assistant.ctrl.chassis as module
 
-    assert module.ChassisRuntime is not None
+    assert module is not None
+    assert not hasattr(module, "ChassisRuntime")
 
 
 def test_assistant_runtime_loop_uses_same_full_hw_bundle_owner() -> None:
@@ -278,6 +278,8 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     monkeypatch,
 ) -> None:
     from assistant.main import _start_runtime
+    import assistant.main as runtime_main
+    import assistant.app as runtime_app
 
     captured = {"drive_loop": None}
     uart3 = object()
@@ -299,8 +301,22 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     def _drive_loop(loop) -> None:
         captured["drive_loop"] = loop
 
-    monkeypatch.setattr("assistant.main.AssistantRuntimeLoop", _loop_factory)
-    monkeypatch.setattr("assistant.main.build_hw_bundle", lambda: hw_bundle)
+    monkeypatch.setattr(runtime_app, "AssistantRuntimeLoop", _loop_factory)
+    monkeypatch.setattr(runtime_app, "build_hw_bundle", lambda: hw_bundle)
+    monkeypatch.setattr(
+        runtime_main,
+        "build_hw_bundle",
+        lambda: (_ for _ in ()).throw(AssertionError("入口不应继续走本模块装配转手")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_main,
+        "AssistantRuntimeLoop",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("入口不应继续走本模块运行时转手")
+        ),
+        raising=False,
+    )
     monkeypatch.setattr("assistant.main._drive_loop", _drive_loop)
     _start_runtime()
 

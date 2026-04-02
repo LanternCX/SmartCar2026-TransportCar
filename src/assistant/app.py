@@ -97,7 +97,7 @@ class AssistantRuntimeLoop:
 class AssistantApp:
     """负责串联协议解析和执行运行时
 
-    @brief 对外提供辅车命令处理和周期推进入口
+    @brief 对外提供辅车命令处理和周期推进入口, 长期状态和安全收口仍由 MotionRuntime 持有
     """
 
     def __init__(self, timeout_ms=None, hw_bundle=None):

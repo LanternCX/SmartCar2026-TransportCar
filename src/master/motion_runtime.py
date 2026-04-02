@@ -5,7 +5,7 @@
 
 import math
 
-from . import runtime_params
+from . import config, runtime_params
 
 
 def _clamp(value, lower, upper):
@@ -336,7 +336,7 @@ class _SpeedController:
 class MotionRuntime:
     """负责主车底座主数据链 owner.
 
-    @brief 持有 IMU、编码器、里程和航向角保持链路。
+    @brief 持有 IMU、编码器、里程和航向角保持链路, 供 app 在每个周期读取, 不承担视觉状态机职责。
     """
 
     def __init__(self, hw_bundle=None):
@@ -357,12 +357,12 @@ class MotionRuntime:
         self.auto_omega_max = float(runtime_params.AUTO_OMEGA_MAX)
         self.tick_ms = int(runtime_params.CONTROL_TICK_MS)
         self.tick_s = float(self.tick_ms) / 1000.0
-        self.gyro_scale = float(runtime_params.GYRO_SCALE)
+        self.gyro_scale = float(config.GYRO_SCALE)
         self.target_heading_deg = 0.0
         self._yaw_integral = 0.0
         self._heading_target_ready = False
-        self.ident_lookup = _load_ident_lookup(runtime_params.IDENT_RESULTS_FILE)
-        self.imu_offsets = _load_gyro_offsets(runtime_params.GYRO_OFFSET_FILE)
+        self.ident_lookup = _load_ident_lookup(config.IDENT_RESULTS_FILE)
+        self.imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
         self.imu_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.imu_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.encoder_ticks = {"m": 0.0, "l": 0.0, "r": 0.0}
