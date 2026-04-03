@@ -23,6 +23,7 @@ class EncoderPort:
         self.phase_b_pin = str(phase_b_pin)
         self.invert = bool(invert)
         self._device = None
+        self._data_ref = None
         self.last_ticks = 0
 
     def ensure_device(self):
@@ -30,6 +31,10 @@ class EncoderPort:
             from smartcar import encoder
 
             self._device = encoder(self.phase_a_pin, self.phase_b_pin, self.invert)
+            getter = getattr(self._device, "get", None)
+            if getter is None:
+                raise RuntimeError("编码器硬件接口缺少 get()")
+            self._data_ref = getter()
         return self._device
 
     def read(self):
