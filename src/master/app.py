@@ -5,6 +5,17 @@
 
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 
+
+def _debug_print(stage, **payload):
+    if not payload:
+        print("[master.app] %s" % str(stage))
+        return
+    parts = []
+    for key in sorted(payload):
+        parts.append("%s=%s" % (str(key), str(payload[key])))
+    print("[master.app] %s | %s" % (str(stage), ", ".join(parts)))
+
+
 if _USE_DIRECT_IMPORTS:
     from hw.encoders import build_encoder_bundle
     from hw.imu import build_imu_bundle
@@ -46,12 +57,14 @@ def build_hw_bundle():
     @return dict
     """
 
-    return {
+    bundle = {
         "uart": build_uart_bundle(),
         "motors": build_motor_bundle(),
         "encoders": build_encoder_bundle(),
         "imu": build_imu_bundle(),
     }
+    _debug_print("build_hw_bundle", keys=tuple(sorted(bundle.keys())))
+    return bundle
 
 
 class MasterRuntimeLoop:
@@ -69,6 +82,8 @@ class MasterRuntimeLoop:
         self.hw_bundle = hw_bundle
         self.uart_bundle = hw_bundle["uart"]
         self.app = app
+        self.capture_ticker = None
+        _debug_print("runtime_loop_init")
 
     @staticmethod
     def _resolve_app_hw_bundle(app):
@@ -159,6 +174,7 @@ class MasterApp:
             "assistant_feedback": None,
             "assistant_command": "",
         }
+        _debug_print("app_init")
 
     def _next_control_seq(self):
         self._control_seq += 1
@@ -167,6 +183,7 @@ class MasterApp:
     def _ensure_motion_state(self):
         if self.motion_state is None:
             self.motion_state = create_runtime_state(hw_bundle=self.hw_bundle)
+            _debug_print("motion_state_created")
         return self.motion_state
 
     def _apply_self_target(self, target):

@@ -232,7 +232,7 @@ def test_master_runtime_loop_reuses_provided_uart_bundle_for_default_app(
     assert captured["build_calls"] == 0
 
 
-def test_master_runtime_loop_accepts_runtime_owner_exposed_by_app_runtime() -> None:
+def test_master_runtime_loop_accepts_motion_state_owner_exposed_by_app() -> None:
     import types
 
     from master.app import MasterRuntimeLoop
@@ -245,9 +245,7 @@ def test_master_runtime_loop_accepts_runtime_owner_exposed_by_app_runtime() -> N
 
     class DummyApp:
         def __init__(self, runtime_hw_bundle):
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
-            )
+            self.motion_state = types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
 
         def step(self, observation):
             return {
@@ -285,9 +283,7 @@ def test_master_runtime_loop_rejects_runtime_owner_drift_under_same_app_bundle()
     class DummyApp:
         def __init__(self, app_hw_bundle, runtime_hw_bundle):
             self.hw_bundle = app_hw_bundle
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
-            )
+            self.motion_state = types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
 
         def step(self, observation):
             return {

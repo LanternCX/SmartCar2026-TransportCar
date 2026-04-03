@@ -5,6 +5,55 @@
 
 _package_name = str(globals().get("__package__", ""))
 
+_TRACE_PRINT_LIMIT = 40
+_trace_print_count = 0
+
+
+def _debug_print(stage, **payload):
+    if not payload:
+        print("[master.motion] %s" % str(stage))
+        return
+    parts = []
+    for key in sorted(payload):
+        parts.append("%s=%s" % (str(key), str(payload[key])))
+    print("[master.motion] %s | %s" % (str(stage), ", ".join(parts)))
+
+
+def _trace_control_chain(state):
+    global _trace_print_count
+
+    gyro_z_raw = float(state.imu_calibrated[5])
+    omega_cmd = float(state.last_applied_target.get("omega", 0.0))
+    motor_active = any(int(state.motor_duties[name]) != 0 for name in ("m", "l", "r"))
+    wheel_target_active = any(
+        abs(float(state.target_wheel_speeds[name])) > 1e-6 for name in ("m", "l", "r")
+    )
+    gyro_active = abs(gyro_z_raw) > 1e-6 or abs(float(state.yaw_rate_deg_s)) > 1e-6
+    hold_active = abs(omega_cmd) > 1e-6
+    if not (gyro_active or hold_active or wheel_target_active or motor_active):
+        return
+    if _trace_print_count >= _TRACE_PRINT_LIMIT:
+        return
+    _trace_print_count += 1
+    _debug_print(
+        "hold_trace",
+        duty=dict(state.motor_duties),
+        heading=round(float(state.heading_deg), 3),
+        target_heading=round(float(state.target_heading_deg), 3),
+        omega=round(omega_cmd, 3),
+        wheel_now={
+            name: round(float(state.wheel_speeds[name]), 3) for name in ("m", "l", "r")
+        },
+        wheel_target={
+            name: round(float(state.target_wheel_speeds[name]), 3)
+            for name in ("m", "l", "r")
+        },
+        yaw_integral=round(float(state.yaw_integral), 3),
+        yaw_rate=round(float(state.yaw_rate_deg_s), 3),
+        z_raw=round(gyro_z_raw, 3),
+    )
+
+
 if _package_name in ("", None):
     import config
     import runtime_params
@@ -302,11 +351,12 @@ def _apply_motor_output_for_state(state, vx, vy, omega, hw_bundle=None):
 
 
 def apply_motion_target(state, target):
+    previous_kind = str(getattr(state, "last_target", {}).get("kind", "hold"))
     state.last_target = dict(target)
     kind = str(state.last_target.get("kind", "hold"))
     if kind != "vel":
         state.last_target = {"kind": "hold"}
-        if state.heading_target_ready:
+        if previous_kind == "vel" or not state.heading_target_ready:
             capture_heading_target(state)
     return dict(state.last_target)
 
@@ -340,6 +390,7 @@ def run_motion_cycle(state, hw_bundle=None, cycle_token=None):
         applied_target.get("omega", 0.0),
         hw_bundle=hw_bundle,
     )
+    _trace_control_chain(state)
     return {
         "target": dict(state.last_applied_target),
         "heading_est_deg": float(state.heading_deg),

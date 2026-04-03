@@ -127,6 +127,20 @@ def test_master_motion_runtime_defaults_heading_hold_to_current_heading() -> Non
     assert result["target"]["omega"] == 0.0
 
 
+def test_master_motion_runtime_repeated_hold_does_not_reset_target_heading() -> None:
+    from master.motion_runtime import MotionRuntime
+
+    runtime = MotionRuntime()
+    runtime.heading_deg = 12.0
+    runtime.target_heading_deg = 12.0
+    runtime.heading_target_ready = True
+
+    runtime.heading_deg = 27.0
+    runtime.apply_self_target({"kind": "hold"})
+
+    assert runtime.target_heading_deg == 12.0
+
+
 def test_master_motion_runtime_base_ok_requires_heading_and_encoder_chain() -> None:
     from master.motion_runtime import MotionRuntime
 

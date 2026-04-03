@@ -146,6 +146,12 @@ def test_master_start_runtime_builds_loop_and_hands_it_to_driver(monkeypatch) ->
     def _drive_loop(loop) -> None:
         captured["drive_loop"] = loop
 
+    monkeypatch.setattr("master.main._build_capture_ticker", lambda hw_bundle: object())
+    monkeypatch.setattr(
+        "master.main._build_runtime_heartbeat_led",
+        lambda: object(),
+        raising=False,
+    )
     monkeypatch.setattr(runtime_app, "MasterRuntimeLoop", _loop_factory)
     monkeypatch.setattr(
         runtime_app,
@@ -174,6 +180,10 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
     step_calls = []
     now_values = iter((100, 120, 140))
 
+    class DummyHeartbeatLed:
+        def toggle(self) -> None:
+            return None
+
     class DummyLoop:
         def step(self, now_ms):
             step_calls.append(now_ms)
@@ -191,6 +201,12 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(runtime_app, "MasterRuntimeLoop", lambda hw_bundle: DummyLoop())
+    monkeypatch.setattr("master.main._build_capture_ticker", lambda hw_bundle: object())
+    monkeypatch.setattr(
+        "master.main._build_runtime_heartbeat_led",
+        lambda: DummyHeartbeatLed(),
+        raising=False,
+    )
     monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
 
     import pytest
@@ -228,6 +244,105 @@ def test_master_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
     assert exc_info.value.code == 0
     assert step_calls == [100, 105]
     assert sleep_calls == [5, 2]
+
+
+def test_master_drive_loop_toggles_runtime_heartbeat_slowly(monkeypatch) -> None:
+    import pytest
+
+    from master.main import _drive_loop
+
+    step_calls = []
+    now_values = iter((100, 100, 350, 350, 650))
+
+    class DummyLoop:
+        def __init__(self) -> None:
+            self.heartbeat_led = _HeartbeatLed()
+
+        def step(self, now_ms):
+            step_calls.append(now_ms)
+            if len(step_calls) == 3:
+                raise SystemExit(0)
+
+    class _HeartbeatLed:
+        def __init__(self) -> None:
+            self.toggle_count = 0
+
+        def toggle(self) -> None:
+            self.toggle_count += 1
+
+    monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
+    monkeypatch.setattr("master.main._sleep_ms", lambda delay_ms: None)
+
+    loop = DummyLoop()
+
+    with pytest.raises(SystemExit) as exc_info:
+        _drive_loop(loop)
+
+    assert exc_info.value.code == 0
+    assert step_calls == [100, 350, 650]
+    assert loop.heartbeat_led.toggle_count == 2
+
+
+def test_master_build_capture_ticker_registers_encoder_and_imu_devices(
+    monkeypatch,
+) -> None:
+    from master.main import _build_capture_ticker
+    import sys
+    import types
+
+    captured = {}
+
+    class FakeTicker:
+        def capture_list(self, *items):
+            captured["items"] = items
+
+        def callback(self, fn):
+            captured["callback"] = fn
+
+        def start(self, tick_ms):
+            captured["tick_ms"] = tick_ms
+
+    class FakeEncoderPort:
+        def __init__(self, device):
+            self.device = device
+
+        def ensure_device(self):
+            return self.device
+
+    class FakeImuDevice:
+        def __init__(self):
+            self.get_count = 0
+
+        def get(self):
+            self.get_count += 1
+            return [0, 0, 0, 0, 0, 0]
+
+    class FakeImuPort:
+        def __init__(self, device):
+            self.device = device
+
+        def ensure_device(self):
+            return self.device
+
+    fake_imu = FakeImuDevice()
+    hw_bundle = {
+        "encoders": {name: FakeEncoderPort(object()) for name in ("m", "l", "r")},
+        "imu": FakeImuPort(fake_imu),
+    }
+
+    monkeypatch.setitem(
+        sys.modules,
+        "smartcar",
+        types.SimpleNamespace(ticker=lambda _: FakeTicker()),
+    )
+    monkeypatch.setattr("master.main._control_tick_ms", lambda: 5)
+
+    ticker_obj = _build_capture_ticker(hw_bundle)
+
+    assert isinstance(ticker_obj, FakeTicker)
+    assert len(captured["items"]) == 4
+    assert captured["tick_ms"] == 5
+    assert fake_imu.get_count == 1
 
 
 def test_master_app_only_drives_assistant_in_current_stage() -> None:
@@ -580,8 +695,10 @@ def test_master_app_self_base_state_preserves_runtime_base_ok(monkeypatch) -> No
         },
     )
 
+    import master.motion_runtime as runtime
+
     app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.motion_state = object()
+    app.motion_state = runtime.create_runtime_state(hw_bundle=None)
 
     result = app.step(None)
 
