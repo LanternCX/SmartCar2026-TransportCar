@@ -70,6 +70,36 @@ class HeadingEstimator:
             1.0 - (2.0 * ((self.y * self.y) + (self.z * self.z))),
         )
 
+    def to_euler_yaw(self):
+        return self.yaw_rad()
+
+
+def quaternion_to_euler_deg(w, x, y, z):
+    sinr_cosp = 2.0 * ((float(w) * float(x)) + (float(y) * float(z)))
+    cosr_cosp = 1.0 - (2.0 * ((float(x) * float(x)) + (float(y) * float(y))))
+    roll_rad = math.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * ((float(w) * float(y)) - (float(z) * float(x)))
+    if sinp >= 1.0:
+        pitch_rad = math.pi / 2.0
+    elif sinp <= -1.0:
+        pitch_rad = -math.pi / 2.0
+    else:
+        pitch_rad = math.asin(sinp)
+
+    siny_cosp = 2.0 * ((float(w) * float(z)) + (float(x) * float(y)))
+    cosy_cosp = 1.0 - (2.0 * ((float(y) * float(y)) + (float(z) * float(z))))
+    yaw_rad = math.atan2(siny_cosp, cosy_cosp)
+    return (
+        math.degrees(roll_rad),
+        math.degrees(pitch_rad),
+        math.degrees(yaw_rad),
+    )
+
+
+def estimator_euler_deg(estimator):
+    return quaternion_to_euler_deg(estimator.w, estimator.x, estimator.y, estimator.z)
+
 
 def capture_heading_target(state):
     """在切换到保持模式时锁定当前航向目标."""

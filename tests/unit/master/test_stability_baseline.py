@@ -115,6 +115,71 @@ def test_master_heading_estimator_updates_yaw() -> None:
     assert estimator.yaw_rad() > 0.0
 
 
+def test_master_heading_estimator_matches_legacy_quaternion_update() -> None:
+    import math
+
+    from legacy.utils.quaternion import Quaternion
+    from master.ctrl.attitude import HeadingEstimator
+
+    master_estimator = HeadingEstimator()
+    legacy_estimator = Quaternion()
+
+    gx_deg_s = 12.3
+    gy_deg_s = -4.5
+    gz_deg_s = 67.8
+    dt_s = 0.017
+
+    master_estimator.update(gx_deg_s, gy_deg_s, gz_deg_s, dt_s)
+    legacy_estimator.update(
+        math.radians(gx_deg_s),
+        math.radians(gy_deg_s),
+        math.radians(gz_deg_s),
+        dt_s,
+    )
+
+    assert master_estimator.w == legacy_estimator.w
+    assert master_estimator.x == legacy_estimator.x
+    assert master_estimator.y == legacy_estimator.y
+    assert master_estimator.z == legacy_estimator.z
+
+
+def test_master_update_heading_from_gyro_matches_legacy_chain() -> None:
+    import math
+    import types
+
+    from legacy.utils.quaternion import Quaternion
+    from master.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 32.768, -16.384, 49.152),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        gyro_lpf=types.SimpleNamespace(update=lambda value: value),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+    )
+
+    update_heading_from_gyro(state)
+
+    legacy_estimator = Quaternion()
+    legacy_estimator.update(
+        math.radians(2.0),
+        math.radians(-1.0),
+        math.radians(3.0),
+        0.02,
+    )
+    legacy_yaw = legacy_estimator.to_euler_yaw()
+
+    assert state.last_yaw_rad == legacy_yaw
+    assert state.heading_deg == math.degrees(legacy_yaw)
+    assert state.yaw_rate_deg_s == 3.0
+
+
 def test_master_and_assistant_heading_correction_share_same_boundary() -> None:
     import types
 
