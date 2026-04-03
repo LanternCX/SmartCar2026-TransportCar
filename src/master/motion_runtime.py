@@ -142,6 +142,23 @@ def _load_gyro_offsets(path):
     return tuple(offsets)
 
 
+def _trace_ident_lookup_loaded(path, wheel_controllers):
+    wheel_ident = {}
+    for name in ("m", "l", "r"):
+        controller = wheel_controllers.get(name)
+        if controller is None:
+            continue
+        wheel_ident[name] = (
+            float(controller.plant_gain or 0.0),
+            float(controller.plant_tau or 0.0),
+        )
+    _debug_print(
+        "ident_lookup_loaded",
+        path=str(path),
+        wheel_ident=wheel_ident,
+    )
+
+
 def _heading_chain_ready(hw_bundle):
     if hw_bundle is None:
         return False
@@ -271,8 +288,10 @@ def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
     state.heading_hold_enabled = True
     state.yaw_kp = float(runtime_params.YAW_KP)
     state.yaw_ki = float(runtime_params.YAW_KI)
+    state.yaw_kd = float(runtime_params.YAW_KD)
     state.yaw_i_max = float(runtime_params.YAW_I_MAX)
     state.auto_omega_max = float(runtime_params.AUTO_OMEGA_MAX)
+    state.hold_speed_eps = float(runtime_params.HOLD_SPEED_EPS)
     state.tick_ms = int(runtime_params.CONTROL_TICK_MS)
     state.tick_s = float(state.tick_ms) / 1000.0
     state.gyro_scale = float(config.GYRO_SCALE)
@@ -302,6 +321,7 @@ def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
         ident_lookup,
         output_limit=runtime_params.MAX_DUTY,
     )
+    _trace_ident_lookup_loaded(config.IDENT_RESULTS_FILE, state.wheel_controllers)
     imu = _state_imu_port(state)
     if imu is not None:
         apply_offsets = getattr(imu, "apply_offsets", None)
@@ -320,14 +340,23 @@ def _resolve_applied_target_for_state(state, target, heading_deg):
     if kind == "vel":
         vx = float(target.get("vx", 0.0))
         vy = float(target.get("vy", 0.0))
-        omega = float(target.get("omega", 0.0)) + compute_heading_correction(
-            state, heading_deg
-        )
+        manual_omega = float(target.get("omega", 0.0))
+        if abs(manual_omega) >= float(state.hold_speed_eps):
+            state.heading_deg = float(heading_deg)
+            capture_heading_target(state)
+            return {
+                "kind": "vel",
+                "vx": vx,
+                "vy": vy,
+                "omega": _clamp(
+                    manual_omega, -state.auto_omega_max, state.auto_omega_max
+                ),
+            }
         return {
             "kind": "vel",
             "vx": vx,
             "vy": vy,
-            "omega": _clamp(omega, -state.auto_omega_max, state.auto_omega_max),
+            "omega": compute_heading_correction(state, heading_deg),
         }
     return {
         "kind": "hold",
@@ -368,6 +397,8 @@ def resolve_heading_hold_target_from_state(
     if _state_imu_port(state, hw_bundle=hw_bundle) is not None:
         run_base_cycle(state, hw_bundle=hw_bundle, cycle_token=cycle_token)
         heading_deg = float(state.heading_deg)
+    else:
+        state.heading_deg = heading_deg
     applied_target = _resolve_applied_target_for_state(
         state, state.last_target, heading_deg
     )

@@ -11,12 +11,14 @@ def test_master_hw_bundle_uses_confirmed_mapping() -> None:
     assert hw_bundle["uart"]["uart6"].uart_id == 5
     assert hw_bundle["uart"]["uart8"].uart_id == 7
     assert hw_bundle["motors"]["m"].port_name == "PWM_C30_DIR_C31"
-    assert hw_bundle["motors"]["l"].port_name == "PWM_D4_DIR_D5"
-    assert hw_bundle["motors"]["r"].port_name == "PWM_D6_DIR_D7"
+    assert hw_bundle["motors"]["l"].port_name == "PWM_D6_DIR_D7"
+    assert hw_bundle["motors"]["l"].invert is True
+    assert hw_bundle["motors"]["r"].port_name == "PWM_D4_DIR_D5"
+    assert hw_bundle["motors"]["r"].invert is False
     assert encoder_pins == {
         "m": ("D15", "D16", True),
-        "l": ("C0", "C1", True),
-        "r": ("C2", "C3", True),
+        "l": ("C2", "C3", True),
+        "r": ("C0", "C1", True),
     }
 
 
@@ -66,6 +68,15 @@ def test_master_runtime_process_state_owns_cross_cycle_state() -> None:
     assert hasattr(state, "odom")
     assert hasattr(state, "target_heading_deg")
     assert hasattr(state, "heading_target_ready")
+
+
+def test_master_runtime_process_state_exposes_heading_stability_fields() -> None:
+    import master.motion_runtime as runtime
+
+    state = runtime.create_runtime_state(hw_bundle=None)
+
+    assert hasattr(state, "yaw_kd")
+    assert hasattr(state, "hold_speed_eps")
 
 
 def test_master_runtime_process_state_uses_clear_public_type_name() -> None:

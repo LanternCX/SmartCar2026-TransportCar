@@ -60,6 +60,13 @@ def test_master_runtime_params_does_not_expose_ident_results_file_board_fact() -
     )
 
 
+def test_master_runtime_params_expose_heading_stability_keys() -> None:
+    import master.runtime_params as runtime_params
+
+    assert hasattr(runtime_params, "YAW_KD")
+    assert hasattr(runtime_params, "HOLD_SPEED_EPS")
+
+
 def test_master_app_uses_runtime_param_deadzone() -> None:
     import master.runtime_params as runtime_params
     from master.app import MasterApp

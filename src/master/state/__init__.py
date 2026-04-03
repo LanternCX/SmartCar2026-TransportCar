@@ -50,6 +50,7 @@ class MasterControlState:
             wheel_controllers if wheel_controllers is not None else {}
         )
         self.last_yaw_rad = 0.0
+        self.last_attitude_time_us = None
 
 
 class MotionRuntimeState(MasterRuntimeState):
@@ -64,8 +65,10 @@ class MotionRuntimeState(MasterRuntimeState):
         self.heading_hold_enabled = True
         self.yaw_kp = 0.0
         self.yaw_ki = 0.0
+        self.yaw_kd = 0.0
         self.yaw_i_max = 0.0
         self.auto_omega_max = 0.0
+        self.hold_speed_eps = 0.0
         self.tick_ms = 0
         self.tick_s = 0.0
         self.gyro_scale = 1.0
@@ -177,3 +180,11 @@ class MotionRuntimeState(MasterRuntimeState):
     @last_yaw_rad.setter
     def last_yaw_rad(self, value):
         self.control.last_yaw_rad = value
+
+    @property
+    def last_attitude_time_us(self):
+        return self.control.last_attitude_time_us
+
+    @last_attitude_time_us.setter
+    def last_attitude_time_us(self, value):
+        self.control.last_attitude_time_us = value

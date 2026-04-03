@@ -180,59 +180,140 @@ def test_master_update_heading_from_gyro_matches_legacy_chain() -> None:
     assert state.yaw_rate_deg_s == 3.0
 
 
-def test_master_and_assistant_heading_correction_share_same_boundary() -> None:
+def test_master_update_heading_from_gyro_matches_verified_inspect_attitude_chain() -> (
+    None
+):
+    import math
     import types
 
-    from assistant.ctrl.attitude import compute_heading_correction as assistant_compute
-    from master.ctrl.attitude import compute_heading_correction as master_compute
+    import pytest
 
-    def _build_state():
-        return types.SimpleNamespace(
-            heading_hold_enabled=True,
-            target_heading_deg=15.0,
-            heading_deg=10.0,
-            yaw_integral=0.0,
-            yaw_kp=0.2,
-            yaw_ki=0.1,
-            yaw_i_max=20.0,
-            auto_omega_max=5.0,
-        )
+    from legacy.utils.quaternion import Quaternion
+    from master.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
 
-    master_state = _build_state()
-    assistant_state = _build_state()
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 34.4064, -16.384, 50.7904),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=1_000_000,
+    )
 
-    assert master_compute(master_state) == assistant_compute(assistant_state)
+    update_heading_from_gyro(state, now_us=1_012_345)
 
-    master_state.heading_hold_enabled = False
-    assistant_state.heading_hold_enabled = False
+    legacy_estimator = Quaternion()
+    legacy_estimator.update(
+        math.radians(2.1),
+        math.radians(-1.0),
+        math.radians(3.1),
+        0.012345,
+    )
+    legacy_yaw = legacy_estimator.to_euler_yaw()
 
-    assert master_compute(master_state) == 0.0
-    assert assistant_compute(assistant_state) == 0.0
+    assert state.last_attitude_time_us == 1_012_345
+    assert state.tick_s == pytest.approx(0.012345)
+    assert state.last_yaw_rad == pytest.approx(legacy_yaw)
+    assert state.heading_deg == pytest.approx(math.degrees(legacy_yaw))
+    assert state.yaw_rate_deg_s == 3.1
 
 
-def test_heading_correction_uses_shortest_turn_across_wrap() -> None:
+def test_master_heading_correction_matches_legacy_pi_and_yaw_rate_damping() -> None:
     import types
 
-    from assistant.ctrl.attitude import compute_heading_correction as assistant_compute
     from master.ctrl.attitude import compute_heading_correction as master_compute
 
-    def _build_state():
-        return types.SimpleNamespace(
-            heading_hold_enabled=True,
-            target_heading_deg=1.0,
-            heading_deg=359.0,
-            yaw_integral=0.0,
-            yaw_kp=0.1,
-            yaw_ki=0.0,
-            yaw_i_max=20.0,
-            auto_omega_max=5.0,
-        )
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=15.0,
+        heading_deg=10.0,
+        yaw_integral=0.0,
+        yaw_kp=0.2,
+        yaw_ki=0.1,
+        yaw_kd=0.05,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=3.0,
+        tick_s=0.02,
+        auto_omega_max=5.0,
+    )
 
-    master_state = _build_state()
-    assistant_state = _build_state()
+    assert master_compute(state) == 0.86
 
-    assert master_compute(master_state) == 0.2
-    assert assistant_compute(assistant_state) == 0.2
+
+def test_master_heading_correction_accumulates_integral_by_tick_s() -> None:
+    import pytest
+    import types
+
+    from master.ctrl.attitude import compute_heading_correction as master_compute
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=15.0,
+        heading_deg=10.0,
+        yaw_integral=0.0,
+        yaw_kp=0.0,
+        yaw_ki=1.0,
+        yaw_kd=0.0,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=0.0,
+        tick_s=0.02,
+        auto_omega_max=5.0,
+    )
+
+    master_compute(state)
+
+    assert state.yaw_integral == pytest.approx(0.1)
+
+
+def test_master_heading_correction_clamps_tick_scaled_integral() -> None:
+    import types
+
+    from master.ctrl.attitude import compute_heading_correction as master_compute
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=15.0,
+        heading_deg=10.0,
+        yaw_integral=19.95,
+        yaw_kp=0.0,
+        yaw_ki=1.0,
+        yaw_kd=0.0,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=0.0,
+        tick_s=0.02,
+        auto_omega_max=50.0,
+    )
+
+    master_compute(state)
+
+    assert state.yaw_integral == 20.0
+
+
+def test_master_heading_correction_uses_shortest_turn_across_wrap() -> None:
+    import types
+
+    from master.ctrl.attitude import compute_heading_correction as master_compute
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=1.0,
+        heading_deg=359.0,
+        yaw_integral=0.0,
+        yaw_kp=0.1,
+        yaw_ki=0.0,
+        yaw_kd=0.0,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=0.0,
+        tick_s=0.02,
+        auto_omega_max=5.0,
+    )
+
+    assert master_compute(state) == 0.2
 
 
 def test_master_runtime_uses_ctrl_attitude_and_filter_entrypoints(monkeypatch) -> None:
