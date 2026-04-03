@@ -1,0 +1,12 @@
+"""当前阶段共享参数.
+
+@file config/params.py
+"""
+
+FOLLOW_ACTIVE_UART = "uart6"
+FOLLOW_RESERVED_UARTS = ("uart8",)
+FOLLOW_TARGET_LABEL = "follower"
+FOLLOW_CONTROL_KP_X = 1.0
+FOLLOW_CONTROL_KP_Y = 1.0
+FOLLOW_CONTROL_KP_ANGLE = 1.0
+FOLLOW_TIMEOUT_MS = 150

@@ -2,9 +2,9 @@
 
 ## 背景
 
-当前仓库 `docs/mpy-cli.md` 已补充 `list` 命令、串口扫描策略，以及 `device_upload_dir`、`.mpyignore`、`run/delete/tree` 的路径语义。
+当前仓库正式手册 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 已补充 `list` 命令、串口扫描策略，以及 `device_upload_dir`、`.mpyignore`、`run/delete/tree` 的路径语义。
 
-但 `.agents/skills/mpy-cli/SKILL.md` 仍停留在较早版本，主要覆盖 `init/config/plan/deploy/upload/run/delete/tree` 的基础流程，没有把新近落地的端口发现与路径边界补进来。
+但当时的 `.agents/skills/mpy-cli/SKILL.md` 仍停留在较早版本，主要覆盖 `init/config/plan/deploy/upload/run/delete/tree` 的基础流程，没有把新近落地的端口发现与路径边界补进来。现行入口已迁到 `.agents/skills/mpy-cli-tool/SKILL.md`。
 
 这会导致 agent 在真实设备操作场景中出现两个风险：
 
@@ -13,7 +13,7 @@
 
 ## 设计目标
 
-1. 让 `mpy-cli` skill 与当前 `docs/mpy-cli.md` 的关键能力对齐。
+1. 让 `mpy-cli` skill 与当前正式手册 `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` 的关键能力对齐。
 2. 保持 skill 为“agent 决策准则”，而不是膨胀成完整命令手册。
 3. 在不重写全文风格的前提下，补齐端口发现、安全边界和路径语义。
 

@@ -2,15 +2,17 @@
 
 import argparse
 import ast
+from dataclasses import dataclass, replace
 import subprocess
+import sys
 import time
-from dataclasses import dataclass
 
 
 PROBE_LOCAL_PATH = "tools/stage2_smoke_probe.py"
 PROBE_REMOTE_PATH = ".agent/stage2_smoke_probe.py"
 REQUIRED_SNAPSHOTS = ("health", "tick", "imu", "enc", "motor", "vision")
 SETTLE_DELAY_S = 0.3
+SUPPORTED_SOURCE_DIRS = ("src/master", "src/assistant")
 
 
 @dataclass
@@ -22,24 +24,74 @@ class Stage2RunResult:
     details: dict
 
 
-def build_probe_commands(port):
+def _build_mpy_cli_command(source_dir, command_args):
+    """构造带 source_dir 覆盖的 mpy-cli 转发命令."""
+    return [
+        "python3",
+        "-m",
+        "tools.run_stage2_smoke",
+        "mpy-cli",
+        "--source-dir",
+        source_dir,
+    ] + list(command_args)
+
+
+def build_probe_commands(port, source_dir="src/master"):
     """构造执行 Stage 2 探针所需的 mpy-cli 命令."""
     common = ["--port", port, "--no-interactive", "--yes"]
     return [
-        ["mpy-cli", "plan", "--mode", "incremental"] + common,
-        ["mpy-cli", "deploy", "--mode", "incremental"] + common,
-        [
-            "mpy-cli",
-            "upload",
-            "--local",
-            PROBE_LOCAL_PATH,
-            "--remote",
-            PROBE_REMOTE_PATH,
-        ]
-        + common,
-        ["mpy-cli", "run", "--path", PROBE_REMOTE_PATH] + common,
-        ["mpy-cli", "delete", "--path", PROBE_REMOTE_PATH] + common,
+        _build_mpy_cli_command(source_dir, ["plan", "--mode", "incremental"] + common),
+        _build_mpy_cli_command(
+            source_dir, ["deploy", "--mode", "incremental"] + common
+        ),
+        _build_mpy_cli_command(
+            source_dir,
+            [
+                "upload",
+                "--local",
+                PROBE_LOCAL_PATH,
+                "--remote",
+                PROBE_REMOTE_PATH,
+            ]
+            + common,
+        ),
+        _build_mpy_cli_command(
+            source_dir, ["run", "--path", PROBE_REMOTE_PATH] + common
+        ),
+        _build_mpy_cli_command(
+            source_dir, ["delete", "--path", PROBE_REMOTE_PATH] + common
+        ),
     ]
+
+
+def _run_mpy_cli_with_source_dir(command_args, source_dir):
+    """仅对当前 mpy-cli 子命令覆盖 source_dir, 不改写全局配置文件."""
+    from mpy_cli import cli as mpy_cli_cli
+
+    original_load_config = mpy_cli_cli.load_config
+
+    def patched_load_config(config_path):
+        config = original_load_config(config_path)
+        return replace(config, source_dir=source_dir)
+
+    mpy_cli_cli.load_config = patched_load_config
+    try:
+        return mpy_cli_cli.main(command_args)
+    finally:
+        mpy_cli_cli.load_config = original_load_config
+
+
+def _handle_mpy_cli_wrapper(argv):
+    """处理内部 mpy-cli 转发入口."""
+    parser = argparse.ArgumentParser(prog="run_stage2_smoke mpy-cli")
+    parser.add_argument("marker")
+    parser.add_argument("--source-dir", choices=SUPPORTED_SOURCE_DIRS, required=True)
+    args, passthrough = parser.parse_known_args(argv)
+    if args.marker != "mpy-cli":
+        parser.error("missing mpy-cli marker")
+    if not passthrough:
+        parser.error("missing mpy-cli command")
+    return _run_mpy_cli_with_source_dir(passthrough, args.source_dir)
 
 
 def _parse_stage2_line(line, details):
@@ -231,9 +283,11 @@ def _is_incremental_delete_miss(result):
     return saw_delete_miss
 
 
-def run_probe(port):
+def run_probe(port, source_dir="src/master"):
     """执行完整的 Stage 2 裸片 smoke 流程."""
-    plan_cmd, deploy_cmd, upload_cmd, run_cmd, delete_cmd = build_probe_commands(port)
+    plan_cmd, deploy_cmd, upload_cmd, run_cmd, delete_cmd = build_probe_commands(
+        port, source_dir=source_dir
+    )
 
     plan_result = _run_command(plan_cmd)
     if plan_result.returncode != 0:
@@ -287,11 +341,22 @@ def _print_result(result):
 
 def main(argv=None):
     """命令行入口."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "mpy-cli":
+        return _handle_mpy_cli_wrapper(argv)
+
     parser = argparse.ArgumentParser(description="运行 Stage 2 裸片 smoke 探针")
     parser.add_argument("--port", required=True, help="mpy-cli 连接使用的串口")
+    parser.add_argument(
+        "--source-dir",
+        choices=SUPPORTED_SOURCE_DIRS,
+        default="src/master",
+        help="显式指定本次 smoke 使用的运行根目录，默认仅主车",
+    )
     args = parser.parse_args(argv)
 
-    result = run_probe(args.port)
+    result = run_probe(args.port, args.source_dir)
     _print_result(result)
     return 0 if result.status == "ok" else 1
 

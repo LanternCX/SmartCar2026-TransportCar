@@ -31,16 +31,14 @@ description: Use when creating branches, committing, merging, or preparing relea
 - `scope` 建议使用目录域：`control` `hardware` `filters` `services` `storage` `config` `utils`
 
 # Commit Trailer
-- 仅当 commit 由 agent 创建时，提交正文末尾必须追加固定 trailer：`Co-authored-by: opencode-agent[bot] <opencode-agent[bot]@users.noreply.github.com>`
-- 人工创建的 commit 不强制追加该 trailer
-- 生成 commit message 时，agent 需要同时满足 Angular 标题格式与上述 trailer 要求
+- 默认不追加任何 `Co-authored-by` 尾注
+- 只有用户明确要求时，才允许追加 `Co-authored-by`
+- 若允许追加，co-author 必须是真人，不得使用 agent、bot 或系统账号
+- 生成提交信息时，优先保持纯净的 Angular 标题，不要自行补尾注
 
 # Examples
 ```text
 feat(services): add sync query for lock status
-
-Co-authored-by: opencode-agent[bot] <opencode-agent[bot]@users.noreply.github.com>
-
 fix(filters): correct dual-window boundary handling
 refactor(control): split kinematics and odometry helpers
 docs: update transport protocol section
@@ -55,7 +53,7 @@ docs: update transport protocol section
 - 分支命名使用小写 + 连字符
 - 单个提交只做一类改动
 - 不提交调试垃圾和敏感信息
-- 提交前对照 `.agents/skills/code-standards/SKILL.md` 做质量检查
+- 提交前先查 `.agents/skills/using-rules/SKILL.md`，收口前再用 `.agents/skills/project-extension-requesting-code-review/SKILL.md` 自检
 
 # Deliverables
 - 符合 Git Flow 的分支轨迹

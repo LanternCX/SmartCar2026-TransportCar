@@ -462,7 +462,7 @@ git commit -m "refactor(services): route transport logs through logger"
 ### Task 6: Document the new runtime logging protocol
 
 **Files:**
-- Modify: `docs/Protocol.md`
+- Modify: `.agents/skills/using-rules/references/openart-protocol.md`
 
 **Step 1: Write the failing test**
 
@@ -471,11 +471,11 @@ Search protocol docs for the new log commands and query.
 **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/contract/services/commands/test_log_commands.py -q && python3 -m pytest tests/unit/services/test_transport_car_logging.py -q`
-Expected: code tests pass, but `docs/Protocol.md` still lacks `log_profile`, `log_level`, `log_filter`, `log_modules`, `log_color`, `log_reset`, and `?log` documentation.
+Expected: code tests pass, but `.agents/skills/using-rules/references/openart-protocol.md` still lacks `log_profile`, `log_level`, `log_filter`, `log_modules`, `log_color`, `log_reset`, and `?log` documentation.
 
 **Step 3: Write minimal implementation**
 
-Update `docs/Protocol.md` to document:
+Update `.agents/skills/using-rules/references/openart-protocol.md` to document:
 
 - purpose of the global log system
 - each new runtime command
@@ -491,7 +491,7 @@ Expected: PASS, and protocol doc matches the implemented behavior.
 **Step 5: Commit**
 
 ```bash
-git add docs/Protocol.md
+git add .agents/skills/using-rules/references/openart-protocol.md
 git commit -m "docs: document runtime logging controls"
 ```
 

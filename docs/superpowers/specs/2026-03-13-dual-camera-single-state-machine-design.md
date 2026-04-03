@@ -22,7 +22,7 @@
 
 ## 非目标
 
-1. 本轮不直接修改运行时代码、视觉代码或 `docs/Protocol.md` 的线协议细节。
+1. 本轮不直接修改运行时代码、视觉代码或 `.agents/skills/using-rules/references/openart-protocol.md` 的线协议细节。
 2. 本轮不强制两颗相机共用同一份视觉实现, 只统一协议与车端消费方式。
 3. 本轮不要求一次性敲定所有检测类别、置信度字段或串口报文压缩格式。
 
@@ -102,7 +102,7 @@
 2. 若查询响应缺少明确结束标记, 主车无法判断一帧结果是否收齐。
 3. 若轮询周期设计不当, 搬运同时避障时仍可能出现观测盲窗。
 4. 若主车状态机直接依赖视觉端内部实现细节, 双摄独立维护会迅速失控。
-5. `docs/Protocol.md` 仍基于单框输入假设, 后续必须单独升级, 不能长期与本设计并存。
+5. `.agents/skills/using-rules/references/openart-protocol.md` 的前身版本仍基于单框输入假设, 后续必须单独升级, 不能长期与本设计并存。
 
 ## 文档落地范围
 
@@ -114,7 +114,7 @@
 
 以下内容留待下一轮实现前再落地:
 
-1. `docs/Protocol.md` 的线协议格式升级。
+1. `.agents/skills/using-rules/references/openart-protocol.md` 的线协议格式升级。
 2. `src/boot.py`、主车/辅车 profile、双摄轮询和视觉协调器代码实现。
 3. 相关 unit/contract/HIL 验证与证据。
 

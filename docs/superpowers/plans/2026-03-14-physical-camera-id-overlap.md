@@ -13,7 +13,7 @@
 ### Task 1: 收敛主控侧协议文档到物理相机 ID 语义
 
 **Files:**
-- Modify: `docs/Protocol.md`
+- Modify: `.agents/skills/using-rules/references/openart-protocol.md`
 - Modify: `docs/developer/strategy.md`
 - Modify: `tests/hil/2026-03-dual-camera-polling.md`
 - Test: `tests/unit/services/test_transport_car_logging.py`
@@ -102,7 +102,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `../SmartCar2026-Vision/main.py`
-- Modify: `../SmartCar2026-Vision/docs/Protocol.md`
+- Modify: `../SmartCar2026-Vision` 协议正文
 - Modify: `../SmartCar2026-Vision/README.md`
 - Test: `../SmartCar2026-Vision/tests/unit/test_vision_protocol_rebuild.py`
 - Test: `../SmartCar2026-Vision/tests/contract/test_main_vision_protocol_contract.py`

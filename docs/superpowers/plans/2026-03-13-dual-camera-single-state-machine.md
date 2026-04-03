@@ -16,7 +16,7 @@
 - Create: `tests/unit/services/test_boot_script.py`
 - Modify: `src/boot.py`
 - Modify: `src/script/remote_control.py`
-- Modify: `docs/Protocol.md`
+- Modify: `.agents/skills/using-rules/references/openart-protocol.md`
 
 **Step 1: Write the failing test**
 
@@ -52,7 +52,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/boot.py src/script/remote_control.py docs/Protocol.md tests/unit/services/test_boot_script.py
+git add src/boot.py src/script/remote_control.py .agents/skills/using-rules/references/openart-protocol.md tests/unit/services/test_boot_script.py
 git commit -m "feat(boot): split role selection from startup entry"
 ```
 
@@ -101,7 +101,7 @@ git commit -m "feat(services): add main and auxiliary vehicle profiles"
 ### Task 3: 升级视觉协议为“单次查询, 多条检测响应”
 
 **Files:**
-- Modify: `docs/Protocol.md`
+- Modify: `.agents/skills/using-rules/references/openart-protocol.md`
 - Modify: `src/vision/protocol.py`
 - Modify: `src/services/runtime/uart_ingress.py`
 - Modify: `tests/unit/services/test_vision_protocol.py`
@@ -139,7 +139,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add docs/Protocol.md src/vision/protocol.py src/services/runtime/uart_ingress.py tests/unit/services/test_vision_protocol.py tests/contract/services/test_transport_runtime_protocol.py
+git add .agents/skills/using-rules/references/openart-protocol.md src/vision/protocol.py src/services/runtime/uart_ingress.py tests/unit/services/test_vision_protocol.py tests/contract/services/test_transport_runtime_protocol.py
 git commit -m "feat(protocol): support multi-detection responses per query"
 ```
 

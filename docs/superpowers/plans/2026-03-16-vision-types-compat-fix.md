@@ -6,7 +6,7 @@
 
 **Architecture:** 保持 `VisionMixin` 的懒装配结构不变, 仅把禁用视觉路径使用的轻量服务占位对象改为模块内本地最小容器。先补 MicroPython 兼容失败测试, 再做最小实现, 最后用 focused tests 验证视觉集成不回退。
 
-**Tech Stack:** Python, MicroPython, pytest, repo-local `.progress/`
+**Tech Stack:** Python, MicroPython, pytest, repo-local `docs/superpowers/memory/`
 
 ---
 
@@ -16,8 +16,8 @@
 - Modify: `tests/unit/services/test_micropython_compatibility.py`
 - Modify: `src/services/car/vision.py`
 - Test: `tests/unit/services/test_transport_car_vision_integration.py`
-- Modify: `.progress/PROGRESS.md`
-- Create: `.progress/entries/2026/2026-03-16-9.md`
+- Modify: `docs/superpowers/memory/debug/INDEX.md`
+- Create: `docs/superpowers/memory/debug/entries/2026-03/2026-03-16-1.md`
 
 **Step 1: 写失败测试**
 
@@ -57,12 +57,12 @@ Expected: PASS
 
 **Step 5: 记录进度**
 
-- 在 `.progress/entries/2026/2026-03-16-9.md` 记录当前板端错误链已从 OOM 后移到 `types` 缺失, 以及本轮兼容修复
-- 在 `.progress/PROGRESS.md` 追加 TOC 行
+- 在 `docs/superpowers/memory/debug/entries/2026-03/2026-03-16-1.md` 记录当前板端错误链已从 OOM 后移到 `types` 缺失, 以及本轮兼容修复
+- 在 `docs/superpowers/memory/debug/INDEX.md` 追加索引行
 
 **Step 6: Commit**
 
 ```bash
-git add tests/unit/services/test_micropython_compatibility.py src/services/car/vision.py .progress/PROGRESS.md .progress/entries/2026/2026-03-16-9.md
+git add tests/unit/services/test_micropython_compatibility.py src/services/car/vision.py docs/superpowers/memory/debug/INDEX.md docs/superpowers/memory/debug/entries/2026-03/2026-03-16-1.md
 git commit -m "fix(vision): remove types dependency from lazy vision service"
 ```

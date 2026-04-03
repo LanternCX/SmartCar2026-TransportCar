@@ -4,9 +4,10 @@ import time
 
 from smartcar import ticker
 
+from config.boot_role import get_vehicle_role
 from config.params import TICK_MS
 from services.diagnostics import format_observe_line
-from services.transport_car import TransportCar
+from services.car import TransportCar
 
 
 SAMPLE_EVERY_TICKS = 20
@@ -23,7 +24,8 @@ def stop_transport(car):
     """停止 ticker 并清零电机输出."""
     if getattr(car, "ticker", None) is not None:
         car.ticker.stop()
-    for state in getattr(car, "wheel_states", ()):  # pragma: no branch
+    chassis_state = getattr(car, "chassis_state", None)
+    for state in getattr(chassis_state, "wheel_states", ()):  # pragma: no branch
         motor = state.get("motor")
         if motor is not None:
             motor.duty(0)
@@ -35,14 +37,17 @@ def main():
     sample_count = 0
 
     try:
-        car = TransportCar()
+        car = TransportCar(vehicle_role=get_vehicle_role())
         pit = ticker(1)
-        capture_items = [state["encoder"] for state in car.wheel_states]
+        chassis_state = car.chassis_state
+        assert chassis_state is not None
+        capture_items = [state["encoder"] for state in chassis_state.wheel_states]
         capture_items.append(car.imu)
         pit.capture_list(*capture_items)
         pit.callback(car.mark_tick)
         car.set_ticker(pit)
         pit.start(TICK_MS)
+        facade = car.get_diagnostics_facade()
 
         next_emit_tick = SETTLE_TICKS
         max_tick = SETTLE_TICKS + SAMPLE_EVERY_TICKS * MAX_SAMPLE_COUNT
@@ -53,12 +58,12 @@ def main():
                 break
 
             if car.tick_count >= next_emit_tick:
-                emit_snapshot(car, "health", car.build_health_snapshot)
-                emit_snapshot(car, "tick", car.build_tick_snapshot)
-                emit_snapshot(car, "imu", car.build_imu_snapshot)
-                emit_snapshot(car, "enc", car.build_encoder_snapshot)
-                emit_snapshot(car, "motor", car.build_motor_snapshot)
-                emit_snapshot(car, "vision", car.build_vision_snapshot)
+                emit_snapshot(car, "health", facade.build_health_snapshot)
+                emit_snapshot(car, "tick", facade.build_tick_snapshot)
+                emit_snapshot(car, "imu", facade.build_imu_snapshot)
+                emit_snapshot(car, "enc", facade.build_encoder_snapshot)
+                emit_snapshot(car, "motor", facade.build_motor_snapshot)
+                emit_snapshot(car, "vision", facade.build_vision_snapshot)
                 sample_count += 1
                 next_emit_tick += SAMPLE_EVERY_TICKS
 
