@@ -3,7 +3,12 @@
 @file src/master/hw/uart.py
 """
 
-from master.config import UART_BAUDRATE, UART_IDS
+_package_name = str(globals().get("__package__", ""))
+
+if "." in _package_name:
+    from ..config import UART_BAUDRATE, UART_IDS
+else:
+    from config import UART_BAUDRATE, UART_IDS
 
 
 class UartPort:

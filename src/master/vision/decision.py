@@ -3,8 +3,14 @@
 @file src/master/vision/decision.py
 """
 
-from master.protocol import build_follow_command
-import master.runtime_params as runtime_params
+_package_name = str(globals().get("__package__", ""))
+
+if "." in _package_name:
+    from .. import runtime_params
+    from ..protocol import build_follow_command
+else:
+    import runtime_params
+    from protocol import build_follow_command
 
 
 class Decision:
@@ -16,6 +22,7 @@ class Decision:
         assistant_target,
         assistant_state,
         assistant_command,
+        self_base_state,
     ):
         self.phase = str(phase)
         self.selected_target = str(selected_target)
@@ -23,6 +30,19 @@ class Decision:
         self.assistant_target = dict(assistant_target)
         self.assistant_state = dict(assistant_state)
         self.assistant_command = str(assistant_command)
+        self.self_base_state = dict(self_base_state)
+
+
+def _build_self_base_state(snapshot):
+    heading_deg = float(snapshot.get("heading_est_deg", 0.0))
+    odom = snapshot.get("odom", (0.0, 0.0))
+    return {
+        "heading_deg": heading_deg,
+        "yaw_rate_deg_s": float(snapshot.get("yaw_rate_deg_s", 0.0)),
+        "odom_x": float(odom[0]),
+        "odom_y": float(odom[1]),
+        "base_ok": 1 if snapshot.get("base_ok", 0) else 0,
+    }
 
 
 def decide_from_state(state_output):
@@ -40,6 +60,7 @@ def _build_idle_decision(
     selected_target="idle",
     target_valid=0,
     target_fresh=0,
+    self_base_snapshot=None,
 ):
     assistant_target = {"valid": 0, "dx": 0.0, "dy": 0.0}
     assistant_state = {
@@ -48,6 +69,9 @@ def _build_idle_decision(
         "target_valid": int(target_valid),
         "target_fresh": int(target_fresh),
     }
+    if self_base_snapshot is None:
+        self_base_snapshot = {}
+    self_base_state = _build_self_base_state(self_base_snapshot)
     return Decision(
         phase=phase,
         selected_target=selected_target,
@@ -60,6 +84,7 @@ def _build_idle_decision(
             dx=0.0,
             dy=0.0,
         ),
+        self_base_state=self_base_state,
     )
 
 
@@ -75,12 +100,14 @@ def decide_from_observation(observation, state_machine=None):
             control_seq,
             phase=phase,
             selected_target=selected_target,
+            self_base_snapshot=observation,
         )
     if int(observation.get("fresh", 1)) != 1 or int(observation.get("stale", 0)) == 1:
         return _build_idle_decision(
             control_seq,
             phase=phase,
             selected_target=selected_target,
+            self_base_snapshot=observation,
         )
     if phase != "TRACKING":
         return _build_idle_decision(
@@ -89,6 +116,7 @@ def decide_from_observation(observation, state_machine=None):
             selected_target=selected_target,
             target_valid=1,
             target_fresh=1,
+            self_base_snapshot=observation,
         )
 
     dx = float(observation.get("err_x", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_X
@@ -100,6 +128,7 @@ def decide_from_observation(observation, state_machine=None):
         "target_valid": 1,
         "target_fresh": 1,
     }
+    self_base_state = _build_self_base_state(observation)
     return Decision(
         phase="TRACKING",
         selected_target=selected_target,
@@ -112,4 +141,5 @@ def decide_from_observation(observation, state_machine=None):
             dx=dx,
             dy=dy,
         ),
+        self_base_state=self_base_state,
     )

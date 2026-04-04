@@ -1,5 +1,5 @@
 def test_decision_builds_planar_follow_command_from_vision_error() -> None:
-    from master.decision import decide_from_observation
+    from master.vision.decision import decide_from_observation
 
     decision = decide_from_observation(
         {
@@ -21,7 +21,7 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
 
 
 def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
-    from master.decision import decide_from_observation
+    from master.vision.decision import decide_from_observation
 
     decision = decide_from_observation({"control_seq": 3, "valid": 0})
 
@@ -32,7 +32,7 @@ def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
 
 
 def test_decision_outputs_zero_when_report_is_stale() -> None:
-    from master.decision import decide_from_observation
+    from master.vision.decision import decide_from_observation
 
     decision = decide_from_observation(
         {"control_seq": 4, "valid": 1, "phase": "MARKER_MISSING", "stale": 1}
@@ -44,7 +44,7 @@ def test_decision_outputs_zero_when_report_is_stale() -> None:
 
 
 def test_decision_holds_inside_center_deadzone() -> None:
-    from master.decision import decide_from_observation
+    from master.vision.decision import decide_from_observation
 
     decision = decide_from_observation(
         {
@@ -62,7 +62,7 @@ def test_decision_holds_inside_center_deadzone() -> None:
 
 
 def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
-    from master.decision import decide_from_observation
+    from master.vision.decision import decide_from_observation
 
     decision = decide_from_observation(
         {

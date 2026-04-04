@@ -1,4 +1,6 @@
-def test_assistant_runtime_loop_closes_follow_timeout_and_state_chain() -> None:
+def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spam() -> (
+    None
+):
     from assistant.app import AssistantRuntimeLoop
 
     class FakeUart:
@@ -27,7 +29,6 @@ def test_assistant_runtime_loop_closes_follow_timeout_and_state_chain() -> None:
     uart3 = FakeUart(
         [
             "follow=1,seq=8,valid=1,dx=0.10,dy=0.00",
-            "STATE?",
         ]
     )
     motors = {"m": FakeMotor(), "l": FakeMotor(), "r": FakeMotor()}
@@ -41,11 +42,11 @@ def test_assistant_runtime_loop_closes_follow_timeout_and_state_chain() -> None:
         }
     )
     loop.step(now_ms=0)
+    loop.step(now_ms=50)
     loop.step(now_ms=200)
 
     assert any(motor.last_duty is not None for motor in motors.values())
-    assert "TIMEOUT,last_seq=8" in uart3.writes
-    assert any(str(item).startswith("state=1,") for item in uart3.writes)
+    assert uart3.writes == ["TIMEOUT,last_seq=8"]
 
 
 def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
@@ -60,9 +61,7 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
     class DummyApp:
         def __init__(self, hw_bundle):
             captured["app_bundle"] = hw_bundle
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=hw_bundle)
-            )
+            self.runtime_state = types.SimpleNamespace(hw_bundle=hw_bundle)
 
         def handle_line(self, line, now_ms):
             return ""
@@ -81,7 +80,7 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
     loop = AssistantRuntimeLoop(hw_bundle)
 
     assert captured["app_bundle"] is hw_bundle
-    assert loop.app.runtime.core.hw_bundle is hw_bundle
+    assert loop.app.runtime_state.hw_bundle is hw_bundle
 
 
 def test_assistant_runtime_loop_rejects_mismatched_app_and_hw_bundle() -> None:
@@ -127,9 +126,7 @@ def test_assistant_runtime_loop_rejects_runtime_owner_drift_under_same_app_bundl
     class DummyApp:
         def __init__(self, app_hw_bundle, runtime_hw_bundle):
             self.hw_bundle = app_hw_bundle
-            self.runtime = types.SimpleNamespace(
-                core=types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
-            )
+            self.runtime_state = types.SimpleNamespace(hw_bundle=runtime_hw_bundle)
 
         def handle_line(self, line, now_ms):
             return ""

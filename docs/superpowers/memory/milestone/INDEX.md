@@ -7,6 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-04-1 | 2026-04-04 | 完成主车底盘控制重构阶段的姿态、方向与节拍闭环调试 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-04-1.md` | 记录主车底盘控制重构阶段完成姿态口径统一、方向映射修正、动态 dt 统一和航向保持语义收口的完整里程碑。 | master, chassis-control, heading, yaw, mapping, dynamic-dt, milestone |
 | 2026-03-07-1 | 2026-03-07 | 视觉状态机迁移到主控端 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-07-1.md` | 将视觉状态机职责迁入主控端搬运车运行时，形成主控内部视觉闭环与位置式控制协同。 | vision, uart6, state-machine, transport-car |
 | 2026-03-07-2 | 2026-03-07 | 建立 Stage 3 设备观测诊断链路 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-07-2.md` | 建立可由 agent 主动触发的 Stage 3 板端观测诊断链路，并补齐运行时诊断快照与设备观测入口。 | diagnostics, mpy-cli, hil, observe, transport-car |
 | 2026-03-09-1 | 2026-03-09 | 补齐 mpy-cli skill 的串口发现与路径边界语义 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-09-1.md` | 补齐 mpy-cli skill 对串口发现、上传路径边界和运维命令语义的指导，收口 agent 默认操作顺序。 | mpy-cli, skill, docs, serial, path-semantics |

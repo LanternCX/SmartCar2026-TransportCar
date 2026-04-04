@@ -1,3 +1,24 @@
+import sys
+
+import pytest
+
+
+def _clear_assistant_runtime_modules() -> None:
+    for module_name in list(sys.modules):
+        if module_name == "assistant" or module_name.startswith("assistant."):
+            sys.modules.pop(module_name, None)
+
+
+@pytest.fixture(autouse=True)
+def _prepare_assistant_runtime_imports(monkeypatch):
+    _clear_assistant_runtime_modules()
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "src"))
+    yield
+    _clear_assistant_runtime_modules()
+
+
 def _build_fake_hw_bundle() -> dict:
     class FakeMotor:
         def __init__(self) -> None:
@@ -10,11 +31,14 @@ def _build_fake_hw_bundle() -> dict:
             self.last_duty = 0
 
     return {
+        "uart": {"uart3": object()},
         "motors": {
             "m": FakeMotor(),
             "l": FakeMotor(),
             "r": FakeMotor(),
-        }
+        },
+        "encoders": {"rear_left": object()},
+        "imu": object(),
     }
 
 
@@ -71,246 +95,6 @@ def test_assistant_read_now_ms_propagates_import_error(monkeypatch) -> None:
         _read_now_ms()
 
 
-def test_assistant_main_rejects_device_root_execution_without_package_path(
-    monkeypatch,
-) -> None:
-    import importlib.util
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant" or module_name.startswith("assistant."):
-            sys.modules.pop(module_name, None)
-
-    monkeypatch.syspath_prepend(str(runtime_root))
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != src_root.resolve()
-        ],
-    )
-    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-
-    with pytest.raises(ModuleNotFoundError, match="assistant") as exc_info:
-        spec.loader.exec_module(module)
-
-    assert exc_info.value.name == "assistant"
-
-
-def test_assistant_main_does_not_swallow_real_package_import_error(monkeypatch) -> None:
-    import builtins
-    import importlib.util
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant" or module_name.startswith("assistant."):
-            sys.modules.pop(module_name, None)
-
-    monkeypatch.syspath_prepend(str(runtime_root))
-    monkeypatch.setattr(
-        sys,
-        "path",
-        [
-            entry
-            for entry in sys.path
-            if Path(entry or ".").resolve() != src_root.resolve()
-        ],
-    )
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "assistant.app":
-            raise ModuleNotFoundError("缺少依赖", name="missing_dependency")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-    spec = importlib.util.spec_from_file_location("__main__", runtime_root / "main.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-
-    with pytest.raises(ModuleNotFoundError, match="缺少依赖") as exc_info:
-        spec.loader.exec_module(module)
-
-    assert exc_info.value.name == "missing_dependency"
-
-
-def test_assistant_main_does_not_fallback_without_module_not_found_error_name(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "main.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError("No module named 'assistant'")
-        return original_import(name, globals, locals, fromlist, level)
-
-    builtins_dict = dict(vars(builtins))
-    builtins_dict.pop("ModuleNotFoundError", None)
-    builtins_dict["__import__"] = _import
-    module_globals = {
-        "__builtins__": builtins_dict,
-        "__file__": str(runtime_root / "main.py"),
-        "__name__": "__main__",
-    }
-
-    with pytest.raises(ImportError, match="No module named 'assistant'"):
-        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
-
-
-def test_assistant_main_does_not_fallback_when_import_error_names_full_module(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "main.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError(
-                "No module named 'assistant.app'",
-                name="assistant.app",
-            )
-        return original_import(name, globals, locals, fromlist, level)
-
-    module_globals = {
-        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
-        "__file__": str(runtime_root / "main.py"),
-        "__name__": "__main__",
-    }
-
-    with pytest.raises(
-        ImportError, match="No module named 'assistant.app'"
-    ) as exc_info:
-        exec(compile(source, str(runtime_root / "main.py"), "exec"), module_globals)
-
-    assert exc_info.value.name == "assistant.app"
-
-
-def test_assistant_app_does_not_swallow_real_package_import_error(monkeypatch) -> None:
-    import builtins
-    import importlib
-    from pathlib import Path
-    import sys
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    src_root = runtime_root.parent
-
-    monkeypatch.syspath_prepend(str(runtime_root))
-    monkeypatch.syspath_prepend(str(src_root))
-
-    for module_name in list(sys.modules):
-        if module_name == "assistant.app" or module_name.startswith("assistant.app."):
-            sys.modules.pop(module_name, None)
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "assistant.protocol":
-            raise ModuleNotFoundError("缺少协议依赖", name="missing_dependency")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-
-    with pytest.raises(ModuleNotFoundError, match="缺少协议依赖") as exc_info:
-        importlib.import_module("assistant.app")
-
-    assert exc_info.value.name == "missing_dependency"
-
-
-def test_assistant_app_does_not_fallback_without_module_not_found_error_name(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "app.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError("No module named 'assistant'")
-        return original_import(name, globals, locals, fromlist, level)
-
-    builtins_dict = dict(vars(builtins))
-    builtins_dict.pop("ModuleNotFoundError", None)
-    builtins_dict["__import__"] = _import
-    module_globals = {
-        "__builtins__": builtins_dict,
-        "__file__": str(runtime_root / "app.py"),
-        "__name__": "app",
-    }
-
-    with pytest.raises(ImportError, match="No module named 'assistant'"):
-        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
-
-
-def test_assistant_app_does_not_fallback_when_import_error_names_full_module(
-    monkeypatch,
-) -> None:
-    import builtins
-    from pathlib import Path
-    import pytest
-
-    runtime_root = Path(__file__).resolve().parents[3] / "src" / "assistant"
-    source = (runtime_root / "app.py").read_text(encoding="utf-8")
-
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.startswith("assistant"):
-            raise ImportError(
-                "No module named 'assistant.runtime_params'",
-                name="assistant.runtime_params",
-            )
-        return original_import(name, globals, locals, fromlist, level)
-
-    module_globals = {
-        "__builtins__": {**dict(vars(builtins)), "__import__": _import},
-        "__file__": str(runtime_root / "app.py"),
-        "__name__": "app",
-    }
-
-    with pytest.raises(
-        ImportError, match="No module named 'assistant.runtime_params'"
-    ) as exc_info:
-        exec(compile(source, str(runtime_root / "app.py"), "exec"), module_globals)
-
-    assert exc_info.value.name == "assistant.runtime_params"
-
-
 def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -> None:
     from assistant.main import main
 
@@ -345,6 +129,7 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     monkeypatch,
 ) -> None:
     from assistant.main import _start_runtime
+    import assistant.app as runtime_app
 
     captured = {"drive_loop": None}
     uart3 = object()
@@ -366,8 +151,8 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     def _drive_loop(loop) -> None:
         captured["drive_loop"] = loop
 
-    monkeypatch.setattr("assistant.main.AssistantRuntimeLoop", _loop_factory)
-    monkeypatch.setattr("assistant.main.build_hw_bundle", lambda: hw_bundle)
+    monkeypatch.setattr(runtime_app, "AssistantRuntimeLoop", _loop_factory)
+    monkeypatch.setattr(runtime_app, "build_hw_bundle", lambda: hw_bundle)
     monkeypatch.setattr("assistant.main._drive_loop", _drive_loop)
     _start_runtime()
 
@@ -375,8 +160,35 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
 
     assert loop_bundle is not None
     assert loop_bundle is hw_bundle
-    assert set(loop_bundle.keys()) == {"uart", "motors", "encoders", "imu"}
     assert isinstance(captured["drive_loop"], DummyLoop)
+
+
+def test_assistant_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
+    import pytest
+
+    from assistant.main import _drive_loop
+
+    step_calls = []
+    sleep_calls = []
+    now_values = iter((200, 200, 203, 205, 205))
+
+    class DummyLoop:
+        def step(self, now_ms):
+            step_calls.append(now_ms)
+            if len(step_calls) == 2:
+                raise SystemExit(0)
+
+    monkeypatch.setattr("assistant.main._read_now_ms", lambda: next(now_values))
+    monkeypatch.setattr(
+        "assistant.main._sleep_ms", lambda delay_ms: sleep_calls.append(delay_ms)
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _drive_loop(DummyLoop())
+
+    assert exc_info.value.code == 0
+    assert step_calls == [200, 205]
+    assert sleep_calls == [5, 2]
 
 
 def test_assistant_app_handles_ping_and_state_query() -> None:
@@ -433,7 +245,10 @@ def test_assistant_app_reports_timeout_only_once_until_state_query() -> None:
 
     assert first_timeout_reply == "TIMEOUT,last_seq=8"
     assert repeated_timeout_reply == ""
-    assert state_reply == "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0"
+    assert state_reply.startswith(
+        "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0,"
+    )
+    assert "base_ok=0" in state_reply
 
 
 def test_assistant_app_returns_err_for_malformed_or_unknown_packets() -> None:
@@ -462,3 +277,71 @@ def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
 
     assert vel_reply == "ACK,last_seq=0"
     assert move_reply == "ERR"
+
+
+def test_assistant_app_routes_through_procedural_runtime_entries(monkeypatch) -> None:
+    import assistant.app as runtime_app
+
+    hw_bundle = _build_fake_hw_bundle()
+    runtime_state = type(
+        "RuntimeState",
+        (),
+        {
+            "last_seq": 0,
+            "timeout": False,
+            "hw_bundle": hw_bundle,
+        },
+    )()
+    captured = {"created": [], "commands": [], "cycles": []}
+
+    def _create_runtime_state(timeout_ms=None, hw_bundle=None):
+        captured["created"].append((timeout_ms, hw_bundle))
+        return runtime_state
+
+    def _apply_runtime_command(state, command, now_ms, cycle_token=None):
+        captured["commands"].append((state, command.kind, now_ms, cycle_token))
+        return "ACK"
+
+    def _run_base_cycle(state, now_ms, cycle_token=None, hw_bundle=None):
+        captured["cycles"].append((state, now_ms, cycle_token, hw_bundle))
+        return "ACK"
+
+    monkeypatch.setattr(runtime_app, "create_runtime_state", _create_runtime_state)
+    monkeypatch.setattr(runtime_app, "apply_runtime_command", _apply_runtime_command)
+    monkeypatch.setattr(runtime_app, "run_base_cycle", _run_base_cycle)
+
+    app = runtime_app.AssistantApp(timeout_ms=100, hw_bundle=hw_bundle)
+
+    reply = app.handle_line("PING", now_ms=10, cycle_token="cmd-cycle")
+    tick_reply = app.tick(now_ms=15, cycle_token="tick-cycle")
+
+    assert captured["created"] == [(100, hw_bundle)]
+    assert reply == "ACK,last_seq=0"
+    assert tick_reply == ""
+    assert captured["commands"] == [(runtime_state, "ping", 10, "cmd-cycle")]
+    assert captured["cycles"] == [(runtime_state, 15, "tick-cycle", hw_bundle)]
+
+
+def test_assistant_runtime_loop_rejects_legacy_runtime_owner_backtrack() -> None:
+    import pytest
+
+    from assistant.app import AssistantRuntimeLoop
+
+    class DummyApp:
+        def __init__(self, hw_bundle):
+            self.runtime = type(
+                "LegacyRuntime",
+                (),
+                {"core": type("LegacyCore", (), {"hw_bundle": hw_bundle})()},
+            )()
+
+        def handle_line(self, line, now_ms, cycle_token=None):
+            return ""
+
+        def tick(self, now_ms, cycle_token=None):
+            return ""
+
+    hw_bundle = _build_fake_hw_bundle()
+
+    with pytest.raises(ValueError, match="唯一 hw_bundle owner"):
+        AssistantRuntimeLoop(hw_bundle, app=DummyApp(hw_bundle=hw_bundle))

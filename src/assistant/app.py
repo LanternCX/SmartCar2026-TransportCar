@@ -3,13 +3,17 @@
 @file src/assistant/app.py
 """
 
-import assistant.runtime_params as runtime_params
-from assistant.ctrl.chassis import ChassisRuntime
-from assistant.protocol import parse_command
-from assistant.hw.encoders import build_encoder_bundle
-from assistant.hw.imu import build_imu_bundle
-from assistant.hw.motors import build_motor_bundle
-from assistant.hw.uart import build_uart_bundle
+from . import runtime_params
+from .motion_runtime import (
+    apply_runtime_command,
+    create_runtime_state,
+    run_base_cycle,
+)
+from .protocol import parse_command
+from .hw.encoders import build_encoder_bundle
+from .hw.imu import build_imu_bundle
+from .hw.motors import build_motor_bundle
+from .hw.uart import build_uart_bundle
 
 
 def build_hw_bundle():
@@ -44,36 +48,34 @@ class AssistantRuntimeLoop:
 
     @staticmethod
     def _resolve_app_hw_bundle(app):
-        runtime = getattr(app, "runtime", None)
-        runtime_hw_bundle = getattr(runtime, "hw_bundle", None)
-        core = getattr(runtime, "core", None)
-        core_hw_bundle = getattr(core, "hw_bundle", None)
+        runtime_state = getattr(app, "runtime_state", None)
+        state_hw_bundle = getattr(runtime_state, "hw_bundle", None)
         app_hw_bundle = getattr(app, "hw_bundle", None)
-        bundles = []
-        for candidate in (core_hw_bundle, runtime_hw_bundle, app_hw_bundle):
-            if candidate is None:
-                continue
-            if all(existing is not candidate for existing in bundles):
-                bundles.append(candidate)
-        if len(bundles) > 1:
+        if (
+            state_hw_bundle is not None
+            and app_hw_bundle is not None
+            and state_hw_bundle is not app_hw_bundle
+        ):
             raise ValueError("app 必须暴露唯一 hw_bundle owner")
-        if core_hw_bundle is not None:
-            return core_hw_bundle
-        if runtime_hw_bundle is not None:
-            return runtime_hw_bundle
+        if state_hw_bundle is not None:
+            return state_hw_bundle
         if app_hw_bundle is not None:
             return app_hw_bundle
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def step(self, now_ms):
+        app_hw_bundle = self._resolve_app_hw_bundle(self.app)
+        if app_hw_bundle is not self.hw_bundle:
+            raise ValueError("hw_bundle 与 app 必须引用同一套装配")
+        cycle_token = object()
         uart3 = self.hw_bundle["uart"]["uart3"]
         line = uart3.read_line()
         if line:
-            reply = self.app.handle_line(line, now_ms=now_ms)
+            reply = self.app.handle_line(line, now_ms=now_ms, cycle_token=cycle_token)
             if reply:
                 uart3.write_line(reply)
 
-        tick_reply = self.app.tick(now_ms=now_ms)
+        tick_reply = self.app.tick(now_ms=now_ms, cycle_token=cycle_token)
         if tick_reply:
             uart3.write_line(tick_reply)
         return tick_reply
@@ -82,17 +84,16 @@ class AssistantRuntimeLoop:
 class AssistantApp:
     """负责串联协议解析和执行运行时
 
-    @brief 对外提供辅车命令处理和周期推进入口
+    @brief 对外提供辅车命令处理和周期推进入口, 长期状态通过过程式运行时入口装配
     """
 
     def __init__(self, timeout_ms=None, hw_bundle=None):
         if timeout_ms is None:
             timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
-        if hw_bundle is None:
-            hw_bundle = build_hw_bundle()
-        self.hw_bundle = hw_bundle
-        # 应用层只保留一个运行时对象, 统一收口命令执行和状态维护
-        self.runtime = ChassisRuntime(timeout_ms=timeout_ms, hw_bundle=self.hw_bundle)
+        self.runtime_state = create_runtime_state(
+            timeout_ms=timeout_ms,
+            hw_bundle=hw_bundle,
+        )
         self._timeout_reported = False
 
     def _render_ack(self):
@@ -102,7 +103,7 @@ class AssistantApp:
         @return str
         """
 
-        return "ACK,last_seq=%d" % int(self.runtime.state.last_seq)
+        return "ACK,last_seq=%d" % int(self.runtime_state.last_seq)
 
     def _render_timeout(self):
         """生成对外超时回包
@@ -111,9 +112,9 @@ class AssistantApp:
         @return str
         """
 
-        return "TIMEOUT,last_seq=%d" % int(self.runtime.state.last_seq)
+        return "TIMEOUT,last_seq=%d" % int(self.runtime_state.last_seq)
 
-    def handle_line(self, line, now_ms):
+    def handle_line(self, line, now_ms, cycle_token=None):
         """处理一条主车输入
 
         @brief 解析文本协议并交给运行时执行
@@ -126,9 +127,14 @@ class AssistantApp:
             command = parse_command(line)
         except (TypeError, ValueError):
             return "ERR"
-        reply = self.runtime.apply_command(command, now_ms=now_ms)
+        reply = apply_runtime_command(
+            self.runtime_state,
+            command,
+            now_ms=now_ms,
+            cycle_token=cycle_token,
+        )
 
-        if not bool(self.runtime.state.timeout):
+        if not bool(self.runtime_state.timeout):
             self._timeout_reported = False
 
         if command.kind == "state_query" or str(reply) == "ERR":
@@ -137,7 +143,7 @@ class AssistantApp:
             return ""
         return self._render_ack()
 
-    def tick(self, now_ms):
+    def tick(self, now_ms, cycle_token=None):
         """推进辅车应用循环
 
         @brief 触发周期性安全检查和状态推进
@@ -145,14 +151,18 @@ class AssistantApp:
         @return str
         """
 
-        reply = self.runtime.tick(now_ms=now_ms)
-        if not bool(self.runtime.state.timeout):
+        reply = run_base_cycle(
+            self.runtime_state,
+            now_ms=now_ms,
+            cycle_token=cycle_token,
+            hw_bundle=self.runtime_state.hw_bundle,
+        )
+        if not bool(self.runtime_state.timeout):
             self._timeout_reported = False
-        if (
-            str(reply) == "DONE"
-            and bool(self.runtime.state.timeout)
-            and not self._timeout_reported
-        ):
+            return ""
+        if str(reply) == "DONE" and bool(self.runtime_state.timeout):
+            if self._timeout_reported:
+                return ""
             self._timeout_reported = True
             return self._render_timeout()
         return ""

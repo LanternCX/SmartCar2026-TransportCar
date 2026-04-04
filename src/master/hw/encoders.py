@@ -3,10 +3,11 @@
 @file src/master/hw/encoders.py
 """
 
+# legacy 与当前主线共用同一套编码器接线, 这里直接固化确认后的板级映射。
 ENCODER_PINS = {
     "m": ("D15", "D16", True),
-    "l": ("C0", "C1", True),
-    "r": ("C2", "C3", True),
+    "l": ("C2", "C3", True),
+    "r": ("C0", "C1", True),
 }
 
 
@@ -22,32 +23,39 @@ class EncoderPort:
         self.phase_b_pin = str(phase_b_pin)
         self.invert = bool(invert)
         self._device = None
+        self._data_ref = None
+        self.last_ticks = 0
 
     def ensure_device(self):
         if self._device is None:
             from smartcar import encoder
 
             self._device = encoder(self.phase_a_pin, self.phase_b_pin, self.invert)
+            getter = getattr(self._device, "get", None)
+            if getter is None:
+                raise RuntimeError("编码器硬件接口缺少 get()")
+            self._data_ref = getter()
         return self._device
 
     def read(self):
         device = self.ensure_device()
         getter = getattr(device, "get", None)
         if getter is None:
-            return 0
-        return int(getter())
+            raise RuntimeError("编码器硬件接口缺少 get()")
+        ticks = getter()
+        if ticks is None:
+            raise RuntimeError("编码器硬件接口返回空读数")
+        self.last_ticks = int(ticks)
+        return self.last_ticks
 
-    def clear(self):
-        device = self.ensure_device()
-        clearer = getattr(device, "clear", None)
-        if clearer is not None:
-            clearer()
+    def read_and_clear(self):
+        return self.read()
 
 
 def build_encoder_bundle():
     """构造主车编码器边界集合.
 
-    @brief 具体引脚映射待统一确认后再写入实现。
+    @brief 按 legacy 已确认映射构造三路编码器边界。
     @return dict
     """
 

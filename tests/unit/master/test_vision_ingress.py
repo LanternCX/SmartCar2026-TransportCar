@@ -1,5 +1,5 @@
 def test_master_vision_ingress_tracks_both_configured_uarts() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -9,7 +9,7 @@ def test_master_vision_ingress_tracks_both_configured_uarts() -> None:
 
 
 def test_master_vision_ingress_parses_active_vision_report() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -29,7 +29,7 @@ def test_master_vision_ingress_parses_active_vision_report() -> None:
 
 
 def test_prepare_observation_accepts_both_uarts_with_same_xy_semantics() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -57,7 +57,7 @@ def test_prepare_observation_accepts_both_uarts_with_same_xy_semantics() -> None
 
 
 def test_prepare_observation_normalizes_preparsed_input_through_same_entry() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -81,7 +81,7 @@ def test_prepare_observation_normalizes_preparsed_input_through_same_entry() -> 
 
 
 def test_prepare_observation_returns_idle_result_when_input_missing() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -95,7 +95,7 @@ def test_prepare_observation_returns_idle_result_when_input_missing() -> None:
 
 
 def test_prepare_observation_returns_idle_result_for_unknown_uart() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -114,7 +114,7 @@ def test_prepare_observation_returns_idle_result_for_unknown_uart() -> None:
 
 
 def test_prepare_observation_returns_idle_result_for_invalid_payload() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -133,7 +133,7 @@ def test_prepare_observation_returns_idle_result_for_invalid_payload() -> None:
 
 
 def test_select_current_target_prefers_latest_received_fresh_report() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -161,7 +161,7 @@ def test_select_current_target_prefers_latest_received_fresh_report() -> None:
 
 
 def test_select_current_target_prefers_uart6_when_reports_are_equally_fresh() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -191,7 +191,7 @@ def test_select_current_target_prefers_uart6_when_reports_are_equally_fresh() ->
 def test_select_current_target_prefers_current_valid_target_over_newer_invalid_report() -> (
     None
 ):
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -217,7 +217,7 @@ def test_select_current_target_prefers_current_valid_target_over_newer_invalid_r
 
 
 def test_select_current_target_uses_fixed_uart6_priority_when_equally_fresh() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart8", reserved_uarts=("uart6",))
 
@@ -245,7 +245,7 @@ def test_select_current_target_uses_fixed_uart6_priority_when_equally_fresh() ->
 def test_select_current_target_keeps_last_valid_target_within_freshness_window() -> (
     None
 ):
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -270,7 +270,7 @@ def test_select_current_target_keeps_last_valid_target_within_freshness_window()
 
 
 def test_prepare_observation_empty_uart_frame_does_not_erase_fresh_target() -> None:
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 
@@ -298,7 +298,7 @@ def test_prepare_observation_empty_uart_frame_does_not_erase_fresh_target() -> N
 def test_select_current_target_expires_last_valid_target_after_freshness_window() -> (
     None
 ):
-    from master.vision_ingress import VisionIngress
+    from master.vision.ingress import VisionIngress
 
     ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
 

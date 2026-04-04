@@ -1,29 +1,11 @@
-"""辅车状态结构与回包
+"""辅车最小状态回包入口
 
 @file src/assistant/status.py
 """
 
 
-class AssistantState:
-    """保存辅车执行阶段的核心状态
-
-    @brief 供运行时更新和状态回包复用
-    """
-
-    def __init__(self):
-        # 跟随状态、里程和最近一次错误统一保存在状态对象中
-        self.follow_active = False
-        self.state_label = "IDLE"
-        self.last_seq = 0
-        self.odom = [0.0, 0.0]
-        self.heading_deg = 0.0
-        self.velocity_command = (0.0, 0.0, 0.0)
-        self.timeout = False
-        self.last_error = ""
-
-
 def _normalize_state_label(state):
-    """将内部状态收口为对外最小状态标签
+    """将运行时状态收口为对外最小状态标签
 
     @brief 对外只暴露 `IDLE`、`BUSY`、`TIMEOUT`
     @param state 当前辅车状态
@@ -41,15 +23,14 @@ def _normalize_state_label(state):
 
 
 def render_state(state):
-    """序列化辅车状态回包
+    """序列化辅车最小状态回包
 
-    @brief 按协议格式生成单行 `STATE` 文本
-    @param state 当前辅车状态
+    @brief 这里只读取状态对象并生成对外回包, 不回写运行时内部状态
+    @param state 当前辅车运行时状态
     @return str
     """
 
-    return "state=1,state_label=%s,last_seq=%d,follow_active=%d" % (
-        _normalize_state_label(state),
-        int(state.last_seq),
-        1 if state.follow_active else 0,
-    )
+    from .protocol import render_state_line
+
+    # 对外只暴露协议约定字段, 避免运行时内部标签直接外溢
+    return render_state_line(state, state_label=_normalize_state_label(state))

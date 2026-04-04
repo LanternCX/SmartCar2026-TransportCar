@@ -9,3 +9,6 @@ UART_IDS = {
     "uart6": 5,
     "uart8": 7,
 }
+GYRO_SCALE = 16.384
+GYRO_OFFSET_FILE = "/flash/gyro_offset.txt"
+IDENT_RESULTS_FILE = "/flash/ident_params.txt"

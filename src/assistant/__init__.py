@@ -3,6 +3,12 @@
 @file src/assistant/__init__.py
 """
 
-from assistant.app import AssistantApp
-
 __all__ = ("AssistantApp",)
+
+
+def __getattr__(name):
+    if name == "AssistantApp":
+        from assistant.app import AssistantApp
+
+        return AssistantApp
+    raise AttributeError(name)

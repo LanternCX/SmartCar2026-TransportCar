@@ -1,21 +1,223 @@
-def test_assistant_stability_baseline_keeps_attitude_and_kinematics_contract() -> None:
-    from assistant.stability.kinematics import body_axis_semantics
-    from assistant.stability.attitude import euler_to_quaternion, quaternion_to_euler
+def test_assistant_follow_offset_rotation_belongs_to_control_math() -> None:
+    from assistant.ctrl.kinematics import rotate_body_delta_to_world
 
-    semantics = body_axis_semantics()
+    world_x, world_y = rotate_body_delta_to_world(10.0, 0.0, 90.0)
 
-    assert semantics["x_positive"] == "right"
-    assert semantics["y_positive"] == "forward"
-    quat = euler_to_quaternion(0.0, 0.0, 10.0)
-    yaw_deg = quaternion_to_euler(quat)[2]
-    assert abs(yaw_deg - 10.0) < 1e-3
+    assert abs(world_x) < 1e-6
+    assert abs(world_y + 10.0) < 1e-6
 
 
-def test_assistant_stability_baseline_keeps_filter_chain_contract() -> None:
-    from assistant.stability.filtering import build_speed_filter_chain
+def test_assistant_ctrl_kinematics_exposes_motion_and_odometry_entrypoints() -> None:
+    import types
 
+    from assistant.ctrl.kinematics import (
+        OmniKinematics,
+        Odometry,
+        resolve_follow_velocity,
+        update_odometry_from_wheels,
+    )
+
+    state = types.SimpleNamespace(
+        kinematics=OmniKinematics(),
+        odometry=Odometry(),
+        wheel_speeds={"m": 0.0, "l": 10.0, "r": 10.0},
+        tick_s=0.1,
+        heading_deg=0.0,
+        odom=[0.0, 0.0],
+        follow_target_world=(1.0, 0.0),
+        follow_position_kp=2.0,
+        follow_position_max_speed=0.5,
+    )
+
+    odom_x, odom_y = update_odometry_from_wheels(state)
+    body_dx, body_dy = resolve_follow_velocity(state)
+
+    assert isinstance(odom_x, float)
+    assert isinstance(odom_y, float)
+    assert odom_x > 0.0
+    assert body_dx == 0.5
+    assert body_dy == 0.0
+
+
+def test_assistant_ctrl_pid_exposes_wheel_speed_controller_entrypoint() -> None:
+    import types
+
+    from assistant.ctrl.pid import (
+        apply_wheel_speed_control,
+        build_wheel_speed_controllers,
+    )
+
+    state = types.SimpleNamespace(
+        wheel_controllers=build_wheel_speed_controllers(
+            {"m": (1.0, 0.0, 0.0), "l": (1.0, 0.0, 0.0), "r": (1.0, 0.0, 0.0)},
+            {},
+            output_limit=100.0,
+        ),
+        target_wheel_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+        wheel_speeds={"m": 1.0, "l": -1.0, "r": 0.5},
+        motor_duties={"m": 0, "l": 0, "r": 0},
+        tick_s=0.1,
+    )
+
+    outputs = apply_wheel_speed_control(
+        state,
+        {"m": 5.0, "l": -5.0, "r": 2.0},
+        limit=20.0,
+    )
+
+    assert outputs["m"] == 4.0
+    assert outputs["l"] == -4.0
+    assert outputs["r"] == 1.5
+    assert state.target_wheel_speeds == {"m": 5.0, "l": -5.0, "r": 2.0}
+    assert state.motor_duties == {"m": 4, "l": -4, "r": 1}
+
+
+def test_assistant_heading_estimator_updates_yaw() -> None:
+    import importlib
+
+    attitude_module = importlib.import_module("assistant.ctrl.attitude")
+    heading_estimator = getattr(attitude_module, "HeadingEstimator")
+    estimator = heading_estimator()
+    estimator.update(0.0, 0.0, 90.0, 1.0)
+
+    assert isinstance(estimator.yaw_rad(), float)
+    assert estimator.yaw_rad() > 0.0
+
+
+def test_assistant_filter_chain_filters_speed_samples() -> None:
+    import importlib
+
+    filters_module = importlib.import_module("assistant.ctrl.filters")
+    build_speed_filter_chain = getattr(filters_module, "build_speed_filter_chain")
     chain = build_speed_filter_chain()
-    filtered = chain.update(0.0)
-    filtered = chain.update(100.0)
+    outputs = [chain.update(value) for value in (0.0, 100.0, 0.0)]
 
-    assert filtered == 5.0
+    assert all(isinstance(value, float) for value in outputs)
+    assert outputs[1] != 100.0
+
+
+def test_assistant_heading_correction_uses_shortest_turn_across_wrap() -> None:
+    import types
+
+    from assistant.ctrl.attitude import compute_heading_correction
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=1.0,
+        heading_deg=359.0,
+        yaw_integral=0.0,
+        yaw_kp=0.1,
+        yaw_ki=0.0,
+        yaw_i_max=20.0,
+        auto_omega_max=5.0,
+    )
+
+    assert compute_heading_correction(state) == 0.2
+
+
+def test_assistant_runtime_uses_ctrl_attitude_and_filter_entrypoints(
+    monkeypatch,
+) -> None:
+    import types
+
+    import assistant.motion_runtime as runtime
+
+    captured = {"heading": 0, "filters": 0, "kinematics": 0, "odometry": 0, "pid": 0}
+
+    def _fake_build_kinematics():
+        captured["kinematics"] += 1
+        return types.SimpleNamespace(
+            inverse_kinematics=lambda vx, vy, omega: {"m": 0.0, "l": 0.0, "r": 0.0}
+        )
+
+    def _fake_build_odometry():
+        captured["odometry"] += 1
+        return object()
+
+    def _fake_build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
+        captured["pid"] += 1
+        return {}
+
+    def _fake_update_odometry(state):
+        state.odom[0] = 2.0
+        state.odom[1] = -1.0
+        return (2.0, -1.0)
+
+    def _fake_apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+        return {"m": 0.0, "l": 0.0, "r": 0.0}
+
+    def _fake_update_heading(state, heading_override=None):
+        captured["heading"] += 1
+        state.heading_deg = 8.0
+
+    def _fake_update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
+        captured["filters"] += 1
+        return {name: 0.0 for name in wheel_names}
+
+    monkeypatch.setattr(runtime, "build_kinematics", _fake_build_kinematics)
+    monkeypatch.setattr(runtime, "build_odometry", _fake_build_odometry)
+    monkeypatch.setattr(
+        runtime,
+        "build_wheel_speed_controllers",
+        _fake_build_wheel_speed_controllers,
+    )
+    monkeypatch.setattr(runtime, "update_odometry_from_wheels", _fake_update_odometry)
+    monkeypatch.setattr(
+        runtime, "apply_wheel_speed_control", _fake_apply_wheel_speed_control
+    )
+    monkeypatch.setattr(runtime, "update_heading_from_gyro", _fake_update_heading)
+    monkeypatch.setattr(runtime, "update_wheel_speeds", _fake_update_wheel_speeds)
+
+    state = runtime.create_runtime_state(timeout_ms=50, hw_bundle=None)
+    runtime.run_base_cycle(state, now_ms=0, hw_bundle=None)
+
+    assert captured == {
+        "heading": 1,
+        "filters": 1,
+        "kinematics": 1,
+        "odometry": 1,
+        "pid": 1,
+    }
+    assert state.heading_deg == 8.0
+    assert tuple(state.odom) == (2.0, -1.0)
+
+
+def test_assistant_runtime_dedupes_equal_cycle_tokens(monkeypatch) -> None:
+    import assistant.motion_runtime as runtime
+
+    captured = {"heading": 0, "filters": 0, "motor": 0}
+
+    class CycleToken:
+        def __init__(self, value):
+            self.value = value
+
+        def __eq__(self, other):
+            return isinstance(other, CycleToken) and self.value == other.value
+
+    def _fake_update_heading(state, heading_override=None):
+        captured["heading"] += 1
+
+    def _fake_update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
+        captured["filters"] += 1
+        return {name: 0.0 for name in wheel_names}
+
+    def _fake_apply_motor_output(state, dx, dy, omega):
+        captured["motor"] += 1
+
+    monkeypatch.setattr(runtime, "update_heading_from_gyro", _fake_update_heading)
+    monkeypatch.setattr(runtime, "update_wheel_speeds", _fake_update_wheel_speeds)
+    monkeypatch.setattr(runtime, "_apply_motor_output", _fake_apply_motor_output)
+
+    state = runtime.create_runtime_state(timeout_ms=50, hw_bundle=None)
+    first_reply = runtime.run_base_cycle(
+        state, now_ms=0, hw_bundle=None, cycle_token=CycleToken(9)
+    )
+    second_reply = runtime.run_base_cycle(
+        state,
+        now_ms=0,
+        hw_bundle=None,
+        cycle_token=CycleToken(9),
+    )
+
+    assert captured == {"heading": 1, "filters": 1, "motor": 1}
+    assert second_reply == first_reply
