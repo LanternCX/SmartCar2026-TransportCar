@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-04-3 | 2026-04-04 | 参数辨识脚本中速度除以3的设计原理澄清 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-3.md` | 记录三轮全向底盘参数辨识时速度除以3的设计原理，防止未来误解为bug。 | pid-identify, omni-wheel, coupling, design-rationale, plant-gain |
 | 2026-04-04-2 | 2026-04-04 | 主车轮子方向与控制手感会被映射冲突和固定 dt 一起带偏 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-2.md` | 收敛主车姿态量级恢复后暴露出的轮子方向反转和打印扰动问题, 最终修正运行时硬件映射并统一全链路动态 dt。 | master, heading-control, mapping, encoder, motor, dynamic-dt, feedforward |
 | 2026-04-04-1 | 2026-04-04 | 主车运行时姿态口径必须对齐 inspect_attitude 的 yaw_deg | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-1.md` | 收敛主车 30 度手动旋转场景量级异常的问题, 通过对齐 `inspect_attitude.py` 的 `yaw_deg` 链路恢复可用朝向观测。 | master, attitude, yaw, inspect-attitude, imu, dt, heading-control |
 | 2026-04-03-1 | 2026-04-03 | 梳理主车板端导入链、采样链与朝向保持链的关键坑点 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-03-1.md` | 沉淀主车板端调试中已确认的导入失败、采样方式、目标锁定与诊断脚本问题，供上下文重置后继续接续。 | board, micropython, import, ticker, imu, heading-hold, inspect-attitude, calibrate-gyro |
