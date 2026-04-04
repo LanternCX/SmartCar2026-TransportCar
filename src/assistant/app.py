@@ -3,17 +3,32 @@
 @file src/assistant/app.py
 """
 
-from . import runtime_params
-from .motion_runtime import (
-    apply_runtime_command,
-    create_runtime_state,
-    run_base_cycle,
-)
-from .protocol import parse_command
-from .hw.encoders import build_encoder_bundle
-from .hw.imu import build_imu_bundle
-from .hw.motors import build_motor_bundle
-from .hw.uart import build_uart_bundle
+_USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
+
+if _USE_DIRECT_IMPORTS:
+    import runtime_params
+    from hw.encoders import build_encoder_bundle
+    from hw.imu import build_imu_bundle
+    from hw.motors import build_motor_bundle
+    from hw.uart import build_uart_bundle
+    from motion_runtime import (
+        apply_runtime_command,
+        create_runtime_state,
+        run_base_cycle,
+    )
+    from protocol import parse_command
+else:
+    from . import runtime_params
+    from .hw.encoders import build_encoder_bundle
+    from .hw.imu import build_imu_bundle
+    from .hw.motors import build_motor_bundle
+    from .hw.uart import build_uart_bundle
+    from .motion_runtime import (
+        apply_runtime_command,
+        create_runtime_state,
+        run_base_cycle,
+    )
+    from .protocol import parse_command
 
 
 def build_hw_bundle():

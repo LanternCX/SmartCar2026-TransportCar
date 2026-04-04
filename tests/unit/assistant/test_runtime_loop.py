@@ -26,6 +26,13 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
         def stop(self):
             self.last_duty = 0
 
+    class FakeEncoder:
+        def __init__(self, name):
+            self.name = name
+
+        def read_and_clear(self):
+            return 0.0
+
     uart3 = FakeUart(
         [
             "follow=1,seq=8,valid=1,dx=0.10,dy=0.00",
@@ -37,7 +44,7 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
         {
             "uart": {"uart3": uart3},
             "motors": motors,
-            "encoders": {},
+            "encoders": {name: FakeEncoder(name) for name in ("m", "l", "r")},
             "imu": object(),
         }
     )
@@ -47,6 +54,88 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
 
     assert any(motor.last_duty is not None for motor in motors.values())
     assert uart3.writes == ["TIMEOUT,last_seq=8"]
+
+
+def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+
+    from assistant.app import AssistantRuntimeLoop
+
+    class FakeUart:
+        def __init__(self, lines=None):
+            self.lines = list(lines or [])
+            self.writes = []
+
+        def read_line(self):
+            if not self.lines:
+                return None
+            return self.lines.pop(0)
+
+        def write_line(self, payload):
+            self.writes.append(payload)
+
+    class FakeMotor:
+        def __init__(self):
+            self.last_duty = None
+
+        def set_duty(self, duty):
+            self.last_duty = duty
+
+        def stop(self):
+            self.last_duty = 0
+
+    class FakeEncoder:
+        def __init__(self, name):
+            self.name = name
+
+        def read_and_clear(self):
+            return 0.0
+
+    uart3 = FakeUart(["follow=1,seq=8,valid=1,dx=0.10,dy=0.00"])
+    motors = {name: FakeMotor() for name in ("m", "l", "r")}
+
+    monkeypatch.setattr(
+        runtime,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.005),
+            setattr(state, "heading_deg", 0.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+
+    def _fake_apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+        duty_map = {"m": -11, "l": 22, "r": -33}
+        for name in ("m", "l", "r"):
+            state.motor_duties[name] = duty_map[name]
+            if motors is not None:
+                motors[name].set_duty(duty_map[name])
+        return dict(duty_map)
+
+    monkeypatch.setattr(
+        runtime, "apply_wheel_speed_control", _fake_apply_wheel_speed_control
+    )
+
+    loop = AssistantRuntimeLoop(
+        {
+            "uart": {"uart3": uart3},
+            "motors": motors,
+            "encoders": {name: FakeEncoder(name) for name in ("m", "l", "r")},
+            "imu": object(),
+        }
+    )
+
+    loop.step(now_ms=0)
+
+    assert {name: motor.last_duty for name, motor in motors.items()} == {
+        "m": -11,
+        "l": 22,
+        "r": -33,
+    }
+    assert loop.app.runtime_state.motor_duties == {"m": -11, "l": 22, "r": -33}
+    assert uart3.writes == []
 
 
 def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
@@ -71,8 +160,8 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
 
     hw_bundle = {
         "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
+        "motors": {name: object() for name in ("m", "l", "r")},
+        "encoders": {name: object() for name in ("m", "l", "r")},
         "imu": object(),
     }
 
@@ -81,6 +170,8 @@ def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
 
     assert captured["app_bundle"] is hw_bundle
     assert loop.app.runtime_state.hw_bundle is hw_bundle
+    assert tuple(sorted(loop.hw_bundle["motors"].keys())) == ("l", "m", "r")
+    assert tuple(sorted(loop.hw_bundle["encoders"].keys())) == ("l", "m", "r")
 
 
 def test_assistant_runtime_loop_rejects_mismatched_app_and_hw_bundle() -> None:
@@ -100,14 +191,14 @@ def test_assistant_runtime_loop_rejects_mismatched_app_and_hw_bundle() -> None:
 
     loop_bundle = {
         "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
+        "motors": {name: object() for name in ("m", "l", "r")},
+        "encoders": {name: object() for name in ("m", "l", "r")},
         "imu": object(),
     }
     app_bundle = {
         "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
+        "motors": {name: object() for name in ("m", "l", "r")},
+        "encoders": {name: object() for name in ("m", "l", "r")},
         "imu": object(),
     }
 
@@ -136,14 +227,14 @@ def test_assistant_runtime_loop_rejects_runtime_owner_drift_under_same_app_bundl
 
     loop_bundle = {
         "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
+        "motors": {name: object() for name in ("m", "l", "r")},
+        "encoders": {name: object() for name in ("m", "l", "r")},
         "imu": object(),
     }
     drifted_runtime_bundle = {
         "uart": {"uart3": object()},
-        "motors": {"m": object()},
-        "encoders": {"rear_left": object()},
+        "motors": {name: object() for name in ("m", "l", "r")},
+        "encoders": {name: object() for name in ("m", "l", "r")},
         "imu": object(),
     }
 

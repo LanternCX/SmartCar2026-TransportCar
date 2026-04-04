@@ -84,6 +84,154 @@ def test_assistant_heading_estimator_updates_yaw() -> None:
     assert estimator.yaw_rad() > 0.0
 
 
+def test_assistant_update_heading_from_gyro_uses_real_elapsed_time() -> None:
+    import math
+    import types
+
+    import pytest
+
+    from legacy.utils.quaternion import Quaternion
+    from assistant.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 34.4064, -16.384, 50.7904),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        gyro_lpf=types.SimpleNamespace(update=lambda value: value),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=1_000_000,
+    )
+
+    update_heading_from_gyro(state, now_us=1_012_345)
+
+    legacy_estimator = Quaternion()
+    legacy_estimator.update(
+        math.radians(2.1),
+        math.radians(-1.0),
+        math.radians(3.1),
+        0.012345,
+    )
+    legacy_yaw = legacy_estimator.to_euler_yaw()
+
+    assert state.last_attitude_time_us == 1_012_345
+    assert state.tick_s == pytest.approx(0.012345)
+    assert state.last_yaw_rad == pytest.approx(legacy_yaw)
+    assert state.heading_deg == pytest.approx(math.degrees(legacy_yaw))
+    assert state.yaw_rate_deg_s == 3.1
+
+
+def test_assistant_update_heading_from_gyro_does_not_fallback_to_fixed_tick_without_real_dt() -> (
+    None
+):
+    import types
+
+    import pytest
+
+    from assistant.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    captured = []
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 32.768, 0.0, 49.152),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=7.5,
+        gyro_lpf=types.SimpleNamespace(
+            update=lambda value: captured.append(value) or value
+        ),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=None,
+    )
+
+    update_heading_from_gyro(state, now_us=1_000_000)
+
+    assert state.last_attitude_time_us == 1_000_000
+    assert state.tick_s == 0.0
+    assert state.last_yaw_rad == pytest.approx(0.0)
+    assert state.heading_deg == pytest.approx(0.0)
+    assert state.yaw_rate_deg_s == 7.5
+    assert captured == []
+
+
+def test_assistant_update_heading_from_gyro_does_not_advance_on_non_positive_dt() -> (
+    None
+):
+    import types
+
+    import pytest
+
+    from assistant.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 32.768, 0.0, 49.152),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        gyro_lpf=types.SimpleNamespace(update=lambda value: value),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=1_000_000,
+    )
+
+    update_heading_from_gyro(state, now_us=999_000)
+
+    assert state.last_attitude_time_us == 1_000_000
+    assert state.tick_s == 0.0
+    assert state.last_yaw_rad == pytest.approx(0.0)
+    assert state.heading_deg == pytest.approx(0.0)
+    assert state.yaw_rate_deg_s == 0.0
+
+
+def test_assistant_update_heading_from_gyro_ignores_invalid_timestamp_before_next_valid_dt() -> (
+    None
+):
+    import types
+
+    import pytest
+
+    from assistant.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 32.768, 0.0, 49.152),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        gyro_lpf=types.SimpleNamespace(update=lambda value: value),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=1_000_000,
+    )
+
+    update_heading_from_gyro(state, now_us=999_000)
+
+    assert state.last_attitude_time_us == 1_000_000
+    assert state.tick_s == 0.0
+
+    update_heading_from_gyro(state, now_us=1_001_000)
+
+    assert state.last_attitude_time_us == 1_001_000
+    assert state.tick_s == pytest.approx(0.001)
+
+
 def test_assistant_filter_chain_filters_speed_samples() -> None:
     import importlib
 
@@ -113,6 +261,84 @@ def test_assistant_heading_correction_uses_shortest_turn_across_wrap() -> None:
     )
 
     assert compute_heading_correction(state) == 0.2
+
+
+def test_assistant_heading_correction_matches_tick_scaled_pi_and_yaw_rate_damping() -> (
+    None
+):
+    import types
+
+    from assistant.ctrl.attitude import compute_heading_correction
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=15.0,
+        heading_deg=10.0,
+        yaw_integral=0.0,
+        yaw_kp=0.2,
+        yaw_ki=0.1,
+        yaw_kd=0.05,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=3.0,
+        tick_s=0.02,
+        auto_omega_max=5.0,
+    )
+
+    assert compute_heading_correction(state) == 0.86
+
+
+def test_assistant_update_heading_from_gyro_keeps_raw_yaw_rate_for_correction() -> None:
+    import types
+
+    import pytest
+
+    from assistant.ctrl.attitude import HeadingEstimator, update_heading_from_gyro
+
+    state = types.SimpleNamespace(
+        imu_calibrated=(0.0, 0.0, 0.0, 32.768, 0.0, 49.152),
+        gyro_scale=16.384,
+        q_est=HeadingEstimator(),
+        tick_s=0.02,
+        last_yaw_rad=0.0,
+        heading_deg=0.0,
+        yaw_rate_deg_s=0.0,
+        gyro_lpf=types.SimpleNamespace(update=lambda value: 1.25),
+        heading_target_ready=True,
+        target_heading_deg=0.0,
+        yaw_integral=0.0,
+        last_attitude_time_us=1_000_000,
+    )
+
+    update_heading_from_gyro(state, now_us=1_020_000)
+
+    assert state.tick_s == pytest.approx(0.02)
+    assert state.yaw_rate_deg_s == 3.0
+
+
+def test_assistant_heading_correction_accumulates_integral_by_tick_s() -> None:
+    import types
+
+    import pytest
+
+    from assistant.ctrl.attitude import compute_heading_correction
+
+    state = types.SimpleNamespace(
+        heading_hold_enabled=True,
+        target_heading_deg=15.0,
+        heading_deg=10.0,
+        yaw_integral=0.0,
+        yaw_kp=0.0,
+        yaw_ki=1.0,
+        yaw_kd=0.0,
+        yaw_i_max=20.0,
+        yaw_rate_deg_s=0.0,
+        tick_s=0.02,
+        auto_omega_max=5.0,
+    )
+
+    compute_heading_correction(state)
+
+    assert state.yaw_integral == pytest.approx(0.1)
 
 
 def test_assistant_runtime_uses_ctrl_attitude_and_filter_entrypoints(
@@ -149,6 +375,7 @@ def test_assistant_runtime_uses_ctrl_attitude_and_filter_entrypoints(
     def _fake_update_heading(state, heading_override=None):
         captured["heading"] += 1
         state.heading_deg = 8.0
+        state.tick_s = 0.005
 
     def _fake_update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
         captured["filters"] += 1
@@ -196,6 +423,7 @@ def test_assistant_runtime_dedupes_equal_cycle_tokens(monkeypatch) -> None:
 
     def _fake_update_heading(state, heading_override=None):
         captured["heading"] += 1
+        state.tick_s = 0.005
 
     def _fake_update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
         captured["filters"] += 1

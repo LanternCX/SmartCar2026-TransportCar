@@ -3,6 +3,8 @@
 @file src/assistant/status.py
 """
 
+_USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
+
 
 def _normalize_state_label(state):
     """将运行时状态收口为对外最小状态标签
@@ -30,7 +32,10 @@ def render_state(state):
     @return str
     """
 
-    from .protocol import render_state_line
+    if _USE_DIRECT_IMPORTS:
+        from protocol import render_state_line
+    else:
+        from .protocol import render_state_line
 
     # 对外只暴露协议约定字段, 避免运行时内部标签直接外溢
     return render_state_line(state, state_label=_normalize_state_label(state))

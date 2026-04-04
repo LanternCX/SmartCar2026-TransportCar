@@ -13,6 +13,7 @@ class ImuPort:
     def __init__(self):
         self.offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self._device = None
+        self._data_ref = None
         self.last_raw = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.last_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -21,14 +22,15 @@ class ImuPort:
             from seekfree import IMU660RX
 
             self._device = IMU660RX()
+            getter = getattr(self._device, "get", None)
+            if getter is None:
+                raise RuntimeError("IMU 硬件接口缺少 get()")
+            self._data_ref = getter()
         return self._device
 
     def read_raw(self):
-        device = self.ensure_device()
-        getter = getattr(device, "get", None)
-        if getter is None:
-            raise RuntimeError("IMU 硬件接口缺少 get()")
-        raw = getter()
+        self.ensure_device()
+        raw = self._data_ref
         if raw is None:
             raise RuntimeError("IMU 硬件接口返回空读数")
         values = tuple(raw)
