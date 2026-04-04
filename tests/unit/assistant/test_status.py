@@ -1,3 +1,23 @@
+def test_assistant_state_imports_without_typing_module(monkeypatch) -> None:
+    import builtins
+    import importlib
+    import sys
+
+    original_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "typing":
+            raise ImportError("no module named 'typing'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    sys.modules.pop("assistant.state", None)
+    monkeypatch.setattr(builtins, "__import__", _import)
+
+    state_module = importlib.import_module("assistant.state")
+
+    assert hasattr(state_module, "MotionRuntimeState")
+
+
 def test_assistant_state_reply_keeps_minimal_fields() -> None:
     from assistant.state import AssistantState
     from assistant.status import render_state
@@ -102,3 +122,23 @@ def test_assistant_state_module_exposes_runtime_and_control_state() -> None:
 
     assert type(state).__name__ == "MotionRuntimeState"
     assert hasattr(control_state, "follow_target_world")
+
+
+def test_assistant_state_module_keeps_runtime_field_annotations() -> None:
+    from assistant.state import MotionRuntimeState
+
+    annotations = MotionRuntimeState.__annotations__
+
+    expected_fields = {
+        "control",
+        "hw_bundle",
+        "safety",
+        "tick_ms",
+        "tick_s",
+        "_last_cycle_token",
+        "_last_base_snapshot",
+        "_last_control_cycle_token",
+        "state_line",
+    }
+
+    assert expected_fields <= set(annotations)

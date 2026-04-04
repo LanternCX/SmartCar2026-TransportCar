@@ -37,24 +37,282 @@ def _build_fake_hw_bundle() -> dict:
             "l": FakeMotor(),
             "r": FakeMotor(),
         },
-        "encoders": {"rear_left": object()},
+        "encoders": {"m": object(), "l": object(), "r": object()},
         "imu": object(),
     }
+
+
+def test_flat_uploaded_assistant_app_imports_without_package_context(
+    monkeypatch,
+) -> None:
+    import importlib
+    from pathlib import Path
+
+    _clear_assistant_runtime_modules()
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[3] / "src" / "assistant")
+    )
+
+    app_module = importlib.import_module("app")
+
+    assert hasattr(app_module, "AssistantRuntimeLoop")
+
+
+def test_flat_uploaded_assistant_main_imports_without_package_context(
+    monkeypatch,
+) -> None:
+    import importlib
+    from pathlib import Path
+
+    _clear_assistant_runtime_modules()
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[3] / "src" / "assistant")
+    )
+
+    main_module = importlib.import_module("main")
+
+    assert hasattr(main_module, "main")
+
+
+def test_flat_uploaded_assistant_start_runtime_runs_full_startup_chain(
+    monkeypatch,
+) -> None:
+    import importlib
+    from pathlib import Path
+
+    _clear_assistant_runtime_modules()
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[3] / "src" / "assistant")
+    )
+
+    events = []
+    hw_bundle = {
+        "uart": {"uart3": object()},
+        "motors": {},
+        "encoders": {},
+        "imu": object(),
+    }
+
+    class DummyLoop:
+        pass
+
+    app_module = importlib.import_module("app")
+    main_module = importlib.import_module("main")
+
+    monkeypatch.setattr(
+        app_module,
+        "build_hw_bundle",
+        lambda: hw_bundle,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "AssistantRuntimeLoop",
+        lambda hw_bundle: events.append(("loop", hw_bundle)) or DummyLoop(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_build_capture_ticker",
+        lambda hw_bundle: events.append(("capture", hw_bundle)) or "capture-ticker",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_build_runtime_heartbeat_led",
+        lambda: events.append(("heartbeat", None)) or "heartbeat-led",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_drive_loop",
+        lambda loop: events.append(
+            (
+                "drive",
+                getattr(loop, "capture_ticker", None),
+                getattr(loop, "heartbeat_led", None),
+            )
+        ),
+    )
+
+    main_module._start_runtime()
+
+    assert events == [
+        ("loop", hw_bundle),
+        ("capture", hw_bundle),
+        ("heartbeat", None),
+        ("drive", "capture-ticker", "heartbeat-led"),
+    ]
+
+
+def test_assistant_build_capture_ticker_registers_encoder_and_imu_devices(
+    monkeypatch,
+) -> None:
+    from assistant.main import _build_capture_ticker
+    import types
+
+    captured = {}
+    events = []
+
+    class FakeTicker:
+        def capture_list(self, *items):
+            captured["items"] = items
+            events.append(("capture_list", items))
+
+        def callback(self, func):
+            captured["callback"] = func
+            events.append(("callback", func))
+
+        def start(self, tick_ms):
+            captured["tick_ms"] = tick_ms
+            events.append(("start", tick_ms))
+
+    class FakeEncoderPort:
+        def __init__(self, name, device):
+            self.name = name
+            self.device = device
+
+        def ensure_device(self):
+            events.append(("ensure_encoder", self.name, self.device))
+            return self.device
+
+    class FakeImuDevice:
+        def __init__(self):
+            self.get_count = 0
+
+        def get(self):
+            self.get_count += 1
+            events.append(("imu_get", self.get_count))
+            return [0, 0, 0, 0, 0, 0]
+
+    class FakeImuPort:
+        def __init__(self, device):
+            self.device = device
+
+        def ensure_device(self):
+            events.append(("ensure_imu", self.device))
+            return self.device
+
+    fake_imu = FakeImuDevice()
+    encoder_devices = {name: object() for name in ("m", "l", "r")}
+    hw_bundle = {
+        "encoders": {
+            name: FakeEncoderPort(name, encoder_devices[name])
+            for name in ("m", "l", "r")
+        },
+        "imu": FakeImuPort(fake_imu),
+    }
+
+    monkeypatch.setattr("assistant.main._control_tick_ms", lambda: 5)
+    monkeypatch.setitem(
+        sys.modules,
+        "smartcar",
+        types.SimpleNamespace(ticker=lambda _channel: FakeTicker()),
+    )
+
+    ticker = _build_capture_ticker(hw_bundle)
+
+    assert isinstance(ticker, FakeTicker)
+    assert captured["items"] == (
+        encoder_devices["m"],
+        encoder_devices["l"],
+        encoder_devices["r"],
+        fake_imu,
+    )
+    assert captured["tick_ms"] == 5
+    assert fake_imu.get_count == 1
+    assert len({id(item) for item in captured["items"][:3]}) == 3
+    assert events == [
+        ("ensure_encoder", "m", encoder_devices["m"]),
+        ("ensure_encoder", "l", encoder_devices["l"]),
+        ("ensure_encoder", "r", encoder_devices["r"]),
+        ("ensure_imu", fake_imu),
+        ("imu_get", 1),
+        (
+            "capture_list",
+            (
+                encoder_devices["m"],
+                encoder_devices["l"],
+                encoder_devices["r"],
+                fake_imu,
+            ),
+        ),
+        ("callback", captured["callback"]),
+        ("start", 5),
+    ]
+
+
+def test_assistant_encoder_port_binds_device_reference_on_first_ensure(
+    monkeypatch,
+) -> None:
+    from assistant.hw.encoders import EncoderPort
+    from types import SimpleNamespace
+
+    class FakeEncoderDevice:
+        def __init__(self):
+            self.get_count = 0
+
+        def get(self):
+            self.get_count += 1
+            return 0
+
+    fake_device = FakeEncoderDevice()
+    monkeypatch.setitem(
+        sys.modules,
+        "smartcar",
+        SimpleNamespace(encoder=lambda *args: fake_device),
+    )
+
+    port = EncoderPort("l", "C2", "C3", True)
+    port.ensure_device()
+
+    assert getattr(port, "_data_ref", None) == 0
+    assert fake_device.get_count == 1
+
+
+def test_assistant_imu_port_binds_device_reference_on_first_ensure(
+    monkeypatch,
+) -> None:
+    from assistant.hw.imu import ImuPort
+    from types import SimpleNamespace
+
+    class FakeImuDevice:
+        def __init__(self):
+            self.get_count = 0
+
+        def get(self):
+            self.get_count += 1
+            return (0, 0, 0, 0, 0, 0)
+
+    fake_device = FakeImuDevice()
+    monkeypatch.setitem(
+        sys.modules,
+        "seekfree",
+        SimpleNamespace(IMU660RX=lambda: fake_device),
+    )
+
+    port = ImuPort()
+    port.ensure_device()
+
+    assert getattr(port, "_data_ref", None) == (0, 0, 0, 0, 0, 0)
+    assert fake_device.get_count == 1
 
 
 def test_assistant_main_starts_runtime_when_no_button_is_held(monkeypatch) -> None:
     from assistant.main import main
 
     started = {"count": 0}
+    events = []
 
     def _start_runtime() -> None:
         started["count"] += 1
 
     monkeypatch.setattr("assistant.main._read_button_state", lambda pin: False)
     monkeypatch.setattr("assistant.main._start_runtime", _start_runtime)
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: events.append((stage, payload)),
+    )
     main()
 
     assert started["count"] == 1
+    assert events == [("main_enter", {}), ("main_branch_runtime", {})]
 
 
 def test_assistant_read_button_state_propagates_import_error(monkeypatch) -> None:
@@ -99,30 +357,70 @@ def test_assistant_main_dispatches_calibrate_gyro_when_c9_is_held(monkeypatch) -
     from assistant.main import main
 
     called = {"calibrate": 0}
+    events = []
 
     def _run_calibrate_gyro() -> None:
         called["calibrate"] += 1
 
     monkeypatch.setattr("assistant.main._read_button_state", lambda pin: pin == "C9")
     monkeypatch.setattr("assistant.main.run_calibrate_gyro", _run_calibrate_gyro)
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: events.append((stage, payload)),
+    )
     main()
 
     assert called["calibrate"] == 1
+    assert events == [("main_enter", {}), ("main_branch_calibrate_gyro", {})]
 
 
 def test_assistant_main_dispatches_pid_identify_when_c8_is_held(monkeypatch) -> None:
     from assistant.main import main
 
     called = {"pid": 0}
+    events = []
 
     def _run_pid_identify() -> None:
         called["pid"] += 1
 
     monkeypatch.setattr("assistant.main._read_button_state", lambda pin: pin == "C8")
     monkeypatch.setattr("assistant.main.run_pid_identify", _run_pid_identify)
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: events.append((stage, payload)),
+    )
     main()
 
     assert called["pid"] == 1
+    assert events == [("main_enter", {}), ("main_branch_pid_identify", {})]
+
+
+def test_assistant_read_button_state_reports_pin_and_pressed_state(monkeypatch) -> None:
+    from assistant.main import _read_button_state
+    from types import SimpleNamespace
+
+    events = []
+
+    class FakePin:
+        IN = object()
+        PULL_UP = object()
+
+        def __init__(self, name, mode, pull):
+            self.name = name
+
+        def value(self):
+            return 0
+
+    monkeypatch.setitem(sys.modules, "machine", SimpleNamespace(Pin=FakePin))
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: events.append((stage, payload)),
+    )
+
+    pressed = _read_button_state("C8")
+
+    assert pressed is True
+    assert events == [("button_state", {"pin": "C8", "pressed": 1})]
 
 
 def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
@@ -131,13 +429,13 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     from assistant.main import _start_runtime
     import assistant.app as runtime_app
 
-    captured = {"drive_loop": None}
+    captured = {"drive_loop": None, "events": []}
     uart3 = object()
     motors = {"m": object()}
     hw_bundle = {
         "uart": {"uart3": uart3},
         "motors": motors,
-        "encoders": {"rear_left": object()},
+        "encoders": {"m": object(), "l": object(), "r": object()},
         "imu": object(),
     }
 
@@ -146,10 +444,33 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
 
     def _loop_factory(loop_bundle):
         captured["loop_bundle"] = loop_bundle
+        captured["events"].append(("loop_factory", loop_bundle))
         return DummyLoop()
 
     def _drive_loop(loop) -> None:
+        captured["events"].append(
+            (
+                "drive_loop",
+                getattr(loop, "capture_ticker", None),
+                getattr(loop, "heartbeat_led", None),
+            )
+        )
         captured["drive_loop"] = loop
+
+    monkeypatch.setattr(
+        "assistant.main._build_capture_ticker",
+        lambda bundle: (
+            captured["events"].append(("build_capture", bundle)) or ("capture", bundle)
+        ),
+    )
+    monkeypatch.setattr(
+        "assistant.main._build_runtime_heartbeat_led",
+        lambda: captured["events"].append(("build_heartbeat", None)) or "heartbeat",
+    )
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: captured["events"].append(("debug", stage, payload)),
+    )
 
     monkeypatch.setattr(runtime_app, "AssistantRuntimeLoop", _loop_factory)
     monkeypatch.setattr(runtime_app, "build_hw_bundle", lambda: hw_bundle)
@@ -161,6 +482,78 @@ def test_assistant_start_runtime_builds_loop_and_hands_it_to_driver(
     assert loop_bundle is not None
     assert loop_bundle is hw_bundle
     assert isinstance(captured["drive_loop"], DummyLoop)
+    assert getattr(captured["drive_loop"], "capture_ticker") == ("capture", hw_bundle)
+    assert getattr(captured["drive_loop"], "heartbeat_led") == "heartbeat"
+    assert captured["events"] == [
+        ("debug", "start_runtime_enter", {}),
+        (
+            "debug",
+            "start_runtime_hw_ready",
+            {"keys": ("encoders", "imu", "motors", "uart")},
+        ),
+        ("loop_factory", hw_bundle),
+        ("build_capture", hw_bundle),
+        ("build_heartbeat", None),
+        ("debug", "start_runtime_loop_ready", {}),
+        ("drive_loop", ("capture", hw_bundle), "heartbeat"),
+    ]
+
+
+def test_assistant_build_capture_ticker_reports_ready_after_start(monkeypatch) -> None:
+    from assistant.main import _build_capture_ticker
+    import types
+
+    events = []
+
+    class FakeTicker:
+        def capture_list(self, *items):
+            events.append(("capture_list", items))
+
+        def callback(self, func):
+            events.append(("callback", func))
+
+        def start(self, tick_ms):
+            events.append(("start", tick_ms))
+
+    class FakeEncoderPort:
+        def __init__(self, device):
+            self.device = device
+
+        def ensure_device(self):
+            return self.device
+
+    class FakeImuDevice:
+        def get(self):
+            events.append(("imu_get", None))
+            return [0, 0, 0, 0, 0, 0]
+
+    class FakeImuPort:
+        def __init__(self, device):
+            self.device = device
+
+        def ensure_device(self):
+            return self.device
+
+    fake_imu = FakeImuDevice()
+    hw_bundle = {
+        "encoders": {name: FakeEncoderPort(object()) for name in ("m", "l", "r")},
+        "imu": FakeImuPort(fake_imu),
+    }
+
+    monkeypatch.setattr("assistant.main._control_tick_ms", lambda: 5)
+    monkeypatch.setitem(
+        sys.modules,
+        "smartcar",
+        types.SimpleNamespace(ticker=lambda _channel: FakeTicker()),
+    )
+    monkeypatch.setattr(
+        "assistant.main._debug_print",
+        lambda stage, **payload: events.append(("debug", stage, payload)),
+    )
+
+    _build_capture_ticker(hw_bundle)
+
+    assert events[-1] == ("debug", "capture_ticker_ready", {"count": 4})
 
 
 def test_assistant_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
@@ -189,6 +582,43 @@ def test_assistant_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
     assert exc_info.value.code == 0
     assert step_calls == [200, 205]
     assert sleep_calls == [5, 2]
+
+
+def test_assistant_drive_loop_toggles_runtime_heartbeat_slowly(monkeypatch) -> None:
+    import pytest
+
+    from assistant.main import _drive_loop
+
+    step_calls = []
+    now_values = iter((100, 100, 350, 350, 650))
+
+    class DummyLoop:
+        def __init__(self) -> None:
+            self.heartbeat_led = _HeartbeatLed()
+
+        def step(self, now_ms):
+            step_calls.append(now_ms)
+            if len(step_calls) == 3:
+                raise SystemExit(0)
+
+    class _HeartbeatLed:
+        def __init__(self) -> None:
+            self.toggle_count = 0
+
+        def toggle(self) -> None:
+            self.toggle_count += 1
+
+    monkeypatch.setattr("assistant.main._read_now_ms", lambda: next(now_values))
+    monkeypatch.setattr("assistant.main._sleep_ms", lambda delay_ms: None)
+
+    loop = DummyLoop()
+
+    with pytest.raises(SystemExit) as exc_info:
+        _drive_loop(loop)
+
+    assert exc_info.value.code == 0
+    assert step_calls == [100, 350, 650]
+    assert loop.heartbeat_led.toggle_count == 2
 
 
 def test_assistant_app_handles_ping_and_state_query() -> None:

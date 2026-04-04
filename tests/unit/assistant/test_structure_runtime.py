@@ -9,12 +9,14 @@ def test_assistant_hw_bundle_uses_confirmed_mapping() -> None:
 
     assert hw_bundle["uart"]["uart3"].uart_id == 2
     assert hw_bundle["motors"]["m"].port_name == "PWM_C30_DIR_C31"
-    assert hw_bundle["motors"]["l"].port_name == "PWM_D4_DIR_D5"
-    assert hw_bundle["motors"]["r"].port_name == "PWM_D6_DIR_D7"
+    assert hw_bundle["motors"]["l"].port_name == "PWM_D6_DIR_D7"
+    assert hw_bundle["motors"]["l"].invert is True
+    assert hw_bundle["motors"]["r"].port_name == "PWM_D4_DIR_D5"
+    assert hw_bundle["motors"]["r"].invert is False
     assert encoder_pins == {
         "m": ("D15", "D16", True),
-        "l": ("C0", "C1", True),
-        "r": ("C2", "C3", True),
+        "l": ("C2", "C3", True),
+        "r": ("C0", "C1", True),
     }
 
 

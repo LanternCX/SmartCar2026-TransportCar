@@ -3,8 +3,6 @@
 @file src/assistant/state/__init__.py
 """
 
-from typing import Callable, Optional, Tuple
-
 
 class AssistantState:
     """保存辅车跨周期最小运行状态."""
@@ -50,16 +48,27 @@ class AssistantControlState:
             wheel_controllers if wheel_controllers is not None else {}
         )
         self.last_yaw_rad = 0.0
+        self.last_attitude_time_us = None
 
 
 class MotionRuntimeState(AssistantState):
     """辅车过程式主线使用的运行时状态容器."""
 
+    control: AssistantControlState
+    hw_bundle: object
+    safety: object
+    tick_ms: int
+    tick_s: float
+    _last_cycle_token: object
+    _last_base_snapshot: object
+    _last_control_cycle_token: object
+    state_line: object
+
     def __init__(self):
         AssistantState.__init__(self)
         self.control = AssistantControlState()
         self.hw_bundle = None
-        self.safety: Optional[object] = None
+        self.safety = None
         self.pid_map = {}
         self.speed_filter_window = 0
         self.speed_diff_max_delta = 0.0
@@ -67,15 +76,17 @@ class MotionRuntimeState(AssistantState):
         self.heading_hold_enabled = True
         self.yaw_kp = 0.0
         self.yaw_ki = 0.0
+        self.yaw_kd = 0.0
         self.yaw_i_max = 0.0
         self.auto_omega_max = 0.0
+        self.hold_speed_eps = 0.0
         self.follow_position_kp = 0.0
         self.follow_position_max_speed = 0.0
         self.tick_ms = 0
         self.tick_s = 0.0
         self.gyro_scale = 1.0
         self.ident_lookup = {}
-        self.imu_offsets: Tuple[float, float, float, float, float, float] = (
+        self.imu_offsets = (
             0.0,
             0.0,
             0.0,
@@ -89,7 +100,7 @@ class MotionRuntimeState(AssistantState):
         self._last_cycle_token = None
         self._last_base_snapshot = None
         self._last_control_cycle_token = None
-        self.state_line: Optional[Callable[[], str]] = None
+        self.state_line = None
 
     @property
     def yaw_integral(self):
@@ -194,3 +205,11 @@ class MotionRuntimeState(AssistantState):
     @last_yaw_rad.setter
     def last_yaw_rad(self, value):
         self.control.last_yaw_rad = value
+
+    @property
+    def last_attitude_time_us(self):
+        return self.control.last_attitude_time_us
+
+    @last_attitude_time_us.setter
+    def last_attitude_time_us(self, value):
+        self.control.last_attitude_time_us = value

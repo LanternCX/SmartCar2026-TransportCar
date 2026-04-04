@@ -74,7 +74,7 @@ class DualWindowRegressionFilter:
         self.long_window = int(long_window)
         self.short_window = int(short_window)
         self.combine_w = float(combine_w)
-        self.sample_idx = 0
+        self.elapsed_ms = 0.0
         self.long_values = []
         self.short_values = []
 
@@ -103,9 +103,13 @@ class DualWindowRegressionFilter:
         intercept = (sum_y - (slope * sum_t)) / count
         return (slope * next_t) + intercept
 
-    def update(self, value):
-        stamp = float(self.sample_idx * self.tick_ms)
-        self.sample_idx += 1
+    def update(self, value, dt_s=None):
+        if dt_s is None or float(dt_s) <= 0.0:
+            dt_ms = float(self.tick_ms)
+        else:
+            dt_ms = float(dt_s) * 1000.0
+        self.elapsed_ms += dt_ms
+        stamp = float(self.elapsed_ms)
         pair = (stamp, float(value))
         self.long_values.append(pair)
         self.short_values.append(pair)
@@ -113,7 +117,7 @@ class DualWindowRegressionFilter:
             self.long_values.pop(0)
         if len(self.short_values) > self.short_window:
             self.short_values.pop(0)
-        next_t = float(self.sample_idx * self.tick_ms)
+        next_t = float(self.elapsed_ms + dt_ms)
         long_pred = self._predict(self.long_values, next_t)
         short_pred = self._predict(self.short_values, next_t)
         return (short_pred * self.combine_w) + (long_pred * (1.0 - self.combine_w))
@@ -125,6 +129,7 @@ class SpeedFilterChain:
     def __init__(self, window, max_delta, tick_ms, long_window, short_window):
         self.spike = SpikeMedianFilter(window)
         self.diff = DiffLimitFilter(max_delta)
+        self.dt_s = None
         self.reg = DualWindowRegressionFilter(
             tick_ms=tick_ms,
             long_window=long_window,
@@ -134,7 +139,7 @@ class SpeedFilterChain:
     def update(self, value):
         filtered = self.spike.update(value)
         filtered = self.diff.update(filtered)
-        return self.reg.update(filtered)
+        return self.reg.update(filtered, dt_s=self.dt_s)
 
 
 def build_speed_filter_chain(
@@ -175,6 +180,13 @@ def build_wheel_filter_bank(
             short_window=short_window,
         )
     return wheel_filters
+
+
+def set_wheel_filter_dt_s(filter_bank, wheel_names, dt_s):
+    for name in wheel_names:
+        filter_chain = filter_bank.get(name)
+        if filter_chain is not None:
+            filter_chain.dt_s = dt_s
 
 
 def update_wheel_speeds(filter_bank, raw_ticks, wheel_names):

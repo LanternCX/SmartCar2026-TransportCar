@@ -5,8 +5,8 @@
 
 MOTOR_PORTS = {
     "m": ("PWM_C30_DIR_C31", False),
-    "l": ("PWM_D4_DIR_D5", False),
-    "r": ("PWM_D6_DIR_D7", True),
+    "l": ("PWM_D6_DIR_D7", True),
+    "r": ("PWM_D4_DIR_D5", False),
 }
 
 

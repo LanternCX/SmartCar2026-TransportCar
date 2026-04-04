@@ -3,31 +3,74 @@
 @file src/assistant/motion_runtime.py
 """
 
-from types import MethodType
+_USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 
-from . import config, runtime_params
-from .ctrl.attitude import (
-    HeadingEstimator,
-    capture_heading_target,
-    compute_heading_correction,
-    update_heading_from_gyro,
-)
-from .ctrl.filters import LowPassFilter, build_wheel_filter_bank, update_wheel_speeds
-from .ctrl.kinematics import (
-    build_kinematics,
-    build_odometry,
-    resolve_follow_velocity,
-    rotate_body_delta_to_world,
-    update_odometry_from_wheels,
-)
-from .ctrl.pid import (
-    apply_wheel_speed_control,
-    build_wheel_speed_controllers,
-    reset_wheel_speed_control,
-)
-from .safety import SafetyGuard
-from .state import MotionRuntimeState
-from .status import render_state
+
+def _debug_print(stage, **payload):
+    if not payload:
+        print("[assistant.motion] %s" % str(stage))
+        return
+    parts = []
+    for key in sorted(payload):
+        parts.append("%s=%s" % (str(key), str(payload[key])))
+    print("[assistant.motion] %s | %s" % (str(stage), ", ".join(parts)))
+
+
+if _USE_DIRECT_IMPORTS:
+    import config
+    import runtime_params
+    from ctrl.attitude import (
+        HeadingEstimator,
+        capture_heading_target,
+        compute_heading_correction,
+        update_heading_from_gyro,
+    )
+    from ctrl.filters import LowPassFilter, build_wheel_filter_bank, update_wheel_speeds
+    from ctrl.filters import set_wheel_filter_dt_s
+    from ctrl.kinematics import (
+        build_kinematics,
+        build_odometry,
+        resolve_follow_velocity,
+        rotate_body_delta_to_world,
+        update_odometry_from_wheels,
+    )
+    from ctrl.pid import (
+        apply_wheel_speed_control,
+        build_wheel_speed_controllers,
+        reset_wheel_speed_control,
+    )
+    from safety import SafetyGuard
+    from state import MotionRuntimeState
+    from status import render_state
+else:
+    from . import config, runtime_params
+    from .ctrl.attitude import (
+        HeadingEstimator,
+        capture_heading_target,
+        compute_heading_correction,
+        update_heading_from_gyro,
+    )
+    from .ctrl.filters import (
+        LowPassFilter,
+        build_wheel_filter_bank,
+        set_wheel_filter_dt_s,
+        update_wheel_speeds,
+    )
+    from .ctrl.kinematics import (
+        build_kinematics,
+        build_odometry,
+        resolve_follow_velocity,
+        rotate_body_delta_to_world,
+        update_odometry_from_wheels,
+    )
+    from .ctrl.pid import (
+        apply_wheel_speed_control,
+        build_wheel_speed_controllers,
+        reset_wheel_speed_control,
+    )
+    from .safety import SafetyGuard
+    from .state import MotionRuntimeState
+    from .status import render_state
 
 
 def _clamp(value, lower, upper):
@@ -79,6 +122,27 @@ def _load_gyro_offsets(path):
     return tuple(offsets)
 
 
+def _trace_ident_lookup_loaded(path, ident_lookup):
+    wheel_ident = {}
+    for name in ("m", "l", "r"):
+        if name not in ident_lookup:
+            continue
+        wheel_ident[name] = ident_lookup[name]
+    _debug_print(
+        "ident_lookup_loaded",
+        path=path,
+        wheel_ident=wheel_ident,
+    )
+
+
+def _trace_gyro_offsets_loaded(path, gyro_offsets):
+    _debug_print(
+        "gyro_offsets_loaded",
+        path=path,
+        gyro_offsets=tuple(gyro_offsets),
+    )
+
+
 def _bind_runtime_hw_bundle(runtime_state, hw_bundle):
     if hw_bundle is None:
         return runtime_state
@@ -91,6 +155,11 @@ def _bind_runtime_hw_bundle(runtime_state, hw_bundle):
 def _state_line(state):
     # 状态回包统一交给独立序列化入口, 运行时只负责提供当前状态对象
     return render_state(state)
+
+
+def _bind_state_line(state):
+    # 运行时装配实例方法, 避免把状态模块重新耦回序列化层。
+    state.state_line = lambda: _state_line(state)
 
 
 def _motor_bundle(state):
@@ -228,16 +297,24 @@ def _refresh_base_chain(state, cycle_token=None):
 
     heading_override = _read_imu_sample(state)
     update_heading_from_gyro(state, heading_override=heading_override)
+    has_valid_attitude_dt = float(state.tick_s) > 0.0
 
     raw_ticks = _read_encoder_ticks(state)
     state.encoder_ticks = dict(raw_ticks)
-    state.wheel_speeds = update_wheel_speeds(
-        state.wheel_filters,
-        raw_ticks,
-        ("m", "l", "r"),
-    )
-
-    odom_x, odom_y = update_odometry_from_wheels(state)
+    if has_valid_attitude_dt:
+        set_wheel_filter_dt_s(state.wheel_filters, ("m", "l", "r"), state.tick_s)
+        state.wheel_speeds = update_wheel_speeds(
+            state.wheel_filters,
+            raw_ticks,
+            ("m", "l", "r"),
+        )
+        odom_x, odom_y = update_odometry_from_wheels(state)
+    else:
+        set_wheel_filter_dt_s(state.wheel_filters, ("m", "l", "r"), 0.0)
+        update_wheel_speeds(state.wheel_filters, raw_ticks, ())
+        state.wheel_speeds = dict(state.wheel_speeds)
+        odom_x = float(state.odom[0])
+        odom_y = float(state.odom[1])
     snapshot = {
         "imu_raw": tuple(state.imu_raw),
         "encoder_ticks": dict(state.encoder_ticks),
@@ -256,6 +333,18 @@ def _apply_motor_output(state, dx, dy, omega):
         float(dy), float(dx), float(omega)
     )
     motors = _motor_bundle(state)
+    if float(state.tick_s) <= 0.0:
+        for name in ("m", "l", "r"):
+            state.target_wheel_speeds[name] = 0.0
+            state.motor_duties[name] = 0
+        if motors is not None:
+            for motor in motors.values():
+                stop = getattr(motor, "stop", None)
+                if stop is not None:
+                    stop()
+                else:
+                    motor.set_duty(0)
+        return {"m": 0.0, "l": 0.0, "r": 0.0}
     apply_wheel_speed_control(
         state,
         wheel_targets,
@@ -355,6 +444,11 @@ def _apply_follow(state, command, now_ms, cycle_token=None):
         float(runtime_params.FOLLOW_OUTPUT_LIMIT),
     )
     _capture_follow_target(state, target_dx, target_dy)
+    if float(state.tick_s) <= 0.0:
+        state.velocity_command = (0.0, 0.0, 0.0)
+        _apply_motor_output(state, 0.0, 0.0, 0.0)
+        _mark_control_applied(state, cycle_token=cycle_token)
+        return "BUSY"
     control_dx, control_dy = resolve_follow_velocity(state)
     omega = compute_heading_correction(state)
     state.velocity_command = (control_dx, control_dy, omega)
@@ -372,8 +466,19 @@ def _apply_velocity(state, command, now_ms, cycle_token=None):
     state.follow_active = True
     state.state_label = "BUSY"
     _clear_follow_target(state)
-    omega = float(command.omega) + compute_heading_correction(state)
-    limited_omega = _clamp(omega, -state.auto_omega_max, state.auto_omega_max)
+    if float(state.tick_s) <= 0.0:
+        state.velocity_command = (0.0, 0.0, 0.0)
+        _apply_motor_output(state, 0.0, 0.0, 0.0)
+        _mark_control_applied(state, cycle_token=cycle_token)
+        return "BUSY"
+    manual_omega = float(command.omega)
+    if abs(manual_omega) >= float(state.hold_speed_eps):
+        capture_heading_target(state)
+        limited_omega = _clamp(
+            manual_omega, -state.auto_omega_max, state.auto_omega_max
+        )
+    else:
+        limited_omega = compute_heading_correction(state)
     state.velocity_command = (float(command.vx), float(command.vy), limited_omega)
     _apply_motor_output(
         state,
@@ -433,12 +538,16 @@ def _apply_command(state, command, now_ms, cycle_token=None):
         return "ACK"
     if command.kind == "hold":
         _clear_follow_deadline(state)
+        should_refresh_heading_target = bool(state.follow_active) or not bool(
+            state.heading_target_ready
+        )
         state.follow_active = False
         if not _is_timeout_locked(state):
             state.state_label = "IDLE"
         state.velocity_command = (0.0, 0.0, 0.0)
         _clear_follow_target(state)
-        capture_heading_target(state)
+        if should_refresh_heading_target:
+            capture_heading_target(state)
         _stop_motors(state)
         _mark_control_applied(state, cycle_token=cycle_token)
         state.safety.clear_estop()
@@ -462,12 +571,22 @@ def _tick(state, now_ms, cycle_token=None):
     if _control_already_applied(state, cycle_token=cycle_token):
         return "BUSY" if state.follow_active else "ACK"
     if state.follow_active:
+        if float(state.tick_s) <= 0.0:
+            state.velocity_command = (0.0, 0.0, 0.0)
+            _apply_motor_output(state, 0.0, 0.0, 0.0)
+            _mark_control_applied(state, cycle_token=cycle_token)
+            return "BUSY"
         dx, dy = resolve_follow_velocity(state)
         omega = compute_heading_correction(state)
         state.velocity_command = (dx, dy, omega)
         _apply_motor_output(state, dx, dy, omega)
         _mark_control_applied(state, cycle_token=cycle_token)
         return "BUSY"
+    if float(state.tick_s) <= 0.0:
+        state.velocity_command = (0.0, 0.0, 0.0)
+        _apply_motor_output(state, 0.0, 0.0, 0.0)
+        _mark_control_applied(state, cycle_token=cycle_token)
+        return "ACK"
     _apply_motor_output(state, 0.0, 0.0, compute_heading_correction(state))
     _mark_control_applied(state, cycle_token=cycle_token)
     return "ACK"
@@ -476,6 +595,7 @@ def _tick(state, now_ms, cycle_token=None):
 def create_runtime_state(timeout_ms=None, hw_bundle=None):
     pid_map = dict(runtime_params.PID_MAP)
     ident_lookup = _load_ident_lookup(config.IDENT_RESULTS_FILE)
+    imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
     if timeout_ms is None:
         timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
     state = MotionRuntimeState()
@@ -487,16 +607,17 @@ def create_runtime_state(timeout_ms=None, hw_bundle=None):
     state.gyro_lpf_alpha = float(runtime_params.GYRO_LPF_ALPHA)
     state.yaw_kp = float(runtime_params.YAW_KP)
     state.yaw_ki = float(runtime_params.YAW_KI)
+    state.yaw_kd = float(runtime_params.YAW_KD)
     state.yaw_i_max = float(runtime_params.YAW_I_MAX)
     state.auto_omega_max = float(runtime_params.AUTO_OMEGA_MAX)
+    state.hold_speed_eps = float(runtime_params.HOLD_SPEED_EPS)
     state.heading_hold_enabled = True
     state.follow_position_kp = float(runtime_params.FOLLOW_POSITION_KP)
     state.follow_position_max_speed = float(runtime_params.FOLLOW_POSITION_MAX_SPEED)
     state.tick_ms = int(runtime_params.CONTROL_TICK_MS)
-    state.tick_s = float(state.tick_ms) / 1000.0
+    state.tick_s = 0.0
     state.gyro_scale = float(config.GYRO_SCALE)
     state.ident_lookup = ident_lookup
-    imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
     state.imu_offsets = (
         float(imu_offsets[0]),
         float(imu_offsets[1]),
@@ -525,7 +646,9 @@ def create_runtime_state(timeout_ms=None, hw_bundle=None):
     state._last_cycle_token = None
     state._last_base_snapshot = None
     state._last_control_cycle_token = None
-    state.state_line = MethodType(_state_line, state)
+    _bind_state_line(state)
+    _trace_ident_lookup_loaded(config.IDENT_RESULTS_FILE, ident_lookup)
+    _trace_gyro_offsets_loaded(config.GYRO_OFFSET_FILE, state.imu_offsets)
     imu = _imu_bundle(state)
     if imu is not None:
         apply_offsets = getattr(imu, "apply_offsets", None)

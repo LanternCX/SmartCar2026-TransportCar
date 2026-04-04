@@ -21,6 +21,47 @@ def _normalize_heading_error(error_deg):
     return wrapped - 180.0
 
 
+def _read_now_us():
+    import time
+
+    ticks_us = getattr(time, "ticks_us", None)
+    if ticks_us is not None:
+        return int(ticks_us())
+    return int(time.time() * 1000000)
+
+
+def _ticks_diff_us(current_us, previous_us):
+    import time
+
+    ticks_diff = getattr(time, "ticks_diff", None)
+    if ticks_diff is not None:
+        return int(ticks_diff(int(current_us), int(previous_us)))
+    return int(current_us) - int(previous_us)
+
+
+def _normalize_gyro_deg_s(gx_deg_s, gy_deg_s, gz_deg_s):
+    return (
+        round(float(gx_deg_s), 1),
+        round(float(gy_deg_s), 1),
+        round(float(gz_deg_s), 1),
+    )
+
+
+def _resolve_attitude_dt_s(state, now_us=None):
+    if now_us is None:
+        now_us = _read_now_us()
+    previous_us = getattr(state, "last_attitude_time_us", None)
+    if previous_us is None:
+        state.last_attitude_time_us = int(now_us)
+        return 0.0
+    dt_us = _ticks_diff_us(now_us, previous_us)
+    dt_s = float(dt_us) / 1000000.0
+    if dt_s <= 0.0:
+        return 0.0
+    state.last_attitude_time_us = int(now_us)
+    return dt_s
+
+
 class HeadingEstimator:
     """保存姿态积分状态并对外提供航向估计结果."""
 
@@ -86,12 +127,21 @@ def ensure_heading_target(state):
         capture_heading_target(state)
 
 
-def update_heading_from_gyro(state, heading_override=None):
+def update_heading_from_gyro(state, heading_override=None, now_us=None):
     """根据当前 IMU 采样推进姿态积分并刷新航向估计."""
 
-    gx_deg_s = float(state.imu_calibrated[3]) / float(state.gyro_scale)
-    gy_deg_s = float(state.imu_calibrated[4]) / float(state.gyro_scale)
-    gz_deg_s = float(state.imu_calibrated[5]) / float(state.gyro_scale)
+    gx_deg_s, gy_deg_s, gz_deg_s = _normalize_gyro_deg_s(
+        float(state.imu_calibrated[3]) / float(state.gyro_scale),
+        float(state.imu_calibrated[4]) / float(state.gyro_scale),
+        float(state.imu_calibrated[5]) / float(state.gyro_scale),
+    )
+    state.tick_s = _resolve_attitude_dt_s(state, now_us=now_us)
+    if state.tick_s <= 0.0:
+        if heading_override is not None:
+            state.heading_deg = float(heading_override)
+            state.last_yaw_rad = math.radians(state.heading_deg)
+        ensure_heading_target(state)
+        return
     state.q_est.update(gx_deg_s, gy_deg_s, gz_deg_s, state.tick_s)
     curr_yaw_rad = state.q_est.yaw_rad()
     delta_yaw = curr_yaw_rad - state.last_yaw_rad
@@ -101,7 +151,7 @@ def update_heading_from_gyro(state, heading_override=None):
         delta_yaw += 2.0 * math.pi
     state.last_yaw_rad = curr_yaw_rad
     state.heading_deg += math.degrees(delta_yaw)
-    state.yaw_rate_deg_s = state.gyro_lpf.update(gz_deg_s)
+    state.yaw_rate_deg_s = gz_deg_s
     if heading_override is not None:
         state.heading_deg = float(heading_override)
         state.last_yaw_rad = math.radians(state.heading_deg)
@@ -118,7 +168,15 @@ def compute_heading_correction(state, heading_deg=None):
     error = _normalize_heading_error(
         float(state.target_heading_deg) - float(heading_deg)
     )
-    state.yaw_integral += error
-    state.yaw_integral = _clamp(state.yaw_integral, -state.yaw_i_max, state.yaw_i_max)
+    dt_s = float(getattr(state, "tick_s", 0.0) or 0.0)
+    state.yaw_integral += error * dt_s
+    state.yaw_integral = _clamp(
+        state.yaw_integral,
+        -float(state.yaw_i_max),
+        float(state.yaw_i_max),
+    )
     omega = (error * state.yaw_kp) + (state.yaw_integral * state.yaw_ki)
+    omega -= float(getattr(state, "yaw_rate_deg_s", 0.0)) * float(
+        getattr(state, "yaw_kd", 0.0)
+    )
     return _clamp(omega, -state.auto_omega_max, state.auto_omega_max)

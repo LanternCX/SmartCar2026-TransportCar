@@ -9,6 +9,8 @@ def test_assistant_runtime_params_exposes_required_keys() -> None:
         "SPEED_FILTER_WINDOW",
         "SPEED_DIFF_MAX_DELTA",
         "GYRO_LPF_ALPHA",
+        "YAW_KD",
+        "HOLD_SPEED_EPS",
     }
 
     assert expected.issubset(set(dir(runtime_params)))
