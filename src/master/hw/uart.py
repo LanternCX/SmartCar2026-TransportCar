@@ -11,6 +11,18 @@ else:
     from config import UART_BAUDRATE, UART_IDS
 
 
+UART_LINE_LIMITS = {
+    "uart3": 256,
+    "uart6": 160,
+    "uart8": 160,
+}
+UART_READ_CHUNKS = {
+    "uart3": 96,
+    "uart6": 96,
+    "uart8": 96,
+}
+
+
 class UartPort:
     """串口端口描述.
 
@@ -22,7 +34,92 @@ class UartPort:
         self.uart_id = int(uart_id)
         self.baudrate = int(baudrate)
         self._device = None
-        self._read_buffer = ""
+        self._read_buffer = bytearray()
+        self._discard_until_newline = False
+        self._line_limit = UART_LINE_LIMITS.get(self.name)
+        self._read_chunk_size = UART_READ_CHUNKS.get(self.name)
+
+    @staticmethod
+    def _find_newline(payload):
+        for index, value in enumerate(payload):
+            if value == 10:
+                return index
+        return -1
+
+    def _tail_length(self):
+        last_newline = -1
+        for index, value in enumerate(self._read_buffer):
+            if value == 10:
+                last_newline = index
+        if last_newline < 0:
+            tail_length = len(self._read_buffer)
+        else:
+            tail_length = len(self._read_buffer) - last_newline - 1
+        if tail_length > 0 and self._read_buffer[-1] == 13:
+            tail_length -= 1
+        return tail_length
+
+    def _drop_partial_tail(self):
+        last_newline = -1
+        for index, value in enumerate(self._read_buffer):
+            if value == 10:
+                last_newline = index
+        if last_newline < 0:
+            self._read_buffer[:] = b""
+            return
+        self._read_buffer[last_newline + 1 :] = b""
+
+    def _append_payload(self, payload):
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        elif not isinstance(payload, bytes):
+            payload = bytes(payload)
+        if self._line_limit is None:
+            self._read_buffer.extend(payload)
+            return
+
+        index = 0
+        payload_length = len(payload)
+        while index < payload_length:
+            if self._discard_until_newline:
+                newline_index = payload.find(b"\n", index)
+                if newline_index < 0:
+                    return
+                self._discard_until_newline = False
+                index = newline_index + 1
+                continue
+
+            newline_index = payload.find(b"\n", index)
+            if newline_index < 0:
+                tail = payload[index:]
+                tail_length = len(tail)
+                if tail_length > 0 and tail[-1] == 13:
+                    tail_length -= 1
+                if self._tail_length() + tail_length > self._line_limit:
+                    self._drop_partial_tail()
+                    self._discard_until_newline = True
+                    return
+                self._read_buffer.extend(tail)
+                return
+
+            line_chunk = payload[index : newline_index + 1]
+            line_body_length = newline_index - index
+            if line_body_length > 0 and payload[newline_index - 1] == 13:
+                line_body_length -= 1
+            if self._tail_length() + line_body_length > self._line_limit:
+                self._drop_partial_tail()
+                index = newline_index + 1
+                continue
+            self._read_buffer.extend(line_chunk)
+            index = newline_index + 1
+
+    def _pop_ready_line(self):
+        newline_index = self._find_newline(self._read_buffer)
+        if newline_index < 0:
+            return None
+        line = bytes(self._read_buffer[:newline_index])
+        self._read_buffer[: newline_index + 1] = b""
+        return line.decode("utf-8").strip("\r")
 
     def ensure_device(self):
         """按需创建并初始化串口对象.
@@ -48,8 +145,44 @@ class UartPort:
             available = getattr(device, "any", lambda: 0)()
             if not available:
                 return None
+            if self._read_chunk_size is not None:
+                available = min(int(available), int(self._read_chunk_size))
             return device.read(available)
         return device.read(size)
+
+    def read_latest_line(self, transform=None):
+        """尽量清掉积压输入, 但只返回最新一条完整文本行.
+
+        @brief 视觉链路只关心最新观测, 这里把完整积压行在同拍内尽量清空, 避免旧消息继续堆积。
+        """
+
+        latest = None
+        while True:
+            line = self._pop_ready_line()
+            if line is None:
+                break
+            if transform is None:
+                latest = line
+            else:
+                transformed = transform(line)
+                if transformed is not None:
+                    latest = transformed
+        while True:
+            payload = self.read()
+            if payload is None:
+                break
+            self._append_payload(payload)
+            while True:
+                line = self._pop_ready_line()
+                if line is None:
+                    break
+                if transform is None:
+                    latest = line
+                else:
+                    transformed = transform(line)
+                    if transformed is not None:
+                        latest = transformed
+        return latest
 
     def write(self, payload):
         """写出原始串口负载.
@@ -68,13 +201,8 @@ class UartPort:
 
         payload = self.read()
         if payload is not None:
-            if isinstance(payload, bytes):
-                payload = payload.decode("utf-8")
-            self._read_buffer += str(payload)
-        if "\n" not in self._read_buffer:
-            return None
-        line, self._read_buffer = self._read_buffer.split("\n", 1)
-        return line.strip("\r")
+            self._append_payload(payload)
+        return self._pop_ready_line()
 
     def write_line(self, payload):
         """按 CRLF 结尾写出一行文本.
@@ -82,7 +210,19 @@ class UartPort:
         @brief 协议输出统一走这一层, 保持板端与主机侧格式一致。
         """
 
-        return self.write("%s\r\n" % str(payload))
+        if isinstance(payload, bytearray):
+            payload = bytes(payload)
+        elif not isinstance(payload, (bytes, str)):
+            payload = str(payload)
+
+        written = self.write(payload)
+        newline = b"\r\n" if isinstance(payload, bytes) else "\r\n"
+        tail_written = self.write(newline)
+        if isinstance(written, int) and isinstance(tail_written, int):
+            return written + tail_written
+        if tail_written is not None:
+            return tail_written
+        return written
 
 
 def build_uart_bundle():
