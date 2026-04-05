@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-06-1 | 2026-04-06 | 主车视觉状态机后的内存恶化主因是串口收发而不是双窗口滤波 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-06-1.md` | 记录主车视觉状态机接入后内存恶化的根因收敛结果, 结论是串口收发热路径才是主因, 双窗口滤波不是这轮主故障源。 | master, memory, uart, vision-state-machine, micropython, filter, debug | 
 | 2026-04-04-3 | 2026-04-04 | 参数辨识脚本中速度除以3的设计原理澄清 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-3.md` | 记录三轮全向底盘参数辨识时速度除以3的设计原理，防止未来误解为bug。 | pid-identify, omni-wheel, coupling, design-rationale, plant-gain |
 | 2026-04-04-2 | 2026-04-04 | 主车轮子方向与控制手感会被映射冲突和固定 dt 一起带偏 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-2.md` | 收敛主车姿态量级恢复后暴露出的轮子方向反转和打印扰动问题, 最终修正运行时硬件映射并统一全链路动态 dt。 | master, heading-control, mapping, encoder, motor, dynamic-dt, feedforward |
 | 2026-04-04-1 | 2026-04-04 | 主车运行时姿态口径必须对齐 inspect_attitude 的 yaw_deg | `docs/superpowers/memory/debug/entries/2026-04/2026-04-04-1.md` | 收敛主车 30 度手动旋转场景量级异常的问题, 通过对齐 `inspect_attitude.py` 的 `yaw_deg` 链路恢复可用朝向观测。 | master, attitude, yaw, inspect-attitude, imu, dt, heading-control |
