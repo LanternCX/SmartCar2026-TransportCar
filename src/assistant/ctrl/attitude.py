@@ -72,6 +72,11 @@ class HeadingEstimator:
         self.z = 0.0
 
     def update(self, gx_deg_s, gy_deg_s, gz_deg_s, dt_s):
+        """按单拍角速度推进四元数积分.
+
+        @brief 用 IMU 角速度刷新姿态估计, 给航向保持和诊断脚本复用。
+        """
+
         gx = math.radians(float(gx_deg_s))
         gy = math.radians(float(gy_deg_s))
         gz = math.radians(float(gz_deg_s))
@@ -106,6 +111,11 @@ class HeadingEstimator:
         self.z *= inv_norm
 
     def yaw_rad(self):
+        """从当前四元数中提取偏航角.
+
+        @brief 给运行时航向保持提供连续 yaw 估计。
+        """
+
         return math.atan2(
             2.0 * ((self.w * self.z) + (self.x * self.y)),
             1.0 - (2.0 * ((self.y * self.y) + (self.z * self.z))),
@@ -113,7 +123,10 @@ class HeadingEstimator:
 
 
 def capture_heading_target(state):
-    """在切换到保持模式时锁定当前航向目标."""
+    """锁定当前航向为保持目标.
+
+    @brief 在辅车进入稳定跟随或停驻时清空积分并固定目标角。
+    """
 
     state.target_heading_deg = float(state.heading_deg)
     state.yaw_integral = 0.0
@@ -121,14 +134,20 @@ def capture_heading_target(state):
 
 
 def ensure_heading_target(state):
-    """只有尚未锁定目标时才初始化航向保持目标."""
+    """在需要时补齐航向保持目标.
+
+    @brief 避免多个控制入口重复判断是否已经锁定目标角。
+    """
 
     if not state.heading_target_ready:
         capture_heading_target(state)
 
 
 def update_heading_from_gyro(state, heading_override=None, now_us=None):
-    """根据当前 IMU 采样推进姿态积分并刷新航向估计."""
+    """根据 IMU 采样推进当前航向估计.
+
+    @brief 统一完成时间步长解析、四元数积分和可选的外部航向覆盖。
+    """
 
     gx_deg_s, gy_deg_s, gz_deg_s = _normalize_gyro_deg_s(
         float(state.imu_calibrated[3]) / float(state.gyro_scale),
@@ -159,7 +178,10 @@ def update_heading_from_gyro(state, heading_override=None, now_us=None):
 
 
 def compute_heading_correction(state, heading_deg=None):
-    """根据当前航向误差输出保持角速度."""
+    """根据航向误差生成保持角速度.
+
+    @brief 用辅车运行时保存的 PID 参数计算偏航修正输出。
+    """
 
     if not getattr(state, "heading_hold_enabled", True):
         return 0.0

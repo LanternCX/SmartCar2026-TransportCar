@@ -7,6 +7,11 @@ _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 
 
 def format_attitude_line(tick, quat, euler_deg, gyro_deg_s, dt_s):
+    """把单拍姿态观测结果格式化为日志行.
+
+    @brief 统一诊断脚本输出, 方便串口直接观察积分状态。
+    """
+
     return (
         "tick=%d "
         "dt_s=%.6f "
@@ -30,10 +35,20 @@ def format_attitude_line(tick, quat, euler_deg, gyro_deg_s, dt_s):
 
 
 def normalize_gyro_deg_s(gyro_deg_s):
+    """整理角速度显示精度.
+
+    @brief 让调试输出保留足够观察趋势的分辨率, 同时避免刷屏过细。
+    """
+
     return tuple(round(float(value), 1) for value in tuple(gyro_deg_s)[:3])
 
 
 def main(max_ticks=200, tick_ms=10):
+    """持续输出辅车姿态积分观测结果.
+
+    @brief 把 IMU 采样、四元数积分和文本打印串成板上诊断入口。
+    """
+
     import time
 
     if _USE_DIRECT_IMPORTS:

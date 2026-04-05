@@ -11,6 +11,11 @@ OFFSET_FILE = "/flash/gyro_offset.txt"
 
 
 def format_offsets_text(offsets):
+    """把六轴零漂结果格式化为持久化文本.
+
+    @brief 保持与运行时读取逻辑一致的逗号分隔格式。
+    """
+
     return ",".join(["%.4f" % float(value) for value in tuple(offsets)[:6]])
 
 
@@ -23,6 +28,11 @@ def _read_imu_port_builder():
 
 
 def _sample_offsets(sample_count=SAMPLE_COUNT, sample_interval_ms=SAMPLE_INTERVAL_MS):
+    """采集静止状态下的 IMU 零漂平均值.
+
+    @brief 统一完成设备初始化、采样循环和进度输出。
+    """
+
     import time
 
     imu_port = _read_imu_port_builder()()
@@ -62,6 +72,11 @@ def main(
     sample_interval_ms=SAMPLE_INTERVAL_MS,
     file_path=OFFSET_FILE,
 ):
+    """执行辅车 IMU 零漂校准主流程.
+
+    @brief 采样、保存并回显校准结果, 供板上独立运行。
+    """
+
     offsets = _sample_offsets(
         sample_count=sample_count, sample_interval_ms=sample_interval_ms
     )

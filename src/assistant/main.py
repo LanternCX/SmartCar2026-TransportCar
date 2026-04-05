@@ -4,6 +4,7 @@
 """
 
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
+# 运行中周期翻转心跳灯, 方便现场确认主循环仍在推进
 RUNTIME_HEARTBEAT_MS = 500
 
 
@@ -18,6 +19,12 @@ def _debug_print(stage, **payload):
 
 
 def run_calibrate_gyro():
+    """切到零漂标定脚本
+
+    @brief 按键触发后复用独立脚本完成陀螺仪零漂采集。
+    @return object
+    """
+
     if _USE_DIRECT_IMPORTS:
         from script.calibrate_gyro import main
     else:
@@ -27,6 +34,12 @@ def run_calibrate_gyro():
 
 
 def run_pid_identify():
+    """切到电机辨识脚本
+
+    @brief 按键触发后复用独立脚本完成底座辨识流程。
+    @return object
+    """
+
     if _USE_DIRECT_IMPORTS:
         from script.pid_identify import main
     else:
@@ -127,11 +140,15 @@ def _drive_loop(loop):
     last_heartbeat_ms = None
     while True:
         now_ms = _read_now_ms()
+
+        # 先对齐控制周期, 避免主循环因为空转打乱底座采样节奏
         if next_tick_ms is not None:
             remaining_ms = int(next_tick_ms) - int(now_ms)
             if remaining_ms > 0:
                 _sleep_ms(remaining_ms)
                 continue
+
+        # 再在固定节拍里翻转心跳灯并推进单步运行时
         if heartbeat_led is not None and (
             last_heartbeat_ms is None
             or _ticks_diff_ms(now_ms, last_heartbeat_ms) >= RUNTIME_HEARTBEAT_MS
@@ -143,15 +160,23 @@ def _drive_loop(loop):
 
 
 def _start_runtime():
+    """装配并启动辅车运行时
+
+    @brief 统一收口硬件装配、运行循环实例和板端采样定时器。
+    """
+
     _debug_print("start_runtime_enter")
     if _USE_DIRECT_IMPORTS:
         from app import AssistantRuntimeLoop, build_hw_bundle
     else:
         from .app import AssistantRuntimeLoop, build_hw_bundle
 
+    # 先完成硬件装配, 保证运行循环与采样链路共用同一套对象
     hw_bundle = build_hw_bundle()
     _debug_print("start_runtime_hw_ready", keys=tuple(sorted(hw_bundle.keys())))
     runtime_loop = AssistantRuntimeLoop(hw_bundle)
+
+    # 再补上周期采样与心跳灯, 让主循环只专注于命令推进
     setattr(runtime_loop, "capture_ticker", _build_capture_ticker(hw_bundle))
     setattr(runtime_loop, "heartbeat_led", _build_runtime_heartbeat_led())
     _debug_print("start_runtime_loop_ready")
@@ -165,6 +190,7 @@ def main():
     """
 
     _debug_print("main_enter")
+    # 优先检查维护按键, 现场按键时直接切到对应脚本
     if _read_button_state("C8"):
         _debug_print("main_branch_pid_identify")
         run_pid_identify()
@@ -174,6 +200,7 @@ def main():
         run_calibrate_gyro()
         return
 
+    # 未触发维护分支时进入正常辅车运行链路
     _debug_print("main_branch_runtime")
     _start_runtime()
 

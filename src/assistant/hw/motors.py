@@ -24,6 +24,11 @@ class MotorPort:
         self._device = None
 
     def ensure_device(self):
+        """按需创建并缓存电机控制器实例.
+
+        @brief 把板级端口名解析成底层驱动对象, 供速度环重复调用。
+        """
+
         if self._device is None:
             from seekfree import MOTOR_CONTROLLER
 
@@ -37,10 +42,20 @@ class MotorPort:
         return self._device
 
     def set_duty(self, duty):
+        """向底层电机驱动写入占空比.
+
+        @brief 统一封装辅车三路电机的输出入口。
+        """
+
         device = self.ensure_device()
         device.duty(int(duty))
 
     def stop(self):
+        """让当前电机立即回到零输出.
+
+        @brief 给超时、急停和模式切换复用同一停车语义。
+        """
+
         self.set_duty(0)
 
 

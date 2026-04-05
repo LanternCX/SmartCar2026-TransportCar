@@ -52,7 +52,10 @@ class AssistantControlState:
 
 
 class MotionRuntimeState(AssistantState):
-    """辅车过程式主线使用的运行时状态容器."""
+    """辅车过程式主线使用的运行时状态容器.
+
+    @brief 把控制子状态保留在 `control` 下集中持有, 同时通过少量扁平代理字段维持主线读写口径稳定。
+    """
 
     control: AssistantControlState
     hw_bundle: object

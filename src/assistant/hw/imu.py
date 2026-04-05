@@ -18,6 +18,11 @@ class ImuPort:
         self.last_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def ensure_device(self):
+        """按需创建并缓存 IMU 设备对象.
+
+        @brief 首次访问时完成驱动绑定, 后续采样直接复用同一实例。
+        """
+
         if self._device is None:
             from seekfree import IMU660RX
 
@@ -29,6 +34,11 @@ class ImuPort:
         return self._device
 
     def read_raw(self):
+        """读取 IMU 当前原始六轴数据.
+
+        @brief 对驱动返回值做轴数校验, 避免异常数据直接进入姿态链路。
+        """
+
         self.ensure_device()
         raw = self._data_ref
         if raw is None:
@@ -40,6 +50,11 @@ class ImuPort:
         return self.last_raw
 
     def read_calibrated(self):
+        """读取扣除零漂后的六轴数据.
+
+        @brief 给姿态估计和诊断脚本提供统一的校准后采样口径。
+        """
+
         raw = self.read_raw()
         calibrated = []
         for index, value in enumerate(raw):
@@ -48,6 +63,11 @@ class ImuPort:
         return self.last_calibrated
 
     def apply_offsets(self, offsets):
+        """写入新的 IMU 零漂偏置.
+
+        @brief 把校准脚本产出的最多 6 个偏置值整理成固定长度元组。
+        """
+
         prepared = [0.0] * 6
         for index, value in enumerate(tuple(offsets)[:6]):
             prepared[index] = float(value)

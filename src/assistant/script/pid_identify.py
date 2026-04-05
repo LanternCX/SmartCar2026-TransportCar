@@ -32,6 +32,11 @@ class LowPassFilter:
         self.state = initial
 
     def update(self, new_val):
+        """推进单路低通滤波状态.
+
+        @brief 给辨识脚本的输入和输出平滑共用同一最简滤波器。
+        """
+
         value = float(new_val)
         if self.state is None:
             self.state = value
@@ -78,6 +83,11 @@ class DualWindowRegressionFilter:
         sum_ty,
         max_len,
     ):
+        """更新一个回归时间窗的累计统计量.
+
+        @brief 用循环数组复用存储, 避免脚本长时间采样时持续分配内存。
+        """
+
         if count < max_len:
             buf[count] = value
             tbuf[count] = t_ms
@@ -114,6 +124,11 @@ class DualWindowRegressionFilter:
         return slope, intercept
 
     def update(self, raw_value):
+        """推进长短双窗回归预测.
+
+        @brief 同时估计速度与加速度, 给参数辨识提供更稳的速度序列。
+        """
+
         value = float(raw_value)
         t_ms = self.sample_idx * self.tick_ms
         self.sample_idx += 1
@@ -187,6 +202,11 @@ def _read_board_drivers():
 
 
 def build_ident_encoder_bundle(drivers):
+    """按轮位创建辨识阶段使用的编码器对象.
+
+    @brief 沿用当前已确认的板级接线映射搭建采样链路。
+    """
+
     encoder_factory = drivers["encoder"]
     bundle = {}
     for name in TARGET_WHEELS:
@@ -196,6 +216,11 @@ def build_ident_encoder_bundle(drivers):
 
 
 def build_ident_motor_bundle(drivers):
+    """按轮位创建辨识阶段使用的电机对象.
+
+    @brief 按当前已确认端口映射直接下发阶跃占空比, 让脚本可独立完成开环采样。
+    """
+
     motor_controller = drivers["MOTOR_CONTROLLER"]
     bundle = {}
     for name in TARGET_WHEELS:
@@ -210,16 +235,31 @@ def build_ident_motor_bundle(drivers):
 
 
 def build_ident_status_led(drivers):
+    """创建辨识阶段的状态指示灯.
+
+    @brief 用板载 LED 告知采样循环仍在推进。
+    """
+
     pin = drivers["Pin"]
     return pin("C4", pin.OUT, value=True)
 
 
 def build_ident_stop_switch(drivers):
+    """创建辨识阶段的人工停止开关.
+
+    @brief 允许操作者在异常时立即终止电机阶跃测试。
+    """
+
     pin = drivers["Pin"]
     return pin("D9", pin.IN, pull=pin.PULL_UP_47K)
 
 
 def build_ident_filter_bank(tick_ms, wheel_names=TARGET_WHEELS):
+    """按轮位创建辨识采样滤波链.
+
+    @brief 把原始编码器计数先做平滑再送入参数辨识。
+    """
+
     bank = {}
     for name in tuple(wheel_names):
         bank[str(name)] = {
@@ -236,6 +276,11 @@ def build_ident_filter_bank(tick_ms, wheel_names=TARGET_WHEELS):
 
 
 def filter_ident_speed(filter_state, raw_ticks):
+    """把原始编码器计数整理成辨识速度序列.
+
+    @brief 统一执行输入平滑、双窗预测和输出平滑。
+    """
+
     smooth_raw = filter_state["input_lpf"].update(float(raw_ticks))
     fused_speed, _, _ = filter_state["dual_filter"].update(smooth_raw)
     filtered_speed = filter_state["output_lpf"].update(float(fused_speed))
@@ -243,6 +288,11 @@ def filter_ident_speed(filter_state, raw_ticks):
 
 
 def create_ident_buffers(names, max_samples):
+    """创建按轮位存储的辨识样本缓冲区.
+
+    @brief 用定长数组保存时间和速度, 便于板上低开销采样。
+    """
+
     return {
         str(name): {
             "t": array("f", [0.0] * int(max_samples)),
@@ -254,6 +304,11 @@ def create_ident_buffers(names, max_samples):
 
 
 def push_ident_sample(name, t_ms, value, buffers, max_samples=None):
+    """向指定轮位的环形缓冲写入一条样本.
+
+    @brief 让长时间辨识时旧样本按固定容量自动覆盖。
+    """
+
     slot = buffers[str(name)]
     size = int(max_samples or len(slot["t"]))
     index = int(slot["count"]) % size
@@ -263,6 +318,11 @@ def push_ident_sample(name, t_ms, value, buffers, max_samples=None):
 
 
 def identify_wheel_from_buffer(name, buffers, step_duty, max_samples=None):
+    """从一条轮速响应序列估计一阶模型参数.
+
+    @brief 输出阶跃增益和时间常数, 供后续轮速前馈和调参使用。
+    """
+
     if float(step_duty) == 0.0:
         return (None, None)
     slot = buffers[str(name)]
@@ -313,6 +373,11 @@ def identify_wheel_from_buffer(name, buffers, step_duty, max_samples=None):
 
 
 def summarize_ident_buffer(name, buffers, max_samples=None, preview_count=5):
+    """汇总指定轮位的样本缓冲概况.
+
+    @brief 在辨识失败时给调试输出提供首尾样本和尾段均值。
+    """
+
     slot = buffers[str(name)]
     size = int(max_samples or len(slot["t"]))
     count = min(int(slot["count"]), size)
@@ -374,6 +439,11 @@ def _format_sample_preview(samples):
 
 
 def print_ident_failure_debug(name, buffers, max_samples=None):
+    """打印辨识失败时的缓冲诊断信息.
+
+    @brief 帮助判断失败是采样不足、速度异常还是稳态未建立。
+    """
+
     summary = summarize_ident_buffer(
         name, buffers, max_samples=max_samples, preview_count=5
     )
@@ -392,6 +462,11 @@ def print_ident_failure_debug(name, buffers, max_samples=None):
 
 
 def format_ident_text(results):
+    """把辨识结果格式化为参数文件文本.
+
+    @brief 保持与运行时参数读取逻辑一致的逐行三列格式。
+    """
+
     lines = []
     for name in TARGET_WHEELS:
         gain_tau = dict(results).get(name)
@@ -431,6 +506,11 @@ def _progress_step(sample_count):
 
 
 def resolve_ident_plan(duration_ms, tick_ms):
+    """根据持续时间与拍长推导采样计划.
+
+    @brief 提前算出样本数和缓冲容量, 避免主流程散落重复公式。
+    """
+
     sample_count = max(1, (int(duration_ms) + int(tick_ms) - 1) // int(tick_ms))
     return {
         "duration_ms": int(duration_ms),
@@ -445,6 +525,11 @@ def main(
     tick_ms=IDENT_TICK_MS,
     file_path=IDENT_RESULTS_FILE,
 ):
+    """执行辅车电机参数辨识主流程.
+
+    @brief 串联采样计划、阶跃采集、参数估计和结果落盘。
+    """
+
     drivers = _read_board_drivers()
     ident_plan = resolve_ident_plan(duration_ms=duration_ms, tick_ms=tick_ms)
     sample_count = int(ident_plan["sample_count"])
