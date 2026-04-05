@@ -352,12 +352,12 @@ def test_master_app_only_drives_assistant_in_current_stage() -> None:
     result = app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
         }
     )
 
     assert result["self_target"] == {"kind": "hold"}
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=12.000,dy=-6.000"
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"
@@ -371,12 +371,12 @@ def test_master_app_enters_center_hold_for_small_error() -> None:
     result = app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=follower,err_x=3,err_y=-4",
+            "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=red,err_x=3,err_y=-4",
         }
     )
 
     assert result["self_target"] == {"kind": "hold"}
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["assistant_command"] == "follow=1,seq=1,valid=0,dx=0.000,dy=0.000"
     assert result["phase"] == "CENTER_HOLD"
 
@@ -388,11 +388,11 @@ def test_master_app_routes_current_selected_target_before_state_machine() -> Non
     result = app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=11,valid=1,target=follower,err_x=9,err_y=0",
+            "line": "vision=1,camera_id=cam_a,seq=11,valid=1,target=red,err_x=9,err_y=0",
         }
     )
 
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["phase"] == "TRACKING"
     assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=9.000,dy=0.000"
 
@@ -404,7 +404,7 @@ def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -424,7 +424,7 @@ def test_master_app_uses_selected_target_instead_of_last_arrival() -> None:
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -432,13 +432,13 @@ def test_master_app_uses_selected_target_instead_of_last_arrival() -> None:
     result = app.step(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=8,valid=1,target=follower,err_x=1,err_y=1",
+            "line": "vision=1,camera_id=cam_b,seq=8,valid=1,target=blue,err_x=1,err_y=1",
             "now_ms": 1010,
         }
     )
 
     assert result["assistant_command"] == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000"
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "blue"
     assert result["phase"] == "CENTER_HOLD"
     assert result["active_uart"] == "uart8"
 
@@ -450,7 +450,7 @@ def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -458,12 +458,12 @@ def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
     result = app.step({"now_ms": 1100})
 
     assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
     assert result["assistant_state"] == {
         "phase": "TRACKING",
-        "selected_target": "follower",
+        "selected_target": "red",
         "target_valid": 1,
         "target_fresh": 1,
     }
@@ -476,7 +476,7 @@ def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -484,12 +484,12 @@ def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
     result = app.step({"uart": "uart6", "now_ms": 1100})
 
     assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
     assert result["assistant_state"] == {
         "phase": "TRACKING",
-        "selected_target": "follower",
+        "selected_target": "red",
         "target_valid": 1,
         "target_fresh": 1,
     }
@@ -504,7 +504,7 @@ def test_master_app_zeroes_command_after_selected_target_leaves_freshness_window
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -585,7 +585,7 @@ def test_master_app_does_not_rejudge_stage_without_new_input(monkeypatch) -> Non
     first = app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -611,7 +611,7 @@ def test_master_app_delays_motion_runtime_until_needed(monkeypatch) -> None:
     result = app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
         }
     )
 
@@ -626,7 +626,7 @@ def test_master_app_keeps_center_hold_while_target_is_still_fresh() -> None:
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=follower,err_x=3,err_y=-4",
+            "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=red,err_x=3,err_y=-4",
             "now_ms": 1000,
         }
     )
@@ -634,11 +634,11 @@ def test_master_app_keeps_center_hold_while_target_is_still_fresh() -> None:
     result = app.step({"now_ms": 1100})
 
     assert result["assistant_command"] == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000"
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["phase"] == "CENTER_HOLD"
     assert result["assistant_state"] == {
         "phase": "CENTER_HOLD",
-        "selected_target": "follower",
+        "selected_target": "red",
         "target_valid": 1,
         "target_fresh": 1,
     }
@@ -661,19 +661,19 @@ def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> 
     app.step(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=4,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=4,valid=1,target=red,err_x=12,err_y=-6",
         }
     )
 
     result = app.step(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=5,valid=0,target=follower",
+            "line": "vision=1,camera_id=cam_b,seq=5,valid=0,target=blue",
         }
     )
 
     assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
-    assert result["selected_target"] == "follower"
+    assert result["selected_target"] == "red"
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"
 

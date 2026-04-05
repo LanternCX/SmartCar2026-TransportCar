@@ -317,7 +317,7 @@ vision=1,camera_id=<camera_id>,seq=<seq>,valid=<0|1>,target=<target>,err_x=<ex>,
 | `camera_id` | 当前 OpenArt 标识 | 文本 | 例如 `cam_a`、`cam_b` |
 | `seq` | 递增序号 | 整数 | 同一路视觉链路内单调递增 |
 | `valid` | 当前是否检测到目标 | `0/1` | `0` 表示本拍无有效目标 |
-| `target` | 目标类别或标签 | 文本 | 例如 `follower`；无目标时建议 `none` |
+| `target` | 当前色标标签 | 文本 | 例如 `red`、`blue`；无目标时建议 `none` |
 | `err_x` | 目标相对目标点的横向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
 | `err_y` | 目标相对目标点的纵向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
 | `bbox_left` | 识别框左边界 | 像素 | `valid=0` 时可省略 |
@@ -328,8 +328,8 @@ vision=1,camera_id=<camera_id>,seq=<seq>,valid=<0|1>,target=<target>,err_x=<ex>,
 合法示例:
 
 ```text
-vision=1,camera_id=cam_a,seq=101,valid=1,target=follower,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
-vision=1,camera_id=cam_b,seq=58,valid=1,target=follower,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
+vision=1,camera_id=cam_a,seq=101,valid=1,target=red,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
+vision=1,camera_id=cam_b,seq=58,valid=1,target=blue,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
 ```
 
 无目标示例:
@@ -352,6 +352,7 @@ vision=1,camera_id=cam_a,seq=102,valid=0,target=none
 - 来源不是 `UART6` 或 `UART8`
 - 缺少 `vision=1`
 - 缺少 `camera_id`、`seq` 或 `valid`
+- `valid=1` 但缺少 `target`
 - `valid=1` 但缺少 `err_x` 或 `err_y`
 - 任一数值字段不是数字
 - 同一条消息出现重复键
@@ -420,7 +421,7 @@ CENTER_HOLD
 一个最小示例:
 
 ```text
-vision=1,camera_id=cam_a,seq=101,valid=1,target=follower,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
-vision=1,camera_id=cam_b,seq=58,valid=1,target=follower,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
+vision=1,camera_id=cam_a,seq=101,valid=1,target=red,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
+vision=1,camera_id=cam_b,seq=58,valid=1,target=blue,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
 follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072
 ```

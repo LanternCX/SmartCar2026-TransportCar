@@ -3,8 +3,6 @@
 @file src/master/vision/parser.py
 """
 
-FOLLOW_TARGET_LABEL = "follower"
-
 
 def split_pairs(line):
     """把视觉协议文本拆成键值对序列.
@@ -74,7 +72,7 @@ def parse_vision_line(line):
         "camera_id": str(payload["camera_id"]),
         "vision_seq": int(payload["seq"]),
         "valid": 1 if valid else 0,
-        "target": str(payload.get("target", FOLLOW_TARGET_LABEL)),
+        "target": str(payload["target"]),
         "err_x": 0.0,
         "err_y": 0.0,
     }

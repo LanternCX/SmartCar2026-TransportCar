@@ -78,7 +78,7 @@ def test_master_app_uses_runtime_param_deadzone() -> None:
         result = app.step(
             {
                 "uart": "uart6",
-                "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=follower,err_x=12,err_y=0",
+                "line": "vision=1,camera_id=cam_a,seq=10,valid=1,target=red,err_x=12,err_y=0",
             }
         )
     finally:
@@ -98,7 +98,7 @@ def test_master_app_uses_runtime_param_follow_timeout() -> None:
         app.step(
             {
                 "uart": "uart6",
-                "line": "vision=1,camera_id=cam_a,seq=1,valid=1,target=follower,err_x=12,err_y=0",
+                "line": "vision=1,camera_id=cam_a,seq=1,valid=1,target=red,err_x=12,err_y=0",
                 "now_ms": 0,
             }
         )
@@ -122,7 +122,7 @@ def test_master_app_uses_runtime_param_control_gains() -> None:
         result = app.step(
             {
                 "uart": "uart6",
-                "line": "vision=1,camera_id=cam_a,seq=1,valid=1,target=follower,err_x=12,err_y=-9",
+                "line": "vision=1,camera_id=cam_a,seq=1,valid=1,target=red,err_x=12,err_y=-9",
             }
         )
     finally:

@@ -16,7 +16,6 @@ else:
 
 FOLLOW_ACTIVE_UART = "uart6"
 FOLLOW_RESERVED_UARTS = ("uart8",)
-FOLLOW_TARGET_LABEL = "follower"
 
 
 class VisionIngress:
@@ -65,6 +64,10 @@ class VisionIngress:
         self._frame_has_input = False
         self._frame_updated_uarts = ()
         self._frame_now_ms = self._resolve_now_ms(now_ms)
+
+    def _mark_uart_updated(self, uart_name):
+        if uart_name not in self._frame_updated_uarts:
+            self._frame_updated_uarts += (uart_name,)
 
     def _normalize_marker_error(self, uart_name, err_x, err_y):
         _ = uart_name
@@ -141,9 +144,14 @@ class VisionIngress:
                 self.current_target = self._mark_target_state(idle, frame_now_ms, False)
                 return dict(self.current_target)
             self._frame_has_input = True
-            self._frame_updated_uarts = tuple(
-                set(self._frame_updated_uarts + (uart_name,))
-            )
+            self._mark_uart_updated(uart_name)
+            if not str(prepared.get("target", "")).strip():
+                idle = self._build_idle_observation("invalid")
+                idle["source_uart"] = uart_name
+                idle["last_seen_ms"] = frame_now_ms
+                self._latest_by_uart[uart_name] = dict(idle)
+                self.current_target = self._mark_target_state(idle, frame_now_ms, True)
+                return dict(self.current_target)
             prepared["err_x"], prepared["err_y"] = self._normalize_marker_error(
                 uart_name, prepared.get("err_x", 0.0), prepared.get("err_y", 0.0)
             )
@@ -151,7 +159,6 @@ class VisionIngress:
             prepared.setdefault("source_uart", uart_name)
             prepared.setdefault("reserved_uarts", self.reserved_uarts)
             prepared.setdefault("source_status", "active")
-            prepared.setdefault("target", FOLLOW_TARGET_LABEL)
             prepared.setdefault("valid", 0)
             prepared["last_seen_ms"] = frame_now_ms
             if "vision_seq" in prepared:
@@ -161,7 +168,7 @@ class VisionIngress:
             return dict(self.current_target)
 
         self._frame_has_input = True
-        self._frame_updated_uarts = tuple(set(self._frame_updated_uarts + (uart_name,)))
+        self._mark_uart_updated(uart_name)
         try:
             parsed = parse_vision_line(line)
         except (KeyError, TypeError, ValueError):
@@ -192,7 +199,7 @@ class VisionIngress:
         """
 
         frame_now_ms = self._resolve_now_ms(now_ms)
-        valid_items = []
+        best_item = None
         for uart_name in self.known_uarts:
             item = self._latest_by_uart.get(uart_name)
             if (
@@ -205,10 +212,23 @@ class VisionIngress:
                     frame_now_ms,
                     uart_name in self._frame_updated_uarts,
                 )
-                if int(marked.get("fresh", 0)) == 1:
-                    valid_items.append(marked)
+                if int(marked.get("fresh", 0)) != 1:
+                    continue
+                if best_item is None:
+                    best_item = marked
+                    continue
+                marked_seen_ms = int(marked.get("last_seen_ms", 0))
+                best_seen_ms = int(best_item.get("last_seen_ms", 0))
+                if marked_seen_ms > best_seen_ms:
+                    best_item = marked
+                    continue
+                if (
+                    marked_seen_ms == best_seen_ms
+                    and str(marked.get("source_uart", "")) == "uart6"
+                ):
+                    best_item = marked
 
-        if not valid_items:
+        if best_item is None:
             source_status = "stale" if self._latest_by_uart else "missing"
             self.current_target = self._mark_target_state(
                 self._build_idle_observation(source_status),
@@ -217,12 +237,5 @@ class VisionIngress:
             )
             return dict(self.current_target)
 
-        valid_items.sort(
-            key=lambda item: (
-                int(item.get("last_seen_ms", 0)),
-                item.get("source_uart", "") == "uart6",
-            ),
-            reverse=True,
-        )
-        self.current_target = dict(valid_items[0])
+        self.current_target = dict(best_item)
         return dict(self.current_target)

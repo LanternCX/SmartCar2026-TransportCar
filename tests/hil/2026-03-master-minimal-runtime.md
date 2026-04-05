@@ -17,7 +17,7 @@
 1. 烧录当前 `master` 最小运行时到设备
 2. 启动主车主程序
 3. 记录当前测试版本与串口
-4. 通过 `UART6` 持续输入 `vision=1,camera_id=cam_a,seq=...,valid=1,target=follower,err_x=...,err_y=...`
+4. 通过 `UART6` 持续输入 `vision=1,camera_id=cam_a,seq=...,valid=1,target=red,err_x=...,err_y=...`
 5. 观察主车是否输出 `follow=1,seq=...,valid=1,dx=...,dy=...,d_angle=...`
 6. 再输入 `valid=0` 报文, 观察主车是否输出无目标保持报文
 

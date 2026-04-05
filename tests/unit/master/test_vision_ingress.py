@@ -16,7 +16,7 @@ def test_master_vision_ingress_parses_active_vision_report() -> None:
     observation = ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=12,valid=1,target=follower,err_x=0.15,err_y=-0.05,bbox_left=10,bbox_top=20,bbox_right=30,bbox_bottom=60",
+            "line": "vision=1,camera_id=cam_a,seq=12,valid=1,target=red,err_x=0.15,err_y=-0.05,bbox_left=10,bbox_top=20,bbox_right=30,bbox_bottom=60",
         }
     )
 
@@ -24,8 +24,25 @@ def test_master_vision_ingress_parses_active_vision_report() -> None:
     assert observation["camera_id"] == "cam_a"
     assert observation["err_x"] == 0.15
     assert observation["err_y"] == -0.05
+    assert observation["target"] == "red"
     assert observation["configured_uart"] == "uart6"
     assert observation["source_uart"] == "uart6"
+
+
+def test_prepare_observation_rejects_valid_payload_without_target_label() -> None:
+    from master.vision.ingress import VisionIngress
+
+    ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
+
+    observation = ingress.prepare_observation(
+        {
+            "uart": "uart6",
+            "line": "vision=1,camera_id=cam_a,seq=12,valid=1,err_x=0.15,err_y=-0.05",
+        }
+    )
+
+    assert observation["source_status"] == "invalid"
+    assert observation["valid"] == 0
 
 
 def test_prepare_observation_accepts_both_uarts_with_same_xy_semantics() -> None:
@@ -36,13 +53,13 @@ def test_prepare_observation_accepts_both_uarts_with_same_xy_semantics() -> None
     uart6 = ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=12,valid=1,target=follower,err_x=10,err_y=5",
+            "line": "vision=1,camera_id=cam_a,seq=12,valid=1,target=red,err_x=10,err_y=5",
         }
     )
     uart8 = ingress.prepare_observation(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=3,valid=1,target=follower,err_x=10,err_y=5",
+            "line": "vision=1,camera_id=cam_b,seq=3,valid=1,target=blue,err_x=10,err_y=5",
         }
     )
 
@@ -67,7 +84,7 @@ def test_prepare_observation_normalizes_preparsed_input_through_same_entry() -> 
             "camera_id": "cam_b",
             "vision_seq": 3,
             "valid": 1,
-            "target": "follower",
+            "target": "blue",
             "err_x": 10,
             "err_y": 5,
         }
@@ -78,6 +95,42 @@ def test_prepare_observation_normalizes_preparsed_input_through_same_entry() -> 
     assert observation["configured_uart"] == "uart6"
     assert observation["source_uart"] == "uart8"
     assert (observation["err_x"], observation["err_y"]) == (10.0, 5.0)
+
+
+def test_prepare_observation_rejects_preparsed_valid_payload_without_target() -> None:
+    from master.vision.ingress import VisionIngress
+
+    ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
+
+    observation = ingress.prepare_observation(
+        {
+            "uart": "uart6",
+            "vision_seq": 3,
+            "valid": 1,
+            "err_x": 10,
+            "err_y": 5,
+        }
+    )
+
+    assert observation["source_status"] == "invalid"
+    assert observation["valid"] == 0
+
+
+def test_prepare_observation_rejects_preparsed_payload_without_target_key() -> None:
+    from master.vision.ingress import VisionIngress
+
+    ingress = VisionIngress(active_uart="uart6", reserved_uarts=("uart8",))
+
+    observation = ingress.prepare_observation(
+        {
+            "uart": "uart6",
+            "vision_seq": 3,
+            "valid": 0,
+        }
+    )
+
+    assert observation["source_status"] == "invalid"
+    assert observation["valid"] == 0
 
 
 def test_prepare_observation_returns_idle_result_when_input_missing() -> None:
@@ -102,7 +155,7 @@ def test_prepare_observation_returns_idle_result_for_unknown_uart() -> None:
     observation = ingress.prepare_observation(
         {
             "uart": "uart9",
-            "line": "vision=1,camera_id=cam_x,seq=1,valid=1,target=follower,err_x=1,err_y=2",
+            "line": "vision=1,camera_id=cam_x,seq=1,valid=1,target=red,err_x=1,err_y=2",
         }
     )
 
@@ -121,7 +174,7 @@ def test_prepare_observation_returns_idle_result_for_invalid_payload() -> None:
     observation = ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=0,camera_id=cam_a,seq=1,valid=1,target=follower,err_x=1,err_y=2",
+            "line": "vision=0,camera_id=cam_a,seq=1,valid=1,target=red,err_x=1,err_y=2",
         }
     )
 
@@ -140,14 +193,14 @@ def test_select_current_target_prefers_latest_received_fresh_report() -> None:
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=8,valid=1,target=follower,err_x=1,err_y=2",
+            "line": "vision=1,camera_id=cam_a,seq=8,valid=1,target=red,err_x=1,err_y=2",
             "now_ms": 1000,
         }
     )
     ingress.prepare_observation(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=7,valid=1,target=follower,err_x=9,err_y=9",
+            "line": "vision=1,camera_id=cam_b,seq=7,valid=1,target=blue,err_x=9,err_y=9",
             "now_ms": 1010,
         }
     )
@@ -168,14 +221,14 @@ def test_select_current_target_prefers_uart6_when_reports_are_equally_fresh() ->
     ingress.prepare_observation(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=5,valid=1,target=follower,err_x=10,err_y=5",
+            "line": "vision=1,camera_id=cam_b,seq=5,valid=1,target=blue,err_x=10,err_y=5",
             "now_ms": 1000,
         }
     )
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=5,valid=1,target=follower,err_x=1,err_y=2",
+            "line": "vision=1,camera_id=cam_a,seq=5,valid=1,target=red,err_x=1,err_y=2",
             "now_ms": 1000,
         }
     )
@@ -198,13 +251,13 @@ def test_select_current_target_prefers_current_valid_target_over_newer_invalid_r
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=4,valid=1,target=follower,err_x=2,err_y=3",
+            "line": "vision=1,camera_id=cam_a,seq=4,valid=1,target=red,err_x=2,err_y=3",
         }
     )
     ingress.prepare_observation(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=5,valid=0,target=follower",
+            "line": "vision=1,camera_id=cam_b,seq=5,valid=0,target=blue",
         }
     )
 
@@ -224,14 +277,14 @@ def test_select_current_target_uses_fixed_uart6_priority_when_equally_fresh() ->
     ingress.prepare_observation(
         {
             "uart": "uart8",
-            "line": "vision=1,camera_id=cam_b,seq=6,valid=1,target=follower,err_x=10,err_y=5",
+            "line": "vision=1,camera_id=cam_b,seq=6,valid=1,target=blue,err_x=10,err_y=5",
             "now_ms": 1000,
         }
     )
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=6,valid=1,target=follower,err_x=1,err_y=2",
+            "line": "vision=1,camera_id=cam_a,seq=6,valid=1,target=red,err_x=1,err_y=2",
             "now_ms": 1000,
         }
     )
@@ -252,7 +305,7 @@ def test_select_current_target_keeps_last_valid_target_within_freshness_window()
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -277,7 +330,7 @@ def test_prepare_observation_empty_uart_frame_does_not_erase_fresh_target() -> N
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
@@ -305,7 +358,7 @@ def test_select_current_target_expires_last_valid_target_after_freshness_window(
     ingress.prepare_observation(
         {
             "uart": "uart6",
-            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=follower,err_x=12,err_y=-6",
+            "line": "vision=1,camera_id=cam_a,seq=9,valid=1,target=red,err_x=12,err_y=-6",
             "now_ms": 1000,
         }
     )
