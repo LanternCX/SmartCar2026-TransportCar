@@ -74,17 +74,38 @@ def test_master_filter_chain_filters_speed_samples() -> None:
     assert outputs[1] != 100.0
 
 
-def test_master_and_assistant_filter_chain_keep_same_default_output() -> None:
-    from assistant.ctrl.filters import build_speed_filter_chain as build_assistant_chain
+def test_master_filter_chain_uses_dual_window_regression_tail() -> None:
     from master.ctrl.filters import build_speed_filter_chain as build_master_chain
+    from master.ctrl.filters import DualWindowRegressionFilter
 
-    samples = (0.0, 100.0, 0.0, 10.0)
     master_chain = build_master_chain()
-    assistant_chain = build_assistant_chain()
-    master_outputs = [master_chain.update(value) for value in samples]
-    assistant_outputs = [assistant_chain.update(value) for value in samples]
 
-    assert master_outputs == assistant_outputs
+    assert isinstance(master_chain.tail, DualWindowRegressionFilter)
+    assert master_chain.tail.long_window == 30
+    assert master_chain.tail.short_window == 8
+
+
+def test_master_filter_chain_keeps_spike_and_diff_before_regression_tail() -> None:
+    from master.ctrl.filters import build_speed_filter_chain
+
+    calls = []
+
+    class Recorder:
+        def __init__(self, label, output) -> None:
+            self.label = label
+            self.output = float(output)
+
+        def update(self, value):
+            calls.append((self.label, float(value)))
+            return self.output
+
+    chain = build_speed_filter_chain()
+    setattr(chain, "spike", Recorder("spike", 3.0))
+    setattr(chain, "diff", Recorder("diff", 2.0))
+    setattr(chain, "tail", Recorder("tail", 1.0))
+
+    assert chain.update(10.0) == 1.0
+    assert calls == [("spike", 10.0), ("diff", 3.0), ("tail", 2.0)]
 
 
 def test_master_and_assistant_runtime_use_public_low_pass_filter_entrypoint() -> None:
