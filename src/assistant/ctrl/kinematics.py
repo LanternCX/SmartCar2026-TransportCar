@@ -17,18 +17,38 @@ class OmniKinematics:
         self.m_per_pulse = (self.wheel_diameter * math.pi) / self.counts_per_rev
 
     def pulses_to_m(self, pulses):
+        """把编码器脉冲数换算成轮缘位移.
+
+        @brief 统一三轮底盘里程换算口径, 避免状态层重复拼公式。
+        """
+
         return float(pulses) * self.m_per_pulse
 
     def velocity_pulses_to_m_s(self, pulse_speed, dt_s):
+        """把单拍脉冲增量换算成线速度.
+
+        @brief 给里程计和速度环共用编码器到米每秒的换算入口。
+        """
+
         return self.pulses_to_m(pulse_speed) / float(dt_s)
 
     def forward_kinematics(self, vm, vl, vr):
+        """把三轮线速度解算为车体系速度.
+
+        @brief 给辅车里程累计和跟随控制提供统一前向运动学结果。
+        """
+
         vx = (0.5 * (float(vl) + float(vr))) - float(vm)
         vy = (math.sqrt(3.0) * 0.5) * (float(vl) - float(vr))
         omega = float(vl) + float(vr) + float(vm)
         return (vx, vy, omega)
 
     def inverse_kinematics(self, vx, vy, omega):
+        """把车体系目标速度分解为三轮目标速度.
+
+        @brief 给速度环输出每个轮位应追踪的目标值。
+        """
+
         inv_3 = 1.0 / 3.0
         sqrt3_3 = math.sqrt(3.0) * inv_3
         return {
@@ -46,6 +66,11 @@ class Odometry:
         self.y = 0.0
 
     def update(self, vx_robot, vy_robot, heading_rad, dt_s):
+        """把车体系速度积分到世界坐标.
+
+        @brief 让辅车跟随逻辑直接基于累计位姿误差工作。
+        """
+
         cos_heading = math.cos(float(heading_rad))
         sin_heading = math.sin(float(heading_rad))
         world_x = (float(vx_robot) * cos_heading) - (float(vy_robot) * sin_heading)
@@ -56,10 +81,20 @@ class Odometry:
 
 
 def build_planar_target(dx, dy):
+    """构造世界坐标系下的平面目标.
+
+    @brief 把外部给出的二维目标统一整理成控制层使用的字典结构。
+    """
+
     return {"dx": float(dx), "dy": float(dy)}
 
 
 def rotate_body_delta_to_world(dx, dy, heading_deg):
+    """把车体系位移增量旋转到世界坐标系.
+
+    @brief 用当前航向把跟随目标从车体系转换为里程坐标。
+    """
+
     theta = math.radians(float(heading_deg))
     cos_t = math.cos(theta)
     sin_t = math.sin(theta)
@@ -69,18 +104,38 @@ def rotate_body_delta_to_world(dx, dy, heading_deg):
 
 
 def inverse_kinematics(dx, dy, omega):
+    """提供面向外层调用的逆运动学捷径.
+
+    @brief 复用统一底盘模型, 避免外部直接依赖类实例构造。
+    """
+
     return build_kinematics().inverse_kinematics(float(dy), float(dx), float(omega))
 
 
 def build_kinematics():
+    """创建辅车底盘运动学模型.
+
+    @brief 把三轮底盘几何参数集中收口在同一个入口。
+    """
+
     return OmniKinematics()
 
 
 def build_odometry():
+    """创建辅车里程累计对象.
+
+    @brief 让运行时在初始化阶段显式装配跨周期位姿状态。
+    """
+
     return Odometry()
 
 
 def update_odometry_from_wheels(state):
+    """根据当前轮速刷新辅车累计里程.
+
+    @brief 把编码器速度、前向运动学和世界系积分串成单拍入口。
+    """
+
     vm = state.kinematics.velocity_pulses_to_m_s(state.wheel_speeds["m"], state.tick_s)
     vl = state.kinematics.velocity_pulses_to_m_s(state.wheel_speeds["l"], state.tick_s)
     vr = state.kinematics.velocity_pulses_to_m_s(state.wheel_speeds["r"], state.tick_s)
@@ -97,6 +152,11 @@ def update_odometry_from_wheels(state):
 
 
 def resolve_follow_velocity(state):
+    """按当前跟随目标解算车体系平移速度.
+
+    @brief 让辅车基于世界系位置误差生成受限的跟随速度指令。
+    """
+
     if state.follow_target_world is None:
         return (0.0, 0.0)
     err_world_x = float(state.follow_target_world[0]) - float(state.odom[0])

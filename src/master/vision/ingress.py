@@ -20,6 +20,11 @@ FOLLOW_TARGET_LABEL = "follower"
 
 
 class VisionIngress:
+    """整理视觉串口输入并维护当前目标快照.
+
+    @brief 把多路串口输入统一转成主车决策层可直接消费的 observation 结构。
+    """
+
     def __init__(
         self,
         active_uart=FOLLOW_ACTIVE_UART,
@@ -52,6 +57,11 @@ class VisionIngress:
         return int(now_ms)
 
     def begin_frame(self, now_ms=None):
+        """开始一帧新的视觉输入统计窗口.
+
+        @brief 每次主循环先重置本帧标记, 后续输入才能区分是旧缓存还是本拍新数据。
+        """
+
         self._frame_has_input = False
         self._frame_updated_uarts = ()
         self._frame_now_ms = self._resolve_now_ms(now_ms)
@@ -99,6 +109,11 @@ class VisionIngress:
         return marked
 
     def prepare_observation(self, observation=None, now_ms=None):
+        """把原始串口输入整理成统一 observation.
+
+        @brief 同时处理空输入、非法报文、直传字典和文本协议, 并刷新当前目标缓存。
+        """
+
         if now_ms is None and isinstance(observation, dict):
             now_ms = observation.get("now_ms")
         frame_now_ms = self._resolve_now_ms(now_ms)
@@ -171,6 +186,11 @@ class VisionIngress:
         return dict(self.current_target)
 
     def select_current_target(self, now_ms=None):
+        """从当前缓存里挑选仍然可用的目标.
+
+        @brief 优先返回新鲜且有效的输入, 否则退回缺失或过期状态供决策层降级处理。
+        """
+
         frame_now_ms = self._resolve_now_ms(now_ms)
         valid_items = []
         for uart_name in self.known_uarts:

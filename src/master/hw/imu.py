@@ -18,6 +18,11 @@ class ImuPort:
         self.last_calibrated = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def ensure_device(self):
+        """按需创建并缓存 IMU 驱动对象.
+
+        @brief 初始化时同时抓取底层共享读数引用, 让后续采样走最短路径。
+        """
+
         if self._device is None:
             from seekfree import IMU660RX
 
@@ -29,6 +34,11 @@ class ImuPort:
         return self._device
 
     def read_raw(self):
+        """读取 IMU 当前六轴原始值.
+
+        @brief 这里只做最小结构校验, 零漂修正留给上层显式调用。
+        """
+
         self.ensure_device()
         raw = self._data_ref
         if raw is None:
@@ -40,6 +50,11 @@ class ImuPort:
         return self.last_raw
 
     def read_calibrated(self):
+        """读取并返回扣除零漂后的六轴值.
+
+        @brief 把参数文件加载得到的零漂统一作用在这里, 让姿态链只接触校准后数据。
+        """
+
         raw = self.read_raw()
         calibrated = []
         for index, value in enumerate(raw):
@@ -48,6 +63,11 @@ class ImuPort:
         return self.last_calibrated
 
     def apply_offsets(self, offsets):
+        """写入主车 IMU 六轴零漂参数.
+
+        @brief 只接收前六个值, 对应 `gyro_offset.txt` 中保存的校准结果。
+        """
+
         prepared = [0.0] * 6
         for index, value in enumerate(tuple(offsets)[:6]):
             prepared[index] = float(value)

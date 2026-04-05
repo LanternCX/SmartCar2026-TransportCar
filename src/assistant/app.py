@@ -79,17 +79,27 @@ class AssistantRuntimeLoop:
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def step(self, now_ms):
+        """推进一轮辅车串口与运行时循环
+
+        @brief 同一轮里先处理串口来包, 再补一次周期检查和状态回传。
+        @param now_ms 当前毫秒时间
+        @return str
+        """
+
         app_hw_bundle = self._resolve_app_hw_bundle(self.app)
         if app_hw_bundle is not self.hw_bundle:
             raise ValueError("hw_bundle 与 app 必须引用同一套装配")
         cycle_token = object()
         uart3 = self.hw_bundle["uart"]["uart3"]
+
+        # 先消费这一轮收到的主车命令, 需要立即回包时直接经 UART3 发回
         line = uart3.read_line()
         if line:
             reply = self.app.handle_line(line, now_ms=now_ms, cycle_token=cycle_token)
             if reply:
                 uart3.write_line(reply)
 
+        # 再执行周期推进, 把超时和最小状态回包统一收口到同一轮末尾
         tick_reply = self.app.tick(now_ms=now_ms, cycle_token=cycle_token)
         if tick_reply:
             uart3.write_line(tick_reply)
@@ -138,10 +148,13 @@ class AssistantApp:
         @return str
         """
 
+        # 先把文本协议收口成结构化命令, 非法输入统一直接报错
         try:
             command = parse_command(line)
         except (TypeError, ValueError):
             return "ERR"
+
+        # 命令合法后交给运行时执行, 由运行时决定状态变化和底座动作
         reply = apply_runtime_command(
             self.runtime_state,
             command,
@@ -152,6 +165,7 @@ class AssistantApp:
         if not bool(self.runtime_state.timeout):
             self._timeout_reported = False
 
+        # 最后按协议类型挑选回包策略, 跟随报文本身不占用串口回包带宽
         if command.kind == "state_query" or str(reply) == "ERR":
             return str(reply)
         if command.kind == "follow":

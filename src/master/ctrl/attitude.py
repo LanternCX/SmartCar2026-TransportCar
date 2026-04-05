@@ -71,6 +71,11 @@ class HeadingEstimator:
         self.z = 0.0
 
     def update(self, gx_deg_s, gy_deg_s, gz_deg_s, dt_s):
+        """接收角速度角度制输入并转交四元数积分.
+
+        @brief 给脚本诊断和运行时共用一个角度制入口, 避免外层重复做单位换算。
+        """
+
         self.update_rad(
             math.radians(float(gx_deg_s)),
             math.radians(float(gy_deg_s)),
@@ -79,6 +84,11 @@ class HeadingEstimator:
         )
 
     def update_rad(self, gx_rad_s, gy_rad_s, gz_rad_s, dt_s):
+        """按弧度制角速度推进四元数状态.
+
+        @brief 这里只维护姿态积分和归一化, 不在这里夹带航向保持控制逻辑。
+        """
+
         gx = float(gx_rad_s)
         gy = float(gy_rad_s)
         gz = float(gz_rad_s)
@@ -113,16 +123,31 @@ class HeadingEstimator:
         self.z *= inv_norm
 
     def yaw_rad(self):
+        """返回当前四元数对应的偏航角.
+
+        @brief 运行时只关心偏航时, 通过这个入口读取最小姿态结果。
+        """
+
         return math.atan2(
             2.0 * ((self.w * self.z) + (self.x * self.y)),
             1.0 - (2.0 * ((self.y * self.y) + (self.z * self.z))),
         )
 
     def to_euler_yaw(self):
+        """提供与旧调用方一致的偏航读取入口.
+
+        @brief 当前实现直接复用 `yaw_rad`, 让外层不必感知内部姿态表示。
+        """
+
         return self.yaw_rad()
 
 
 def quaternion_to_euler_deg(w, x, y, z):
+    """把四元数展开成欧拉角角度制三元组.
+
+    @brief 主要用于脚本观察和人工诊断, 不是控制链的主计算入口。
+    """
+
     sinr_cosp = 2.0 * ((float(w) * float(x)) + (float(y) * float(z)))
     cosr_cosp = 1.0 - (2.0 * ((float(x) * float(x)) + (float(y) * float(y))))
     roll_rad = math.atan2(sinr_cosp, cosr_cosp)
@@ -146,11 +171,19 @@ def quaternion_to_euler_deg(w, x, y, z):
 
 
 def estimator_euler_deg(estimator):
+    """读取估计器当前姿态并转换成角度制欧拉角.
+
+    @brief 给调试脚本提供统一格式化前的数据入口。
+    """
+
     return quaternion_to_euler_deg(estimator.w, estimator.x, estimator.y, estimator.z)
 
 
 def capture_heading_target(state):
-    """在切换到保持模式时锁定当前航向目标."""
+    """在切换到保持模式时锁定当前航向目标.
+
+    @brief 同时清空积分项, 避免旧误差继续影响新的保持阶段。
+    """
 
     state.target_heading_deg = float(state.heading_deg)
     state.yaw_integral = 0.0
@@ -158,14 +191,20 @@ def capture_heading_target(state):
 
 
 def ensure_heading_target(state):
-    """只有尚未锁定目标时才初始化航向保持目标."""
+    """只有尚未锁定目标时才初始化航向保持目标.
+
+    @brief 把幂等保护收口在这里, 外层无需关心目标是否已经建立。
+    """
 
     if not state.heading_target_ready:
         capture_heading_target(state)
 
 
 def update_heading_from_gyro(state, heading_override=None, now_us=None):
-    """根据当前 IMU 采样推进姿态积分并刷新航向估计."""
+    """根据当前 IMU 采样推进姿态积分并刷新航向估计.
+
+    @brief 这个入口负责打通 IMU 校准值、四元数积分和连续航向角更新。
+    """
 
     gx_deg_s, gy_deg_s, gz_deg_s = _normalize_gyro_deg_s(
         float(state.imu_calibrated[3]) / float(state.gyro_scale),
@@ -197,7 +236,10 @@ def update_heading_from_gyro(state, heading_override=None, now_us=None):
 
 
 def compute_heading_correction(state, heading_deg=None):
-    """根据当前航向误差输出保持角速度."""
+    """根据当前航向误差输出保持角速度.
+
+    @brief 这里只计算航向保持角速度, 具体轮速分配留给后续控制链处理。
+    """
 
     if not getattr(state, "heading_hold_enabled", True):
         return 0.0

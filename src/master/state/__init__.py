@@ -54,7 +54,10 @@ class MasterControlState:
 
 
 class MotionRuntimeState(MasterRuntimeState):
-    """主车过程式运行时使用的状态对象."""
+    """主车过程式运行时使用的状态对象.
+
+    @brief 把控制链内部 owner 集中放在 `control` 下, 同时保留运行时主线可直接读写的扁平入口。
+    """
 
     def __init__(self):
         MasterRuntimeState.__init__(self)

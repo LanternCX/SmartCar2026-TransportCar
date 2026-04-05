@@ -21,6 +21,11 @@ class LowPassFilter:
         self.initialized = False
 
     def update(self, value):
+        """推进低通滤波状态.
+
+        @brief 首次采样直接对齐输入, 后续再按 alpha 平滑更新。
+        """
+
         next_value = float(value)
         if not self.initialized:
             self.state = next_value
@@ -40,6 +45,11 @@ class SpikeMedianFilter:
         self.buf = []
 
     def update(self, value):
+        """用中值窗压制孤立尖峰.
+
+        @brief 让编码器单拍异常不会直接进入后续差分和回归链路。
+        """
+
         if len(self.buf) >= self.window:
             self.buf.pop(0)
         self.buf.append(float(value))
@@ -55,6 +65,11 @@ class DiffLimitFilter:
         self.prev = None
 
     def update(self, value):
+        """限制相邻采样的变化幅度.
+
+        @brief 在进入回归预测前先削掉不可信的突变增量。
+        """
+
         next_value = float(value)
         if self.prev is None:
             self.prev = next_value
@@ -80,6 +95,11 @@ class DualWindowRegressionFilter:
 
     @staticmethod
     def _predict(window, next_t):
+        """根据窗口采样预测下一拍值.
+
+        @brief 用最小二乘拟合给长窗和短窗提供统一预测结果。
+        """
+
         count = len(window)
         if count == 0:
             return 0.0
@@ -104,6 +124,11 @@ class DualWindowRegressionFilter:
         return (slope * next_t) + intercept
 
     def update(self, value, dt_s=None):
+        """推进双窗回归滤波器.
+
+        @brief 同时维护长短两个时间窗, 在响应速度和稳态抖动之间折中。
+        """
+
         if dt_s is None or float(dt_s) <= 0.0:
             dt_ms = float(self.tick_ms)
         else:
@@ -137,6 +162,11 @@ class SpeedFilterChain:
         )
 
     def update(self, value):
+        """依次执行尖峰抑制、差分限幅和回归预测.
+
+        @brief 统一给单轮轮速提供一个可直接复用的滤波入口。
+        """
+
         filtered = self.spike.update(value)
         filtered = self.diff.update(filtered)
         return self.reg.update(filtered, dt_s=self.dt_s)
@@ -149,7 +179,10 @@ def build_speed_filter_chain(
     long_window=30,
     short_window=8,
 ):
-    """构造单路轮速滤波公开入口."""
+    """构造单路轮速滤波公开入口.
+
+    @brief 把单轮滤波链的默认窗口和预测参数集中收口在这里。
+    """
 
     return SpeedFilterChain(
         window=window,
@@ -168,7 +201,10 @@ def build_wheel_filter_bank(
     long_window,
     short_window,
 ):
-    """按轮位构造滤波链, 但对象 owner 仍由状态层持有."""
+    """按轮位构造滤波链集合.
+
+    @brief 统一为三轮底盘准备同口径的滤波对象, 但 owner 仍由状态层持有。
+    """
 
     wheel_filters = {}
     for name in wheel_names:
@@ -183,6 +219,11 @@ def build_wheel_filter_bank(
 
 
 def set_wheel_filter_dt_s(filter_bank, wheel_names, dt_s):
+    """给全部轮速滤波链同步当前拍长.
+
+    @brief 让回归预测与实际调度周期保持一致。
+    """
+
     for name in wheel_names:
         filter_chain = filter_bank.get(name)
         if filter_chain is not None:
@@ -190,7 +231,10 @@ def set_wheel_filter_dt_s(filter_bank, wheel_names, dt_s):
 
 
 def update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
-    """执行单拍滤波计算, 返回每个轮位的滤波结果."""
+    """执行单拍轮速滤波计算.
+
+    @brief 按轮位读取原始计数并返回当前拍的滤波结果。
+    """
 
     wheel_speeds = {}
     for name in wheel_names:

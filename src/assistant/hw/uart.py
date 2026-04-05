@@ -25,6 +25,11 @@ class UartPort:
         self._read_buffer = ""
 
     def ensure_device(self):
+        """按需创建并初始化 UART 设备.
+
+        @brief 首次使用时完成串口实例化和波特率配置。
+        """
+
         if self._device is None:
             from machine import UART
 
@@ -33,6 +38,11 @@ class UartPort:
         return self._device
 
     def read(self, size=None):
+        """读取当前串口缓存数据.
+
+        @brief 未指定长度时优先按当前可读字节数一次性取完。
+        """
+
         device = self.ensure_device()
         if size is None:
             available = getattr(device, "any", lambda: 0)()
@@ -42,10 +52,20 @@ class UartPort:
         return device.read(size)
 
     def write(self, payload):
+        """向串口写入原始负载.
+
+        @brief 保持上层协议层自行决定报文编码格式。
+        """
+
         device = self.ensure_device()
         return device.write(payload)
 
     def read_line(self):
+        """读取一行以换行符结尾的文本.
+
+        @brief 用内部缓冲把分片到达的串口内容重新拼成完整行。
+        """
+
         payload = self.read()
         if payload is not None:
             if isinstance(payload, bytes):
@@ -57,6 +77,11 @@ class UartPort:
         return line.strip("\r")
 
     def write_line(self, payload):
+        """按 CRLF 结尾写出一行文本.
+
+        @brief 统一辅车文本协议常用的逐行发送口径。
+        """
+
         return self.write("%s\r\n" % str(payload))
 
 

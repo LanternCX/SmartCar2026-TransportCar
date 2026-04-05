@@ -46,6 +46,11 @@ def _build_self_base_state(snapshot):
 
 
 def decide_from_state(state_output):
+    """在缺少新视觉输入时生成保守决策.
+
+    @brief 把运行时已有状态包装成空闲决策, 让下游输出链保持字段稳定。
+    """
+
     control_seq = int(state_output.get("control_seq", 0))
     return _build_idle_decision(
         control_seq=control_seq,
@@ -62,6 +67,11 @@ def _build_idle_decision(
     target_fresh=0,
     self_base_snapshot=None,
 ):
+    """构造不驱动辅车跟随的空闲决策对象.
+
+    @brief 统一集中空目标、阶段状态和基础回包字段, 避免多处各写一套默认值。
+    """
+
     assistant_target = {"valid": 0, "dx": 0.0, "dy": 0.0}
     assistant_state = {
         "phase": phase,
@@ -89,6 +99,11 @@ def _build_idle_decision(
 
 
 def decide_from_observation(observation, state_machine=None):
+    """根据视觉观测生成主车对外决策结果.
+
+    @brief 这里只决定是否进入跟随输出以及给辅车的目标量, 不负责状态机推进。
+    """
+
     _ = state_machine
     control_seq = int(observation.get("control_seq", 0))
     phase = str(observation.get("phase", "MARKER_MISSING"))

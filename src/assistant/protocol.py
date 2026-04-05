@@ -1,4 +1,6 @@
-"""辅车协议文本解析
+"""承接主车下发文本并转成辅车主链可执行命令, 供应用入口和运行时直接消费。
+
+同时负责把辅车最小状态裁剪成对外回包文本, 作为状态输出的协议出口。
 
 @file src/assistant/protocol.py
 """
@@ -35,6 +37,14 @@ class Command:
 
 
 def render_state_line(state, state_label=None):
+    """渲染辅车最小状态回包
+
+    @brief 把运行时状态裁剪成协议约定的紧凑文本, 供主车轮询读取。
+    @param state 当前辅车运行时状态
+    @param state_label 可选对外状态标签
+    @return str
+    """
+
     if state_label is None:
         state_label = state.state_label
     return (

@@ -1,4 +1,6 @@
-"""辅车安全保护
+"""位于辅车运行时与电机控制之间, 统一判断主车命令超时和急停是否应抢占当前动作。
+
+它对外只提供停机判定与安全状态维护, 供主链在每轮推进前先完成安全收口。
 
 @file src/assistant/safety.py
 """
@@ -13,7 +15,9 @@ class SafetyGuard:
     def __init__(self, timeout_ms):
         # 超时阈值和最近命令时间由安全保护统一维护
         self.timeout_ms = int(timeout_ms)
+        # 最近一次收到主车命令的时间, 用来判断链路是否超时
         self.last_command_ms = None
+        # 急停一旦触发就优先于普通超时检查
         self.estop_active = False
 
     def mark_command(self, now_ms):

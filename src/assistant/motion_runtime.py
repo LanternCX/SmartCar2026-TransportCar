@@ -82,6 +82,13 @@ def _clamp(value, lower, upper):
 
 
 def _load_ident_lookup(path):
+    """读取轮速辨识参数表
+
+    @brief 启动时把文本辨识结果转成按轮名索引的查询表。
+    @param path 辨识结果文件路径
+    @return dict
+    """
+
     lookup = {}
     try:
         with open(path, "r") as handle:
@@ -102,6 +109,13 @@ def _load_ident_lookup(path):
 
 
 def _load_gyro_offsets(path):
+    """读取陀螺仪零漂参数
+
+    @brief 兼容六轴完整格式和旧版单值格式, 启动时统一收口为六元组。
+    @param path 零漂文件路径
+    @return tuple
+    """
+
     offsets = [0.0] * 6
     try:
         with open(path, "r") as handle:
@@ -199,6 +213,13 @@ def _heading_chain_ready(state):
 
 
 def _encoder_chain_ready(state):
+    """检查编码器链路是否可用
+
+    @brief 只有三路编码器对象都具备读取能力时, 才允许底座链路标记为可用。
+    @param state 当前辅车运行时状态
+    @return bool
+    """
+
     encoders = _encoder_bundle(state)
     if encoders is None:
         return False
@@ -231,6 +252,13 @@ def _capture_follow_target(state, dx, dy):
 
 
 def _read_imu_sample(state):
+    """读取一帧姿态输入
+
+    @brief 统一兼容校准输出、直接航向角和原始陀螺仪三种 IMU 接口形态。
+    @param state 当前辅车运行时状态
+    @return float | None
+    """
+
     imu = _imu_bundle(state)
     heading_override = None
     if imu is None:
@@ -262,6 +290,13 @@ def _read_imu_sample(state):
 
 
 def _read_encoder_ticks(state):
+    """读取一轮编码器脉冲
+
+    @brief 优先消费可清空计数的接口, 保证速度估计使用本周期增量。
+    @param state 当前辅车运行时状态
+    @return dict
+    """
+
     encoders = _encoder_bundle(state)
     if encoders is None:
         return {"m": 0.0, "l": 0.0, "r": 0.0}
@@ -288,17 +323,27 @@ def _read_encoder_ticks(state):
 
 
 def _refresh_base_chain(state, cycle_token=None):
+    """刷新底座基础观测链
+
+    @brief 在单个周期内复用姿态、编码器和里程计快照, 避免重复采样。
+    @param state 当前辅车运行时状态
+    @param cycle_token 当前周期令牌
+    @return dict
+    """
+
     if cycle_token is not None and cycle_token == state._last_cycle_token:
         if state._last_base_snapshot is None:
             return {}
         return dict(state._last_base_snapshot)
 
+    # 先更新链路可用性与原始传感器输入, 为后续控制和状态回包准备统一观测
     _update_base_ok(state)
 
     heading_override = _read_imu_sample(state)
     update_heading_from_gyro(state, heading_override=heading_override)
     has_valid_attitude_dt = float(state.tick_s) > 0.0
 
+    # 再根据周期时长决定是否推进滤波和里程计, 避免首轮零周期污染估计
     raw_ticks = _read_encoder_ticks(state)
     state.encoder_ticks = dict(raw_ticks)
     if has_valid_attitude_dt:
@@ -315,6 +360,7 @@ def _refresh_base_chain(state, cycle_token=None):
         state.wheel_speeds = dict(state.wheel_speeds)
         odom_x = float(state.odom[0])
         odom_y = float(state.odom[1])
+    # 最后缓存本轮快照, 让同周期的命令处理和 tick 共享同一份底座观测
     snapshot = {
         "imu_raw": tuple(state.imu_raw),
         "encoder_ticks": dict(state.encoder_ticks),
@@ -329,6 +375,16 @@ def _refresh_base_chain(state, cycle_token=None):
 
 
 def _apply_motor_output(state, dx, dy, omega):
+    """把车体速度指令落到三轮输出
+
+    @brief 同时维护目标轮速、控制器输出和硬件停机兜底状态。
+    @param state 当前辅车运行时状态
+    @param dx 车体 x 方向速度命令
+    @param dy 车体 y 方向速度命令
+    @param omega 角速度命令
+    @return dict | None
+    """
+
     wheel_targets = state.kinematics.inverse_kinematics(
         float(dy), float(dx), float(omega)
     )
@@ -414,6 +470,16 @@ def _reject_unsupported_command(state, cycle_token=None):
 
 
 def _apply_follow(state, command, now_ms, cycle_token=None):
+    """执行一条跟随报文
+
+    @brief 根据主车给出的相对位移目标刷新跟随状态并推进一次控制输出。
+    @param state 当前辅车运行时状态
+    @param command 已解析跟随命令
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @return str
+    """
+
     _refresh_base_chain(state, cycle_token=cycle_token)
     if int(command.seq) <= int(state.last_seq):
         return "IGNORED"
@@ -458,6 +524,16 @@ def _apply_follow(state, command, now_ms, cycle_token=None):
 
 
 def _apply_velocity(state, command, now_ms, cycle_token=None):
+    """执行一条直接速度命令
+
+    @brief 直接速度模式仍复用安全、航向保持和轮速控制链路。
+    @param state 当前辅车运行时状态
+    @param command 已解析速度命令
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @return str
+    """
+
     _refresh_base_chain(state, cycle_token=cycle_token)
     state.safety.mark_command(now_ms)
     state.safety.clear_estop()
@@ -491,10 +567,23 @@ def _apply_velocity(state, command, now_ms, cycle_token=None):
 
 
 def _apply_command(state, command, now_ms, cycle_token=None):
+    """分发并执行辅车命令
+
+    @brief 统一处理控制命令、运动命令和状态查询, 收口所有即时回包语义。
+    @param state 当前辅车运行时状态
+    @param command 已解析命令
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @return str
+    """
+
+    # 轻量查询命令直接在这里返回, 不必进入运动控制分支
     if command.kind == "ping":
         return "ACK"
     if command.kind == "state_query":
         return state.state_line()
+
+    # 运动相关命令统一经过专门分支, 让安全状态与控制输出保持一致
     if command.kind == "follow":
         return _apply_follow(state, command, now_ms, cycle_token=cycle_token)
     if command.kind == "arm":
@@ -552,6 +641,7 @@ def _apply_command(state, command, now_ms, cycle_token=None):
         _mark_control_applied(state, cycle_token=cycle_token)
         state.safety.clear_estop()
         return "DONE"
+    # 未支持的命令最后统一走拒绝分支, 保持错误语义稳定
     if command.kind == "vel":
         return _apply_velocity(state, command, now_ms, cycle_token=cycle_token)
     if command.kind == "move":
@@ -560,7 +650,18 @@ def _apply_command(state, command, now_ms, cycle_token=None):
 
 
 def _tick(state, now_ms, cycle_token=None):
+    """推进一轮辅车周期控制
+
+    @brief 在每个控制周期里先做安全检查, 再决定继续跟随、保持姿态或停机。
+    @param state 当前辅车运行时状态
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @return str
+    """
+
     _refresh_base_chain(state, cycle_token=cycle_token)
+
+    # 先处理急停和超时, 这些条件一旦触发就优先抢占后续控制输出
     if state.safety.should_stop(now_ms):
         if _is_timeout_locked(state):
             _preserve_timeout_stop(state, cycle_token=cycle_token)
@@ -570,6 +671,8 @@ def _tick(state, now_ms, cycle_token=None):
         return "DONE"
     if _control_already_applied(state, cycle_token=cycle_token):
         return "BUSY" if state.follow_active else "ACK"
+
+    # 再根据当前模式决定继续跟随目标还是退回姿态保持/空输出
     if state.follow_active:
         if float(state.tick_s) <= 0.0:
             state.velocity_command = (0.0, 0.0, 0.0)
@@ -593,11 +696,20 @@ def _tick(state, now_ms, cycle_token=None):
 
 
 def create_runtime_state(timeout_ms=None, hw_bundle=None):
+    """构造辅车运行时状态对象
+
+    @brief 集中装配参数、控制器、传感器偏置和最小状态回包绑定。
+    @param timeout_ms 命令超时阈值
+    @param hw_bundle 可选硬件装配
+    @return MotionRuntimeState
+    """
+
     pid_map = dict(runtime_params.PID_MAP)
     ident_lookup = _load_ident_lookup(config.IDENT_RESULTS_FILE)
     imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
     if timeout_ms is None:
         timeout_ms = runtime_params.FOLLOW_TIMEOUT_MS
+    # 先写入运行时公共参数, 让后续控制链装配都从状态对象取统一配置
     state = MotionRuntimeState()
     state.hw_bundle = hw_bundle
     state.safety = SafetyGuard(timeout_ms=timeout_ms)
@@ -626,6 +738,7 @@ def create_runtime_state(timeout_ms=None, hw_bundle=None):
         float(imu_offsets[4]),
         float(imu_offsets[5]),
     )
+    # 再装配姿态、运动学、滤波器和轮速控制器, 收口底座主链依赖
     state.q_est = HeadingEstimator()
     state.kinematics = build_kinematics()
     state.odometry = build_odometry()
@@ -643,6 +756,7 @@ def create_runtime_state(timeout_ms=None, hw_bundle=None):
         ident_lookup,
         output_limit=runtime_params.MAX_DUTY,
     )
+    # 最后绑定周期缓存和对外状态序列化入口, 便于命令与 tick 共享状态
     state._last_cycle_token = None
     state._last_base_snapshot = None
     state._last_control_cycle_token = None
@@ -658,6 +772,16 @@ def create_runtime_state(timeout_ms=None, hw_bundle=None):
 
 
 def run_base_cycle(runtime_state, now_ms, cycle_token=None, hw_bundle=None):
+    """执行一轮辅车周期推进
+
+    @brief 对外暴露最小周期入口, 先绑定硬件 owner 再推进内部 tick。
+    @param runtime_state 辅车运行时状态
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @param hw_bundle 可选硬件装配
+    @return str
+    """
+
     _bind_runtime_hw_bundle(runtime_state, hw_bundle)
     return _tick(runtime_state, now_ms=now_ms, cycle_token=cycle_token)
 
@@ -669,6 +793,17 @@ def apply_runtime_command(
     cycle_token=None,
     hw_bundle=None,
 ):
+    """执行一条辅车运行时命令
+
+    @brief 对外统一收口命令入口, 保证命令执行前先完成硬件 owner 绑定。
+    @param runtime_state 辅车运行时状态
+    @param command 已解析命令
+    @param now_ms 当前毫秒时间
+    @param cycle_token 当前周期令牌
+    @param hw_bundle 可选硬件装配
+    @return str
+    """
+
     _bind_runtime_hw_bundle(runtime_state, hw_bundle)
     return _apply_command(
         runtime_state,

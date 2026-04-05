@@ -1,10 +1,13 @@
 """主车底座主数据链运行时.
 
 @file src/master/motion_runtime.py
+
+负责把 IMU、编码器、姿态保持和轮速控制串成主车底座单拍运行链。
 """
 
 _package_name = str(globals().get("__package__", ""))
 
+# 调试打印只保留有限拍, 避免连续运行时刷满串口日志
 _TRACE_PRINT_LIMIT = 40
 _trace_print_count = 0
 
@@ -20,6 +23,13 @@ def _debug_print(stage, **payload):
 
 
 def _trace_control_chain(state):
+    """抽样打印航向保持控制链快照
+
+    @brief 仅在底座真正运动或正在保持朝向时输出有限次调试信息。
+    @param state 底座运行时状态
+    @return None
+    """
+
     global _trace_print_count
 
     gyro_z_raw = float(state.imu_calibrated[5])
@@ -102,6 +112,13 @@ def _clamp(value, lower, upper):
 
 
 def _load_ident_lookup(path):
+    """读取电机辨识结果表
+
+    @brief 从 `ident_params.txt` 读取每个轮位的增益和时间常数, 在轮控初始化阶段装配进去。
+    @param path 辨识结果文件路径
+    @return dict
+    """
+
     lookup = {}
     try:
         with open(path, "r") as handle:
@@ -122,6 +139,13 @@ def _load_ident_lookup(path):
 
 
 def _load_gyro_offsets(path):
+    """读取陀螺仪零漂参数
+
+    @brief 从 `gyro_offset.txt` 读取 IMU 零漂结果, 兼容单值和六轴两种文本格式, 缺失时回退到零偏置。
+    @param path 零漂文件路径
+    @return tuple
+    """
+
     offsets = [0.0] * 6
     try:
         with open(path, "r") as handle:
@@ -172,6 +196,13 @@ def _heading_chain_ready(hw_bundle):
 
 
 def _encoder_chain_ready(hw_bundle):
+    """检查编码器链路是否具备采样能力
+
+    @brief 用于对外判断底座快照里的编码器数据是否可信。
+    @param hw_bundle 当前硬件装配
+    @return bool
+    """
+
     if hw_bundle is None:
         return False
     encoders = hw_bundle.get("encoders")
@@ -190,6 +221,13 @@ def _encoder_chain_ready(hw_bundle):
 
 
 def base_chain_ready(hw_bundle):
+    """检查主车底座主数据链是否就绪
+
+    @brief 只有 IMU 和三路编码器都可用时才把底座观测标记为有效。
+    @param hw_bundle 当前硬件装配
+    @return bool
+    """
+
     return _heading_chain_ready(hw_bundle) and _encoder_chain_ready(hw_bundle)
 
 
@@ -222,6 +260,14 @@ def _state_motor_bundle(state, hw_bundle=None):
 
 
 def _read_imu_sample_for_state(state, hw_bundle=None):
+    """把当前 IMU 采样写回运行时状态
+
+    @brief 按设备能力优先读取校准值, 必要时退回原始值或外部航向角接口。
+    @param state 底座运行时状态
+    @param hw_bundle 可选硬件装配
+    @return float | None
+    """
+
     imu = _state_imu_port(state, hw_bundle=hw_bundle)
     heading_override = None
     if imu is None:
@@ -253,6 +299,14 @@ def _read_imu_sample_for_state(state, hw_bundle=None):
 
 
 def _read_encoder_ticks_for_state(state, hw_bundle=None):
+    """读取三路编码器本拍增量
+
+    @brief 统一兼容带清零与不带清零的编码器端口接口。
+    @param state 底座运行时状态
+    @param hw_bundle 可选硬件装配
+    @return dict
+    """
+
     encoders = _state_encoder_bundle(state, hw_bundle=hw_bundle)
     if encoders is None:
         return {"m": 0.0, "l": 0.0, "r": 0.0}
@@ -279,6 +333,14 @@ def _read_encoder_ticks_for_state(state, hw_bundle=None):
 
 
 def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
+    """创建主车底座运行时状态容器
+
+    @brief 装配参数、滤波器、姿态估计和轮速控制器, 形成主链 owner 初始快照。
+    @param hw_bundle 可选硬件装配
+    @return MotionRuntimeState
+    """
+
+    # 先收口参数与离线校准结果, 让后续状态对象只依赖一份初始化输入
     pid_map = dict(runtime_params.PID_MAP)
     ident_lookup = _load_ident_lookup(config.IDENT_RESULTS_FILE)
     imu_offsets = _load_gyro_offsets(config.GYRO_OFFSET_FILE)
@@ -307,6 +369,7 @@ def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
     state.q_est = HeadingEstimator()
     state.kinematics = build_kinematics()
     state.odometry = build_odometry()
+    # 滤波器和控制器按当前参数一次性装配, 单拍执行阶段只做更新不再重建
     state.gyro_lpf = LowPassFilter(runtime_params.GYRO_LPF_ALPHA, initial=0.0)
     state.wheel_filters = build_wheel_filter_bank(
         tick_ms=int(runtime_params.CONTROL_TICK_MS),
@@ -322,6 +385,7 @@ def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
         output_limit=runtime_params.MAX_DUTY,
     )
     _trace_ident_lookup_loaded(config.IDENT_RESULTS_FILE, state.wheel_controllers)
+    # IMU 若支持板端偏置下发, 在 owner 创建时一次性同步零漂参数
     imu = _state_imu_port(state)
     if imu is not None:
         apply_offsets = getattr(imu, "apply_offsets", None)
@@ -331,6 +395,13 @@ def create_runtime_state(hw_bundle=None) -> MotionRuntimeState:
 
 
 def next_motion_control_seq(state) -> int:
+    """递增底座控制序号
+
+    @brief 让跨拍控制命令可以携带单调递增的去重标记。
+    @param state 底座运行时状态
+    @return int
+    """
+
     state._control_seq += 1
     return int(state._control_seq)
 
@@ -380,6 +451,14 @@ def _apply_motor_output_for_state(state, vx, vy, omega, hw_bundle=None):
 
 
 def apply_motion_target(state, target):
+    """写入主车当前拍的自车目标
+
+    @brief 只接受速度目标或保持目标, 并在切回保持时重置航向保持基准。
+    @param state 底座运行时状态
+    @param target 当前目标字典
+    @return dict
+    """
+
     previous_kind = str(getattr(state, "last_target", {}).get("kind", "hold"))
     state.last_target = dict(target)
     kind = str(state.last_target.get("kind", "hold"))
@@ -393,6 +472,16 @@ def apply_motion_target(state, target):
 def resolve_heading_hold_target_from_state(
     state, current_heading_deg, hw_bundle=None, cycle_token=None
 ):
+    """解出当前拍应执行的航向保持目标
+
+    @brief 先刷新姿态观测, 再把人工角速度或自动保持修正收口成最终目标。
+    @param state 底座运行时状态
+    @param current_heading_deg 外部给定的当前航向角
+    @param hw_bundle 可选硬件装配
+    @param cycle_token 当前拍去重标记
+    @return dict
+    """
+
     heading_deg = float(current_heading_deg)
     if _state_imu_port(state, hw_bundle=hw_bundle) is not None:
         run_base_cycle(state, hw_bundle=hw_bundle, cycle_token=cycle_token)
@@ -407,6 +496,16 @@ def resolve_heading_hold_target_from_state(
 
 
 def run_motion_cycle(state, hw_bundle=None, cycle_token=None):
+    """推进主车底座完整控制拍
+
+    @brief 串起底座观测刷新、航向保持解算和电机输出下发。
+    @param state 底座运行时状态
+    @param hw_bundle 可选硬件装配
+    @param cycle_token 当前拍去重标记
+    @return dict
+    """
+
+    # 先刷新同一拍底座观测, 确保控制解算使用最新姿态和编码器数据
     run_base_cycle(state, hw_bundle=hw_bundle, cycle_token=cycle_token)
     applied_target = _resolve_applied_target_for_state(
         state,
@@ -431,6 +530,16 @@ def run_motion_cycle(state, hw_bundle=None, cycle_token=None):
 
 
 def run_base_cycle(state, hw_bundle=None, cycle_token=None) -> dict:
+    """推进主车底座观测拍
+
+    @brief 读取 IMU 与编码器并更新姿态、轮速和里程快照, 供应用层和控制层复用。
+    @param state 底座运行时状态
+    @param hw_bundle 可选硬件装配
+    @param cycle_token 当前拍去重标记
+    @return dict
+    """
+
+    # 同一拍如果已经刷新过底座观测, 直接复用快照避免重复读硬件
     resolved_hw_bundle = _resolve_state_hw_bundle(state, hw_bundle)
     if cycle_token is not None and cycle_token == getattr(
         state, "_last_cycle_token", None
@@ -439,6 +548,7 @@ def run_base_cycle(state, hw_bundle=None, cycle_token=None) -> dict:
             return {}
         return dict(state._last_base_snapshot)
 
+    # 先更新姿态链, 再读取编码器增量和轮速估计
     heading_override = _read_imu_sample_for_state(state, hw_bundle=resolved_hw_bundle)
     update_heading_from_gyro(state, heading_override=heading_override)
 
@@ -450,6 +560,7 @@ def run_base_cycle(state, hw_bundle=None, cycle_token=None) -> dict:
         ("m", "l", "r"),
     )
 
+    # 里程与快照统一在这里收口, 让上层只消费一份底座观测结果
     odom_x, odom_y = update_odometry_from_wheels(state)
     # 主车对外只返回底座观测快照, 不在这里混入视觉或调度阶段状态
     snapshot = {
@@ -476,15 +587,43 @@ class MotionRuntime(MotionRuntimeState):
         self.__dict__.update(state.__dict__)
 
     def refresh_base_chain(self, cycle_token=None):
+        """刷新一拍底座观测链
+
+        @brief 面向对象包装 `run_base_cycle`, 供应用层直接复用。
+        @param cycle_token 当前拍去重标记
+        @return dict
+        """
+
         return run_base_cycle(self, hw_bundle=self.hw_bundle, cycle_token=cycle_token)
 
     def apply_self_target(self, target):
+        """写入当前拍自车目标
+
+        @brief 面向对象包装目标写入入口, 保持与应用层交互一致。
+        @param target 当前目标字典
+        @return dict
+        """
+
         return apply_motion_target(self, target)
 
     def next_control_seq(self):
+        """生成下一条控制序号
+
+        @brief 面向对象包装递增序号入口, 供应用层对外发包使用。
+        @return int
+        """
+
         return next_motion_control_seq(self)
 
     def update_heading_hold(self, current_heading_deg, cycle_token=None):
+        """计算当前拍航向保持目标
+
+        @brief 面向对象包装航向保持解算, 便于上层先看目标再决定是否执行控制。
+        @param current_heading_deg 外部给定的当前航向角
+        @param cycle_token 当前拍去重标记
+        @return dict
+        """
+
         return resolve_heading_hold_target_from_state(
             self,
             current_heading_deg,
@@ -493,4 +632,11 @@ class MotionRuntime(MotionRuntimeState):
         )
 
     def execute_control_loop(self, cycle_token=None):
+        """推进一拍完整底座控制循环
+
+        @brief 面向对象包装控制拍执行入口, 供运行循环直接调用。
+        @param cycle_token 当前拍去重标记
+        @return dict
+        """
+
         return run_motion_cycle(self, hw_bundle=self.hw_bundle, cycle_token=cycle_token)

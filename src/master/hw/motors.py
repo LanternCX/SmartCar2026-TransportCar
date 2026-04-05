@@ -24,6 +24,11 @@ class MotorPort:
         self._device = None
 
     def ensure_device(self):
+        """按需创建并缓存电机驱动对象.
+
+        @brief 把端口名到驱动常量的映射收口在这里, 上层只面向轮位名称。
+        """
+
         if self._device is None:
             from seekfree import MOTOR_CONTROLLER
 
@@ -37,10 +42,20 @@ class MotorPort:
         return self._device
 
     def set_duty(self, duty):
+        """向底层驱动下发占空比命令.
+
+        @brief 控制层传来的输出在这里真正触达硬件, 不再重复做策略判断。
+        """
+
         device = self.ensure_device()
         device.duty(int(duty))
 
     def stop(self):
+        """让当前电机立即回到零输出.
+
+        @brief 停止动作复用统一下发入口, 保持占空比写入路径一致。
+        """
+
         self.set_duty(0)
 
 

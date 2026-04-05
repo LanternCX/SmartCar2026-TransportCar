@@ -21,6 +21,11 @@ class LowPassFilter:
         self.initialized = False
 
     def update(self, value):
+        """推进低通滤波状态并返回当前输出.
+
+        @brief 首拍直接吸收输入, 后续才按 alpha 融合, 这样初始化阶段不会被旧默认值拖偏。
+        """
+
         next_value = float(value)
         if not self.initialized:
             self.state = next_value
@@ -40,6 +45,11 @@ class SpikeMedianFilter:
         self.buf = []
 
     def update(self, value):
+        """把尖峰值压回局部中位数.
+
+        @brief 先在输入端抑制单拍毛刺, 避免后续差分限幅和回归预测被异常点带偏。
+        """
+
         if len(self.buf) >= self.window:
             self.buf.pop(0)
         self.buf.append(float(value))
@@ -55,6 +65,11 @@ class DiffLimitFilter:
         self.prev = None
 
     def update(self, value):
+        """限制相邻样本的变化幅度.
+
+        @brief 这个阶段专门处理跳边和误码, 让后面的回归窗只看到可接受的增量。
+        """
+
         next_value = float(value)
         if self.prev is None:
             self.prev = next_value
@@ -80,6 +95,11 @@ class DualWindowRegressionFilter:
 
     @staticmethod
     def _predict(window, next_t):
+        """按窗口内样本做一次线性外推.
+
+        @brief 长窗和短窗都复用这个计算, 统一预测口径后再由外层做融合。
+        """
+
         count = len(window)
         if count == 0:
             return 0.0
@@ -104,6 +124,11 @@ class DualWindowRegressionFilter:
         return (slope * next_t) + intercept
 
     def update(self, value):
+        """同步推进长短两个窗口并输出融合预测值.
+
+        @brief 短窗负责跟手, 长窗负责稳态, 这里把两者折中成给速度环使用的单路结果。
+        """
+
         stamp = float(self.sample_idx * self.tick_ms)
         self.sample_idx += 1
         pair = (stamp, float(value))
@@ -132,6 +157,11 @@ class SpeedFilterChain:
         )
 
     def update(self, value):
+        """按既定顺序执行单路轮速滤波链.
+
+        @brief 先压尖峰、再限差分、最后做回归预测, 保持所有轮位使用一致处理链。
+        """
+
         filtered = self.spike.update(value)
         filtered = self.diff.update(filtered)
         return self.reg.update(filtered)
@@ -144,7 +174,10 @@ def build_speed_filter_chain(
     long_window=30,
     short_window=8,
 ):
-    """构造单路轮速滤波公开入口."""
+    """构造单路轮速滤波公开入口.
+
+    @brief 把一组滤波参数固化成可复用对象, 供各轮按同样口径装配。
+    """
 
     return SpeedFilterChain(
         window=window,
@@ -163,7 +196,10 @@ def build_wheel_filter_bank(
     long_window,
     short_window,
 ):
-    """按轮位构造滤波链, 但对象 owner 仍由状态层持有."""
+    """按轮位构造滤波链, 但对象 owner 仍由状态层持有.
+
+    @brief 这里负责批量装配, 不负责保存跨周期状态引用。
+    """
 
     wheel_filters = {}
     for name in wheel_names:
@@ -178,7 +214,10 @@ def build_wheel_filter_bank(
 
 
 def update_wheel_speeds(filter_bank, raw_ticks, wheel_names):
-    """执行单拍滤波计算, 返回每个轮位的滤波结果."""
+    """执行单拍滤波计算, 返回每个轮位的滤波结果.
+
+    @brief 统一把原始脉冲样本推进到各轮滤波链, 给速度环提供同拍结果。
+    """
 
     wheel_speeds = {}
     for name in wheel_names:

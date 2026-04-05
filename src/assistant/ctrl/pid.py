@@ -32,6 +32,11 @@ class SpeedController:
         self.prev_target = 0.0
 
     def set_gains(self, kp, ki, ki2=0.0):
+        """写入单轮速度环参数.
+
+        @brief 让运行时把整车配置表中的 PID 参数装配到轮控对象。
+        """
+
         self.kp = float(kp)
         self.ki = float(ki)
         self.ki2 = float(ki2)
@@ -46,6 +51,11 @@ class SpeedController:
         return (float(target) + tau_term) / float(self.plant_gain)
 
     def update(self, target, now, dt_s):
+        """根据目标轮速与当前轮速计算新的电机输出.
+
+        @brief 把增量 PID 与一阶模型前馈合并成单拍控制结果。
+        """
+
         if dt_s <= 0.0:
             dt_s = 1.0
         err = float(target) - float(now)
@@ -67,12 +77,22 @@ class SpeedController:
         return total
 
     def reset(self):
+        """清空单轮速度环的跨周期状态.
+
+        @brief 在停车、超时或切模式时避免旧积分继续影响下一次控制。
+        """
+
         self.output = 0.0
         self.prev_error = 0.0
         self.prev_target = 0.0
 
 
 def build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
+    """按轮位装配速度控制器集合.
+
+    @brief 把 PID 参数和辨识结果合并为运行时可直接调用的控制对象。
+    """
+
     wheel_controllers = {}
     for name in ("m", "l", "r"):
         gains = pid_map.get(name, (0.0, 0.0, 0.0))
@@ -88,6 +108,11 @@ def build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
 
 
 def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+    """执行一拍轮速闭环并可选地写回电机.
+
+    @brief 同步刷新目标轮速、控制输出和状态记录, 保持链路口径一致。
+    """
+
     outputs = {}
     for name in ("m", "l", "r"):
         raw = _clamp(float(wheel_targets.get(name, 0.0)), -float(limit), float(limit))
@@ -108,6 +133,11 @@ def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
 
 
 def reset_wheel_speed_control(state):
+    """把轮速控制链恢复到静止初始态.
+
+    @brief 统一清零目标值、占空比记录和各轮控制器内部状态。
+    """
+
     for name in ("m", "l", "r"):
         state.target_wheel_speeds[name] = 0.0
         state.motor_duties[name] = 0
