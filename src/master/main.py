@@ -1,9 +1,12 @@
 """主车启动入口
 
 @file src/master/main.py
+
+负责在板端按按键分支选择校准、辨识或正常运行主链。
 """
 
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
+# 运行态心跳灯翻转周期, 用于确认主循环仍在推进
 RUNTIME_HEARTBEAT_MS = 500
 
 
@@ -18,6 +21,12 @@ def _debug_print(stage, **payload):
 
 
 def run_calibrate_gyro():
+    """进入陀螺仪零漂校准脚本
+
+    @brief 为板端快捷入口补齐到脚本层的跳转职责。
+    @return object
+    """
+
     if _USE_DIRECT_IMPORTS:
         from script.calibrate_gyro import main
     else:
@@ -27,6 +36,12 @@ def run_calibrate_gyro():
 
 
 def run_pid_identify():
+    """进入电机辨识脚本
+
+    @brief 为板端快捷入口补齐到参数辨识脚本的跳转职责。
+    @return object
+    """
+
     if _USE_DIRECT_IMPORTS:
         from script.pid_identify import main
     else:
@@ -121,40 +136,53 @@ def _drive_loop(loop):
     """
 
     _debug_print("drive_loop_enter")
+    # 先初始化拍点调度与心跳状态, 让后续循环只关注单拍推进
     tick_ms = _control_tick_ms()
     next_tick_ms = None
     heartbeat_led = getattr(loop, "heartbeat_led", None)
     last_heartbeat_ms = None
     while True:
         now_ms = _read_now_ms()
+        # 未到下一拍时主动等待, 保持控制节拍稳定
         if next_tick_ms is not None:
             remaining_ms = int(next_tick_ms) - int(now_ms)
             if remaining_ms > 0:
                 _sleep_ms(remaining_ms)
                 continue
+        # 到达心跳周期时翻转 LED, 便于肉眼确认运行主链没有卡死
         if heartbeat_led is not None and (
             last_heartbeat_ms is None
             or _ticks_diff_ms(now_ms, last_heartbeat_ms) >= RUNTIME_HEARTBEAT_MS
         ):
             heartbeat_led.toggle()
             last_heartbeat_ms = int(now_ms)
+        # 交给运行循环推进当前拍, 然后预约下一拍时间
         loop.step(now_ms)
         next_tick_ms = int(now_ms) + tick_ms
 
 
 def _start_runtime():
+    """完成主车运行态装配并进入循环
+
+    @brief 串起硬件装配、运行循环实例化和采集 ticker 启动。
+    @return None
+    """
+
     _debug_print("start_runtime_enter")
     if _USE_DIRECT_IMPORTS:
         from app import MasterRuntimeLoop, build_hw_bundle
     else:
         from .app import MasterRuntimeLoop, build_hw_bundle
 
+    # 先装配主链依赖的硬件边界, 再把它们交给运行循环统一持有
     hw_bundle = build_hw_bundle()
     _debug_print("start_runtime_hw_ready", keys=tuple(sorted(hw_bundle.keys())))
     runtime_loop = MasterRuntimeLoop(hw_bundle)
+    # 把拍点采集和心跳观测挂到运行循环上, 让主循环只做调度
     setattr(runtime_loop, "capture_ticker", _build_capture_ticker(hw_bundle))
     setattr(runtime_loop, "heartbeat_led", _build_runtime_heartbeat_led())
     _debug_print("start_runtime_loop_ready")
+    # 初始化完成后直接转入无限循环, 退出由板端重启接管
     _drive_loop(runtime_loop)
 
 

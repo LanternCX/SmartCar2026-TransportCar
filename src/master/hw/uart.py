@@ -25,6 +25,11 @@ class UartPort:
         self._read_buffer = ""
 
     def ensure_device(self):
+        """按需创建并初始化串口对象.
+
+        @brief 串口波特率和编号都在这里一次性落地, 上层只保留收发语义。
+        """
+
         if self._device is None:
             from machine import UART
 
@@ -33,6 +38,11 @@ class UartPort:
         return self._device
 
     def read(self, size=None):
+        """读取串口字节流.
+
+        @brief 未指定长度时先按 `any()` 读取当前可用数据, 避免阻塞主循环。
+        """
+
         device = self.ensure_device()
         if size is None:
             available = getattr(device, "any", lambda: 0)()
@@ -42,10 +52,20 @@ class UartPort:
         return device.read(size)
 
     def write(self, payload):
+        """写出原始串口负载.
+
+        @brief 协议层负责组织内容, 这里仅保持最薄的发送封装。
+        """
+
         device = self.ensure_device()
         return device.write(payload)
 
     def read_line(self):
+        """按换行符切出一条完整文本行.
+
+        @brief 内部保留残留缓冲, 让视觉和命令链都能按行消费串口文本。
+        """
+
         payload = self.read()
         if payload is not None:
             if isinstance(payload, bytes):
@@ -57,6 +77,11 @@ class UartPort:
         return line.strip("\r")
 
     def write_line(self, payload):
+        """按 CRLF 结尾写出一行文本.
+
+        @brief 协议输出统一走这一层, 保持板端与主机侧格式一致。
+        """
+
         return self.write("%s\r\n" % str(payload))
 
 

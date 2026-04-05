@@ -32,6 +32,11 @@ class SpeedController:
         self.prev_target = 0.0
 
     def set_gains(self, kp, ki, ki2=0.0):
+        """写入单轮速度环使用的增益参数.
+
+        @brief 允许在装配阶段统一下发参数, 运行拍内不再重复改写。
+        """
+
         self.kp = float(kp)
         self.ki = float(ki)
         self.ki2 = float(ki2)
@@ -46,6 +51,11 @@ class SpeedController:
         return (float(target) + tau_term) / float(self.plant_gain)
 
     def update(self, target, now, dt_s):
+        """根据目标速度和当前反馈计算本拍电机输出.
+
+        @brief 这里把增量式 PID 和辨识前馈合并, 返回最终给电机层的占空比命令。
+        """
+
         if dt_s <= 0.0:
             dt_s = 1.0
         err = float(target) - float(now)
@@ -67,12 +77,22 @@ class SpeedController:
         return total
 
     def reset(self):
+        """清空跨周期误差和输出状态.
+
+        @brief 在停机或模式切换时调用, 避免旧积分残留带入下一段动作。
+        """
+
         self.output = 0.0
         self.prev_error = 0.0
         self.prev_target = 0.0
 
 
 def build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
+    """按轮位装配速度环控制器集合.
+
+    @brief 同时把 PID 参数和辨识前馈参数绑定到每一路控制器, 供运行时直接复用。
+    """
+
     wheel_controllers = {}
     for name in ("m", "l", "r"):
         gains = pid_map.get(name, (0.0, 0.0, 0.0))
@@ -88,6 +108,11 @@ def build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
 
 
 def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+    """把车体目标轮速落实成每个轮位的输出命令.
+
+    @brief 这个入口负责限幅、更新状态快照并在提供电机对象时直接下发占空比。
+    """
+
     outputs = {}
     for name in ("m", "l", "r"):
         raw = _clamp(float(wheel_targets.get(name, 0.0)), -float(limit), float(limit))

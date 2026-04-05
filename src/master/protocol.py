@@ -1,6 +1,8 @@
-"""主车到辅车的协议文本构造
+"""主车与辅车之间的协议适配层
 
 @file src/master/protocol.py
+
+负责收口主车发给辅车的控制报文格式, 以及辅车状态回包的解析入口。
 """
 
 
@@ -47,6 +49,13 @@ def build_follow_command(seq, valid, dx, dy):
 
 
 def parse_assistant_state(line):
+    """解析辅车状态回包文本
+
+    @brief 只接受带 `state=1` 头标记的报文, 并把关键底座状态转成主车可直接消费的字典。
+    @param line UART 读到的一行文本
+    @return dict | None
+    """
+
     payload = {}
     for item in str(line).strip().split(","):
         field = item.strip()

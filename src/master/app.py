@@ -1,6 +1,8 @@
 """主车应用编排入口
 
 @file src/master/app.py
+
+负责把视觉输入、状态判断、底座运行时和辅车输出串成主车单拍主链。
 """
 
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
@@ -87,6 +89,13 @@ class MasterRuntimeLoop:
 
     @staticmethod
     def _resolve_app_hw_bundle(app):
+        """确认应用对象暴露唯一硬件装配
+
+        @brief 避免运行循环和应用层各自持有不同硬件 owner。
+        @param app 运行循环要接管的应用对象
+        @return dict
+        """
+
         motion_state = getattr(app, "motion_state", None)
         state_hw_bundle = getattr(motion_state, "hw_bundle", None)
         app_hw_bundle = getattr(app, "hw_bundle", None)
@@ -115,6 +124,13 @@ class MasterRuntimeLoop:
                 latest_state = parsed
 
     def step(self, now_ms):
+        """推进一拍主车运行循环
+
+        @brief 读取辅车回包与双路视觉输入, 然后把单拍观测交给应用层产出控制结果。
+        @param now_ms 当前毫秒时钟
+        @return dict
+        """
+
         assistant_feedback = self._read_assistant_feedback()
         observations = []
         for uart_name in ("uart6", "uart8"):
@@ -150,12 +166,16 @@ class MasterApp:
             reserved_uarts=reserved_uarts,
         )
         self.state_machine = MarkerStateMachine()
+        # 运行态首次需要推进底座时才创建, 避免纯逻辑测试被硬件依赖绑死
         self.motion_state = None
+        # 控制序号跟随每拍输出递增, 供辅车忽略重复控制报文
         self._control_seq = 0
+        # 状态机无新输入时沿用上一拍输出, 保持阶段结论稳定
         self._last_state_output = {"phase": "MARKER_MISSING", "hold": True}
         self._last_has_target = False
         self.last_assistant_command = ""
         self._last_self_target = {"kind": "hold"}
+        # 底座快照作为应用层默认回包骨架, 目标暂失时仍能对外给出稳定状态
         self._last_self_base_state = {
             "heading_deg": 0.0,
             "yaw_rate_deg_s": 0.0,
@@ -218,6 +238,7 @@ class MasterApp:
         @return dict
         """
 
+        # 先拆出当前拍调度字段, 视觉观测本体继续交给 ingress 统一整理
         now_ms = None
         cycle_token = None
         run_motion = False
@@ -236,11 +257,14 @@ class MasterApp:
             if not prepared_observation:
                 prepared_observation = None
 
+        # 需要执行底座控制时, 先确保运行态 owner 已经装配完成
         if run_motion:
             self._ensure_motion_state()
 
+        # 每拍先刷新底座观测, 这样后续决策总能拿到同一时刻的姿态与里程
         base_snapshot = self._refresh_self_base_state(cycle_token=cycle_token)
 
+        # 把双路视觉输入收口成当前应该使用的一份目标观测
         self.ingress.begin_frame(now_ms=now_ms)
         if (
             isinstance(prepared_observation, dict)
@@ -271,10 +295,12 @@ class MasterApp:
         selected.update(base_snapshot)
         selected["control_seq"] = self._next_control_seq()
 
+        # 状态机结论与底座快照拼好后再做控制决策, 保证主辅车输出来自同一拍上下文
         decision = decide_from_observation(selected)
         self._last_self_base_state = dict(decision.self_base_state)
         self_target = self._apply_self_target(decision.self_target)
         if run_motion:
+            # 只有运行态拍才真正推进电机控制, 纯逻辑拍只更新目标与快照
             run_motion_cycle(
                 self._ensure_motion_state(),
                 hw_bundle=self.hw_bundle,
@@ -287,6 +313,7 @@ class MasterApp:
                 selected_observation.get("configured_uart", self.ingress.active_uart)
             )
 
+        # 对外结果只保留 review 和联调需要的关键骨架字段
         self.last_result = {
             "selected_target": decision.selected_target,
             "phase": decision.phase,

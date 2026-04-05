@@ -3,7 +3,7 @@
 @file src/master/hw/encoders.py
 """
 
-# legacy 与当前主线共用同一套编码器接线, 这里直接固化确认后的板级映射。
+# 当前主线已确认三路编码器接线, 这里直接固化板级映射。
 ENCODER_PINS = {
     "m": ("D15", "D16", True),
     "l": ("C2", "C3", True),
@@ -27,6 +27,11 @@ class EncoderPort:
         self.last_ticks = 0
 
     def ensure_device(self):
+        """按需创建并缓存板级编码器对象.
+
+        @brief 这里顺便确认底层驱动提供 `get()` 能力, 避免运行拍内重复做接口探测。
+        """
+
         if self._device is None:
             from smartcar import encoder
 
@@ -38,6 +43,11 @@ class EncoderPort:
         return self._device
 
     def read(self):
+        """读取当前编码器计数并更新最近一次快照.
+
+        @brief 对外统一返回整数脉冲值, 让控制链不直接接触底层驱动细节。
+        """
+
         device = self.ensure_device()
         getter = getattr(device, "get", None)
         if getter is None:
@@ -49,13 +59,18 @@ class EncoderPort:
         return self.last_ticks
 
     def read_and_clear(self):
+        """兼容当前控制链使用的单拍读取入口.
+
+        @brief 现阶段底层驱动直接返回最新计数, 因此这里复用 `read()` 保持调用面稳定。
+        """
+
         return self.read()
 
 
 def build_encoder_bundle():
     """构造主车编码器边界集合.
 
-    @brief 按 legacy 已确认映射构造三路编码器边界。
+    @brief 按当前已确认的板级接线映射构造三路编码器边界。
     @return dict
     """
 

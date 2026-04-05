@@ -31,6 +31,11 @@ class MarkerStateMachine:
         has_target=None,
         has_new_input=None,
     ):
+        """根据目标可见性与偏差决定当前视觉阶段.
+
+        @brief 这里只维护 `MARKER_MISSING/CENTER_HOLD/TRACKING` 三态, 让决策层按阶段选择动作。
+        """
+
         _ = has_new_input
         if has_target is None:
             has_target = int(valid) == 1
