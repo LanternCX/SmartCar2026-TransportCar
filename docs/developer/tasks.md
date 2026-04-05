@@ -1,6 +1,6 @@
 # 完赛路线任务清单
 
-> 说明：其中与 `boot.py` 入口、双摄轮询、主辅分别烧录、`UART3` 主辅直连通信、最小状态回传相关的旧任务口径，已由 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
+> 说明：其中与 `boot.py` 入口、双摄轮询、主辅分别烧录、`UART3` 主辅直连通信、最小状态回传相关的旧任务口径，已由 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
 
 > 我正在使用 writing-plans 思路来拆解执行任务。
 >
@@ -17,7 +17,7 @@
 
 ## 1. 阶段总览
 
-> 说明：当前阶段默认先推进“主车感知与决策、辅车执行跟随”的最小闭环，不默认展开主车自身运动闭环任务；若后续阶段需要恢复主车参与动作，必须先回到 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 对齐阶段边界。
+> 说明：当前阶段默认先推进“主车感知与决策、辅车执行跟随”的最小闭环，不默认展开主车自身运动闭环任务；若后续阶段需要恢复主车参与动作，必须先回到 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 对齐阶段边界。
 
 - 阶段 A：基础对齐（规则、接口、验证基线）
 - 阶段 B：双车最小可用协同（能完成单次稳定搬运）
@@ -36,7 +36,7 @@
 
 ### 任务
 
-- [ ] A-01 对齐本项目方向文档，确认总体方向以 `docs/developer/strategy.md` 为主，但凡涉及启动入口、通信方式、运行时边界、当前阶段主辅动作分工等冲突项，以 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 为准。
+- [ ] A-01 对齐本项目方向文档，确认总体方向以 `docs/developer/strategy.md` 为主，但凡涉及启动入口、通信方式、运行时边界、当前阶段主辅动作分工等冲突项，以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 为准。
 - [ ] A-02 在队内确认“稳定完赛优先”策略，不再并行推进冲成绩分支。
 - [ ] A-03 对齐视觉实现与底盘协议边界（视觉代码可分开维护，车端协议统一）。
 - [ ] A-04 对齐主辅角色：主车双摄决策与唯一状态机，辅车纯执行。
@@ -213,7 +213,7 @@
 后续任何新会话，先读：
 
 1. `docs/developer/strategy.md`
-2. `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md`
+2. `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md`
 3. `docs/developer/tasks.md`
 
 然后只讨论当前“进行中”任务，不跨阶段并行。

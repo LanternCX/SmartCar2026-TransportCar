@@ -4,7 +4,7 @@
 
 - 本清单用于冻结 `src/legacy` 后续裁剪顺序
 - 本清单只定义哪些内容必须迁移, 哪些内容只保留在 `legacy`, 哪些内容可在新系统稳定后归档
-- 任何删减都必须先对照 `docs/superpowers/specs/2026-03-24-master-assistant-minimal-runtime-design.md`
+- 任何删减都必须先对照 `docs/superpowers/specs/archive/PR#16/2026-03-24-master-assistant-minimal-runtime-design.md`
 - `src/legacy` 只作为参考, 不再要求保持旧入口可运行
 - 旧仓库对应测试在归档后整体退出当前主线验证面
 

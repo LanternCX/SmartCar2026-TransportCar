@@ -1,6 +1,6 @@
 # 电控设计
 
-> 说明：其中与 `boot.py` 入口、角色切换入口、双摄轮询、`UART3` 主辅直连通信相关的旧口径，已由 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
+> 说明：其中与 `boot.py` 入口、角色切换入口、双摄轮询、`UART3` 主辅直连通信相关的旧口径，已由 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
 
 ## 控制目标与主要特性
 
@@ -21,11 +21,11 @@
 - 主车自身底盘闭环能力仍需保留在目录结构与算法设计中，但当前主线不把它作为默认运行阶段。
 - 当前入口方案是 `main.py` 单入口，按钮长按在 `main.py` 内部分发到辨识脚本与零漂校准脚本。
 - 当前主辅通信方案是 `UART3` 直连，视觉输入为 `UART6` / `UART8` 双路持续接收。
-- 若本文件后文的历史说明与上述当前口径冲突，以 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 为准。
+- 若本文件后文的历史说明与上述当前口径冲突，以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 为准。
 
 ## 历史上电入口配置（仅供 legacy 理解）
 
-> 历史归档说明：本节以下内容主要用于理解 `legacy` 旧系统入口，不再作为当前 `master` / `assistant` 运行时的实现依据。当前入口方案以 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 为准，即删除 `boot.py`、只保留 `main.py` 单入口，并在 `main.py` 内完成按钮脚本分发。
+> 历史归档说明：本节以下内容主要用于理解 `legacy` 旧系统入口，不再作为当前 `master` / `assistant` 运行时的实现依据。当前入口方案以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 为准，即删除 `boot.py`、只保留 `main.py` 单入口，并在 `main.py` 内完成按钮脚本分发。
 
 当前 boot.py 已将“角色选择”和“启动入口”拆开：
 

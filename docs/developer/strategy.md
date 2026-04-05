@@ -1,6 +1,6 @@
 # 项目核心方案
 
-> 说明：其中与 `main.py` 单入口、UART6/UART8 持续接收、主辅分别烧录、`UART3` 主辅直连通信、最小状态回传、以及“当前阶段主车不动、只控辅车跟随”相关的旧口径，已由 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
+> 说明：其中与 `main.py` 单入口、UART6/UART8 持续接收、主辅分别烧录、`UART3` 主辅直连通信、最小状态回传、以及“当前阶段主车不动、只控辅车随动”相关的旧口径，已由 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
 
 > 本文件只定义项目方向，不展开具体技术实现。
 >
@@ -15,7 +15,7 @@
 
 ## 2. 方案路径
 
-> 说明：以下条目中凡涉及“双摄轮询”“统一运行时 profile”“主车同时驱动自身和辅车动作”的内容，均属于上一阶段口径；当前阶段请以 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md` 中的“双 UART 持续接收”“分别烧录”“主车不动、只控辅车跟随”为准。
+> 说明：以下条目中凡涉及“双摄轮询”“统一运行时 profile”“主车同时驱动自身和辅车动作”的内容，均属于上一阶段口径；当前阶段请以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 中的“双 UART 持续接收”“分别烧录”“主车不动、只控辅车跟随”为准。
 
 - 采用主辅协同。
 - 主车负责环境理解、任务决策与唯一任务状态机维护。
@@ -114,7 +114,7 @@
 
 ## 9. 使用规则
 
-- 新会话先阅读本文件，并同时阅读 `docs/superpowers/specs/2026-03-30-master-assistant-hardware-design.md`。
+- 新会话先阅读本文件，并同时阅读 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md`。
 - 若出现方案分歧，先检查是否属于 2026-03-30 设计文档已显式覆盖的冲突项；若不是，再以本文件对齐方向。
 - 若分歧属于已被 2026-03-30 设计文档显式覆盖的冲突项，则以该设计文档为准。
 - 需要调整方向时，先更新本文件，再推进实现。
