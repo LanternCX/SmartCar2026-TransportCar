@@ -24,6 +24,7 @@ description: Use when implementing or refactoring code in this repository and ne
 - 注释风格、文档字符串规范与注释示例 -> `references/comment-rules.md`
 - 硬件事实、串口链路、视觉协议、坐标与联调语义 -> `references/hardware-and-protocol.md`（完整协议正文继续路由到 `references/openart-protocol.md`）
 - 比赛目标、双车协同、控制层级、调参与诊断顺序 -> `references/strategy-and-control.md`
+- `docs/superpowers/specs/` 与 `docs/superpowers/plans/` 的归档、搬运与目录整理 -> `references/superpowers-doc-archive.md`
 
 ## First Check
 
