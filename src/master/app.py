@@ -114,9 +114,14 @@ class MasterRuntimeLoop:
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def _read_assistant_feedback(self):
+        uart3 = self.uart_bundle["uart3"]
+        reader = getattr(uart3, "read_latest_line", None)
+        if reader is not None:
+            return reader(transform=parse_assistant_state)
+
         latest_state = None
         while True:
-            line = self.uart_bundle["uart3"].read_line()
+            line = uart3.read_line()
             if not line:
                 return latest_state
             parsed = parse_assistant_state(line)
@@ -134,7 +139,11 @@ class MasterRuntimeLoop:
         assistant_feedback = self._read_assistant_feedback()
         observations = []
         for uart_name in ("uart6", "uart8"):
-            line = self.uart_bundle[uart_name].read_line()
+            uart_port = self.uart_bundle[uart_name]
+            reader = getattr(uart_port, "read_latest_line", None)
+            if reader is None:
+                reader = uart_port.read_line
+            line = reader()
             if line:
                 observations.append({"uart": uart_name, "line": line})
 
@@ -243,19 +252,34 @@ class MasterApp:
         cycle_token = None
         run_motion = False
         prepared_observation = observation
+        observation_items = None
         if isinstance(observation, dict):
             now_ms = observation.get("now_ms")
             cycle_token = observation.get("cycle_token")
             run_motion = bool(observation.get("run_motion", False))
-            prepared_observation = dict(observation)
-            prepared_observation.pop("now_ms", None)
-            prepared_observation.pop("cycle_token", None)
-            prepared_observation.pop("run_motion", None)
-            self._last_assistant_feedback = prepared_observation.pop(
-                "assistant_feedback", self._last_assistant_feedback
-            )
-            if not prepared_observation:
+            if "assistant_feedback" in observation:
+                self._last_assistant_feedback = observation["assistant_feedback"]
+            if "observations" in observation:
+                observation_items = observation.get("observations") or ()
                 prepared_observation = None
+            else:
+                payload_keys = []
+                for key in observation:
+                    if key not in (
+                        "now_ms",
+                        "cycle_token",
+                        "run_motion",
+                        "assistant_feedback",
+                    ):
+                        payload_keys.append(key)
+                if not payload_keys:
+                    prepared_observation = None
+                elif len(payload_keys) == len(observation):
+                    prepared_observation = observation
+                else:
+                    prepared_observation = {}
+                    for key in payload_keys:
+                        prepared_observation[key] = observation[key]
 
         # 需要执行底座控制时, 先确保运行态 owner 已经装配完成
         if run_motion:
@@ -266,11 +290,8 @@ class MasterApp:
 
         # 把双路视觉输入收口成当前应该使用的一份目标观测
         self.ingress.begin_frame(now_ms=now_ms)
-        if (
-            isinstance(prepared_observation, dict)
-            and "observations" in prepared_observation
-        ):
-            for item in tuple(prepared_observation.get("observations", ())):
+        if observation_items is not None:
+            for item in observation_items:
                 self.ingress.prepare_observation(item, now_ms=now_ms)
         else:
             self.ingress.prepare_observation(prepared_observation, now_ms=now_ms)

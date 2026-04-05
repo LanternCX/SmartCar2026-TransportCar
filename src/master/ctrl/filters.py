@@ -89,15 +89,15 @@ class DualWindowRegressionFilter:
         self.long_window = int(long_window)
         self.short_window = int(short_window)
         self.combine_w = float(combine_w)
-        self.sample_idx = 0
+        self.elapsed_ms = 0.0
         self.long_values = []
         self.short_values = []
 
     @staticmethod
     def _predict(window, next_t):
-        """按窗口内样本做一次线性外推.
+        """根据窗口采样预测下一拍值.
 
-        @brief 长窗和短窗都复用这个计算, 统一预测口径后再由外层做融合。
+        @brief 用最小二乘拟合给长窗和短窗提供统一预测结果。
         """
 
         count = len(window)
@@ -123,14 +123,18 @@ class DualWindowRegressionFilter:
         intercept = (sum_y - (slope * sum_t)) / count
         return (slope * next_t) + intercept
 
-    def update(self, value):
-        """同步推进长短两个窗口并输出融合预测值.
+    def update(self, value, dt_s=None):
+        """推进双窗回归滤波器.
 
-        @brief 短窗负责跟手, 长窗负责稳态, 这里把两者折中成给速度环使用的单路结果。
+        @brief 同时维护长短两个时间窗, 在响应速度和稳态抖动之间折中。
         """
 
-        stamp = float(self.sample_idx * self.tick_ms)
-        self.sample_idx += 1
+        if dt_s is None or float(dt_s) <= 0.0:
+            dt_ms = float(self.tick_ms)
+        else:
+            dt_ms = float(dt_s) * 1000.0
+        self.elapsed_ms += dt_ms
+        stamp = float(self.elapsed_ms)
         pair = (stamp, float(value))
         self.long_values.append(pair)
         self.short_values.append(pair)
@@ -138,7 +142,7 @@ class DualWindowRegressionFilter:
             self.long_values.pop(0)
         if len(self.short_values) > self.short_window:
             self.short_values.pop(0)
-        next_t = float(self.sample_idx * self.tick_ms)
+        next_t = float(self.elapsed_ms + dt_ms)
         long_pred = self._predict(self.long_values, next_t)
         short_pred = self._predict(self.short_values, next_t)
         return (short_pred * self.combine_w) + (long_pred * (1.0 - self.combine_w))
@@ -150,7 +154,7 @@ class SpeedFilterChain:
     def __init__(self, window, max_delta, tick_ms, long_window, short_window):
         self.spike = SpikeMedianFilter(window)
         self.diff = DiffLimitFilter(max_delta)
-        self.reg = DualWindowRegressionFilter(
+        self.tail = DualWindowRegressionFilter(
             tick_ms=tick_ms,
             long_window=long_window,
             short_window=short_window,
@@ -159,12 +163,12 @@ class SpeedFilterChain:
     def update(self, value):
         """按既定顺序执行单路轮速滤波链.
 
-        @brief 先压尖峰、再限差分、最后做回归预测, 保持所有轮位使用一致处理链。
+        @brief 先压尖峰、再限差分、最后做双窗回归, 保持所有轮位使用一致处理链。
         """
 
         filtered = self.spike.update(value)
         filtered = self.diff.update(filtered)
-        return self.reg.update(filtered)
+        return self.tail.update(filtered)
 
 
 def build_speed_filter_chain(
