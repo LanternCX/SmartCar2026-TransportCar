@@ -57,6 +57,15 @@ def test_master_motion_runtime_reads_yaw_stability_params() -> None:
     assert getattr(runtime, "hold_speed_eps") == 0.25
 
 
+def test_master_motion_runtime_builds_dual_window_wheel_filter_tail() -> None:
+    from master.ctrl.filters import DualWindowRegressionFilter
+    from master.motion_runtime import MotionRuntime
+
+    runtime = MotionRuntime()
+
+    assert isinstance(runtime.wheel_filters["m"].tail, DualWindowRegressionFilter)
+
+
 def test_master_motion_runtime_logs_loaded_ident_lookup(monkeypatch) -> None:
     import master.motion_runtime as runtime
 
@@ -84,6 +93,24 @@ def test_master_motion_runtime_logs_loaded_ident_lookup(monkeypatch) -> None:
             "wheel_ident": ident_lookup,
         },
     ) in captured
+
+
+def test_master_motion_runtime_execute_loop_no_longer_traces_each_cycle(
+    monkeypatch,
+) -> None:
+    from master.motion_runtime import MotionRuntime
+
+    runtime = MotionRuntime()
+    calls = {"count": 0}
+
+    monkeypatch.setattr(
+        "master.motion_runtime._trace_control_chain",
+        lambda state: calls.__setitem__("count", calls["count"] + 1),
+    )
+
+    runtime.execute_control_loop(cycle_token=object())
+
+    assert calls["count"] == 0
 
 
 def test_master_motion_runtime_keeps_heading_hold_enabled_by_default() -> None:

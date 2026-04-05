@@ -520,7 +520,6 @@ def run_motion_cycle(state, hw_bundle=None, cycle_token=None):
         applied_target.get("omega", 0.0),
         hw_bundle=hw_bundle,
     )
-    _trace_control_chain(state)
     return {
         "target": dict(state.last_applied_target),
         "heading_est_deg": float(state.heading_deg),
