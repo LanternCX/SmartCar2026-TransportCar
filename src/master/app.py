@@ -114,6 +114,12 @@ class MasterRuntimeLoop:
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
     def _read_assistant_feedback(self):
+        """读取辅车最新状态回包
+
+        @brief 优先复用按行清积压接口, 保证主车决策只消费同拍内最新一条有效状态。
+        @return dict | None
+        """
+
         uart3 = self.uart_bundle["uart3"]
         reader = getattr(uart3, "read_latest_line", None)
         if reader is not None:
@@ -136,6 +142,7 @@ class MasterRuntimeLoop:
         @return dict
         """
 
+        # 先收口辅车最新状态, 避免后续控制决策混入过期回包
         assistant_feedback = self._read_assistant_feedback()
         observations = []
         for uart_name in ("uart6", "uart8"):
@@ -147,6 +154,7 @@ class MasterRuntimeLoop:
             if line:
                 observations.append({"uart": uart_name, "line": line})
 
+        # 把同拍输入装成统一结构后再交给应用层, 保证决策上下文只来自当前这一拍
         step_input = {"now_ms": now_ms, "run_motion": True, "cycle_token": object()}
         if assistant_feedback is not None:
             step_input["assistant_feedback"] = assistant_feedback
