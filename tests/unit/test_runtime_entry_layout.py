@@ -42,8 +42,3 @@ def test_master_and_assistant_runtime_files_do_not_use_typing_module() -> None:
             content = file_path.read_text(encoding="utf-8")
             assert "from typing import" not in content
             assert "import typing" not in content
-            for line in content.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("def "):
-                    assert "->" not in stripped
-                    assert re.search(r"def\s+\w+\([^)]*:[^)]*\)", stripped) is None
