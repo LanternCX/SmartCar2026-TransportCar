@@ -4,8 +4,7 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
     decision = decide_from_observation(
         {
             "control_seq": 4,
-            "camera_id": "cam_a",
-            "target": "red",
+            "selected_target": "tracked",
             "valid": 1,
             "phase": "TRACKING",
             "err_x": 0.1,
@@ -13,7 +12,7 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
         }
     )
 
-    assert decision.selected_target == "red"
+    assert decision.selected_target == "tracked"
     assert decision.phase == "TRACKING"
     assert decision.self_target == {"kind": "hold"}
     assert decision.assistant_target == {"valid": 1, "dx": 0.1, "dy": -0.05}
@@ -23,12 +22,17 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
 def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
     from master.vision.decision import decide_from_observation
 
-    decision = decide_from_observation({"control_seq": 3, "valid": 0})
+    decision = decide_from_observation(
+        {"control_seq": 3, "valid": 0, "source_status": "invalid"}
+    )
 
     assert decision.selected_target == "idle"
     assert decision.self_target == {"kind": "hold"}
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert decision.assistant_command == "follow=1,seq=3,valid=0,dx=0.000,dy=0.000"
+    assert (
+        decision.assistant_command
+        == "follow=1,seq=3,valid=0,dx=0.000,dy=0.000,reason=parse_invalid"
+    )
 
 
 def test_decision_outputs_zero_when_report_is_stale() -> None:
@@ -40,7 +44,10 @@ def test_decision_outputs_zero_when_report_is_stale() -> None:
 
     assert decision.phase == "MARKER_MISSING"
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert decision.assistant_command == "follow=1,seq=4,valid=0,dx=0.000,dy=0.000"
+    assert (
+        decision.assistant_command
+        == "follow=1,seq=4,valid=0,dx=0.000,dy=0.000,reason=stale"
+    )
 
 
 def test_decision_holds_inside_center_deadzone() -> None:
@@ -58,7 +65,10 @@ def test_decision_holds_inside_center_deadzone() -> None:
 
     assert decision.phase == "CENTER_HOLD"
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert decision.assistant_command == "follow=1,seq=6,valid=0,dx=0.000,dy=0.000"
+    assert (
+        decision.assistant_command
+        == "follow=1,seq=6,valid=0,dx=0.000,dy=0.000,reason=center_hold"
+    )
 
 
 def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
@@ -67,8 +77,7 @@ def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
     decision = decide_from_observation(
         {
             "control_seq": 7,
-            "camera_id": "cam_a",
-            "target": "blue",
+            "selected_target": "tracked",
             "valid": 1,
             "fresh": 1,
             "has_new_input": 0,
@@ -79,12 +88,12 @@ def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
     )
 
     assert decision.phase == "TRACKING"
-    assert decision.selected_target == "blue"
+    assert decision.selected_target == "tracked"
     assert decision.assistant_target == {"valid": 1, "dx": 12.0, "dy": -6.0}
     assert decision.assistant_command == "follow=1,seq=7,valid=1,dx=12.000,dy=-6.000"
     assert decision.assistant_state == {
         "phase": "TRACKING",
-        "selected_target": "blue",
+        "selected_target": "tracked",
         "target_valid": 1,
         "target_fresh": 1,
     }

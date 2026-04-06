@@ -298,73 +298,71 @@ state=1,state_label=BUSY,last_seq=3002,follow_active=1
 
 - 主方向: `OpenArt -> RT1021`
 - RT1021 通过 `UART6` 与 `UART8` 分别接收两个正交 OpenArt 的持续回传
-- 当前专项方案不再使用 `?frame=<camera_id>` 这类轮询查询作为主线前提
+- 当前专项方案不再使用旧轮询查询作为主线前提
 - 视觉链路传递的是“目标误差”, 不是“离散动作命令”
 
 ### 4.3 持续回传格式
 
-当前专项方案中, 每个 OpenArt 持续发送单行结构化文本:
+当前专项方案中, 每个 OpenArt 持续发送单行最小文本:
 
 ```text
-vision=1,camera_id=<camera_id>,seq=<seq>,valid=<0|1>,target=<target>,err_x=<ex>,err_y=<ey>,bbox_left=<l>,bbox_top=<t>,bbox_right=<r>,bbox_bottom=<b>
+v=1,s=<seq>,x=<x>,y=<y>
+```
+
+无目标时固定发送:
+
+```text
+v=0,s=<seq>
 ```
 
 字段语义:
 
 | 字段 | 含义 | 单位 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `vision` | 视觉报文标记 | 推荐 `1` | 用于让接收侧快速识别视觉上报 |
-| `camera_id` | 当前 OpenArt 标识 | 文本 | 例如 `cam_a`、`cam_b` |
-| `seq` | 递增序号 | 整数 | 同一路视觉链路内单调递增 |
-| `valid` | 当前是否检测到目标 | `0/1` | `0` 表示本拍无有效目标 |
-| `target` | 当前色标标签 | 文本 | 例如 `red`、`blue`；无目标时建议 `none` |
-| `err_x` | 目标相对目标点的横向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
-| `err_y` | 目标相对目标点的纵向误差 | 位置量 | 由 OpenArt 侧计算, 供主控直接进入 P 环 |
-| `bbox_left` | 识别框左边界 | 像素 | `valid=0` 时可省略 |
-| `bbox_top` | 识别框上边界 | 像素 | `valid=0` 时可省略 |
-| `bbox_right` | 识别框右边界 | 像素 | `valid=0` 时可省略 |
-| `bbox_bottom` | 识别框下边界 | 像素 | `valid=0` 时可省略 |
+| `v` | 当前帧是否存在有效目标 | `0/1` | `v=1` 表示当前帧存在有效目标, `v=0` 表示当前帧无有效目标 |
+| `s` | 递增序号 | 整数 | 同一路视觉链路内单调递增 |
+| `x` | 横向偏差 | 像素 | `x` 表示目标中心相对画面中心的横向像素差值 |
+| `y` | 纵向偏差 | 像素 | `y` 表示目标底边相对当前期望抓取位置的纵向像素差值, 当前阶段默认目标位置为 `60` |
 
 合法示例:
 
 ```text
-vision=1,camera_id=cam_a,seq=101,valid=1,target=red,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
-vision=1,camera_id=cam_b,seq=58,valid=1,target=blue,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
+v=1,s=101,x=-15,y=18
+v=1,s=102,x=6,y=12
 ```
 
 无目标示例:
 
 ```text
-vision=1,camera_id=cam_a,seq=102,valid=0,target=none
+v=0,s=103
 ```
 
 补充说明:
 
-- 当前专项方案中, 目标点与误差都在 OpenArt 侧计算完成后再发送给主控。
-- `err_x` / `err_y` 的主语义是供主车直接做 P 环映射的控制误差, 不是原始图像像素差。
-- `bbox_*` 主要用于联调观察与必要的视觉侧留证, 不是主控做误差计算的唯一输入前提。
-- `err_x > 0` 固定表示应朝车体系 `x+` 方向修正, `err_y > 0` 固定表示应朝车体系 `y+` 方向修正。
+- `v=1` 时必须同时携带 `x` 和 `y`。
+- `v=0` 时不发送 `x` 和 `y`。
+- `x > 0` 表示目标在画面中心右侧, `x < 0` 表示目标在画面中心左侧。
+- `y > 0` 表示目标底边超过期望抓取位置, `y < 0` 表示目标底边尚未到达期望抓取位置。
+- `y=0` 表示目标已到达当前设定抓取距离。
 
 ### 4.4 不会被当作有效视觉上报的情况
 
 以下消息不会被当作当前专项方案的有效视觉上报:
 
 - 来源不是 `UART6` 或 `UART8`
-- 缺少 `vision=1`
-- 缺少 `camera_id`、`seq` 或 `valid`
-- `valid=1` 但缺少 `target`
-- `valid=1` 但缺少 `err_x` 或 `err_y`
+- 缺少 `v` 或缺少 `s`
+- `v=1` 但缺少 `x` 或 `y`
+- `v=0` 但仍携带 `x` 或 `y`
 - 任一数值字段不是数字
 - 同一条消息出现重复键
-- `valid=1` 且给出了非法 bbox, 如 `bbox_right <= bbox_left` 或 `bbox_bottom <= bbox_top`
-- 沿用旧轮询协议 `?frame=<camera_id>`、`frame_end=1` 或旧 `x,y` 载荷作为当前主线输入
+- 沿用旧长报文字段作为正式输入
 
 ### 4.5 RT1021 对持续视觉上报的消费规则
 
 - RT1021 分别维护来自 `UART6` 与 `UART8` 的最近有效视觉上报
-- 每一路视觉链路按 `seq` 更新, 用于丢弃明显倒退或重复的旧包
-- `valid=0` 表示该路当前无有效目标, 不应被误解为位置控制量归零命令
-- 主车收到 `err_x` / `err_y` 后, 直接以 P 环映射到位置式控制量
+- 每一路视觉链路按 `s` 更新, 用于丢弃明显倒退或重复的旧包
+- `v=0` 表示该路当前无有效目标, 不应被误解为位置控制量归零命令
+- 主车收到 `x` / `y` 后, 直接以当前主线语义进入后续控制映射
 - 当前专项方案下, 视觉输入链不再依赖轮询节拍、批次结束标记或单次查询多条响应语义
 
 ### 4.6 视觉状态诊断接口
@@ -412,7 +410,7 @@ CENTER_HOLD
 
 当前专项方案的默认交互方式如下:
 
-1. 两个 OpenArt 分别通过独立视觉链路持续回传 `vision=1,...` 报文
+1. 两个 OpenArt 分别通过独立视觉链路持续回传最小视觉文本报文
 2. 主车分别消费 `UART6` 与 `UART8` 上的最新有效误差
 3. 主车对视觉误差做 P 环映射, 生成高频位置式控制量
 4. 主车通过 `UART3` 向辅车持续发送 `follow=1,...` 报文
@@ -421,7 +419,7 @@ CENTER_HOLD
 一个最小示例:
 
 ```text
-vision=1,camera_id=cam_a,seq=101,valid=1,target=red,err_x=-0.035,err_y=0.120,bbox_left=100,bbox_top=20,bbox_right=140,bbox_bottom=90
-vision=1,camera_id=cam_b,seq=58,valid=1,target=blue,err_x=-0.012,err_y=0.105,bbox_left=110,bbox_top=18,bbox_right=150,bbox_bottom=88
+v=1,s=101,x=-15,y=18
+v=1,s=58,x=6,y=12
 follow=1,seq=3001,valid=1,dx=-0.018,dy=0.072
 ```

@@ -29,7 +29,7 @@ def build_hold_command():
     return "HOLD"
 
 
-def build_follow_command(seq, valid, dx, dy):
+def build_follow_command(seq, valid, dx, dy, reason=""):
     """构造主车到辅车的高频跟随报文
 
     @brief 按约定格式生成 `follow=1,...` 文本
@@ -37,15 +37,20 @@ def build_follow_command(seq, valid, dx, dy):
     @param valid 当前拍是否有有效目标
     @param dx 车体系横向位置式控制量
     @param dy 车体系纵向位置式控制量
+    @param reason 当前拍无效时的调试原因, 仅 `valid=0` 时追加到报文尾部
     @return str
     """
 
-    return "follow=1,seq=%d,valid=%d,dx=%.3f,dy=%.3f" % (
+    command = "follow=1,seq=%d,valid=%d,dx=%.3f,dy=%.3f" % (
         int(seq),
         1 if int(valid) else 0,
         float(dx),
         float(dy),
     )
+    reason_text = str(reason).strip()
+    if int(valid) != 1 and reason_text:
+        command += ",reason=%s" % reason_text
+    return command
 
 
 def parse_assistant_state(line):

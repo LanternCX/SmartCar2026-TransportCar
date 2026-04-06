@@ -33,6 +33,7 @@ if _USE_DIRECT_IMPORTS:
     from protocol import parse_assistant_state
     from vision.decision import decide_from_observation
     from vision.ingress import VisionIngress
+    from vision.parser import parse_vision_line
     from vision.state_machine import MarkerStateMachine
 else:
     from .hw.encoders import build_encoder_bundle
@@ -49,6 +50,7 @@ else:
     from .protocol import parse_assistant_state
     from .vision.decision import decide_from_observation
     from .vision.ingress import VisionIngress
+    from .vision.parser import parse_vision_line
     from .vision.state_machine import MarkerStateMachine
 
 
@@ -134,6 +136,14 @@ class MasterRuntimeLoop:
             if parsed is not None:
                 latest_state = parsed
 
+    @staticmethod
+    def _keep_valid_vision_line(line):
+        try:
+            parse_vision_line(line)
+        except (TypeError, ValueError):
+            return None
+        return line
+
     def step(self, now_ms):
         """推进一拍主车运行循环
 
@@ -149,8 +159,11 @@ class MasterRuntimeLoop:
             uart_port = self.uart_bundle[uart_name]
             reader = getattr(uart_port, "read_latest_line", None)
             if reader is None:
-                reader = uart_port.read_line
-            line = reader()
+                line = uart_port.read_line()
+                if line is not None:
+                    line = self._keep_valid_vision_line(line)
+            else:
+                line = reader(transform=self._keep_valid_vision_line)
             if line:
                 observations.append({"uart": uart_name, "line": line})
 
@@ -341,6 +354,14 @@ class MasterApp:
             active_uart = str(
                 selected_observation.get("configured_uart", self.ingress.active_uart)
             )
+        assistant_debug_line = ""
+        if str(selected_observation.get("source_status", "")).strip() == "invalid":
+            raw_line = str(selected_observation.get("debug_raw_line", "")).strip()
+            if raw_line:
+                assistant_debug_line = "debug_parse_invalid,uart=%s,raw=%s" % (
+                    active_uart,
+                    raw_line,
+                )
 
         # 对外结果只保留 review 和联调需要的关键骨架字段
         self.last_result = {
@@ -352,6 +373,7 @@ class MasterApp:
             "self_base_state": dict(self._last_self_base_state),
             "assistant_state": decision.assistant_state,
             "assistant_feedback": self._last_assistant_feedback,
+            "assistant_debug_line": assistant_debug_line,
             "assistant_command": self.last_assistant_command,
         }
         return dict(self.last_result)

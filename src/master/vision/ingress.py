@@ -73,14 +73,20 @@ class VisionIngress:
         _ = uart_name
         return float(err_x), float(err_y)
 
+    def _resolve_selected_target(self, observation):
+        if int(observation.get("valid", 0)) != 1:
+            return "idle"
+        selected_target = str(observation.get("selected_target", "")).strip()
+        if selected_target:
+            return selected_target
+        return "tracked"
+
     def _build_idle_observation(self, source_status):
         return {
             "configured_uart": self.active_uart,
             "source_uart": "",
             "reserved_uarts": self.reserved_uarts,
             "source_status": str(source_status),
-            "camera_id": "",
-            "target": "idle",
             "selected_target": "idle",
             "vision_seq": 0,
             "valid": 0,
@@ -95,7 +101,7 @@ class VisionIngress:
 
     def _mark_target_state(self, observation, now_ms, has_new_input):
         marked = dict(observation)
-        marked.setdefault("selected_target", str(marked.get("target", "idle")))
+        marked["selected_target"] = self._resolve_selected_target(marked)
         marked.setdefault("last_seen_ms", int(now_ms))
         is_valid = int(marked.get("valid", 0)) == 1
         is_fresh = False
@@ -110,6 +116,15 @@ class VisionIngress:
         marked["target_age_ms"] = int(age_ms)
         marked["control_valid"] = 1 if is_valid and is_fresh else 0
         return marked
+
+    def _accept_uart_update(self, uart_name, vision_seq):
+        current = self._latest_by_uart.get(uart_name)
+        if current is None:
+            return True
+        current_seq = current.get("vision_seq")
+        if current_seq is None:
+            return True
+        return int(vision_seq) > int(current_seq)
 
     def prepare_observation(self, observation=None, now_ms=None):
         """把原始串口输入整理成统一 observation.
@@ -138,20 +153,13 @@ class VisionIngress:
 
         line = prepared.get("line")
         if line is None:
-            if len(prepared) == 1 and "uart" in prepared:
+            if tuple(sorted(prepared.keys())) in (("now_ms", "uart"), ("uart",)):
                 idle = self._build_idle_observation("missing")
                 idle["source_uart"] = uart_name
                 self.current_target = self._mark_target_state(idle, frame_now_ms, False)
                 return dict(self.current_target)
             self._frame_has_input = True
             self._mark_uart_updated(uart_name)
-            if not str(prepared.get("target", "")).strip():
-                idle = self._build_idle_observation("invalid")
-                idle["source_uart"] = uart_name
-                idle["last_seen_ms"] = frame_now_ms
-                self._latest_by_uart[uart_name] = dict(idle)
-                self.current_target = self._mark_target_state(idle, frame_now_ms, True)
-                return dict(self.current_target)
             prepared["err_x"], prepared["err_y"] = self._normalize_marker_error(
                 uart_name, prepared.get("err_x", 0.0), prepared.get("err_y", 0.0)
             )
@@ -175,8 +183,17 @@ class VisionIngress:
             idle = self._build_idle_observation("invalid")
             idle["source_uart"] = uart_name
             idle["last_seen_ms"] = frame_now_ms
+            idle["debug_raw_line"] = str(line).strip()
             self._latest_by_uart[uart_name] = dict(idle)
             self.current_target = self._mark_target_state(idle, frame_now_ms, True)
+            return dict(self.current_target)
+
+        if not self._accept_uart_update(uart_name, parsed["vision_seq"]):
+            current = self._latest_by_uart.get(uart_name)
+            if current is None:
+                current = self._build_idle_observation("missing")
+                current["source_uart"] = uart_name
+            self.current_target = self._mark_target_state(current, frame_now_ms, False)
             return dict(self.current_target)
 
         self.latest_vision_seq = int(parsed["vision_seq"])
@@ -224,14 +241,33 @@ class VisionIngress:
                     continue
                 if (
                     marked_seen_ms == best_seen_ms
-                    and str(marked.get("source_uart", "")) == "uart6"
+                    and str(marked.get("source_uart", "")) == self.active_uart
                 ):
                     best_item = marked
 
         if best_item is None:
             source_status = "stale" if self._latest_by_uart else "missing"
+            debug_raw_line = ""
+            debug_uart = ""
+            for uart_name in self._frame_updated_uarts:
+                item = self._latest_by_uart.get(uart_name)
+                if item is None:
+                    continue
+                item_status = str(item.get("source_status", "")).strip()
+                if item_status and item_status != "active":
+                    source_status = item_status
+                    debug_raw_line = str(item.get("debug_raw_line", "")).strip()
+                    debug_uart = str(item.get("source_uart", uart_name)).strip()
+                    break
+                if int(item.get("valid", 0)) != 1:
+                    source_status = "active"
+                    break
+            idle = self._build_idle_observation(source_status)
+            if debug_raw_line:
+                idle["debug_raw_line"] = debug_raw_line
+                idle["source_uart"] = debug_uart
             self.current_target = self._mark_target_state(
-                self._build_idle_observation(source_status),
+                idle,
                 frame_now_ms,
                 False,
             )

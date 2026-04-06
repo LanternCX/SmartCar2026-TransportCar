@@ -39,25 +39,6 @@ def pairs_to_map(pairs):
     return payload
 
 
-def parse_bbox(payload):
-    """从协议映射中提取并校验框坐标.
-
-    @brief 只有框字段齐全时才输出结果, 缺字段则保持为空字典让上层继续按最小观测处理。
-    """
-
-    names = ("bbox_left", "bbox_top", "bbox_right", "bbox_bottom")
-    if not all(name in payload for name in names):
-        return {}
-    bbox = {}
-    for name in names:
-        bbox[name] = float(payload[name])
-    if bbox["bbox_right"] <= bbox["bbox_left"]:
-        raise ValueError("invalid_bbox")
-    if bbox["bbox_bottom"] <= bbox["bbox_top"]:
-        raise ValueError("invalid_bbox")
-    return bbox
-
-
 def parse_vision_line(line):
     """解析一整行视觉协议文本.
 
@@ -65,19 +46,28 @@ def parse_vision_line(line):
     """
 
     payload = pairs_to_map(split_pairs(line))
-    if payload.get("vision") != "1":
-        raise ValueError("unsupported_vision_payload")
-    valid = int(payload["valid"])
+    allowed_keys = ("v", "s", "x", "y")
+    for key in payload:
+        if key not in allowed_keys:
+            raise ValueError("unexpected_key")
+    if "s" not in payload:
+        raise ValueError("missing_seq")
+    if "v" not in payload:
+        raise ValueError("missing_valid_flag")
+    valid = int(payload["v"])
+    if valid not in (0, 1):
+        raise ValueError("invalid_valid_flag")
     observation = {
-        "camera_id": str(payload["camera_id"]),
-        "vision_seq": int(payload["seq"]),
-        "valid": 1 if valid else 0,
-        "target": str(payload["target"]),
+        "vision_seq": int(payload["s"]),
+        "valid": valid,
         "err_x": 0.0,
         "err_y": 0.0,
     }
-    if valid:
-        observation["err_x"] = float(payload["err_x"])
-        observation["err_y"] = float(payload["err_y"])
-        observation.update(parse_bbox(payload))
+    if valid == 1:
+        if "x" not in payload or "y" not in payload:
+            raise ValueError("missing_xy")
+        observation["err_x"] = float(payload["x"])
+        observation["err_y"] = float(payload["y"])
+    elif "x" in payload or "y" in payload:
+        raise ValueError("unexpected_xy_for_invalid_frame")
     return observation

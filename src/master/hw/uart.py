@@ -21,6 +21,10 @@ UART_READ_CHUNKS = {
     "uart6": 96,
     "uart8": 96,
 }
+UART_READ_BUDGET_CHUNKS = {
+    "uart6": 2,
+    "uart8": 2,
+}
 
 
 class UartPort:
@@ -38,6 +42,7 @@ class UartPort:
         self._discard_until_newline = False
         self._line_limit = UART_LINE_LIMITS.get(self.name)
         self._read_chunk_size = UART_READ_CHUNKS.get(self.name)
+        self._read_budget_chunks = UART_READ_BUDGET_CHUNKS.get(self.name)
 
     @staticmethod
     def _find_newline(payload):
@@ -175,14 +180,21 @@ class UartPort:
                 break
             if transform is None:
                 latest = line
-            else:
-                transformed = transform(line)
-                if transformed is not None:
-                    latest = transformed
+                continue
+            transformed = transform(line)
+            if transformed is not None:
+                latest = transformed
+        read_count = 0
         while True:
+            if (
+                self._read_budget_chunks is not None
+                and read_count >= self._read_budget_chunks
+            ):
+                break
             payload = self.read()
             if payload is None:
                 break
+            read_count += 1
             self._append_payload(payload)
             while True:
                 line = self._pop_ready_line()
@@ -190,10 +202,10 @@ class UartPort:
                     break
                 if transform is None:
                     latest = line
-                else:
-                    transformed = transform(line)
-                    if transformed is not None:
-                        latest = transformed
+                    continue
+                transformed = transform(line)
+                if transformed is not None:
+                    latest = transformed
         return latest
 
     def write(self, payload):
