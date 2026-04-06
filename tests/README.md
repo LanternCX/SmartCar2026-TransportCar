@@ -2,16 +2,13 @@
 
 本仓库采用分层 TDD 验证模型，在不破坏运行时代码结构的前提下，把主机侧快回归和板级留证分开管理。
 
-- `tests/unit/`：纯逻辑与确定性模块测试
-- `tests/contract/`：基于 fake context / fake UART 的协议与行为契约测试
+- `tests/unit/`：主机侧快速回归测试
 - `tests/hil/`：真实板级验证场景、观测脚本和验收记录
 
 ## 本地命令
 
 ```bash
 python3 -m pytest tests/unit -q
-python3 -m pytest tests/contract -q
-python3 -m pytest tests/unit tests/contract -q
 ```
 
 ## 设备阶段

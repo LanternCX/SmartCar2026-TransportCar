@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  unit-and-contract:
+  unit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,5 +24,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest
 
-      - name: Run unit and contract tests
-        run: python -m pytest tests/unit tests/contract -q
+      - name: Run unit tests
+        run: python -m pytest tests/unit -q
