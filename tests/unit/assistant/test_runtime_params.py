@@ -74,7 +74,7 @@ def test_assistant_runtime_uses_runtime_param_follow_timeout() -> None:
     finally:
         runtime_params.FOLLOW_TIMEOUT_MS = old_timeout
 
-    assert reply == "TIMEOUT,last_seq=8"
+    assert reply == ""
 
 
 def test_assistant_runtime_default_chassis_timeout_reads_runtime_params() -> None:

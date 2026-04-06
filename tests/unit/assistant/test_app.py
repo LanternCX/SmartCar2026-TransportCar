@@ -648,7 +648,9 @@ def test_assistant_app_maps_auxiliary_entries_to_ack_with_last_seq() -> None:
     assert reset_reply == "ACK,last_seq=8"
 
 
-def test_assistant_app_keeps_follow_phase_silent_but_reports_timeout() -> None:
+def test_assistant_app_replies_to_follow_during_debug_and_keeps_timeout_silent() -> (
+    None
+):
     from assistant.app import AssistantApp
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
@@ -657,12 +659,12 @@ def test_assistant_app_keeps_follow_phase_silent_but_reports_timeout() -> None:
     busy_tick_reply = app.tick(now_ms=50)
     timeout_reply = app.tick(now_ms=120)
 
-    assert follow_reply == ""
+    assert follow_reply == "OK,seq=8,valid=1"
     assert busy_tick_reply == ""
-    assert timeout_reply == "TIMEOUT,last_seq=8"
+    assert timeout_reply == ""
 
 
-def test_assistant_app_reports_timeout_only_once_until_state_query() -> None:
+def test_assistant_app_exposes_timeout_only_via_state_query() -> None:
     from assistant.app import AssistantApp
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
@@ -673,7 +675,7 @@ def test_assistant_app_reports_timeout_only_once_until_state_query() -> None:
     repeated_timeout_reply = app.tick(now_ms=130)
     state_reply = app.handle_line("STATE?", now_ms=131)
 
-    assert first_timeout_reply == "TIMEOUT,last_seq=8"
+    assert first_timeout_reply == ""
     assert repeated_timeout_reply == ""
     assert state_reply.startswith(
         "state=1,state_label=TIMEOUT,last_seq=8,follow_active=0,"
@@ -692,9 +694,24 @@ def test_assistant_app_returns_err_for_malformed_or_unknown_packets() -> None:
     unknown_reply = app.handle_line("WHATEVER", now_ms=11)
     follow_reply = app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=12)
 
-    assert malformed_reply == "ERR"
-    assert unknown_reply == "ERR"
-    assert follow_reply == ""
+    assert (
+        malformed_reply
+        == "ERR,reason=invalid_literal_for_int,raw=follow=1,seq=oops,valid=1,dx=0.10,dy=0.00"
+    )
+    assert unknown_reply == "ERR,reason=unsupported_command,raw=WHATEVER"
+    assert follow_reply == "OK,seq=8,valid=1"
+
+
+def test_assistant_app_returns_err_for_follow_packet_missing_valid_field() -> None:
+    from assistant.app import AssistantApp
+
+    app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
+
+    reply = app.handle_line("follow=1,seq=8,dx=0.10,dy=0.00", now_ms=12)
+
+    assert (
+        reply == "ERR,reason=missing_required_field,raw=follow=1,seq=8,dx=0.10,dy=0.00"
+    )
 
 
 def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
@@ -706,7 +723,7 @@ def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
     move_reply = app.handle_line("MOVE 0.1 0.2 15", now_ms=11)
 
     assert vel_reply == "ACK,last_seq=0"
-    assert move_reply == "ERR"
+    assert move_reply == "ERR,reason=unsupported_command,raw=MOVE 0.1 0.2 15"
 
 
 def test_assistant_app_routes_through_procedural_runtime_entries(monkeypatch) -> None:

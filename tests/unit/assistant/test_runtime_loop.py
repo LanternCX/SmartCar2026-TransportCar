@@ -53,7 +53,7 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
     loop.step(now_ms=200)
 
     assert any(motor.last_duty is not None for motor in motors.values())
-    assert uart3.writes == ["TIMEOUT,last_seq=8"]
+    assert uart3.writes == ["OK,seq=8,valid=1"]
 
 
 def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
@@ -135,7 +135,7 @@ def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
         "r": -33,
     }
     assert loop.app.runtime_state.motor_duties == {"m": -11, "l": 22, "r": -33}
-    assert uart3.writes == []
+    assert uart3.writes == ["OK,seq=8,valid=1"]
 
 
 def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
@@ -274,3 +274,122 @@ def test_assistant_uart_read_line_buffers_partial_and_returns_single_lines() -> 
     assert port.read_line() is None
     assert port.read_line() == "follow=1,seq=1,valid=1,dx=1.0,dy=0.0"
     assert port.read_line() == "STATE?"
+
+
+def test_assistant_uart_read_latest_line_prefers_newest_complete_command() -> None:
+    from assistant.hw.uart import UartPort
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"follow=1,seq=1,valid=1,dx=0.1,dy=0.0\r\n",
+                b"follow=1,seq=2,valid=1,dx=0.2,dy=0.0\r\n",
+            ]
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", FakeDevice())
+
+    assert port.read_latest_line() == "follow=1,seq=2,valid=1,dx=0.2,dy=0.0"
+
+
+def test_assistant_uart_read_latest_line_drains_fragmented_backlog_in_one_call() -> (
+    None
+):
+    from assistant.hw.uart import UartPort
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"follow=1,seq=1,va",
+                b"lid=1,dx=0.1,dy=0.0\r\n",
+                b"follow=1,seq=2,va",
+                b"lid=1,dx=0.2,dy=0.0\r\n",
+            ]
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", FakeDevice())
+
+    assert port.read_latest_line() == "follow=1,seq=2,valid=1,dx=0.2,dy=0.0"
+
+
+def test_assistant_uart_drops_overlong_partial_line_and_resyncs() -> None:
+    from assistant.hw.uart import UartPort
+
+    valid_line = "follow=1,seq=3,valid=1,dx=0.3,dy=0.0"
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"x" * 257,
+                b"overflow-tail\r\n" + valid_line.encode("utf-8") + b"\r\n",
+            ]
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", FakeDevice())
+
+    assert port.read_line() is None
+    assert port.read_line() == valid_line
+
+
+def test_assistant_uart_read_latest_line_limits_each_read_chunk() -> None:
+    from assistant.hw.uart import UartPort
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.buffer = bytearray(
+                b"follow=1,seq=1,valid=1,dx=0.1,dy=0.0\r\n"
+                b"follow=1,seq=2,valid=1,dx=0.2,dy=0.0\r\n"
+            )
+            self.read_sizes = []
+
+        def any(self) -> int:
+            return len(self.buffer)
+
+        def read(self, size=None):
+            self.read_sizes.append(size)
+            if not self.buffer:
+                return None
+            if size is None:
+                size = len(self.buffer)
+            chunk = bytes(self.buffer[:size])
+            del self.buffer[:size]
+            return chunk
+
+    device = FakeDevice()
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", device)
+
+    port.read_latest_line()
+
+    assert device.read_sizes
+    assert max(device.read_sizes) <= 96

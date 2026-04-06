@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 UART 类接口
 # 使用 RT1021-MicroPython 核心板
 # 搭配 USB 转 TTL 模块进行 UART 通信测试
@@ -18,9 +17,9 @@ time.sleep_ms(100)
 
 # 核心板上 C4 是 LED
 # 学习板上 D9  对应二号拨码开关
-led     = Pin('C4' , Pin.OUT, value = True)
-switch2 = Pin('D9' , Pin.IN , pull = Pin.PULL_UP_47K)
-state2  = switch2.value()
+led = Pin("C4", Pin.OUT, value=True)
+switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
+state2 = switch2.value()
 
 # ------------------------------------------------------------------------------
 #   构造接口 标准 MicroPython 的 machine.UART 模块
@@ -36,6 +35,7 @@ state2  = switch2.value()
 # | LPUART4 | id = 3  | D0   | D1  |
 # | LPUART6 | id = 5  | D20  | D21 |
 # | LPUART8 | id = 7  | D22  | D23 |
+uart3 = UART(3)
 uart6 = UART(5)
 uart8 = UART(7)
 
@@ -62,9 +62,11 @@ uart8 = UART(7)
 #       return          返回内容    |   返回读取到的内容 为字节数组形式
 # ------------------------------------------------------------------------------
 
+uart3.init(460800)
 uart6.init(460800)
 uart8.init(460800)
 
+uart3.write("Test.\r\n")
 uart6.write("Test.\r\n")
 uart8.write("Test.\r\n")
 buf_len = 0
@@ -73,27 +75,34 @@ while True:
     # 每 500ms 读取一次 将数据再原样发回
     time.sleep_ms(500)
     # 翻转 C4 LED 电平
-    led .toggle()
-    
+    led.toggle()
+
+    buf_len = uart3.any()
+    if buf_len:
+        buf = uart3.read(buf_len)
+        print("uart3 buf_len = %6d" % (buf_len))
+        uart3.write("uart3:")
+        uart3.write(buf)
+
     buf_len = uart6.any()
-    if(buf_len):
+    if buf_len:
         buf = uart6.read(buf_len)
-        print("uart6 buf_len = %6d"%(buf_len))
+        print("uart6 buf_len = %6d" % (buf_len))
         uart6.write("uart6:")
         uart6.write(buf)
 
     buf_len = uart8.any()
-    if(buf_len):
+    if buf_len:
         buf = uart8.read(buf_len)
-        print("uart8 buf_len = %6d"%(buf_len))
+        print("uart8 buf_len = %6d" % (buf_len))
         uart8.write("uart8:")
         uart8.write(buf)
-    
+
     # 如果拨码开关打开 对应引脚拉低 就退出循环
     # 这么做是为了防止写错代码导致异常 有一个退出的手段
     if switch2.value() != state2:
         print("Test program stop.")
         break
-    
+
     # 回收内存
     gc.collect()

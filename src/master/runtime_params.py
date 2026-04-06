@@ -8,8 +8,8 @@
 
 # 视觉跟随阶段使用的目标有效期与中心死区, 单位分别为 ms 和 px
 FOLLOW_TIMEOUT_MS = 150
-FOLLOW_CONTROL_KP_X = 1.0
-FOLLOW_CONTROL_KP_Y = 1.0
+FOLLOW_CONTROL_KP_X = 0.01
+FOLLOW_CONTROL_KP_Y = 0.01
 FOLLOW_CENTER_DEADZONE_PX = 8.0
 
 # 主循环节拍与速度估计窗口配置

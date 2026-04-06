@@ -103,6 +103,12 @@ def _split_pairs(line):
     return payload
 
 
+def _require_fields(payload, *required_keys):
+    for key in required_keys:
+        if key not in payload:
+            raise ValueError("missing_required_field")
+
+
 def parse_command(line):
     """解析辅车协议命令
 
@@ -115,6 +121,7 @@ def parse_command(line):
     if "=" in str(line):
         payload = _split_pairs(line)
         if payload.get("follow") == "1":
+            _require_fields(payload, "seq", "valid")
             return Command(
                 kind="follow",
                 seq=int(payload["seq"]),

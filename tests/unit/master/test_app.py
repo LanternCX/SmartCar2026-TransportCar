@@ -358,7 +358,7 @@ def test_master_app_only_drives_assistant_in_current_stage() -> None:
 
     assert result["self_target"] == {"kind": "hold"}
     assert result["selected_target"] == "tracked"
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=12.000,dy=-6.000"
+    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"
 
@@ -397,7 +397,7 @@ def test_master_app_routes_current_selected_target_before_state_machine() -> Non
 
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=9.000,dy=0.000"
+    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.027,dy=0.000"
 
 
 def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
@@ -466,7 +466,7 @@ def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
 
     result = app.step({"now_ms": 1100})
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
+    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
@@ -492,7 +492,7 @@ def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
 
     result = app.step({"uart": "uart6", "now_ms": 1100})
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
+    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
@@ -687,7 +687,7 @@ def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> 
         }
     )
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=12.000,dy=-6.000"
+    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"

@@ -31,6 +31,42 @@ else:
     from .protocol import parse_command
 
 
+def _normalize_error_reason(error):
+    reason = str(error).strip()
+    if not reason:
+        return "unknown"
+    lowered = reason.lower()
+    if "invalid literal for int" in lowered:
+        return "invalid_literal_for_int"
+    if "invalid literal for float" in lowered:
+        return "invalid_literal_for_float"
+    sanitized = []
+    for char in lowered:
+        if ("a" <= char <= "z") or ("0" <= char <= "9"):
+            sanitized.append(char)
+            continue
+        sanitized.append("_")
+    compact = "".join(sanitized).strip("_")
+    while "__" in compact:
+        compact = compact.replace("__", "_")
+    return compact or "unknown"
+
+
+def _render_error_reply(reason):
+    return "ERR,reason=%s" % str(reason)
+
+
+def _render_error_reply_with_raw(reason, raw_line):
+    raw_text = str(raw_line).strip()
+    if not raw_text:
+        return _render_error_reply(reason)
+    return "ERR,reason=%s,raw=%s" % (str(reason), raw_text)
+
+
+def _render_follow_reply(command):
+    return "OK,seq=%d,valid=%d" % (int(command.seq), int(command.valid))
+
+
 def build_hw_bundle():
     """构造辅车硬件装配入口.
 
@@ -92,8 +128,12 @@ class AssistantRuntimeLoop:
         cycle_token = object()
         uart3 = self.hw_bundle["uart"]["uart3"]
 
-        # 先消费这一轮收到的主车命令, 需要立即回包时直接经 UART3 发回
-        line = uart3.read_line()
+        # 高频跟随链路只消费当前拍里最新完整命令, 避免旧包排队拖慢控制闭环
+        reader = getattr(uart3, "read_latest_line", None)
+        if reader is not None:
+            line = reader()
+        else:
+            line = uart3.read_line()
         if line:
             reply = self.app.handle_line(line, now_ms=now_ms, cycle_token=cycle_token)
             if reply:
@@ -151,8 +191,11 @@ class AssistantApp:
         # 先把文本协议收口成结构化命令, 非法输入统一直接报错
         try:
             command = parse_command(line)
-        except (TypeError, ValueError):
-            return "ERR"
+        except (TypeError, ValueError) as error:
+            return _render_error_reply_with_raw(
+                _normalize_error_reason(error),
+                line,
+            )
 
         # 命令合法后交给运行时执行, 由运行时决定状态变化和底座动作
         reply = apply_runtime_command(
@@ -166,10 +209,15 @@ class AssistantApp:
             self._timeout_reported = False
 
         # 最后按协议类型挑选回包策略, 跟随报文本身不占用串口回包带宽
-        if command.kind == "state_query" or str(reply) == "ERR":
+        if command.kind == "state_query":
             return str(reply)
+        if str(reply) == "ERR":
+            reason = (
+                str(getattr(self.runtime_state, "last_error", "")).strip() or "unknown"
+            )
+            return _render_error_reply_with_raw(reason, line)
         if command.kind == "follow":
-            return ""
+            return _render_follow_reply(command)
         return self._render_ack()
 
     def tick(self, now_ms, cycle_token=None):
@@ -190,8 +238,5 @@ class AssistantApp:
             self._timeout_reported = False
             return ""
         if str(reply) == "DONE" and bool(self.runtime_state.timeout):
-            if self._timeout_reported:
-                return ""
             self._timeout_reported = True
-            return self._render_timeout()
         return ""

@@ -32,8 +32,8 @@ def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
     )
     result = loop.step(now_ms=100)
 
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=12.000,dy=-6.000"
-    assert uart3.writes == ["follow=1,seq=1,valid=1,dx=12.000,dy=-6.000"]
+    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"
+    assert uart3.writes == ["follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"]
 
 
 def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:

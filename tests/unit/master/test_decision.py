@@ -15,8 +15,12 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
     assert decision.selected_target == "tracked"
     assert decision.phase == "TRACKING"
     assert decision.self_target == {"kind": "hold"}
-    assert decision.assistant_target == {"valid": 1, "dx": 0.1, "dy": -0.05}
-    assert decision.assistant_command == "follow=1,seq=4,valid=1,dx=0.100,dy=-0.050"
+    assert decision.assistant_target == {
+        "valid": 1,
+        "dx": 0.00030000000000000003,
+        "dy": -0.00025,
+    }
+    assert decision.assistant_command == "follow=1,seq=4,valid=1,dx=0.000,dy=-0.000"
 
 
 def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
@@ -89,8 +93,12 @@ def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
 
     assert decision.phase == "TRACKING"
     assert decision.selected_target == "tracked"
-    assert decision.assistant_target == {"valid": 1, "dx": 12.0, "dy": -6.0}
-    assert decision.assistant_command == "follow=1,seq=7,valid=1,dx=12.000,dy=-6.000"
+    assert decision.assistant_target == {
+        "valid": 1,
+        "dx": 0.036000000000000004,
+        "dy": -0.03,
+    }
+    assert decision.assistant_command == "follow=1,seq=7,valid=1,dx=0.036,dy=-0.030"
     assert decision.assistant_state == {
         "phase": "TRACKING",
         "selected_target": "tracked",
