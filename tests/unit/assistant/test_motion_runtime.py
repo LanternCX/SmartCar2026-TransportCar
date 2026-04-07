@@ -347,6 +347,36 @@ def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
     assert state.timeout is False
 
 
+def test_motion_runtime_accepts_velocity_mode_without_seq(monkeypatch) -> None:
+    import assistant.motion_runtime as runtime
+
+    state = _new_state(timeout_ms=100)
+
+    monkeypatch.setattr(
+        runtime,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.005),
+            setattr(state, "heading_deg", 0.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    monkeypatch.setitem(
+        apply_runtime_command.__globals__,
+        "update_heading_from_gyro",
+        runtime.update_heading_from_gyro,
+    )
+
+    result = _apply_line(state, "f=1,m=1,x=0.10,y=-0.05", now_ms=1)
+
+    assert result == "BUSY"
+    assert state.follow_active is True
+    assert state.last_seq == 0
+    assert state.state_label == "BUSY"
+    assert state.velocity_command[0] == 0.1
+    assert state.velocity_command[1] == -0.05
+
+
 def test_motion_runtime_discards_duplicate_or_older_follow_packet() -> None:
     state = _new_state(timeout_ms=100)
 

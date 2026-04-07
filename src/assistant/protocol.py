@@ -124,6 +124,15 @@ def parse_command(line):
     if "=" in str(line):
         payload = _split_pairs(line)
         if payload.get("f") == "1":
+            if int(payload.get("m", 0) or 0) == 1:
+                _require_fields(payload, "x", "y")
+                return Command(
+                    kind="follow_velocity",
+                    seq=0,
+                    valid=1,
+                    vx=float(payload["x"]),
+                    vy=float(payload["y"]),
+                )
             _require_fields(payload, "s", "v", "x", "y")
             return Command(
                 kind="follow",

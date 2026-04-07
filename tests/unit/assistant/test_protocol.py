@@ -27,6 +27,17 @@ def test_assistant_protocol_rejects_follow_packet_missing_required_field() -> No
         parse_command("f=1,s=7,x=0.10,y=-0.05")
 
 
+def test_assistant_protocol_parses_velocity_mode_without_seq() -> None:
+    from assistant.protocol import parse_command
+
+    result = parse_command("f=1,m=1,x=0.10,y=-0.05")
+
+    assert result.kind == "follow_velocity"
+    assert result.seq == 0
+    assert result.vx == 0.1
+    assert result.vy == -0.05
+
+
 def test_assistant_protocol_parses_key_value_follow_without_mode_field() -> None:
     from assistant.protocol import parse_command
 

@@ -216,7 +216,7 @@ class AssistantApp:
                 str(getattr(self.runtime_state, "last_error", "")).strip() or "unknown"
             )
             return _render_error_reply_with_raw(reason, line)
-        if command.kind == "follow":
+        if command.kind == "follow" or command.kind == "follow_velocity":
             return _render_follow_reply(command)
         return self._render_ack()
 

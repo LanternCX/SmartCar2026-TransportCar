@@ -586,6 +586,8 @@ def _apply_command(state, command, now_ms, cycle_token=None):
     # 运动相关命令统一经过专门分支, 让安全状态与控制输出保持一致
     if command.kind == "follow":
         return _apply_follow(state, command, now_ms, cycle_token=cycle_token)
+    if command.kind == "follow_velocity":
+        return _apply_velocity(state, command, now_ms, cycle_token=cycle_token)
     if command.kind == "arm":
         _refresh_base_chain(state, cycle_token=cycle_token)
         capture_heading_target(state)

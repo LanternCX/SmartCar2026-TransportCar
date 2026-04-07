@@ -718,6 +718,16 @@ def test_assistant_app_returns_err_for_follow_packet_missing_valid_field() -> No
     assert reply.endswith("raw=f=1,s=8,x=0.10,y=0.00")
 
 
+def test_assistant_app_replies_to_velocity_mode_without_seq() -> None:
+    from assistant.app import AssistantApp
+
+    app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
+
+    reply = app.handle_line("f=1,m=1,x=0.10,y=-0.05", now_ms=12)
+
+    _assert_follow_ack(reply, 0, 1)
+
+
 def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:
     from assistant.app import AssistantApp
 
