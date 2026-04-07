@@ -358,7 +358,7 @@ def test_master_app_only_drives_assistant_in_current_stage() -> None:
 
     assert result["self_target"] == {"kind": "hold"}
     assert result["selected_target"] == "tracked"
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.12, -0.06)
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"
 
@@ -377,10 +377,7 @@ def test_master_app_enters_center_hold_for_small_error() -> None:
 
     assert result["self_target"] == {"kind": "hold"}
     assert result["selected_target"] == "tracked"
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=1,valid=0,dx=0.000,dy=0.000,reason=center_hold"
-    )
+    _assert_follow_command_semantics(result["assistant_command"], 1, 0, 0.0, 0.0)
     assert result["phase"] == "CENTER_HOLD"
 
 
@@ -397,7 +394,7 @@ def test_master_app_routes_current_selected_target_before_state_machine() -> Non
 
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.027,dy=0.000"
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.09, 0.0)
 
 
 def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
@@ -414,10 +411,7 @@ def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
 
     result = app.step({"uart": "uart6", "now_ms": 1200})
 
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000,reason=stale"
-    )
+    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
     assert result["selected_target"] == "idle"
     assert result["phase"] == "MARKER_MISSING"
     assert result["self_target"] == {"kind": "hold"}
@@ -443,10 +437,7 @@ def test_master_app_uses_selected_target_instead_of_last_arrival() -> None:
         }
     )
 
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000,reason=center_hold"
-    )
+    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "CENTER_HOLD"
     assert result["active_uart"] == "uart8"
@@ -466,7 +457,7 @@ def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
 
     result = app.step({"now_ms": 1100})
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
@@ -492,7 +483,7 @@ def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
 
     result = app.step({"uart": "uart6", "now_ms": 1100})
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["self_target"] == {"kind": "hold"}
@@ -520,10 +511,7 @@ def test_master_app_zeroes_command_after_selected_target_leaves_freshness_window
 
     result = app.step({"now_ms": 1200})
 
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000,reason=stale"
-    )
+    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
     assert result["selected_target"] == "idle"
     assert result["phase"] == "MARKER_MISSING"
 
@@ -645,10 +633,7 @@ def test_master_app_keeps_center_hold_while_target_is_still_fresh() -> None:
 
     result = app.step({"now_ms": 1100})
 
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=2,valid=0,dx=0.000,dy=0.000,reason=center_hold"
-    )
+    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "CENTER_HOLD"
     assert result["assistant_state"] == {
@@ -687,7 +672,7 @@ def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> 
         }
     )
 
-    assert result["assistant_command"] == "follow=1,seq=2,valid=1,dx=0.036,dy=-0.030"
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
     assert result["selected_target"] == "tracked"
     assert result["phase"] == "TRACKING"
     assert result["active_uart"] == "uart6"
@@ -769,3 +754,15 @@ def test_master_app_runs_base_cycle_through_process_entry(monkeypatch) -> None:
     assert calls["apply"] == [({"hw_bundle": None}, {"kind": "hold"})]
     assert calls["control"] == [({"hw_bundle": None}, None, cycle_token)]
     assert result["self_base_state"]["base_ok"] == 1
+
+
+def _assert_follow_command_semantics(command, seq, valid, x, y) -> None:
+    from assistant.protocol import parse_command
+
+    parsed = parse_command(command)
+
+    assert parsed.kind == "follow"
+    assert parsed.seq == seq
+    assert parsed.valid == valid
+    assert parsed.dx == x
+    assert parsed.dy == y

@@ -69,7 +69,7 @@ def test_assistant_runtime_uses_runtime_param_follow_timeout() -> None:
     runtime_params.FOLLOW_TIMEOUT_MS = 10
     try:
         app = AssistantApp()
-        app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=0)
+        app.handle_line("f=1,s=8,v=1,x=0.10,y=0.00", now_ms=0)
         reply = app.tick(now_ms=20)
     finally:
         runtime_params.FOLLOW_TIMEOUT_MS = old_timeout
@@ -116,7 +116,7 @@ def test_assistant_runtime_uses_runtime_param_output_limit() -> None:
     try:
         state = create_runtime_state(timeout_ms=runtime_params.FOLLOW_TIMEOUT_MS)
         apply_runtime_command(
-            state, parse_command("follow=1,seq=1,valid=1,dx=999.0,dy=0.0"), now_ms=0
+            state, parse_command("f=1,s=1,v=1,x=999.0,y=0.0"), now_ms=0
         )
     finally:
         runtime_params.FOLLOW_OUTPUT_LIMIT = old_limit

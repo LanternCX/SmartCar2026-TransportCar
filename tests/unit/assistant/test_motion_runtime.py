@@ -335,7 +335,7 @@ def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
     assert (
         _apply_line(
             state,
-            "follow=1,seq=7,valid=1,dx=0.10,dy=-0.05",
+            "f=1,s=7,v=1,x=0.10,y=-0.05",
             now_ms=1,
         )
         == "BUSY"
@@ -350,9 +350,9 @@ def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
 def test_motion_runtime_discards_duplicate_or_older_follow_packet() -> None:
     state = _new_state(timeout_ms=100)
 
-    _apply_line(state, "follow=1,seq=7,valid=1,dx=0.10,dy=0.00", now_ms=1)
+    _apply_line(state, "f=1,s=7,v=1,x=0.10,y=0.00", now_ms=1)
 
-    result = _apply_line(state, "follow=1,seq=7,valid=1,dx=0.20,dy=0.10", now_ms=2)
+    result = _apply_line(state, "f=1,s=7,v=1,x=0.20,y=0.10", now_ms=2)
 
     assert result == "IGNORED"
     assert state.last_seq == 7
@@ -361,7 +361,7 @@ def test_motion_runtime_discards_duplicate_or_older_follow_packet() -> None:
 def test_motion_runtime_marks_follow_inactive_when_target_missing() -> None:
     state = _new_state(timeout_ms=100)
 
-    result = _apply_line(state, "follow=1,seq=8,valid=0,dx=0.00,dy=0.00", now_ms=2)
+    result = _apply_line(state, "f=1,s=8,v=0,x=0.00,y=0.00", now_ms=2)
 
     assert result == "HOLD"
     assert state.follow_active is False
@@ -372,7 +372,7 @@ def test_motion_runtime_marks_follow_inactive_when_target_missing() -> None:
 
 def test_motion_runtime_stops_when_timeout_expires() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
 
     assert _tick(state, now_ms=150) == "DONE"
     assert state.follow_active is False
@@ -407,7 +407,7 @@ def test_motion_runtime_rejects_legacy_move_entry_in_current_stage() -> None:
 
 def test_motion_runtime_hold_does_not_clear_timeout_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     result = _apply_line(state, "HOLD", now_ms=151)
@@ -420,10 +420,10 @@ def test_motion_runtime_hold_does_not_clear_timeout_state() -> None:
 
 def test_motion_runtime_newer_follow_can_exit_timeout_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
-    result = _apply_line(state, "follow=1,seq=9,valid=1,dx=0.1,dy=-0.1", now_ms=151)
+    result = _apply_line(state, "f=1,s=9,v=1,x=0.1,y=-0.1", now_ms=151)
 
     assert result == "BUSY"
     assert state.state_label == "BUSY"
@@ -434,7 +434,7 @@ def test_motion_runtime_newer_follow_can_exit_timeout_state() -> None:
 
 def test_motion_runtime_reset_odom_clears_timeout_but_keeps_last_seq() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     result = _apply_line(state, "RESET_ODOM", now_ms=151)
@@ -448,7 +448,7 @@ def test_motion_runtime_reset_odom_clears_timeout_but_keeps_last_seq() -> None:
 
 def test_motion_runtime_stop_does_not_clear_timeout_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     result = _apply_line(state, "STOP", now_ms=151)
@@ -461,7 +461,7 @@ def test_motion_runtime_stop_does_not_clear_timeout_state() -> None:
 
 def test_motion_runtime_disarm_does_not_clear_timeout_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     result = _apply_line(state, "DISARM", now_ms=151)
@@ -474,7 +474,7 @@ def test_motion_runtime_disarm_does_not_clear_timeout_state() -> None:
 
 def test_motion_runtime_ping_and_state_query_keep_current_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     ping_result = _apply_line(state, "PING", now_ms=151)
@@ -491,7 +491,7 @@ def test_motion_runtime_ping_and_state_query_keep_current_state() -> None:
 
 def test_motion_runtime_tick_after_stop_keeps_timeout_state() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
     assert _apply_line(state, "STOP", now_ms=151) == "DONE"
 
@@ -505,7 +505,7 @@ def test_motion_runtime_tick_after_stop_keeps_timeout_state() -> None:
 
 def test_motion_runtime_velocity_entry_refreshes_timeout_window() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
 
     assert _apply_line(state, "VEL 0.1 0.2 0.3", now_ms=80) == "BUSY"
     assert _tick(state, now_ms=110) == "BUSY"
@@ -515,7 +515,7 @@ def test_motion_runtime_velocity_entry_refreshes_timeout_window() -> None:
 
 def test_motion_runtime_ignored_legacy_move_does_not_delay_timeout() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
 
     assert _apply_line(state, "MOVE 0.1 0.2 15", now_ms=80) == "ERR"
     assert _tick(state, now_ms=110) == "DONE"
@@ -525,7 +525,7 @@ def test_motion_runtime_ignored_legacy_move_does_not_delay_timeout() -> None:
 
 def test_motion_runtime_reset_odom_clears_velocity_command_but_keeps_last_seq() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=-0.1", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=-0.1", now_ms=10)
 
     result = _apply_line(state, "RESET_ODOM", now_ms=11)
 
@@ -537,7 +537,7 @@ def test_motion_runtime_reset_odom_clears_velocity_command_but_keeps_last_seq() 
 
 def test_motion_runtime_hold_does_not_retrigger_timeout_on_later_tick() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
     assert _tick(state, now_ms=150) == "DONE"
 
     assert _apply_line(state, "HOLD", now_ms=151) == "DONE"
@@ -548,7 +548,7 @@ def test_motion_runtime_hold_does_not_retrigger_timeout_on_later_tick() -> None:
 
 def test_motion_runtime_reset_odom_does_not_start_new_timeout_window() -> None:
     state = _new_state(timeout_ms=100)
-    _apply_line(state, "follow=1,seq=8,valid=1,dx=0.2,dy=0.0", now_ms=10)
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
 
     assert _apply_line(state, "RESET_ODOM", now_ms=20) == "ACK"
     assert _tick(state, now_ms=130) == "ACK"
@@ -752,10 +752,10 @@ def test_motion_runtime_maps_right_shift_direction_to_three_wheel_signs(
         _fake_apply_wheel_speed_control,
     )
 
-    _apply_line(state, "follow=1,seq=1,valid=1,dx=300.0,dy=0.0", now_ms=5)
+    _apply_line(state, "f=1,s=1,v=1,x=300.0,y=0.0", now_ms=5)
     right_shift = {name: motor.last_duty for name, motor in motors.items()}
 
-    _apply_line(state, "follow=1,seq=2,valid=1,dx=0.0,dy=300.0", now_ms=1)
+    _apply_line(state, "f=1,s=2,v=1,x=0.0,y=300.0", now_ms=1)
     forward_shift = {name: motor.last_duty for name, motor in motors.items()}
 
     assert right_shift["m"] == 0
@@ -791,7 +791,7 @@ def test_motion_runtime_reuses_same_cycle_sensor_snapshot() -> None:
 
     _apply_line(
         state,
-        "follow=1,seq=1,valid=1,dx=0.1,dy=0.0",
+        "f=1,s=1,v=1,x=0.1,y=0.0",
         now_ms=10,
         cycle_token=cycle_token,
     )
@@ -852,7 +852,7 @@ def test_motion_runtime_closes_speed_loop_before_motor_output() -> None:
     for state in (state_static, state_feedback):
         _apply_line(
             state,
-            "follow=1,seq=1,valid=1,dx=0.0,dy=1.5",
+            "f=1,s=1,v=1,x=0.0,y=1.5",
             now_ms=0,
             cycle_token=object(),
         )
@@ -873,7 +873,7 @@ def test_motion_runtime_defaults_heading_hold_to_current_heading() -> None:
 
     reply = _apply_line(
         state,
-        "follow=1,seq=1,valid=1,dx=0.1,dy=0.0",
+        "f=1,s=1,v=1,x=0.1,y=0.0",
         now_ms=0,
         cycle_token=object(),
     )
@@ -907,7 +907,7 @@ def test_motion_runtime_same_cycle_does_not_apply_control_twice() -> None:
 
     _apply_line(
         state,
-        "follow=1,seq=1,valid=1,dx=0.1,dy=0.0",
+        "f=1,s=1,v=1,x=0.1,y=0.0",
         now_ms=0,
         cycle_token=cycle_token,
     )
@@ -941,7 +941,7 @@ def test_motion_runtime_follow_rebinds_to_world_target_instead_of_raw_output() -
 
     _apply_line(
         state,
-        "follow=1,seq=1,valid=1,dx=1.0,dy=0.0",
+        "f=1,s=1,v=1,x=1.0,y=0.0",
         now_ms=0,
         cycle_token=object(),
     )

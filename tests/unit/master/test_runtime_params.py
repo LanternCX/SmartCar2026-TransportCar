@@ -129,4 +129,12 @@ def test_master_app_uses_runtime_param_control_gains() -> None:
         runtime_params.FOLLOW_CONTROL_KP_X = old_kp_x
         runtime_params.FOLLOW_CONTROL_KP_Y = old_kp_y
 
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=24.000,dy=-27.000"
+    from assistant.protocol import parse_command
+
+    parsed = parse_command(result["assistant_command"])
+
+    assert parsed.kind == "follow"
+    assert parsed.seq == 1
+    assert parsed.valid == 1
+    assert parsed.dx == 24.0
+    assert parsed.dy == -27.0

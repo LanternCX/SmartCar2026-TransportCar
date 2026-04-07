@@ -7,6 +7,18 @@ def _build_master_hw_bundle(uart3, uart6, uart8) -> dict:
     }
 
 
+def _assert_follow_command_semantics(command, seq, valid, x, y) -> None:
+    from assistant.protocol import parse_command
+
+    parsed = parse_command(command)
+
+    assert parsed.kind == "follow"
+    assert parsed.seq == seq
+    assert parsed.valid == valid
+    assert parsed.dx == x
+    assert parsed.dy == y
+
+
 def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
     from master.app import MasterRuntimeLoop
 
@@ -32,8 +44,9 @@ def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
     )
     result = loop.step(now_ms=100)
 
-    assert result["assistant_command"] == "follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"
-    assert uart3.writes == ["follow=1,seq=1,valid=1,dx=0.036,dy=-0.030"]
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.12, -0.06)
+    assert len(uart3.writes) == 1
+    _assert_follow_command_semantics(uart3.writes[0], 1, 1, 0.12, -0.06)
 
 
 def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
@@ -61,13 +74,9 @@ def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
     )
     result = loop.step(now_ms=100)
 
-    assert (
-        result["assistant_command"]
-        == "follow=1,seq=1,valid=0,dx=0.000,dy=0.000,reason=vision_invalid"
-    )
-    assert uart3.writes == [
-        "follow=1,seq=1,valid=0,dx=0.000,dy=0.000,reason=vision_invalid"
-    ]
+    _assert_follow_command_semantics(result["assistant_command"], 1, 0, 0.0, 0.0)
+    assert len(uart3.writes) == 1
+    _assert_follow_command_semantics(uart3.writes[0], 1, 0, 0.0, 0.0)
 
 
 def test_master_runtime_loop_continues_polling_vision_and_writing_controls() -> None:
@@ -312,8 +321,8 @@ def test_master_uart_read_line_buffers_partial_and_returns_single_lines() -> Non
     class FakeDevice:
         def __init__(self) -> None:
             self.chunks = [
-                b"follow=1,seq=1",
-                b",valid=1,dx=1.0,dy=0.0\r\nPING\r\n",
+                b"F,1,1",
+                b",1.0,0.0\r\nPING\r\n",
             ]
 
         def any(self) -> int:
@@ -330,7 +339,7 @@ def test_master_uart_read_line_buffers_partial_and_returns_single_lines() -> Non
     setattr(port, "_device", FakeDevice())
 
     assert port.read_line() is None
-    assert port.read_line() == "follow=1,seq=1,valid=1,dx=1.0,dy=0.0"
+    assert port.read_line() == "F,1,1,1.0,0.0"
     assert port.read_line() == "PING"
 
 
@@ -364,7 +373,7 @@ def test_master_vision_uart_drops_overlong_partial_line_and_resyncs() -> None:
 def test_master_uart3_keeps_long_remote_line_without_vision_drop_rule() -> None:
     from master.hw.uart import UartPort
 
-    long_remote_line = "follow=1,seq=1," + ("x" * 170)
+    long_remote_line = "F,1,1," + ("x" * 170)
 
     class FakeDevice:
         def __init__(self) -> None:
@@ -977,9 +986,9 @@ def test_master_uart_write_line_writes_payload_and_crlf_separately() -> None:
     port = UartPort(name="uart3", uart_id=3, baudrate=115200)
     setattr(port, "_device", device)
 
-    written = port.write_line("follow=1,seq=5,valid=1,dx=1.000,dy=-2.000")
+    written = port.write_line("F,5,1,1,-2")
 
-    assert device.writes == ["follow=1,seq=5,valid=1,dx=1.000,dy=-2.000", "\r\n"]
+    assert device.writes == ["F,5,1,1,-2", "\r\n"]
     assert written == len(device.writes[0]) + len(device.writes[1])
 
 

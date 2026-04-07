@@ -35,7 +35,7 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
 
     uart3 = FakeUart(
         [
-            "follow=1,seq=8,valid=1,dx=0.10,dy=0.00",
+            "f=1,s=8,v=1,x=0.10,y=0.00",
         ]
     )
     motors = {"m": FakeMotor(), "l": FakeMotor(), "r": FakeMotor()}
@@ -53,7 +53,7 @@ def test_assistant_runtime_loop_closes_follow_timeout_without_periodic_state_spa
     loop.step(now_ms=200)
 
     assert any(motor.last_duty is not None for motor in motors.values())
-    assert uart3.writes == ["OK,seq=8,valid=1"]
+    assert uart3.writes == ["K,8,1"]
 
 
 def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
@@ -93,7 +93,7 @@ def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
         def read_and_clear(self):
             return 0.0
 
-    uart3 = FakeUart(["follow=1,seq=8,valid=1,dx=0.10,dy=0.00"])
+    uart3 = FakeUart(["f=1,s=8,v=1,x=0.10,y=0.00"])
     motors = {name: FakeMotor() for name in ("m", "l", "r")}
 
     monkeypatch.setattr(
@@ -135,7 +135,7 @@ def test_assistant_runtime_loop_writes_three_motor_outputs_for_follow_cycle(
         "r": -33,
     }
     assert loop.app.runtime_state.motor_duties == {"m": -11, "l": 22, "r": -33}
-    assert uart3.writes == ["OK,seq=8,valid=1"]
+    assert uart3.writes == ["K,8,1"]
 
 
 def test_assistant_runtime_loop_passes_full_hw_bundle_to_runtime_owner(
@@ -254,8 +254,8 @@ def test_assistant_uart_read_line_buffers_partial_and_returns_single_lines() -> 
     class FakeDevice:
         def __init__(self) -> None:
             self.chunks = [
-                b"follow=1,seq=1",
-                b",valid=1,dx=1.0,dy=0.0\r\nSTATE?\r\n",
+                b"f=1,s=1",
+                b",v=1,x=1.0,y=0.0\r\nSTATE?\r\n",
             ]
 
         def any(self) -> int:
@@ -272,7 +272,7 @@ def test_assistant_uart_read_line_buffers_partial_and_returns_single_lines() -> 
     setattr(port, "_device", FakeDevice())
 
     assert port.read_line() is None
-    assert port.read_line() == "follow=1,seq=1,valid=1,dx=1.0,dy=0.0"
+    assert port.read_line() == "f=1,s=1,v=1,x=1.0,y=0.0"
     assert port.read_line() == "STATE?"
 
 
@@ -282,8 +282,8 @@ def test_assistant_uart_read_latest_line_prefers_newest_complete_command() -> No
     class FakeDevice:
         def __init__(self) -> None:
             self.chunks = [
-                b"follow=1,seq=1,valid=1,dx=0.1,dy=0.0\r\n",
-                b"follow=1,seq=2,valid=1,dx=0.2,dy=0.0\r\n",
+                b"f=1,s=1,v=1,x=0.1,y=0.0\r\n",
+                b"f=1,s=2,v=1,x=0.2,y=0.0\r\n",
             ]
 
         def any(self) -> int:
@@ -299,7 +299,7 @@ def test_assistant_uart_read_latest_line_prefers_newest_complete_command() -> No
     port = UartPort(name="uart3", uart_id=3, baudrate=115200)
     setattr(port, "_device", FakeDevice())
 
-    assert port.read_latest_line() == "follow=1,seq=2,valid=1,dx=0.2,dy=0.0"
+    assert port.read_latest_line() == "f=1,s=2,v=1,x=0.2,y=0.0"
 
 
 def test_assistant_uart_read_latest_line_drains_fragmented_backlog_in_one_call() -> (
@@ -310,10 +310,10 @@ def test_assistant_uart_read_latest_line_drains_fragmented_backlog_in_one_call()
     class FakeDevice:
         def __init__(self) -> None:
             self.chunks = [
-                b"follow=1,seq=1,va",
-                b"lid=1,dx=0.1,dy=0.0\r\n",
-                b"follow=1,seq=2,va",
-                b"lid=1,dx=0.2,dy=0.0\r\n",
+                b"f=1,s=1,v=1,x=0",
+                b".1,y=0.0\r\n",
+                b"f=1,s=2,v=1,x=0",
+                b".2,y=0.0\r\n",
             ]
 
         def any(self) -> int:
@@ -329,13 +329,13 @@ def test_assistant_uart_read_latest_line_drains_fragmented_backlog_in_one_call()
     port = UartPort(name="uart3", uart_id=3, baudrate=115200)
     setattr(port, "_device", FakeDevice())
 
-    assert port.read_latest_line() == "follow=1,seq=2,valid=1,dx=0.2,dy=0.0"
+    assert port.read_latest_line() == "f=1,s=2,v=1,x=0.2,y=0.0"
 
 
 def test_assistant_uart_drops_overlong_partial_line_and_resyncs() -> None:
     from assistant.hw.uart import UartPort
 
-    valid_line = "follow=1,seq=3,valid=1,dx=0.3,dy=0.0"
+    valid_line = "f=1,s=3,v=1,x=0.3,y=0.0"
 
     class FakeDevice:
         def __init__(self) -> None:
@@ -367,8 +367,7 @@ def test_assistant_uart_read_latest_line_limits_each_read_chunk() -> None:
     class FakeDevice:
         def __init__(self) -> None:
             self.buffer = bytearray(
-                b"follow=1,seq=1,valid=1,dx=0.1,dy=0.0\r\n"
-                b"follow=1,seq=2,valid=1,dx=0.2,dy=0.0\r\n"
+                b"f=1,s=1,v=1,x=0.1,y=0.0\r\nf=1,s=2,v=1,x=0.2,y=0.0\r\n"
             )
             self.read_sizes = []
 

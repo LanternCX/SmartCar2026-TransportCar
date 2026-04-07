@@ -632,12 +632,20 @@ def test_assistant_app_handles_ping_and_state_query() -> None:
     assert state.startswith("state=1,")
 
 
+def _assert_follow_ack(reply, seq, valid) -> None:
+    parts = str(reply).split(",")
+
+    assert parts[0] == "K"
+    assert int(parts[1]) == seq
+    assert int(parts[2]) == valid
+
+
 def test_assistant_app_maps_auxiliary_entries_to_ack_with_last_seq() -> None:
     from assistant.app import AssistantApp
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
 
-    app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=10)
+    app.handle_line("f=1,s=8,v=1,x=0.10,y=0.00", now_ms=10)
 
     hold_reply = app.handle_line("HOLD", now_ms=11)
     stop_reply = app.handle_line("STOP", now_ms=12)
@@ -655,11 +663,11 @@ def test_assistant_app_replies_to_follow_during_debug_and_keeps_timeout_silent()
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
 
-    follow_reply = app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=10)
+    follow_reply = app.handle_line("f=1,s=8,v=1,x=0.10,y=0.00", now_ms=10)
     busy_tick_reply = app.tick(now_ms=50)
     timeout_reply = app.tick(now_ms=120)
 
-    assert follow_reply == "OK,seq=8,valid=1"
+    _assert_follow_ack(follow_reply, 8, 1)
     assert busy_tick_reply == ""
     assert timeout_reply == ""
 
@@ -669,7 +677,7 @@ def test_assistant_app_exposes_timeout_only_via_state_query() -> None:
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
 
-    app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=10)
+    app.handle_line("f=1,s=8,v=1,x=0.10,y=0.00", now_ms=10)
 
     first_timeout_reply = app.tick(now_ms=120)
     repeated_timeout_reply = app.tick(now_ms=130)
@@ -688,18 +696,15 @@ def test_assistant_app_returns_err_for_malformed_or_unknown_packets() -> None:
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
 
-    malformed_reply = app.handle_line(
-        "follow=1,seq=oops,valid=1,dx=0.10,dy=0.00", now_ms=10
-    )
+    malformed_reply = app.handle_line("f=1,s=oops,v=1,x=0.10,y=0.00", now_ms=10)
     unknown_reply = app.handle_line("WHATEVER", now_ms=11)
-    follow_reply = app.handle_line("follow=1,seq=8,valid=1,dx=0.10,dy=0.00", now_ms=12)
+    follow_reply = app.handle_line("f=1,s=8,v=1,x=0.10,y=0.00", now_ms=12)
 
-    assert (
-        malformed_reply
-        == "ERR,reason=invalid_literal_for_int,raw=follow=1,seq=oops,valid=1,dx=0.10,dy=0.00"
-    )
-    assert unknown_reply == "ERR,reason=unsupported_command,raw=WHATEVER"
-    assert follow_reply == "OK,seq=8,valid=1"
+    assert malformed_reply.startswith("ERR,reason=invalid_literal_for_int,")
+    assert malformed_reply.endswith("raw=f=1,s=oops,v=1,x=0.10,y=0.00")
+    assert unknown_reply.startswith("ERR,reason=unsupported_command,")
+    assert unknown_reply.endswith("raw=WHATEVER")
+    _assert_follow_ack(follow_reply, 8, 1)
 
 
 def test_assistant_app_returns_err_for_follow_packet_missing_valid_field() -> None:
@@ -707,11 +712,10 @@ def test_assistant_app_returns_err_for_follow_packet_missing_valid_field() -> No
 
     app = AssistantApp(timeout_ms=100, hw_bundle=_build_fake_hw_bundle())
 
-    reply = app.handle_line("follow=1,seq=8,dx=0.10,dy=0.00", now_ms=12)
+    reply = app.handle_line("f=1,s=8,x=0.10,y=0.00", now_ms=12)
 
-    assert (
-        reply == "ERR,reason=missing_required_field,raw=follow=1,seq=8,dx=0.10,dy=0.00"
-    )
+    assert reply.startswith("ERR,reason=missing_required_field,")
+    assert reply.endswith("raw=f=1,s=8,x=0.10,y=0.00")
 
 
 def test_assistant_app_accepts_vel_but_still_rejects_move() -> None:

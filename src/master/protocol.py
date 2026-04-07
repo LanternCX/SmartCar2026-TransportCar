@@ -29,6 +29,16 @@ def build_hold_command():
     return "HOLD"
 
 
+def _compact_float_text(value):
+    number = float(value)
+    if -0.0005 < number < 0.0005:
+        number = 0.0
+    text = ("%.3f" % number).rstrip("0").rstrip(".")
+    if not text or text == "-0":
+        return "0"
+    return text
+
+
 def build_follow_command(seq, valid, dx, dy, reason=""):
     """构造主车到辅车的高频跟随报文
 
@@ -41,16 +51,13 @@ def build_follow_command(seq, valid, dx, dy, reason=""):
     @return str
     """
 
-    command = "follow=1,seq=%d,valid=%d,dx=%.3f,dy=%.3f" % (
+    _ = reason
+    return "f=1,s=%d,v=%d,x=%s,y=%s" % (
         int(seq),
         1 if int(valid) else 0,
-        float(dx),
-        float(dy),
+        _compact_float_text(dx),
+        _compact_float_text(dy),
     )
-    reason_text = str(reason).strip()
-    if int(valid) != 1 and reason_text:
-        command += ",reason=%s" % reason_text
-    return command
 
 
 def parse_assistant_state(line):

@@ -64,7 +64,7 @@ def _render_error_reply_with_raw(reason, raw_line):
 
 
 def _render_follow_reply(command):
-    return "OK,seq=%d,valid=%d" % (int(command.seq), int(command.valid))
+    return "K,%d,%d" % (int(command.seq), int(command.valid))
 
 
 def build_hw_bundle():

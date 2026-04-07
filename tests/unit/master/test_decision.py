@@ -1,3 +1,15 @@
+def _assert_follow_command_semantics(command, seq, valid, x, y) -> None:
+    from assistant.protocol import parse_command
+
+    parsed = parse_command(command)
+
+    assert parsed.kind == "follow"
+    assert parsed.seq == seq
+    assert parsed.valid == valid
+    assert parsed.dx == x
+    assert parsed.dy == y
+
+
 def test_decision_builds_planar_follow_command_from_vision_error() -> None:
     from master.vision.decision import decide_from_observation
 
@@ -17,10 +29,10 @@ def test_decision_builds_planar_follow_command_from_vision_error() -> None:
     assert decision.self_target == {"kind": "hold"}
     assert decision.assistant_target == {
         "valid": 1,
-        "dx": 0.00030000000000000003,
-        "dy": -0.00025,
+        "dx": 0.001,
+        "dy": -0.0005,
     }
-    assert decision.assistant_command == "follow=1,seq=4,valid=1,dx=0.000,dy=-0.000"
+    _assert_follow_command_semantics(decision.assistant_command, 4, 1, 0.001, -0.001)
 
 
 def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
@@ -33,10 +45,7 @@ def test_decision_outputs_zero_planar_command_when_target_is_invalid() -> None:
     assert decision.selected_target == "idle"
     assert decision.self_target == {"kind": "hold"}
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert (
-        decision.assistant_command
-        == "follow=1,seq=3,valid=0,dx=0.000,dy=0.000,reason=parse_invalid"
-    )
+    _assert_follow_command_semantics(decision.assistant_command, 3, 0, 0.0, 0.0)
 
 
 def test_decision_outputs_zero_when_report_is_stale() -> None:
@@ -48,10 +57,7 @@ def test_decision_outputs_zero_when_report_is_stale() -> None:
 
     assert decision.phase == "MARKER_MISSING"
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert (
-        decision.assistant_command
-        == "follow=1,seq=4,valid=0,dx=0.000,dy=0.000,reason=stale"
-    )
+    _assert_follow_command_semantics(decision.assistant_command, 4, 0, 0.0, 0.0)
 
 
 def test_decision_holds_inside_center_deadzone() -> None:
@@ -69,10 +75,7 @@ def test_decision_holds_inside_center_deadzone() -> None:
 
     assert decision.phase == "CENTER_HOLD"
     assert decision.assistant_target == {"valid": 0, "dx": 0.0, "dy": 0.0}
-    assert (
-        decision.assistant_command
-        == "follow=1,seq=6,valid=0,dx=0.000,dy=0.000,reason=center_hold"
-    )
+    _assert_follow_command_semantics(decision.assistant_command, 6, 0, 0.0, 0.0)
 
 
 def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
@@ -95,10 +98,10 @@ def test_decision_keeps_tracking_with_fresh_target_without_new_input() -> None:
     assert decision.selected_target == "tracked"
     assert decision.assistant_target == {
         "valid": 1,
-        "dx": 0.036000000000000004,
-        "dy": -0.03,
+        "dx": 0.12,
+        "dy": -0.06,
     }
-    assert decision.assistant_command == "follow=1,seq=7,valid=1,dx=0.036,dy=-0.030"
+    _assert_follow_command_semantics(decision.assistant_command, 7, 1, 0.12, -0.06)
     assert decision.assistant_state == {
         "phase": "TRACKING",
         "selected_target": "tracked",

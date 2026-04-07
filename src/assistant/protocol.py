@@ -78,14 +78,18 @@ def _split_fields(line):
     return fields
 
 
+def _split_csv_fields(line):
+    fields = []
+    for item in str(line).strip().split(","):
+        field = item.strip()
+        if field:
+            fields.append(field)
+    if not fields:
+        raise ValueError("empty_command")
+    return fields
+
+
 def _split_pairs(line):
-    """按逗号拆解键值对协议
-
-    @brief 用于解析 `follow=1,...` 形式的键值报文
-    @param line 原始命令文本
-    @return dict
-    """
-
     payload = {}
     for item in str(line).strip().split(","):
         field = item.strip()
@@ -117,17 +121,16 @@ def parse_command(line):
     @return Command
     """
 
-    # 带等号的文本优先按键值协议解析, 用于处理高频跟随报文
     if "=" in str(line):
         payload = _split_pairs(line)
-        if payload.get("follow") == "1":
-            _require_fields(payload, "seq", "valid")
+        if payload.get("f") == "1":
+            _require_fields(payload, "s", "v", "x", "y")
             return Command(
                 kind="follow",
-                seq=int(payload["seq"]),
-                valid=int(payload["valid"]),
-                dx=float(payload.get("dx", 0.0)),
-                dy=float(payload.get("dy", 0.0)),
+                seq=int(payload["s"]),
+                valid=int(payload["v"]),
+                dx=float(payload["x"]),
+                dy=float(payload["y"]),
             )
 
     fields = _split_fields(line)
