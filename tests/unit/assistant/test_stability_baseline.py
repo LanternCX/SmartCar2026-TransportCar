@@ -72,6 +72,37 @@ def test_assistant_ctrl_pid_exposes_wheel_speed_controller_entrypoint() -> None:
     assert state.motor_duties == {"m": 4, "l": -4, "r": 1}
 
 
+def test_assistant_ctrl_pid_uses_tick_ms_when_tick_s_is_zero() -> None:
+    import types
+
+    from assistant.ctrl.pid import (
+        apply_wheel_speed_control,
+        build_wheel_speed_controllers,
+    )
+
+    state = types.SimpleNamespace(
+        wheel_controllers=build_wheel_speed_controllers(
+            {"m": (0.0, 1.0, 0.0), "l": (0.0, 1.0, 0.0), "r": (0.0, 1.0, 0.0)},
+            {},
+            output_limit=2000.0,
+        ),
+        target_wheel_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+        wheel_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+        motor_duties={"m": 0, "l": 0, "r": 0},
+        tick_s=0.0,
+        tick_ms=5,
+    )
+
+    outputs = apply_wheel_speed_control(
+        state,
+        {"m": 1000.0, "l": 0.0, "r": 0.0},
+        limit=2000.0,
+    )
+
+    assert outputs["m"] == 5.0
+    assert state.motor_duties["m"] == 5
+
+
 def test_assistant_heading_estimator_updates_yaw() -> None:
     import importlib
 
@@ -364,7 +395,7 @@ def test_assistant_runtime_uses_ctrl_attitude_and_filter_entrypoints(
         captured["pid"] += 1
         return {}
 
-    def _fake_update_odometry(state):
+    def _fake_update_odometry(state, heading_deg=None):
         state.odom[0] = 2.0
         state.odom[1] = -1.0
         return (2.0, -1.0)

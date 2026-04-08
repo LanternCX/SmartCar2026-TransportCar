@@ -32,6 +32,7 @@ if _USE_DIRECT_IMPORTS:
         build_odometry,
         resolve_follow_velocity,
         rotate_body_delta_to_world,
+        scale_wheel_targets,
         update_odometry_from_wheels,
     )
     from ctrl.pid import (
@@ -61,6 +62,7 @@ else:
         build_odometry,
         resolve_follow_velocity,
         rotate_body_delta_to_world,
+        scale_wheel_targets,
         update_odometry_from_wheels,
     )
     from .ctrl.pid import (
@@ -79,6 +81,13 @@ def _clamp(value, lower, upper):
     if value > upper:
         return upper
     return value
+
+
+_TRANSLATION_IDLE = "idle"
+_TRANSLATION_FOLLOW = "follow"
+_TRANSLATION_VELOCITY = "velocity"
+_TURN_AUTO = "auto"
+_TURN_MANUAL = "manual"
 
 
 def _load_ident_lookup(path):
@@ -245,10 +254,68 @@ def _clear_follow_target(state):
 
 def _capture_follow_target(state, dx, dy):
     offset_x, offset_y = rotate_body_delta_to_world(dx, dy, state.heading_deg)
+    if state.follow_target_world is None:
+        base_x = float(state.odom[0])
+        base_y = float(state.odom[1])
+    else:
+        base_x = float(state.follow_target_world[0])
+        base_y = float(state.follow_target_world[1])
     state.follow_target_world = (
-        float(state.odom[0]) + float(offset_x),
-        float(state.odom[1]) + float(offset_y),
+        base_x + float(offset_x),
+        base_y + float(offset_y),
     )
+
+
+def _clear_velocity_target(state):
+    state.follow_velocity_target = (0.0, 0.0)
+
+
+def _set_translation_mode(state, mode):
+    state.translation_mode = str(mode)
+    state.follow_active = mode != _TRANSLATION_IDLE
+
+
+def _set_velocity_target(state, vx, vy):
+    state.follow_velocity_target = (float(vx), float(vy))
+
+
+def _set_turn_auto(state, capture_current_heading=False):
+    if capture_current_heading:
+        capture_heading_target(state)
+    state.turn_source = _TURN_AUTO
+    state.manual_omega_target = 0.0
+
+
+def _set_turn_manual(state, omega):
+    capture_heading_target(state)
+    state.turn_source = _TURN_MANUAL
+    state.manual_omega_target = _clamp(
+        float(omega), -float(state.auto_omega_max), float(state.auto_omega_max)
+    )
+
+
+def _clear_mode_state(state, capture_current_heading=False):
+    _set_translation_mode(state, _TRANSLATION_IDLE)
+    _set_turn_auto(state, capture_current_heading=capture_current_heading)
+    _clear_follow_target(state)
+    _clear_velocity_target(state)
+
+
+def _resolve_translation_command(state):
+    if state.translation_mode == _TRANSLATION_FOLLOW:
+        return resolve_follow_velocity(state)
+    if state.translation_mode == _TRANSLATION_VELOCITY:
+        return (
+            float(state.follow_velocity_target[0]),
+            float(state.follow_velocity_target[1]),
+        )
+    return (0.0, 0.0)
+
+
+def _resolve_turn_command(state):
+    if state.turn_source == _TURN_MANUAL:
+        return float(state.manual_omega_target)
+    return compute_heading_correction(state)
 
 
 def _read_imu_sample(state):
@@ -325,7 +392,7 @@ def _read_encoder_ticks(state):
 def _refresh_base_chain(state, cycle_token=None):
     """刷新底座基础观测链
 
-    @brief 在单个周期内复用姿态、编码器和里程计快照, 避免重复采样。
+    @brief 在单个周期内复用姿态、编码器和里程计快照。
     @param state 当前辅车运行时状态
     @param cycle_token 当前周期令牌
     @return dict
@@ -336,14 +403,15 @@ def _refresh_base_chain(state, cycle_token=None):
             return {}
         return dict(state._last_base_snapshot)
 
-    # 先更新链路可用性与原始传感器输入, 为后续控制和状态回包准备统一观测
+    # 先刷新链路可用性和原始传感器输入
     _update_base_ok(state)
 
+    odom_heading_deg = float(state.heading_deg)
     heading_override = _read_imu_sample(state)
     update_heading_from_gyro(state, heading_override=heading_override)
     has_valid_attitude_dt = float(state.tick_s) > 0.0
 
-    # 再根据周期时长决定是否推进滤波和里程计, 避免首轮零周期污染估计
+    # 再根据周期时长决定是否推进滤波和里程计
     raw_ticks = _read_encoder_ticks(state)
     state.encoder_ticks = dict(raw_ticks)
     if has_valid_attitude_dt:
@@ -353,14 +421,16 @@ def _refresh_base_chain(state, cycle_token=None):
             raw_ticks,
             ("m", "l", "r"),
         )
-        odom_x, odom_y = update_odometry_from_wheels(state)
+        odom_x, odom_y = update_odometry_from_wheels(
+            state, heading_deg=odom_heading_deg
+        )
     else:
         set_wheel_filter_dt_s(state.wheel_filters, ("m", "l", "r"), 0.0)
         update_wheel_speeds(state.wheel_filters, raw_ticks, ())
         state.wheel_speeds = dict(state.wheel_speeds)
         odom_x = float(state.odom[0])
         odom_y = float(state.odom[1])
-    # 最后缓存本轮快照, 让同周期的命令处理和 tick 共享同一份底座观测
+    # 最后缓存本轮快照, 供同周期的命令处理和 tick 复用
     snapshot = {
         "imu_raw": tuple(state.imu_raw),
         "encoder_ticks": dict(state.encoder_ticks),
@@ -377,7 +447,7 @@ def _refresh_base_chain(state, cycle_token=None):
 def _apply_motor_output(state, dx, dy, omega):
     """把车体速度指令落到三轮输出
 
-    @brief 同时维护目标轮速、控制器输出和硬件停机兜底状态。
+    @brief 更新目标轮速并把结果写到三轮输出。
     @param state 当前辅车运行时状态
     @param dx 车体 x 方向速度命令
     @param dy 车体 y 方向速度命令
@@ -386,21 +456,13 @@ def _apply_motor_output(state, dx, dy, omega):
     """
 
     wheel_targets = state.kinematics.inverse_kinematics(
-        float(dy), float(dx), float(omega)
+        float(dx), float(dy), float(omega)
+    )
+    wheel_targets = scale_wheel_targets(
+        wheel_targets,
+        runtime_params.FOLLOW_OUTPUT_LIMIT,
     )
     motors = _motor_bundle(state)
-    if float(state.tick_s) <= 0.0:
-        for name in ("m", "l", "r"):
-            state.target_wheel_speeds[name] = 0.0
-            state.motor_duties[name] = 0
-        if motors is not None:
-            for motor in motors.values():
-                stop = getattr(motor, "stop", None)
-                if stop is not None:
-                    stop()
-                else:
-                    motor.set_duty(0)
-        return {"m": 0.0, "l": 0.0, "r": 0.0}
     apply_wheel_speed_control(
         state,
         wheel_targets,
@@ -428,26 +490,36 @@ def _stop_motors(state):
 
 def _stop(state, reason="", cycle_token=None):
     _refresh_base_chain(state, cycle_token=cycle_token)
-    state.follow_active = False
     state.state_label = "TIMEOUT" if reason == "timeout_stop" else "IDLE"
     state.velocity_command = (0.0, 0.0, 0.0)
     state.timeout = reason == "timeout_stop"
-    _clear_follow_target(state)
-    capture_heading_target(state)
+    state.last_error = str(reason)
+    _clear_mode_state(state, capture_current_heading=True)
     _stop_motors(state)
     _mark_control_applied(state, cycle_token=cycle_token)
-    if reason:
-        state.last_error = reason
+
+
+def _hold_heading_in_timeout(state, cycle_token=None):
+    _refresh_base_chain(state, cycle_token=cycle_token)
+    state.state_label = "TIMEOUT"
+    state.timeout = True
+    _set_translation_mode(state, _TRANSLATION_IDLE)
+    _clear_follow_target(state)
+    _clear_velocity_target(state)
+    _set_turn_auto(state, capture_current_heading=False)
+    omega = _resolve_turn_command(state)
+    state.velocity_command = (0.0, 0.0, omega)
+    _apply_motor_output(state, 0.0, 0.0, omega)
+    _mark_control_applied(state, cycle_token=cycle_token)
+    state.last_error = "timeout_stop"
 
 
 def _preserve_timeout_stop(state, cycle_token=None):
     _refresh_base_chain(state, cycle_token=cycle_token)
-    state.follow_active = False
     state.velocity_command = (0.0, 0.0, 0.0)
     state.state_label = "TIMEOUT"
     state.timeout = True
-    _clear_follow_target(state)
-    capture_heading_target(state)
+    _clear_mode_state(state, capture_current_heading=True)
     _stop_motors(state)
     _mark_control_applied(state, cycle_token=cycle_token)
     state.last_error = "timeout_stop"
@@ -472,7 +544,7 @@ def _reject_unsupported_command(state, cycle_token=None):
 def _apply_follow(state, command, now_ms, cycle_token=None):
     """执行一条跟随报文
 
-    @brief 根据主车给出的相对位移目标刷新跟随状态并推进一次控制输出。
+    @brief 根据相对位移目标刷新跟随状态并推进一次控制输出。
     @param state 当前辅车运行时状态
     @param command 已解析跟随命令
     @param now_ms 当前毫秒时间
@@ -489,15 +561,13 @@ def _apply_follow(state, command, now_ms, cycle_token=None):
     state.timeout = False
     state.last_seq = int(command.seq)
     if not command.valid:
-        state.follow_active = False
         state.state_label = "IDLE"
         state.velocity_command = (0.0, 0.0, 0.0)
-        _clear_follow_target(state)
-        capture_heading_target(state)
+        _clear_mode_state(state, capture_current_heading=True)
         _stop_motors(state)
         _mark_control_applied(state, cycle_token=cycle_token)
         return "HOLD"
-    state.follow_active = True
+    _set_translation_mode(state, _TRANSLATION_FOLLOW)
     state.state_label = "BUSY"
     target_dx = _clamp(
         float(command.dx),
@@ -510,13 +580,10 @@ def _apply_follow(state, command, now_ms, cycle_token=None):
         float(runtime_params.FOLLOW_OUTPUT_LIMIT),
     )
     _capture_follow_target(state, target_dx, target_dy)
-    if float(state.tick_s) <= 0.0:
-        state.velocity_command = (0.0, 0.0, 0.0)
-        _apply_motor_output(state, 0.0, 0.0, 0.0)
-        _mark_control_applied(state, cycle_token=cycle_token)
-        return "BUSY"
-    control_dx, control_dy = resolve_follow_velocity(state)
-    omega = compute_heading_correction(state)
+    _clear_velocity_target(state)
+    _set_turn_auto(state, capture_current_heading=state.turn_source == _TURN_MANUAL)
+    control_dx, control_dy = _resolve_translation_command(state)
+    omega = _resolve_turn_command(state)
     state.velocity_command = (control_dx, control_dy, omega)
     _apply_motor_output(state, control_dx, control_dy, omega)
     _mark_control_applied(state, cycle_token=cycle_token)
@@ -526,7 +593,7 @@ def _apply_follow(state, command, now_ms, cycle_token=None):
 def _apply_velocity(state, command, now_ms, cycle_token=None):
     """执行一条直接速度命令
 
-    @brief 直接速度模式仍复用安全、航向保持和轮速控制链路。
+    @brief 按直接速度命令推进安全、航向保持和轮速控制链路。
     @param state 当前辅车运行时状态
     @param command 已解析速度命令
     @param now_ms 当前毫秒时间
@@ -539,23 +606,20 @@ def _apply_velocity(state, command, now_ms, cycle_token=None):
     state.safety.clear_estop()
     state.last_error = ""
     state.timeout = False
-    state.follow_active = True
+    _set_translation_mode(state, _TRANSLATION_VELOCITY)
     state.state_label = "BUSY"
     _clear_follow_target(state)
-    if float(state.tick_s) <= 0.0:
-        state.velocity_command = (0.0, 0.0, 0.0)
-        _apply_motor_output(state, 0.0, 0.0, 0.0)
-        _mark_control_applied(state, cycle_token=cycle_token)
-        return "BUSY"
-    manual_omega = float(command.omega)
-    if abs(manual_omega) >= float(state.hold_speed_eps):
-        capture_heading_target(state)
-        limited_omega = _clamp(
-            manual_omega, -state.auto_omega_max, state.auto_omega_max
-        )
+    _set_velocity_target(state, command.vx, command.vy)
+    released_manual_turn = state.turn_source == _TURN_MANUAL and abs(
+        float(command.omega)
+    ) < float(state.hold_speed_eps)
+    if abs(float(command.omega)) >= float(state.hold_speed_eps):
+        _set_turn_manual(state, command.omega)
     else:
-        limited_omega = compute_heading_correction(state)
-    state.velocity_command = (float(command.vx), float(command.vy), limited_omega)
+        _set_turn_auto(state, capture_current_heading=released_manual_turn)
+    control_dx, control_dy = _resolve_translation_command(state)
+    limited_omega = _resolve_turn_command(state)
+    state.velocity_command = (control_dx, control_dy, limited_omega)
     _apply_motor_output(
         state,
         state.velocity_command[0],
@@ -569,7 +633,7 @@ def _apply_velocity(state, command, now_ms, cycle_token=None):
 def _apply_command(state, command, now_ms, cycle_token=None):
     """分发并执行辅车命令
 
-    @brief 统一处理控制命令、运动命令和状态查询, 收口所有即时回包语义。
+    @brief 统一处理控制命令、运动命令和状态查询。
     @param state 当前辅车运行时状态
     @param command 已解析命令
     @param now_ms 当前毫秒时间
@@ -577,13 +641,13 @@ def _apply_command(state, command, now_ms, cycle_token=None):
     @return str
     """
 
-    # 轻量查询命令直接在这里返回, 不必进入运动控制分支
+    # 轻量查询命令直接返回
     if command.kind == "ping":
         return "ACK"
     if command.kind == "state_query":
         return state.state_line()
 
-    # 运动相关命令统一经过专门分支, 让安全状态与控制输出保持一致
+    # 运动相关命令统一经过专门分支
     if command.kind == "follow":
         return _apply_follow(state, command, now_ms, cycle_token=cycle_token)
     if command.kind == "follow_velocity":
@@ -594,17 +658,13 @@ def _apply_command(state, command, now_ms, cycle_token=None):
         return "ACK"
     if command.kind == "disarm":
         _clear_follow_deadline(state)
-        if _is_timeout_locked(state):
-            _preserve_timeout_stop(state, cycle_token=cycle_token)
-        else:
-            _stop(state, cycle_token=cycle_token)
+        state.safety.trigger_estop()
+        _stop(state, cycle_token=cycle_token)
         return "ACK"
     if command.kind == "stop":
+        _clear_follow_deadline(state)
         state.safety.trigger_estop()
-        if _is_timeout_locked(state):
-            _preserve_timeout_stop(state, cycle_token=cycle_token)
-        else:
-            _stop(state, "estop", cycle_token=cycle_token)
+        _stop(state, "estop", cycle_token=cycle_token)
         return "DONE"
     if command.kind == "reset_odom":
         _clear_follow_deadline(state)
@@ -616,13 +676,11 @@ def _apply_command(state, command, now_ms, cycle_token=None):
         state.yaw_rate_deg_s = 0.0
         state.last_yaw_rad = 0.0
         state.q_est = state.q_est.__class__()
-        state.follow_active = False
         state.state_label = "IDLE"
         state.velocity_command = (0.0, 0.0, 0.0)
         state.timeout = False
         state.last_error = ""
-        _clear_follow_target(state)
-        capture_heading_target(state)
+        _clear_mode_state(state, capture_current_heading=True)
         _stop_motors(state)
         _mark_control_applied(state, cycle_token=cycle_token)
         state.safety.clear_estop()
@@ -632,13 +690,10 @@ def _apply_command(state, command, now_ms, cycle_token=None):
         should_refresh_heading_target = bool(state.follow_active) or not bool(
             state.heading_target_ready
         )
-        state.follow_active = False
         if not _is_timeout_locked(state):
             state.state_label = "IDLE"
         state.velocity_command = (0.0, 0.0, 0.0)
-        _clear_follow_target(state)
-        if should_refresh_heading_target:
-            capture_heading_target(state)
+        _clear_mode_state(state, capture_current_heading=should_refresh_heading_target)
         _stop_motors(state)
         _mark_control_applied(state, cycle_token=cycle_token)
         state.safety.clear_estop()
@@ -665,34 +720,33 @@ def _tick(state, now_ms, cycle_token=None):
 
     # 先处理急停和超时, 这些条件一旦触发就优先抢占后续控制输出
     if state.safety.should_stop(now_ms):
-        if _is_timeout_locked(state):
+        if state.safety.estop_active:
+            _stop(state, "estop", cycle_token=cycle_token)
+        elif _is_timeout_locked(state):
+            _hold_heading_in_timeout(state, cycle_token=cycle_token)
+        else:
+            _hold_heading_in_timeout(state, cycle_token=cycle_token)
+        return "DONE"
+    if _is_timeout_locked(state):
+        if state.safety.estop_active:
             _preserve_timeout_stop(state, cycle_token=cycle_token)
         else:
-            reason = "estop" if state.safety.estop_active else "timeout_stop"
-            _stop(state, reason, cycle_token=cycle_token)
+            _hold_heading_in_timeout(state, cycle_token=cycle_token)
         return "DONE"
     if _control_already_applied(state, cycle_token=cycle_token):
-        return "BUSY" if state.follow_active else "ACK"
+        return "BUSY" if state.translation_mode != _TRANSLATION_IDLE else "ACK"
 
     # 再根据当前模式决定继续跟随目标还是退回姿态保持/空输出
-    if state.follow_active:
-        if float(state.tick_s) <= 0.0:
-            state.velocity_command = (0.0, 0.0, 0.0)
-            _apply_motor_output(state, 0.0, 0.0, 0.0)
-            _mark_control_applied(state, cycle_token=cycle_token)
-            return "BUSY"
-        dx, dy = resolve_follow_velocity(state)
-        omega = compute_heading_correction(state)
+    if state.translation_mode != _TRANSLATION_IDLE:
+        dx, dy = _resolve_translation_command(state)
+        omega = _resolve_turn_command(state)
         state.velocity_command = (dx, dy, omega)
         _apply_motor_output(state, dx, dy, omega)
         _mark_control_applied(state, cycle_token=cycle_token)
         return "BUSY"
-    if float(state.tick_s) <= 0.0:
-        state.velocity_command = (0.0, 0.0, 0.0)
-        _apply_motor_output(state, 0.0, 0.0, 0.0)
-        _mark_control_applied(state, cycle_token=cycle_token)
-        return "ACK"
-    _apply_motor_output(state, 0.0, 0.0, compute_heading_correction(state))
+    omega = _resolve_turn_command(state)
+    state.velocity_command = (0.0, 0.0, omega)
+    _apply_motor_output(state, 0.0, 0.0, omega)
     _mark_control_applied(state, cycle_token=cycle_token)
     return "ACK"
 

@@ -5,7 +5,7 @@ from assistant.motion_runtime import (
     create_runtime_state,
     run_base_cycle,
 )
-from assistant.protocol import parse_command
+from assistant.protocol import Command, parse_command
 
 
 def test_assistant_motion_runtime_imports_without_types_module(monkeypatch) -> None:
@@ -172,7 +172,7 @@ def test_assistant_motion_runtime_logs_loaded_gyro_offsets_summary(monkeypatch) 
     ) in captured
 
 
-def test_assistant_motion_runtime_first_cycle_does_not_fallback_to_fixed_tick_for_speed_loop(
+def test_assistant_motion_runtime_first_cycle_forwards_zero_dt_to_speed_loop(
     monkeypatch,
 ) -> None:
     import assistant.motion_runtime as runtime
@@ -206,13 +206,7 @@ def test_assistant_motion_runtime_first_cycle_does_not_fallback_to_fixed_tick_fo
     runtime.run_base_cycle(state, now_ms=0, cycle_token=object(), hw_bundle=None)
 
     assert state.tick_s == 0.0
-    assert captured == []
-    assert state.motor_duties == {"m": 0, "l": 0, "r": 0}
-    assert {name: motor.last_duty for name, motor in motors.items()} == {
-        "m": 0,
-        "l": 0,
-        "r": 0,
-    }
+    assert captured == [(0.0, {"m": 0.0, "l": 0.0, "r": 0.0})]
 
 
 def test_assistant_motion_runtime_zero_dt_does_not_advance_wheel_filters(
@@ -264,14 +258,15 @@ def test_assistant_motion_runtime_zero_dt_keeps_heading_chain_static(
     assert captured == []
 
 
-def test_assistant_motion_runtime_zero_dt_keeps_velocity_command_static(
+def test_assistant_motion_runtime_zero_dt_keeps_heading_output_active(
     monkeypatch,
 ) -> None:
     import assistant.motion_runtime as runtime
 
     state = runtime.create_runtime_state(timeout_ms=50, hw_bundle=None)
-    state.follow_active = True
+    state.translation_mode = "velocity"
     state.velocity_command = (0.0, 0.0, 0.0)
+    state.follow_velocity_target = (0.2, 0.1)
 
     monkeypatch.setattr(runtime, "resolve_follow_velocity", lambda state: (0.2, 0.1))
     monkeypatch.setattr(runtime, "compute_heading_correction", lambda state: 0.4)
@@ -279,10 +274,56 @@ def test_assistant_motion_runtime_zero_dt_keeps_velocity_command_static(
     runtime.run_base_cycle(state, now_ms=0, cycle_token=object(), hw_bundle=None)
 
     assert state.tick_s == 0.0
-    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert state.velocity_command == (0.2, 0.1, 0.4)
 
 
-def test_assistant_motion_runtime_idle_zero_dt_skips_heading_hold_correction(
+def test_motion_runtime_follow_command_zero_dt_still_keeps_heading_output(
+    monkeypatch,
+) -> None:
+    class FakeMotor:
+        def __init__(self) -> None:
+            self.last_duty = 0
+
+        def set_duty(self, duty) -> None:
+            self.last_duty = int(duty)
+
+        def stop(self) -> None:
+            self.last_duty = 0
+
+    motors = {name: FakeMotor() for name in ("m", "l", "r")}
+    state = _new_state(timeout_ms=100, hw_bundle={"motors": motors})
+    state.heading_deg = 20.0
+    state.target_heading_deg = 0.0
+    state.heading_target_ready = True
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.0),
+            setattr(state, "heading_deg", 20.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: -1.2,
+    )
+
+    result = _apply_line(
+        state,
+        "f=1,s=4,v=1,x=0.10,y=1.00",
+        now_ms=10,
+        cycle_token=object(),
+    )
+
+    assert result == "BUSY"
+    assert state.velocity_command[2] == pytest.approx(-1.2)
+    assert any(motor.last_duty != 0 for motor in motors.values())
+
+
+def test_assistant_motion_runtime_idle_zero_dt_keeps_heading_hold_correction(
     monkeypatch,
 ) -> None:
     import assistant.motion_runtime as runtime
@@ -290,11 +331,14 @@ def test_assistant_motion_runtime_idle_zero_dt_skips_heading_hold_correction(
     state = runtime.create_runtime_state(timeout_ms=50, hw_bundle=None)
     state.follow_active = False
     state.velocity_command = (0.0, 0.0, 0.0)
+    state.heading_deg = 15.0
+    state.target_heading_deg = 0.0
+    state.heading_target_ready = True
 
     monkeypatch.setattr(
         runtime,
         "compute_heading_correction",
-        lambda state: (_ for _ in ()).throw(AssertionError("不应进入保持链")),
+        lambda state: -0.6,
     )
 
     result = runtime.run_base_cycle(
@@ -303,7 +347,7 @@ def test_assistant_motion_runtime_idle_zero_dt_skips_heading_hold_correction(
 
     assert result == "ACK"
     assert state.tick_s == 0.0
-    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert state.velocity_command == (0.0, 0.0, -0.6)
 
 
 def _new_state(timeout_ms=100, hw_bundle=None):
@@ -329,6 +373,34 @@ def _tick(state, now_ms, cycle_token=None, hw_bundle=None):
     )
 
 
+def _force_positive_tick(monkeypatch, heading_deg=0.0, tick_s=0.005):
+    import assistant.motion_runtime as runtime
+
+    fake_update = lambda state, heading_override=None: (
+        setattr(state, "tick_s", float(tick_s)),
+        setattr(state, "heading_deg", float(heading_deg)),
+        setattr(state, "yaw_rate_deg_s", 0.0),
+    )[-1]
+
+    monkeypatch.setitem(
+        apply_runtime_command.__globals__,
+        "update_heading_from_gyro",
+        fake_update,
+    )
+    if run_base_cycle.__globals__ is not apply_runtime_command.__globals__:
+        monkeypatch.setitem(
+            run_base_cycle.__globals__,
+            "update_heading_from_gyro",
+            fake_update,
+        )
+
+
+def _patch_runtime_hook(monkeypatch, name, fake_value):
+    monkeypatch.setitem(apply_runtime_command.__globals__, name, fake_value)
+    if run_base_cycle.__globals__ is not apply_runtime_command.__globals__:
+        monkeypatch.setitem(run_base_cycle.__globals__, name, fake_value)
+
+
 def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
     state = _new_state(timeout_ms=100)
 
@@ -343,8 +415,35 @@ def test_motion_runtime_accepts_follow_command_and_updates_state() -> None:
     assert state.follow_active is True
     assert state.last_seq == 7
     assert state.state_label == "BUSY"
-    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert state.velocity_command == (0.1, -0.05, 0.0)
     assert state.timeout is False
+
+
+def test_motion_runtime_first_valid_follow_packet_builds_target_from_current_position() -> (
+    None
+):
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.2, -0.3, 0.0]
+
+    result = _apply_line(state, "f=1,s=1,v=1,x=0.10,y=-0.05", now_ms=1)
+
+    assert result == "BUSY"
+    assert state.follow_target_world == pytest.approx((1.3, -0.35))
+
+
+def test_motion_runtime_newer_follow_packet_accumulates_on_existing_target() -> None:
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.0, 2.0, 0.0]
+
+    assert _apply_line(state, "f=1,s=1,v=1,x=0.10,y=0.20", now_ms=1) == "BUSY"
+    state.odom = [3.0, 4.0, 0.0]
+
+    result = _apply_line(state, "f=1,s=2,v=1,x=-0.30,y=0.50", now_ms=2)
+
+    assert result == "BUSY"
+    assert state.follow_target_world == pytest.approx((0.8, 2.7))
 
 
 def test_motion_runtime_accepts_velocity_mode_without_seq(monkeypatch) -> None:
@@ -361,10 +460,8 @@ def test_motion_runtime_accepts_velocity_mode_without_seq(monkeypatch) -> None:
             setattr(state, "yaw_rate_deg_s", 0.0),
         )[-1],
     )
-    monkeypatch.setitem(
-        apply_runtime_command.__globals__,
-        "update_heading_from_gyro",
-        runtime.update_heading_from_gyro,
+    _patch_runtime_hook(
+        monkeypatch, "update_heading_from_gyro", runtime.update_heading_from_gyro
     )
 
     result = _apply_line(state, "f=1,m=1,x=0.10,y=-0.05", now_ms=1)
@@ -388,6 +485,24 @@ def test_motion_runtime_discards_duplicate_or_older_follow_packet() -> None:
     assert state.last_seq == 7
 
 
+def test_motion_runtime_duplicate_or_older_follow_packet_does_not_accumulate_target() -> (
+    None
+):
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.0, 2.0, 0.0]
+
+    assert _apply_line(state, "f=1,s=7,v=1,x=0.10,y=0.20", now_ms=1) == "BUSY"
+    state.odom = [9.0, 9.0, 0.0]
+
+    duplicate_result = _apply_line(state, "f=1,s=7,v=1,x=0.50,y=0.50", now_ms=2)
+    older_result = _apply_line(state, "f=1,s=6,v=1,x=-0.20,y=-0.20", now_ms=3)
+
+    assert duplicate_result == "IGNORED"
+    assert older_result == "IGNORED"
+    assert state.follow_target_world == pytest.approx((1.1, 2.2))
+
+
 def test_motion_runtime_marks_follow_inactive_when_target_missing() -> None:
     state = _new_state(timeout_ms=100)
 
@@ -398,6 +513,22 @@ def test_motion_runtime_marks_follow_inactive_when_target_missing() -> None:
     assert state.state_label == "IDLE"
     assert state.velocity_command == (0.0, 0.0, 0.0)
     assert _tick(state, now_ms=3) == "ACK"
+
+
+def test_motion_runtime_invalid_follow_packet_clears_accumulated_target_immediately() -> (
+    None
+):
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.0, 2.0, 0.0]
+
+    assert _apply_line(state, "f=1,s=1,v=1,x=0.10,y=0.20", now_ms=1) == "BUSY"
+
+    result = _apply_line(state, "f=1,s=2,v=0,x=0.00,y=0.00", now_ms=2)
+
+    assert result == "HOLD"
+    assert state.follow_target_world is None
+    assert state.follow_active is False
 
 
 def test_motion_runtime_stops_when_timeout_expires() -> None:
@@ -411,6 +542,149 @@ def test_motion_runtime_stops_when_timeout_expires() -> None:
     assert state.last_error == "timeout_stop"
 
 
+def test_motion_runtime_timeout_clears_accumulated_target() -> None:
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.0, 2.0, 0.0]
+
+    assert _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10) == "BUSY"
+    assert state.follow_target_world == pytest.approx((1.2, 2.0))
+
+    assert _tick(state, now_ms=150) == "DONE"
+    assert state.follow_target_world is None
+    assert state.follow_active is False
+    assert state.state_label == "TIMEOUT"
+    assert state.timeout is True
+
+
+def test_motion_runtime_timeout_keeps_heading_hold_output_active(
+    monkeypatch,
+) -> None:
+    class FakeMotor:
+        def __init__(self) -> None:
+            self.last_duty = 0
+
+        def set_duty(self, duty) -> None:
+            self.last_duty = int(duty)
+
+        def stop(self) -> None:
+            self.last_duty = 0
+
+    motors = {name: FakeMotor() for name in ("m", "l", "r")}
+    state = _new_state(timeout_ms=100, hw_bundle={"motors": motors})
+    state.target_heading_deg = 0.0
+    state.heading_target_ready = True
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.005),
+            setattr(state, "heading_deg", 18.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: -0.9,
+    )
+
+    def _fake_apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+        assert motors is not None
+        for name in ("m", "l", "r"):
+            motors[name].set_duty(int(wheel_targets[name] * 1000))
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "apply_wheel_speed_control",
+        _fake_apply_wheel_speed_control,
+    )
+
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10, cycle_token=object())
+
+    assert _tick(state, now_ms=150, cycle_token=object()) == "DONE"
+    assert state.state_label == "TIMEOUT"
+    assert state.timeout is True
+    assert state.velocity_command == pytest.approx((0.0, 0.0, -0.9))
+    assert any(motor.last_duty != 0 for motor in motors.values())
+
+
+def test_motion_runtime_base_cycle_integrates_odom_with_pre_update_heading(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+
+    monkeypatch.setattr(
+        runtime,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.1),
+            setattr(state, "heading_deg", 90.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "update_wheel_speeds",
+        lambda filter_bank, raw_ticks, wheel_names: {"m": 0.0, "l": 10.0, "r": 10.0},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "apply_wheel_speed_control",
+        lambda state, wheel_targets, limit, motors=None: {"m": 0.0, "l": 0.0, "r": 0.0},
+    )
+
+    runtime.run_base_cycle(state, now_ms=10, cycle_token=object(), hw_bundle=None)
+
+    assert state.heading_deg == 90.0
+    assert state.odom[0] > 0.0
+    assert state.odom[1] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_motion_runtime_scales_wheel_targets_like_legacy_before_speed_loop(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+    import assistant.runtime_params as runtime_params
+
+    captured = {}
+    state = _new_state(timeout_ms=100)
+    state.tick_s = 0.1
+    state.kinematics = type(
+        "_FakeKinematics",
+        (),
+        {
+            "inverse_kinematics": lambda self, vx, vy, omega: {
+                "m": 12.0,
+                "l": 6.0,
+                "r": -3.0,
+            }
+        },
+    )()
+
+    old_limit = runtime_params.FOLLOW_OUTPUT_LIMIT
+    runtime_params.FOLLOW_OUTPUT_LIMIT = 6.0
+    try:
+        monkeypatch.setattr(
+            runtime,
+            "apply_wheel_speed_control",
+            lambda state, wheel_targets, limit, motors=None: captured.update(
+                {"targets": dict(wheel_targets), "limit": float(limit)}
+            ),
+        )
+
+        runtime._apply_motor_output(state, dx=1.0, dy=2.0, omega=3.0)
+    finally:
+        runtime_params.FOLLOW_OUTPUT_LIMIT = old_limit
+
+    assert captured["limit"] == 6.0
+    assert captured["targets"] == pytest.approx({"m": 6.0, "l": 3.0, "r": -1.5})
+
+
 def test_motion_runtime_accepts_velocity_entry_as_base_chassis_capability() -> None:
     state = _new_state(timeout_ms=100)
 
@@ -419,8 +693,146 @@ def test_motion_runtime_accepts_velocity_entry_as_base_chassis_capability() -> N
     assert result == "BUSY"
     assert state.follow_active is True
     assert state.state_label == "BUSY"
-    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert state.velocity_command == (0.1, 0.2, 0.3)
     assert state.last_error == ""
+
+
+def test_motion_runtime_follow_tick_keeps_position_control_and_heading_hold(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+
+    _force_positive_tick(monkeypatch, heading_deg=18.0)
+    resolved_velocity = iter(((0.18, -0.02), (-0.07, 0.11)))
+    _patch_runtime_hook(
+        monkeypatch,
+        "resolve_follow_velocity",
+        lambda state: next(resolved_velocity),
+    )
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: 0.35,
+    )
+
+    state = _new_state(timeout_ms=100)
+
+    assert (
+        _apply_line(
+            state,
+            "f=1,s=9,v=1,x=0.20,y=-0.05",
+            now_ms=1,
+            cycle_token=object(),
+        )
+        == "BUSY"
+    )
+    assert state.velocity_command == pytest.approx((0.18, -0.02, 0.35))
+
+    assert _tick(state, now_ms=6, cycle_token=object()) == "BUSY"
+
+    assert state.velocity_command == pytest.approx((-0.07, 0.11, 0.35))
+
+
+def test_motion_runtime_follow_uses_higher_default_position_speed_cap(
+    monkeypatch,
+) -> None:
+    _force_positive_tick(monkeypatch, heading_deg=0.0)
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: 0.0,
+    )
+
+    state = _new_state(timeout_ms=100)
+
+    assert (
+        _apply_line(
+            state,
+            "f=1,s=1,v=1,x=0.00,y=300.00",
+            now_ms=1,
+            cycle_token=object(),
+        )
+        == "BUSY"
+    )
+    assert state.follow_position_max_speed == pytest.approx(3.0)
+    assert state.velocity_command == pytest.approx((0.0, 3.0, 0.0))
+
+
+def test_motion_runtime_velocity_mode_tick_keeps_velocity_command_and_heading_hold(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+
+    _force_positive_tick(monkeypatch, heading_deg=12.0)
+    heading_values = []
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: heading_values.append(float(state.heading_deg)) or 0.28,
+    )
+
+    state = _new_state(timeout_ms=100)
+
+    assert (
+        _apply_line(
+            state,
+            "f=1,m=1,x=0.12,y=-0.04",
+            now_ms=1,
+            cycle_token=object(),
+        )
+        == "BUSY"
+    )
+
+    assert state.velocity_command == pytest.approx((0.12, -0.04, 0.28))
+    assert _tick(state, now_ms=6, cycle_token=object()) == "BUSY"
+
+    assert heading_values == [12.0, 12.0]
+    assert state.velocity_command == pytest.approx((0.12, -0.04, 0.28))
+
+
+def test_motion_runtime_follow_velocity_manual_omega_can_release_back_to_heading_hold(
+    monkeypatch,
+) -> None:
+    import assistant.motion_runtime as runtime
+
+    _force_positive_tick(monkeypatch, heading_deg=27.0)
+    heading_values = []
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: heading_values.append(float(state.heading_deg)) or -0.31,
+    )
+
+    state = _new_state(timeout_ms=100)
+
+    assert (
+        apply_runtime_command(
+            state,
+            Command(kind="follow_velocity", vx=0.08, vy=0.03, omega=0.6),
+            now_ms=1,
+            cycle_token=object(),
+        )
+        == "BUSY"
+    )
+    assert state.velocity_command == pytest.approx((0.08, 0.03, 0.6))
+    assert heading_values == []
+
+    assert (
+        apply_runtime_command(
+            state,
+            Command(kind="follow_velocity", vx=0.08, vy=0.03, omega=0.0),
+            now_ms=6,
+            cycle_token=object(),
+        )
+        == "BUSY"
+    )
+    assert state.velocity_command == pytest.approx((0.08, 0.03, -0.31))
+    assert heading_values == [27.0]
+
+    assert _tick(state, now_ms=11, cycle_token=object()) == "BUSY"
+
+    assert heading_values == [27.0, 27.0]
+    assert state.velocity_command == pytest.approx((0.08, 0.03, -0.31))
 
 
 def test_motion_runtime_rejects_legacy_move_entry_in_current_stage() -> None:
@@ -476,32 +888,6 @@ def test_motion_runtime_reset_odom_clears_timeout_but_keeps_last_seq() -> None:
     assert state.last_seq == 8
 
 
-def test_motion_runtime_stop_does_not_clear_timeout_state() -> None:
-    state = _new_state(timeout_ms=100)
-    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
-    assert _tick(state, now_ms=150) == "DONE"
-
-    result = _apply_line(state, "STOP", now_ms=151)
-
-    assert result == "DONE"
-    assert state.state_label == "TIMEOUT"
-    assert state.timeout is True
-    assert state.last_error == "timeout_stop"
-
-
-def test_motion_runtime_disarm_does_not_clear_timeout_state() -> None:
-    state = _new_state(timeout_ms=100)
-    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
-    assert _tick(state, now_ms=150) == "DONE"
-
-    result = _apply_line(state, "DISARM", now_ms=151)
-
-    assert result == "ACK"
-    assert state.state_label == "TIMEOUT"
-    assert state.timeout is True
-    assert state.last_error == "timeout_stop"
-
-
 def test_motion_runtime_ping_and_state_query_keep_current_state() -> None:
     state = _new_state(timeout_ms=100)
     _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
@@ -519,18 +905,145 @@ def test_motion_runtime_ping_and_state_query_keep_current_state() -> None:
     assert state.timeout is True
 
 
-def test_motion_runtime_tick_after_stop_keeps_timeout_state() -> None:
-    state = _new_state(timeout_ms=100)
-    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10)
-    assert _tick(state, now_ms=150) == "DONE"
+def test_motion_runtime_stop_after_timeout_switches_to_hard_stop(
+    monkeypatch,
+) -> None:
+    class FakeMotor:
+        def __init__(self) -> None:
+            self.last_duty = 0
+
+        def set_duty(self, duty) -> None:
+            self.last_duty = int(duty)
+
+        def stop(self) -> None:
+            self.last_duty = 0
+
+    motors = {name: FakeMotor() for name in ("m", "l", "r")}
+    state = _new_state(timeout_ms=100, hw_bundle={"motors": motors})
+    state.target_heading_deg = 0.0
+    state.heading_target_ready = True
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.005),
+            setattr(state, "heading_deg", 18.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: -0.9,
+    )
+
+    def _fake_apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+        assert motors is not None
+        for name in ("m", "l", "r"):
+            motors[name].set_duty(int(wheel_targets[name] * 1000))
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "apply_wheel_speed_control",
+        _fake_apply_wheel_speed_control,
+    )
+
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10, cycle_token=object())
+    assert _tick(state, now_ms=150, cycle_token=object()) == "DONE"
+    assert any(motor.last_duty != 0 for motor in motors.values())
     assert _apply_line(state, "STOP", now_ms=151) == "DONE"
 
-    tick_result = _tick(state, now_ms=152)
+    assert state.state_label == "IDLE"
+    assert state.timeout is False
+    assert state.last_error == "estop"
+    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert all(motor.last_duty == 0 for motor in motors.values())
+
+    tick_result = _tick(state, now_ms=152, cycle_token=object())
 
     assert tick_result == "DONE"
-    assert state.state_label == "TIMEOUT"
-    assert state.timeout is True
-    assert state.last_error == "timeout_stop"
+    assert state.state_label == "IDLE"
+    assert state.timeout is False
+    assert state.last_error == "estop"
+    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert all(motor.last_duty == 0 for motor in motors.values())
+
+
+def test_motion_runtime_stop_clears_accumulated_target() -> None:
+    state = _new_state(timeout_ms=100)
+    state.heading_deg = 0.0
+    state.odom = [1.0, 2.0, 0.0]
+
+    assert _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10) == "BUSY"
+    assert state.follow_target_world == pytest.approx((1.2, 2.0))
+
+    assert _apply_line(state, "STOP", now_ms=11) == "DONE"
+    assert state.follow_target_world is None
+    assert state.follow_active is False
+    assert state.state_label == "IDLE"
+    assert state.timeout is False
+    assert state.last_error == "estop"
+
+
+def test_motion_runtime_disarm_after_timeout_cancels_heading_hold_output(
+    monkeypatch,
+) -> None:
+    class FakeMotor:
+        def __init__(self) -> None:
+            self.last_duty = 0
+
+        def set_duty(self, duty) -> None:
+            self.last_duty = int(duty)
+
+        def stop(self) -> None:
+            self.last_duty = 0
+
+    motors = {name: FakeMotor() for name in ("m", "l", "r")}
+    state = _new_state(timeout_ms=100, hw_bundle={"motors": motors})
+    state.target_heading_deg = 0.0
+    state.heading_target_ready = True
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: (
+            setattr(state, "tick_s", 0.005),
+            setattr(state, "heading_deg", 18.0),
+            setattr(state, "yaw_rate_deg_s", 0.0),
+        )[-1],
+    )
+    _patch_runtime_hook(
+        monkeypatch,
+        "compute_heading_correction",
+        lambda state: -0.9,
+    )
+
+    def _fake_apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
+        assert motors is not None
+        for name in ("m", "l", "r"):
+            motors[name].set_duty(int(wheel_targets[name] * 1000))
+
+    _patch_runtime_hook(
+        monkeypatch,
+        "apply_wheel_speed_control",
+        _fake_apply_wheel_speed_control,
+    )
+
+    _apply_line(state, "f=1,s=8,v=1,x=0.2,y=0.0", now_ms=10, cycle_token=object())
+
+    assert _tick(state, now_ms=150, cycle_token=object()) == "DONE"
+    assert state.velocity_command == pytest.approx((0.0, 0.0, -0.9))
+    assert any(motor.last_duty != 0 for motor in motors.values())
+
+    assert _apply_line(state, "DISARM", now_ms=151) == "ACK"
+
+    _tick(state, now_ms=152, cycle_token=object())
+
+    assert state.state_label == "IDLE"
+    assert state.timeout is False
+    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert all(motor.last_duty == 0 for motor in motors.values())
 
 
 def test_motion_runtime_velocity_entry_refreshes_timeout_window() -> None:
@@ -571,7 +1084,7 @@ def test_motion_runtime_hold_does_not_retrigger_timeout_on_later_tick() -> None:
     assert _tick(state, now_ms=150) == "DONE"
 
     assert _apply_line(state, "HOLD", now_ms=151) == "DONE"
-    assert _tick(state, now_ms=260) == "ACK"
+    assert _tick(state, now_ms=260) == "DONE"
     assert state.state_label == "TIMEOUT"
     assert state.timeout is True
 
@@ -612,7 +1125,7 @@ def test_motion_runtime_vel_command_keeps_heading_hold_enabled_by_default() -> N
     result = _apply_line(state, "VEL 0.1 0.0 0.0", now_ms=0)
 
     assert result == "BUSY"
-    assert state.velocity_command == (0.0, 0.0, 0.0)
+    assert state.velocity_command == (0.1, 0.0, 0.0)
     assert state.target_heading_deg == 15.0
 
 
@@ -631,8 +1144,8 @@ def test_motion_runtime_small_manual_omega_falls_back_to_heading_hold(
     state.yaw_kd = 0.0
     state.hold_speed_eps = 0.25
 
-    monkeypatch.setitem(
-        apply_runtime_command.__globals__,
+    _patch_runtime_hook(
+        monkeypatch,
         "update_heading_from_gyro",
         lambda state, heading_override=None: (
             setattr(state, "tick_s", 0.005),
@@ -680,8 +1193,8 @@ def test_motion_runtime_passes_dynamic_tick_to_speed_loop(monkeypatch) -> None:
     state.follow_active = True
     state.follow_target_world = (0.0, 0.0)
 
-    monkeypatch.setitem(
-        run_base_cycle.__globals__,
+    _patch_runtime_hook(
+        monkeypatch,
         "update_heading_from_gyro",
         lambda state, heading_override=None: (
             setattr(state, "tick_s", 0.012345),
@@ -719,8 +1232,8 @@ def test_motion_runtime_passes_dynamic_tick_to_wheel_filters(monkeypatch) -> Non
         },
     )
 
-    monkeypatch.setitem(
-        run_base_cycle.__globals__,
+    _patch_runtime_hook(
+        monkeypatch,
         "update_heading_from_gyro",
         lambda state, heading_override=None: (
             setattr(state, "tick_s", next(dt_values)),
@@ -735,7 +1248,7 @@ def test_motion_runtime_passes_dynamic_tick_to_wheel_filters(monkeypatch) -> Non
     assert state.wheel_filters["m"].reg.long_values == [(7.0, 10.0), (20.0, 15.0)]
 
 
-def test_motion_runtime_maps_right_shift_direction_to_three_wheel_signs(
+def test_motion_runtime_maps_documented_axis_semantics_to_three_wheel_signs(
     monkeypatch,
 ) -> None:
     class FakeMotor:
@@ -752,14 +1265,8 @@ def test_motion_runtime_maps_right_shift_direction_to_three_wheel_signs(
         def heading_deg(self):
             return 0.0
 
-    motors = {"m": FakeMotor(), "l": FakeMotor(), "r": FakeMotor()}
-    state = _new_state(
-        timeout_ms=100,
-        hw_bundle={"motors": motors, "imu": FakeHeading()},
-    )
-
-    monkeypatch.setitem(
-        apply_runtime_command.__globals__,
+    _patch_runtime_hook(
+        monkeypatch,
         "update_heading_from_gyro",
         lambda state, heading_override=None: (
             setattr(state, "tick_s", 0.005),
@@ -776,24 +1283,30 @@ def test_motion_runtime_maps_right_shift_direction_to_three_wheel_signs(
             if motors is not None:
                 motors[name].set_duty(duty)
 
-    monkeypatch.setitem(
-        apply_runtime_command.__globals__,
+    _patch_runtime_hook(
+        monkeypatch,
         "apply_wheel_speed_control",
         _fake_apply_wheel_speed_control,
     )
 
-    _apply_line(state, "f=1,s=1,v=1,x=300.0,y=0.0", now_ms=5)
-    right_shift = {name: motor.last_duty for name, motor in motors.items()}
+    def _run_follow_line(line, now_ms):
+        motors = {"m": FakeMotor(), "l": FakeMotor(), "r": FakeMotor()}
+        state = _new_state(
+            timeout_ms=100,
+            hw_bundle={"motors": motors, "imu": FakeHeading()},
+        )
+        _apply_line(state, line, now_ms=now_ms)
+        return {name: motor.last_duty for name, motor in motors.items()}
 
-    _apply_line(state, "f=1,s=2,v=1,x=0.0,y=300.0", now_ms=1)
-    forward_shift = {name: motor.last_duty for name, motor in motors.items()}
+    x_positive = _run_follow_line("f=1,s=1,v=1,x=300.0,y=0.0", now_ms=5)
+    y_positive = _run_follow_line("f=1,s=1,v=1,x=0.0,y=300.0", now_ms=5)
 
-    assert right_shift["m"] == 0
-    assert right_shift["l"] > 0
-    assert right_shift["r"] < 0
-    assert forward_shift["m"] < 0
-    assert forward_shift["l"] > 0
-    assert forward_shift["r"] > 0
+    assert x_positive["m"] < 0
+    assert x_positive["l"] > 0
+    assert x_positive["r"] > 0
+    assert y_positive["m"] == 0
+    assert y_positive["l"] > 0
+    assert y_positive["r"] < 0
 
 
 def test_motion_runtime_reuses_same_cycle_sensor_snapshot() -> None:
@@ -979,7 +1492,7 @@ def test_motion_runtime_follow_rebinds_to_world_target_instead_of_raw_output() -
 
     _tick(state, now_ms=5, cycle_token=object())
 
-    assert first_command == (0.0, 0.0, 0.0)
+    assert first_command == pytest.approx((1.0, 0.0, 0.0))
     assert state.velocity_command[0] == pytest.approx(0.0, abs=1e-6)
     assert state.velocity_command[1] == pytest.approx(-1.0, abs=1e-6)
 

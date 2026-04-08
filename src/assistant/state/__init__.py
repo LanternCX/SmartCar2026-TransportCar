@@ -5,7 +5,7 @@
 
 
 class AssistantState:
-    """保存辅车跨周期最小运行状态."""
+    """保存辅车跨周期运行状态."""
 
     def __init__(self):
         self.follow_active = False
@@ -35,7 +35,11 @@ class AssistantControlState:
     ):
         self.yaw_integral = 0.0
         self.heading_target_ready = False
+        self.translation_mode = "idle"
+        self.turn_source = "auto"
         self.follow_target_world = None
+        self.follow_velocity_target = (0.0, 0.0)
+        self.manual_omega_target = 0.0
         self.wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
         self.target_wheel_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
         self.motor_duties = {"m": 0, "l": 0, "r": 0}
@@ -54,7 +58,7 @@ class AssistantControlState:
 class MotionRuntimeState(AssistantState):
     """辅车过程式主线使用的运行时状态容器.
 
-    @brief 把控制子状态保留在 `control` 下集中持有, 同时通过少量扁平代理字段维持主线读写口径稳定。
+    @brief 把控制子状态集中保留在 `control` 下, 并通过扁平代理字段暴露主线读写入口。
     """
 
     control: AssistantControlState
@@ -128,6 +132,38 @@ class MotionRuntimeState(AssistantState):
     @follow_target_world.setter
     def follow_target_world(self, value):
         self.control.follow_target_world = value
+
+    @property
+    def translation_mode(self):
+        return self.control.translation_mode
+
+    @translation_mode.setter
+    def translation_mode(self, value):
+        self.control.translation_mode = value
+
+    @property
+    def turn_source(self):
+        return self.control.turn_source
+
+    @turn_source.setter
+    def turn_source(self, value):
+        self.control.turn_source = value
+
+    @property
+    def follow_velocity_target(self):
+        return self.control.follow_velocity_target
+
+    @follow_velocity_target.setter
+    def follow_velocity_target(self, value):
+        self.control.follow_velocity_target = value
+
+    @property
+    def manual_omega_target(self):
+        return self.control.manual_omega_target
+
+    @manual_omega_target.setter
+    def manual_omega_target(self, value):
+        self.control.manual_omega_target = value
 
     @property
     def wheel_speeds(self):

@@ -5,6 +5,7 @@ def test_assistant_runtime_params_exposes_required_keys() -> None:
         "FOLLOW_TIMEOUT_MS",
         "CONTROL_TICK_MS",
         "FOLLOW_OUTPUT_LIMIT",
+        "FOLLOW_POSITION_MAX_SPEED",
         "PID_MAP",
         "SPEED_FILTER_WINDOW",
         "SPEED_DIFF_MAX_DELTA",
@@ -15,6 +16,12 @@ def test_assistant_runtime_params_exposes_required_keys() -> None:
 
     assert expected.issubset(set(dir(runtime_params)))
     assert set(runtime_params.PID_MAP.keys()) == {"m", "l", "r"}
+
+
+def test_assistant_runtime_params_raises_default_follow_position_speed_cap() -> None:
+    import assistant.runtime_params as runtime_params
+
+    assert runtime_params.FOLLOW_POSITION_MAX_SPEED == 3.0
 
 
 def test_assistant_runtime_params_does_not_expose_gyro_scale_board_fact() -> None:

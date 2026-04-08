@@ -110,8 +110,13 @@ def build_wheel_speed_controllers(pid_map, ident_lookup, output_limit):
 def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
     """执行一拍轮速闭环并可选地写回电机.
 
-    @brief 同步刷新目标轮速、控制输出和状态记录, 保持链路口径一致。
+    @brief 同步刷新目标轮速、控制输出和状态记录。
     """
+
+    dt_s = float(getattr(state, "tick_s", 0.0) or 0.0)
+    if dt_s <= 0.0:
+        tick_ms = float(getattr(state, "tick_ms", 0.0) or 0.0)
+        dt_s = tick_ms / 1000.0 if tick_ms > 0.0 else 0.0
 
     outputs = {}
     for name in ("m", "l", "r"):
@@ -120,7 +125,7 @@ def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
         duty = state.wheel_controllers[name].update(
             raw,
             state.wheel_speeds.get(name, 0.0),
-            state.tick_s,
+            dt_s,
         )
         outputs[name] = duty
         state.motor_duties[name] = int(duty)
@@ -135,7 +140,7 @@ def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
 def reset_wheel_speed_control(state):
     """把轮速控制链恢复到静止初始态.
 
-    @brief 统一清零目标值、占空比记录和各轮控制器内部状态。
+    @brief 清零目标值、占空比记录和各轮控制器内部状态。
     """
 
     for name in ("m", "l", "r"):
