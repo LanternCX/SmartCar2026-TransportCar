@@ -66,7 +66,6 @@ def _build_idle_decision(
     target_valid=0,
     target_fresh=0,
     self_base_snapshot=None,
-    reason="",
 ):
     """构造不驱动辅车跟随的空闲决策对象.
 
@@ -94,25 +93,9 @@ def _build_idle_decision(
             valid=0,
             dx=0.0,
             dy=0.0,
-            reason=reason,
         ),
         self_base_state=self_base_state,
     )
-
-
-def _resolve_idle_reason(observation, phase):
-    source_status = str(observation.get("source_status", "")).strip()
-    if source_status == "invalid":
-        return "parse_invalid"
-    if source_status == "active" and int(observation.get("valid", 0)) != 1:
-        return "vision_invalid"
-    if int(observation.get("fresh", 1)) != 1 or int(observation.get("stale", 0)) == 1:
-        return "stale"
-    if phase == "CENTER_HOLD":
-        return "center_hold"
-    if source_status == "missing":
-        return "missing"
-    return "missing"
 
 
 def decide_from_observation(observation, state_machine=None):
@@ -131,7 +114,6 @@ def decide_from_observation(observation, state_machine=None):
             phase=phase,
             selected_target=selected_target,
             self_base_snapshot=observation,
-            reason=_resolve_idle_reason(observation, phase),
         )
     if int(observation.get("fresh", 1)) != 1 or int(observation.get("stale", 0)) == 1:
         return _build_idle_decision(
@@ -139,9 +121,8 @@ def decide_from_observation(observation, state_machine=None):
             phase=phase,
             selected_target=selected_target,
             self_base_snapshot=observation,
-            reason=_resolve_idle_reason(observation, phase),
         )
-    if phase != "TRACKING":
+    if phase not in ("ALIGN_X", "ALIGN_Y"):
         return _build_idle_decision(
             control_seq,
             phase=phase,
@@ -149,21 +130,25 @@ def decide_from_observation(observation, state_machine=None):
             target_valid=1,
             target_fresh=1,
             self_base_snapshot=observation,
-            reason=_resolve_idle_reason(observation, phase),
         )
 
-    dx = float(observation.get("err_x", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_X
-    dy = float(observation.get("err_y", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_Y
+    # 主辅车当前按头对头阵型工作, 主车观测到的前/右在辅车车体系下都要反向解释。
+    dx = 0.0
+    dy = 0.0
+    if phase == "ALIGN_X":
+        dx = -float(observation.get("err_x", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_X
+    else:
+        dy = -float(observation.get("err_y", 0.0)) * runtime_params.FOLLOW_CONTROL_KP_Y
     assistant_target = {"valid": 1, "dx": dx, "dy": dy}
     assistant_state = {
-        "phase": "TRACKING",
+        "phase": phase,
         "selected_target": selected_target,
         "target_valid": 1,
         "target_fresh": 1,
     }
     self_base_state = _build_self_base_state(observation)
     return Decision(
-        phase="TRACKING",
+        phase=phase,
         selected_target=selected_target,
         self_target={"kind": "hold"},
         assistant_target=assistant_target,

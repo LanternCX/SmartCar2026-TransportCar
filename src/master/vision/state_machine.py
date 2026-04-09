@@ -33,22 +33,24 @@ class MarkerStateMachine:
     ):
         """根据目标可见性与偏差决定当前视觉阶段.
 
-        @brief 这里只维护 `MARKER_MISSING/CENTER_HOLD/TRACKING` 三态, 让决策层按阶段选择动作。
+        @brief 这里只维护 `MARKER_MISSING/CENTER_HOLD/ALIGN_X/ALIGN_Y` 四态, 让决策层按阶段选择动作。
         """
 
         _ = has_new_input
         if has_target is None:
             has_target = int(valid) == 1
+        err_x = float(err_x)
+        err_y = float(err_y)
         if not has_target:
             self.phase = "MARKER_MISSING"
             return {"phase": self.phase, "hold": True}
-        if (
-            abs(float(err_x)) <= self.deadzone_px
-            and abs(float(err_y)) <= self.deadzone_px
-        ):
+        if abs(err_x) <= self.deadzone_px and abs(err_y) <= self.deadzone_px:
             self.phase = "CENTER_HOLD"
             return {"phase": self.phase, "hold": True}
-        self.phase = "TRACKING"
+        if abs(err_x) > self.deadzone_px:
+            self.phase = "ALIGN_X"
+            return {"phase": self.phase, "hold": False}
+        self.phase = "ALIGN_Y"
         return {"phase": self.phase, "hold": False}
 
 

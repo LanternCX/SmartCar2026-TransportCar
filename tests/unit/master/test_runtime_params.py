@@ -136,5 +136,5 @@ def test_master_app_uses_runtime_param_control_gains() -> None:
     assert parsed.kind == "follow"
     assert parsed.seq == 1
     assert parsed.valid == 1
-    assert parsed.dx == 24.0
-    assert parsed.dy == -27.0
+    assert parsed.dx == -24.0
+    assert parsed.dy == 0.0

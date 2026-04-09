@@ -44,9 +44,9 @@ def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
     )
     result = loop.step(now_ms=100)
 
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.12, -0.06)
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 1.2, 0.0)
     assert len(uart3.writes) == 1
-    _assert_follow_command_semantics(uart3.writes[0], 1, 1, 0.12, -0.06)
+    _assert_follow_command_semantics(uart3.writes[0], 1, 1, 1.2, 0.0)
 
 
 def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
@@ -77,6 +77,50 @@ def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
     _assert_follow_command_semantics(result["assistant_command"], 1, 0, 0.0, 0.0)
     assert len(uart3.writes) == 1
     _assert_follow_command_semantics(uart3.writes[0], 1, 0, 0.0, 0.0)
+
+
+def test_master_runtime_loop_step_omits_internal_perf_diag() -> None:
+    from master.app import MasterRuntimeLoop
+
+    class FakeUart:
+        def __init__(self, lines=None):
+            self.lines = list(lines or [])
+            self.writes = []
+
+        def read_latest_line(self, transform=None):
+            if not self.lines:
+                return None
+            line = self.lines.pop(0)
+            if transform is None:
+                return line
+            return transform(line)
+
+        def write_line(self, payload):
+            self.writes.append(payload)
+
+    class FakeApp:
+        def __init__(self, hw_bundle):
+            self.hw_bundle = hw_bundle
+
+        def step(self, observation):
+            return {
+                "assistant_command": "cmd-once",
+                "selected_target": "tracked",
+                "phase": "ALIGN_X",
+                "self_target": {"kind": "hold"},
+            }
+
+    uart3 = FakeUart()
+    uart6 = FakeUart(["v=1,s=1,x=12,y=-6"])
+    uart8 = FakeUart()
+    hw_bundle = _build_master_hw_bundle(uart3=uart3, uart6=uart6, uart8=uart8)
+    loop = MasterRuntimeLoop(hw_bundle, app=FakeApp(hw_bundle))
+
+    result = loop.step(now_ms=100)
+
+    assert result["assistant_command"] == "cmd-once"
+    assert "perf_diag" not in result
+    assert uart3.writes == ["cmd-once"]
 
 
 def test_master_runtime_loop_continues_polling_vision_and_writing_controls() -> None:

@@ -39,19 +39,17 @@ def _compact_float_text(value):
     return text
 
 
-def build_follow_command(seq, valid, dx, dy, reason=""):
+def build_follow_command(seq, valid, dx, dy):
     """构造主车到辅车的高频跟随报文
 
-    @brief 按约定格式生成 `follow=1,...` 文本
+    @brief 按辅车当前协议生成 `f=1,s=...,v=...,x=...,y=...` 文本
     @param seq 递增控制序号
     @param valid 当前拍是否有有效目标
     @param dx 车体系横向位置式控制量
     @param dy 车体系纵向位置式控制量
-    @param reason 当前拍无效时的调试原因, 仅 `valid=0` 时追加到报文尾部
     @return str
     """
 
-    _ = reason
     return "f=1,s=%d,v=%d,x=%s,y=%s" % (
         int(seq),
         1 if int(valid) else 0,

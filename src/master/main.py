@@ -8,6 +8,8 @@
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
 # 运行态心跳灯翻转周期, 用于确认主循环仍在推进
 RUNTIME_HEARTBEAT_MS = 500
+# 控制诊断汇总打印周期, 避免逐拍日志本身拖慢热路径
+CONTROL_PROFILE_REPORT_MS = 500
 
 
 def _debug_print(stage, **payload):
@@ -104,6 +106,61 @@ def _noop_ticker_callback(_ticker_obj):
     return None
 
 
+def _new_control_profile():
+    return {
+        "samples": 0,
+        "period_samples": 0,
+        "period_total_ms": 0,
+        "period_max_ms": 0,
+        "step_total_ms": 0,
+        "step_max_ms": 0,
+        "overrun_count": 0,
+    }
+
+
+def _update_control_profile(profile, tick_ms, actual_ms=None, step_total_ms=None):
+    if actual_ms is None and step_total_ms is None:
+        return None
+    if actual_ms is not None:
+        actual_ms = int(actual_ms)
+        profile["period_samples"] += 1
+        profile["period_total_ms"] += actual_ms
+        if actual_ms > profile["period_max_ms"]:
+            profile["period_max_ms"] = actual_ms
+    if step_total_ms is None:
+        return None
+    total_ms = int(step_total_ms)
+    profile["samples"] += 1
+    profile["step_total_ms"] += total_ms
+    if total_ms > profile["step_max_ms"]:
+        profile["step_max_ms"] = total_ms
+    if total_ms > int(tick_ms):
+        profile["overrun_count"] += 1
+    return None
+
+
+def _emit_control_profile(profile, tick_ms):
+    samples = int(profile.get("samples", 0))
+    if samples <= 0:
+        return None
+    period_samples = int(profile.get("period_samples", 0))
+    period_avg_ms = 0
+    if period_samples > 0:
+        period_avg_ms = int(round(profile["period_total_ms"] / float(period_samples)))
+    step_avg_ms = int(round(profile["step_total_ms"] / float(samples)))
+    _debug_print(
+        "control_profile",
+        overrun_count=int(profile["overrun_count"]),
+        period_avg_ms=period_avg_ms,
+        period_max_ms=int(profile["period_max_ms"]),
+        samples=samples,
+        step_avg_ms=step_avg_ms,
+        step_max_ms=int(profile["step_max_ms"]),
+        target_ms=int(tick_ms),
+    )
+    return None
+
+
 def _build_runtime_heartbeat_led():
     from machine import Pin
 
@@ -141,6 +198,9 @@ def _drive_loop(loop):
     next_tick_ms = None
     heartbeat_led = getattr(loop, "heartbeat_led", None)
     last_heartbeat_ms = None
+    last_control_ms = None
+    last_profile_report_ms = None
+    control_profile = _new_control_profile()
     while True:
         now_ms = _read_now_ms()
         # 未到下一拍时主动等待, 保持控制节拍稳定
@@ -156,8 +216,27 @@ def _drive_loop(loop):
         ):
             heartbeat_led.toggle()
             last_heartbeat_ms = int(now_ms)
+        if last_profile_report_ms is None:
+            last_profile_report_ms = int(now_ms)
+        elif (
+            _ticks_diff_ms(now_ms, last_profile_report_ms) >= CONTROL_PROFILE_REPORT_MS
+        ):
+            _emit_control_profile(control_profile, tick_ms=tick_ms)
+            control_profile = _new_control_profile()
+            last_profile_report_ms = int(now_ms)
+        actual_ms = None
+        if last_control_ms is not None:
+            actual_ms = _ticks_diff_ms(now_ms, last_control_ms)
+        last_control_ms = int(now_ms)
         # 交给运行循环推进当前拍, 然后预约下一拍时间
         loop.step(now_ms)
+        step_finished_ms = _read_now_ms()
+        _update_control_profile(
+            control_profile,
+            tick_ms=tick_ms,
+            actual_ms=actual_ms,
+            step_total_ms=_ticks_diff_ms(step_finished_ms, now_ms),
+        )
         next_tick_ms = int(now_ms) + tick_ms
 
 

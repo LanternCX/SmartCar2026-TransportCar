@@ -178,7 +178,7 @@ def test_master_start_runtime_keeps_stepping_runtime_loop(monkeypatch) -> None:
     import master.app as runtime_app
 
     step_calls = []
-    now_values = iter((100, 120, 140))
+    now_values = iter((100, 100, 120, 120, 140))
 
     class DummyHeartbeatLed:
         def toggle(self) -> None:
@@ -225,7 +225,7 @@ def test_master_drive_loop_waits_for_next_5ms_tick(monkeypatch) -> None:
 
     step_calls = []
     sleep_calls = []
-    now_values = iter((100, 100, 103, 105, 105))
+    now_values = iter((100, 100, 100, 103, 105))
 
     class DummyLoop:
         def step(self, now_ms):
@@ -281,6 +281,49 @@ def test_master_drive_loop_toggles_runtime_heartbeat_slowly(monkeypatch) -> None
     assert exc_info.value.code == 0
     assert step_calls == [100, 350, 650]
     assert loop.heartbeat_led.toggle_count == 2
+
+
+def test_master_drive_loop_reports_lightweight_control_profile_summary(
+    monkeypatch,
+) -> None:
+    import pytest
+
+    from master.main import _drive_loop
+
+    step_calls = []
+    debug_events = []
+    now_values = iter((100, 105, 610))
+
+    class DummyLoop:
+        def step(self, now_ms):
+            step_calls.append(now_ms)
+            if len(step_calls) == 3:
+                raise SystemExit(0)
+            return {"assistant_command": "cmd"}
+
+    now_values = iter((100, 105, 200, 205, 610))
+    monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
+    monkeypatch.setattr("master.main._sleep_ms", lambda delay_ms: None)
+    monkeypatch.setattr(
+        "master.main._debug_print",
+        lambda stage, **payload: debug_events.append((stage, dict(payload))),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _drive_loop(DummyLoop())
+
+    assert exc_info.value.code == 0
+    assert step_calls == [100, 200, 610]
+    assert [stage for stage, _ in debug_events].count("control_period") == 0
+    control_profile_events = [
+        payload for stage, payload in debug_events if stage == "control_profile"
+    ]
+    assert len(control_profile_events) == 1
+    assert control_profile_events[0]["samples"] == 2
+    assert control_profile_events[0]["step_avg_ms"] == 5
+    assert control_profile_events[0]["step_max_ms"] == 5
+    assert control_profile_events[0]["period_avg_ms"] == 100
+    assert control_profile_events[0]["period_max_ms"] == 100
 
 
 def test_master_build_capture_ticker_registers_encoder_and_imu_devices(
@@ -358,8 +401,8 @@ def test_master_app_only_drives_assistant_in_current_stage() -> None:
 
     assert result["self_target"] == {"kind": "hold"}
     assert result["selected_target"] == "tracked"
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.12, -0.06)
-    assert result["phase"] == "TRACKING"
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 1.2, 0.0)
+    assert result["phase"] == "ALIGN_X"
     assert result["active_uart"] == "uart6"
 
 
@@ -393,8 +436,8 @@ def test_master_app_routes_current_selected_target_before_state_machine() -> Non
     )
 
     assert result["selected_target"] == "tracked"
-    assert result["phase"] == "TRACKING"
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.09, 0.0)
+    assert result["phase"] == "ALIGN_X"
+    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.9, 0.0)
 
 
 def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
@@ -457,12 +500,12 @@ def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
 
     result = app.step({"now_ms": 1100})
 
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
     assert result["selected_target"] == "tracked"
-    assert result["phase"] == "TRACKING"
+    assert result["phase"] == "ALIGN_X"
     assert result["self_target"] == {"kind": "hold"}
     assert result["assistant_state"] == {
-        "phase": "TRACKING",
+        "phase": "ALIGN_X",
         "selected_target": "tracked",
         "target_valid": 1,
         "target_fresh": 1,
@@ -483,12 +526,12 @@ def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
 
     result = app.step({"uart": "uart6", "now_ms": 1100})
 
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
     assert result["selected_target"] == "tracked"
-    assert result["phase"] == "TRACKING"
+    assert result["phase"] == "ALIGN_X"
     assert result["self_target"] == {"kind": "hold"}
     assert result["assistant_state"] == {
-        "phase": "TRACKING",
+        "phase": "ALIGN_X",
         "selected_target": "tracked",
         "target_valid": 1,
         "target_fresh": 1,
@@ -672,9 +715,9 @@ def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> 
         }
     )
 
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 0.12, -0.06)
+    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
     assert result["selected_target"] == "tracked"
-    assert result["phase"] == "TRACKING"
+    assert result["phase"] == "ALIGN_X"
     assert result["active_uart"] == "uart6"
 
 
