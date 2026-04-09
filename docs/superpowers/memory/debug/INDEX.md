@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-09-1 | 2026-04-09 | 主车高频控制诊断会放大串口热路径并触发 UART3 写超时 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-09-1.md` | 把主车控制周期诊断从热路径内的分段取时与逐拍输出收口为外层轻量汇总，避免调试本身持续放大 `UART3` 写超时与周期失真。 | master, uart, diagnostics, control-profile, etimedout, hot-path, debug |
 | 2026-04-08-2 | 2026-04-08 | 上调辅车位置式固定平移速度上限以扩大单窗口位移 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-08-2.md` | 把辅车位置式默认平移速度上限从 1.5 上调到 3.0，并用主机侧回归固定住“只改固定上限、不扩协议与模式语义”的边界。 | assistant, follow-position, speed-cap, motion-runtime, runtime-params, regression, debug |
 | 2026-04-08-1 | 2026-04-08 | 修复辅车速度模式后续周期退回普通路径的问题 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-08-1.md` | 收敛辅车速度模式只在收包当拍生效的问题，并把默认朝向保持与显式角速度例外规则收口到统一周期分发。 | assistant, follow-velocity, heading-hold, motion-runtime, mode-state, regression, debug |
 | 2026-04-06-1 | 2026-04-06 | 主车视觉状态机后的内存恶化主因是串口收发而不是双窗口滤波 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-06-1.md` | 记录主车视觉状态机接入后内存恶化的根因收敛结果, 结论是串口收发热路径才是主因, 双窗口滤波不是这轮主故障源。 | master, memory, uart, vision-state-machine, micropython, filter, debug |
