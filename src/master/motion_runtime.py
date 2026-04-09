@@ -77,6 +77,7 @@ if _package_name in ("", None):
     from ctrl.kinematics import (
         build_kinematics,
         build_odometry,
+        scale_wheel_targets,
         update_odometry_from_wheels,
     )
     from ctrl.pid import apply_wheel_speed_control, build_wheel_speed_controllers
@@ -97,6 +98,7 @@ else:
     from .ctrl.kinematics import (
         build_kinematics,
         build_odometry,
+        scale_wheel_targets,
         update_odometry_from_wheels,
     )
     from .ctrl.pid import apply_wheel_speed_control, build_wheel_speed_controllers
@@ -441,6 +443,10 @@ def _apply_motor_output_for_state(state, vx, vy, omega, hw_bundle=None):
     wheel_targets = state.kinematics.inverse_kinematics(
         float(vy), float(vx), float(omega)
     )
+    wheel_targets = scale_wheel_targets(
+        wheel_targets,
+        runtime_params.FOLLOW_OUTPUT_LIMIT,
+    )
     motors = _state_motor_bundle(state, hw_bundle=hw_bundle)
     apply_wheel_speed_control(
         state,
@@ -548,19 +554,28 @@ def run_base_cycle(state, hw_bundle=None, cycle_token=None) -> dict:
         return dict(state._last_base_snapshot)
 
     # 先更新姿态链, 再读取编码器增量和轮速估计
+    odom_heading_deg = float(state.heading_deg)
     heading_override = _read_imu_sample_for_state(state, hw_bundle=resolved_hw_bundle)
     update_heading_from_gyro(state, heading_override=heading_override)
+    has_valid_attitude_dt = float(state.tick_s) > 0.0
 
     raw_ticks = _read_encoder_ticks_for_state(state, hw_bundle=resolved_hw_bundle)
     state.encoder_ticks = dict(raw_ticks)
-    state.wheel_speeds = update_wheel_speeds(
-        state.wheel_filters,
-        raw_ticks,
-        ("m", "l", "r"),
-    )
+    if has_valid_attitude_dt:
+        state.wheel_speeds = update_wheel_speeds(
+            state.wheel_filters,
+            raw_ticks,
+            ("m", "l", "r"),
+        )
 
-    # 里程与快照统一在这里收口, 让上层只消费一份底座观测结果
-    odom_x, odom_y = update_odometry_from_wheels(state)
+        # 里程与快照统一在这里收口, 让上层只消费一份底座观测结果
+        odom_x, odom_y = update_odometry_from_wheels(
+            state, heading_deg=odom_heading_deg
+        )
+    else:
+        state.wheel_speeds = dict(state.wheel_speeds)
+        odom_x = float(state.odom[0])
+        odom_y = float(state.odom[1])
     # 主车对外只返回底座观测快照, 不在这里混入视觉或调度阶段状态
     snapshot = {
         "imu_raw": tuple(state.imu_raw),

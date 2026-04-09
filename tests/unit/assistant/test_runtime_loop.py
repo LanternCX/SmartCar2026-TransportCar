@@ -392,3 +392,41 @@ def test_assistant_uart_read_latest_line_limits_each_read_chunk() -> None:
 
     assert device.read_sizes
     assert max(device.read_sizes) <= 96
+
+
+def test_assistant_uart3_read_latest_line_has_no_two_chunk_budget() -> None:
+    from assistant.hw.uart import UartPort
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"noise\r\n",
+                b"f=1,s=10,v=1,x=0.1,y=0.0\r\n",
+                b"f=1,s=11,v=1,x=0.2,y=0.0\r\n",
+            ]
+            self.read_count = 0
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            self.read_count += 1
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    def _keep_follow_line(line):
+        if not line.startswith("f="):
+            return None
+        return line
+
+    device = FakeDevice()
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", device)
+
+    assert (
+        port.read_latest_line(transform=_keep_follow_line) == "f=1,s=11,v=1,x=0.2,y=0.0"
+    )
+    assert device.read_count == 3

@@ -113,6 +113,11 @@ def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
     @brief 这个入口负责限幅、更新状态快照并在提供电机对象时直接下发占空比。
     """
 
+    dt_s = float(getattr(state, "tick_s", 0.0) or 0.0)
+    if dt_s <= 0.0:
+        tick_ms = float(getattr(state, "tick_ms", 0.0) or 0.0)
+        dt_s = tick_ms / 1000.0 if tick_ms > 0.0 else 0.0
+
     outputs = {}
     for name in ("m", "l", "r"):
         raw = _clamp(float(wheel_targets.get(name, 0.0)), -float(limit), float(limit))
@@ -120,7 +125,7 @@ def apply_wheel_speed_control(state, wheel_targets, limit, motors=None):
         duty = state.wheel_controllers[name].update(
             raw,
             state.wheel_speeds.get(name, 0.0),
-            state.tick_s,
+            dt_s,
         )
         outputs[name] = duty
         state.motor_duties[name] = int(duty)

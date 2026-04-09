@@ -340,6 +340,179 @@ def test_master_motion_runtime_passes_dynamic_tick_to_speed_loop(monkeypatch) ->
         assert controller.dt_values == [pytest.approx(0.012345)]
 
 
+def test_master_motion_runtime_zero_tick_falls_back_to_fixed_control_step(
+    monkeypatch,
+) -> None:
+    import master.runtime_params as runtime_params
+    import master.motion_runtime as runtime_module
+    from master.motion_runtime import MotionRuntime
+
+    class FakeImu:
+        def read_calibrated(self):
+            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    class FakeEncoder:
+        def read_and_clear(self):
+            return 0.0
+
+    class FakeController:
+        def __init__(self) -> None:
+            self.dt_values = []
+
+        def update(self, _target, _now, dt_s):
+            self.dt_values.append(float(dt_s))
+            return 0.0
+
+        def reset(self):
+            return None
+
+    motion_runtime = MotionRuntime(
+        hw_bundle={
+            "imu": FakeImu(),
+            "encoders": {name: FakeEncoder() for name in ("m", "l", "r")},
+        }
+    )
+    controllers = {name: FakeController() for name in ("m", "l", "r")}
+    motion_runtime.wheel_controllers = controllers
+    motion_runtime.target_heading_deg = 0.0
+    motion_runtime.heading_target_ready = True
+    motion_runtime.last_target = {"kind": "hold"}
+    motion_runtime.last_attitude_time_us = 1_000_000
+
+    monkeypatch.setattr(
+        runtime_module,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: setattr(state, "tick_s", 0.0),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "update_wheel_speeds",
+        lambda _filter_bank, _raw_ticks, wheel_names: {
+            name: 0.0 for name in wheel_names
+        },
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "update_odometry_from_wheels",
+        lambda state, heading_deg=None: (0.0, 0.0),
+    )
+
+    motion_runtime.execute_control_loop(cycle_token=object())
+
+    expected_dt = float(runtime_params.CONTROL_TICK_MS) / 1000.0
+    for controller in controllers.values():
+        assert controller.dt_values == [expected_dt]
+
+
+def test_master_motion_runtime_accumulates_odometry_with_heading_before_update(
+    monkeypatch,
+) -> None:
+    import master.motion_runtime as runtime
+
+    class FakeImu:
+        def read_calibrated(self):
+            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    class FakeEncoder:
+        def read_and_clear(self):
+            return 0.0
+
+    state = runtime.create_runtime_state(
+        hw_bundle={
+            "imu": FakeImu(),
+            "encoders": {name: FakeEncoder() for name in ("m", "l", "r")},
+        }
+    )
+    state.heading_deg = 0.0
+    setattr(
+        state.kinematics, "velocity_pulses_to_m_s", lambda pulses, dt_s: float(pulses)
+    )
+    setattr(state.kinematics, "forward_kinematics", lambda vm, vl, vr: (1.0, 0.0, 0.0))
+
+    captured = {"heading_rad": 999.0}
+
+    def _fake_update_heading(state, heading_override=None):
+        state.heading_deg = 90.0
+
+    def _fake_update_wheel_speeds(_filter_bank, _raw_ticks, wheel_names):
+        return {name: 0.0 for name in wheel_names}
+
+    def _fake_read_imu_sample_for_state(state, hw_bundle=None):
+        return None
+
+    def _fake_read_encoder_ticks_for_state(state, hw_bundle=None):
+        return {name: 0.0 for name in ("m", "l", "r")}
+
+    def _fake_odometry_update(vx_robot, vy_robot, heading_rad, dt_s):
+        captured["heading_rad"] = float(heading_rad)
+        return (0.0, 0.0)
+
+    setattr(state.odometry, "update", _fake_odometry_update)
+
+    monkeypatch.setattr(runtime, "update_heading_from_gyro", _fake_update_heading)
+    monkeypatch.setattr(runtime, "update_wheel_speeds", _fake_update_wheel_speeds)
+    monkeypatch.setattr(
+        runtime, "_read_imu_sample_for_state", _fake_read_imu_sample_for_state
+    )
+    monkeypatch.setattr(
+        runtime, "_read_encoder_ticks_for_state", _fake_read_encoder_ticks_for_state
+    )
+
+    runtime.run_base_cycle(state, hw_bundle=state.hw_bundle, cycle_token=object())
+
+    assert captured["heading_rad"] == 0.0
+    assert state.heading_deg == 90.0
+
+
+def test_master_motion_runtime_zero_tick_skips_odometry_accumulation(
+    monkeypatch,
+) -> None:
+    import master.motion_runtime as runtime
+
+    class FakeImu:
+        def read_calibrated(self):
+            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    class FakeEncoder:
+        def read_and_clear(self):
+            return 0.0
+
+    state = runtime.create_runtime_state(
+        hw_bundle={
+            "imu": FakeImu(),
+            "encoders": {name: FakeEncoder() for name in ("m", "l", "r")},
+        }
+    )
+    state.odom = [1.5, -0.5]
+
+    monkeypatch.setattr(
+        runtime,
+        "update_heading_from_gyro",
+        lambda state, heading_override=None: setattr(state, "tick_s", 0.0),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "update_wheel_speeds",
+        lambda _filter_bank, _raw_ticks, wheel_names: {
+            name: 0.0 for name in wheel_names
+        },
+    )
+    monkeypatch.setattr(
+        runtime,
+        "update_odometry_from_wheels",
+        lambda state, heading_deg=None: (_ for _ in ()).throw(
+            AssertionError("零周期不应继续推进里程累计")
+        ),
+    )
+
+    snapshot = runtime.run_base_cycle(
+        state, hw_bundle=state.hw_bundle, cycle_token=object()
+    )
+
+    assert snapshot["odom"] == (1.5, -0.5)
+    assert tuple(state.odom) == (1.5, -0.5)
+
+
 def test_master_motion_runtime_base_ok_requires_heading_and_encoder_chain() -> None:
     from master.motion_runtime import MotionRuntime
 

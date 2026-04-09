@@ -62,6 +62,50 @@ def test_master_ctrl_pid_exposes_wheel_speed_controller_entrypoint() -> None:
     assert state.motor_duties == {"m": 4, "l": -4, "r": 1}
 
 
+def test_master_ctrl_pid_keeps_scaling_boundary_outside_public_entrypoint() -> None:
+    import types
+
+    import master.ctrl.pid as pid_module
+
+    class FakeController:
+        def __init__(self) -> None:
+            self.targets = []
+
+        def update(self, target, _now, _dt_s):
+            self.targets.append(float(target))
+            return float(target)
+
+    controllers = {name: FakeController() for name in ("m", "l", "r")}
+    state = types.SimpleNamespace(
+        wheel_controllers=controllers,
+        target_wheel_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+        wheel_speeds={"m": 0.0, "l": 0.0, "r": 0.0},
+        motor_duties={"m": 0, "l": 0, "r": 0},
+        tick_s=0.005,
+    )
+
+    pid_module.scale_wheel_targets = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("PID 公共入口不应负责三轮统一缩放")
+    )
+
+    outputs = pid_module.apply_wheel_speed_control(
+        state,
+        {"m": 60.0, "l": 30.0, "r": -20.0},
+        limit=60.0,
+    )
+
+    assert outputs["m"] == 60.0
+    assert outputs["l"] == 30.0
+    assert outputs["r"] == -20.0
+    assert state.target_wheel_speeds == {
+        "m": 60.0,
+        "l": 30.0,
+        "r": -20.0,
+    }
+    for name, controller in controllers.items():
+        assert controller.targets == [state.target_wheel_speeds[name]]
+
+
 def test_master_filter_chain_filters_speed_samples() -> None:
     import importlib
 
@@ -356,7 +400,7 @@ def test_master_runtime_uses_ctrl_attitude_and_filter_entrypoints(monkeypatch) -
         captured["pid"] += 1
         return {}
 
-    def _fake_update_odometry(state):
+    def _fake_update_odometry(state, heading_deg=None):
         state.odom[0] = 1.5
         state.odom[1] = -0.5
         return (1.5, -0.5)

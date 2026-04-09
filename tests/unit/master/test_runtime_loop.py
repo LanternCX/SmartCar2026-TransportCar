@@ -686,6 +686,38 @@ def test_master_vision_uart_read_latest_line_stops_after_small_fixed_budget() ->
     assert len(device.chunks) == 1
 
 
+def test_master_vision_uart8_read_latest_line_stops_after_small_fixed_budget() -> None:
+    from master.hw.uart import UartPort
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"v=1,s=1,x=1,y=1\r\n",
+                b"v=1,s=2,x=2,y=2\r\n",
+                b"v=1,s=3,x=3,y=3\r\n",
+            ]
+            self.read_count = 0
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            self.read_count += 1
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    device = FakeDevice()
+    port = UartPort(name="uart8", uart_id=8, baudrate=115200)
+    setattr(port, "_device", device)
+
+    assert port.read_latest_line() == "v=1,s=2,x=2,y=2"
+    assert device.read_count == 2
+    assert len(device.chunks) == 1
+
+
 def test_master_uart3_read_line_limits_each_read_chunk() -> None:
     from master.hw.uart import UartPort
 
@@ -817,6 +849,56 @@ def test_master_uart3_read_latest_line_still_drains_all_available_chunks() -> No
         "yaw_rate_deg_s": 0.0,
         "odom_x": 0.3,
         "odom_y": 0.4,
+        "base_ok": 1,
+    }
+    assert device.read_count == 3
+
+
+def test_master_uart3_read_latest_line_has_no_two_chunk_budget() -> None:
+    from master.hw.uart import UartPort
+    from master.protocol import parse_assistant_state
+
+    last_state_line = (
+        "state=1,state_label=TRACKING,last_seq=11,follow_active=1,"
+        "heading_deg=5.000,target_heading_deg=5.000,yaw_rate_deg_s=0.000,"
+        "odom_x=0.5000,odom_y=0.6000,base_ok=1"
+    )
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.chunks = [
+                b"noise-without-state=1\r\n",
+                b"state=1,state_label=TRACKING,last_seq=10,follow_active=1,"
+                b"heading_deg=4.000,target_heading_deg=4.000,yaw_rate_deg_s=0.000,"
+                b"odom_x=0.4000,odom_y=0.5000,base_ok=1\r\n",
+                last_state_line.encode("utf-8") + b"\r\n",
+            ]
+            self.read_count = 0
+
+        def any(self) -> int:
+            if not self.chunks:
+                return 0
+            return len(self.chunks[0])
+
+        def read(self, size=None):
+            self.read_count += 1
+            if not self.chunks:
+                return None
+            return self.chunks.pop(0)
+
+    device = FakeDevice()
+    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
+    setattr(port, "_device", device)
+
+    assert port.read_latest_line(transform=parse_assistant_state) == {
+        "state_label": "TRACKING",
+        "last_seq": 11,
+        "follow_active": 1,
+        "heading_deg": 5.0,
+        "target_heading_deg": 5.0,
+        "yaw_rate_deg_s": 0.0,
+        "odom_x": 0.5,
+        "odom_y": 0.6,
         "base_ok": 1,
     }
     assert device.read_count == 3

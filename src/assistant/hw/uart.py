@@ -45,6 +45,12 @@ class UartPort:
         return -1
 
     def _tail_length(self):
+        """返回缓冲区末尾未成行内容长度
+
+        @brief 用于判断继续拼接后是否会让当前半行超过长度上限。
+        @return int
+        """
+
         last_newline = -1
         for index, value in enumerate(self._read_buffer):
             if value == 10:
@@ -68,6 +74,12 @@ class UartPort:
         self._read_buffer[last_newline + 1 :] = b""
 
     def _append_payload(self, payload):
+        """把新读到的字节流并入按行缓冲区
+
+        @brief 在保留完整行的同时丢弃超长半行, 避免命令链被异常报文拖住。
+        @param payload 新读到的串口负载
+        """
+
         if isinstance(payload, str):
             payload = payload.encode("utf-8")
         elif not isinstance(payload, bytes):
@@ -169,6 +181,11 @@ class UartPort:
         return self._pop_ready_line()
 
     def read_latest_line(self, transform=None):
+        """尽量清掉积压输入, 但只返回最新一条完整文本行.
+
+        @brief 控制链只关心最新命令, 这里把完整积压行在同拍内尽量清空, 避免旧消息继续堆积。
+        """
+
         latest = None
         while True:
             line = self._pop_ready_line()

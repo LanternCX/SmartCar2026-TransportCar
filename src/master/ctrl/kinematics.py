@@ -89,6 +89,29 @@ def build_planar_target(dx, dy):
     return {"dx": float(dx), "dy": float(dy)}
 
 
+def scale_wheel_targets(wheel_targets, limit):
+    """按统一比例缩放三轮目标.
+
+    @brief 当任一轮超过上限时, 让三轮一起按同一比例缩放。
+    """
+
+    limit = abs(float(limit))
+    prepared = {
+        "m": float(wheel_targets.get("m", 0.0)),
+        "l": float(wheel_targets.get("l", 0.0)),
+        "r": float(wheel_targets.get("r", 0.0)),
+    }
+    max_speed = max(abs(prepared["m"]), abs(prepared["l"]), abs(prepared["r"]))
+    if max_speed <= limit or max_speed <= 0.0:
+        return prepared
+    scale = limit / max_speed
+    return {
+        "m": prepared["m"] * scale,
+        "l": prepared["l"] * scale,
+        "r": prepared["r"] * scale,
+    }
+
+
 def build_kinematics():
     """构造主车运动学对象.
 
@@ -107,7 +130,7 @@ def build_odometry():
     return Odometry()
 
 
-def update_odometry_from_wheels(state):
+def update_odometry_from_wheels(state, heading_deg=None):
     """根据当前轮速更新主车里程快照.
 
     @brief 这个入口把轮速、运动学和里程对象串起来, 给运行时写回统一的 `odom` 输出。
@@ -120,7 +143,7 @@ def update_odometry_from_wheels(state):
     odom_x, odom_y = state.odometry.update(
         vx_robot,
         vy_robot,
-        math.radians(float(state.heading_deg)),
+        math.radians(float(state.heading_deg if heading_deg is None else heading_deg)),
         state.tick_s,
     )
     state.odom[0] = odom_x
