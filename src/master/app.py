@@ -2,7 +2,7 @@
 
 @file src/master/app.py
 
-负责把视觉输入、状态判断、底座运行时和辅车输出串成主车单拍主链。
+负责把主车当前保留的底座运行时收口为单拍入口。
 """
 
 _USE_DIRECT_IMPORTS = globals().get("__package__") in ("", None)
@@ -30,11 +30,6 @@ if _USE_DIRECT_IMPORTS:
         run_base_cycle,
         run_motion_cycle,
     )
-    from protocol import parse_assistant_state
-    from vision.decision import decide_from_observation
-    from vision.ingress import VisionIngress
-    from vision.parser import parse_vision_line
-    from vision.state_machine import MarkerStateMachine
 else:
     from .hw.encoders import build_encoder_bundle
     from .hw.imu import build_imu_bundle
@@ -47,11 +42,6 @@ else:
         run_base_cycle,
         run_motion_cycle,
     )
-    from .protocol import parse_assistant_state
-    from .vision.decision import decide_from_observation
-    from .vision.ingress import VisionIngress
-    from .vision.parser import parse_vision_line
-    from .vision.state_machine import MarkerStateMachine
 
 
 def build_hw_bundle():
@@ -74,7 +64,7 @@ def build_hw_bundle():
 class MasterRuntimeLoop:
     """主车当前主线运行循环.
 
-    @brief 串起双路视觉读入与 UART3 控制输出, 自身不持有底座长期状态。
+    @brief 旧跟随整链已经移除, 这里只负责按节拍推进主车应用本体。
     """
 
     def __init__(self, hw_bundle, app=None):
@@ -115,97 +105,28 @@ class MasterRuntimeLoop:
             return app_hw_bundle
         raise ValueError("app 必须暴露唯一 hw_bundle owner")
 
-    def _read_assistant_feedback(self):
-        """读取辅车最新状态回包
-
-        @brief 优先复用按行清积压接口, 保证主车决策只消费同拍内最新一条有效状态。
-        @return dict | None
-        """
-
-        uart3 = self.uart_bundle["uart3"]
-        reader = getattr(uart3, "read_latest_line", None)
-        if reader is not None:
-            return reader(transform=parse_assistant_state)
-
-        latest_state = None
-        while True:
-            line = uart3.read_line()
-            if not line:
-                return latest_state
-            parsed = parse_assistant_state(line)
-            if parsed is not None:
-                latest_state = parsed
-
-    @staticmethod
-    def _keep_valid_vision_line(line):
-        try:
-            parse_vision_line(line)
-        except (TypeError, ValueError):
-            return None
-        return line
-
     def step(self, now_ms):
         """推进一拍主车运行循环
 
-        @brief 读取辅车回包与双路视觉输入, 然后把单拍观测交给应用层产出控制结果。
+        @brief 旧跟随输入与转发已经退出主车, 当前只按节拍推进应用本体。
         @param now_ms 当前毫秒时钟
         @return dict
         """
 
-        # 先收口辅车最新状态, 避免后续控制决策混入过期回包
-        assistant_feedback = self._read_assistant_feedback()
-        observations = []
-        for uart_name in ("uart6", "uart8"):
-            uart_port = self.uart_bundle[uart_name]
-            reader = getattr(uart_port, "read_latest_line", None)
-            if reader is None:
-                line = uart_port.read_line()
-                if line is not None:
-                    line = self._keep_valid_vision_line(line)
-            else:
-                line = reader(transform=self._keep_valid_vision_line)
-            if line:
-                observations.append({"uart": uart_name, "line": line})
-
-        # 把同拍输入装成统一结构后再交给应用层, 保证决策上下文只来自当前这一拍
         step_input = {"now_ms": now_ms, "run_motion": True, "cycle_token": object()}
-        if assistant_feedback is not None:
-            step_input["assistant_feedback"] = assistant_feedback
-        if observations:
-            step_input["observations"] = observations
-        result = self.app.step(step_input)
-        self.uart_bundle["uart3"].write_line(result["assistant_command"])
-        return result
+        return self.app.step(step_input)
 
 
 class MasterApp:
-    """负责串联视觉输入、决策输出和运行时状态.
+    """负责串联主车自身运行时状态.
 
-    @brief 对外提供主车流程的单步推进入口, 视觉状态机只负责阶段切换, 底座状态由过程式状态容器承接。
+    @brief 旧跟随视觉与转发链路已经删除, 这里只保留主车底座快照与动作保持入口。
     """
 
-    def __init__(
-        self,
-        active_uart="uart6",
-        reserved_uarts=("uart8",),
-        hw_bundle=None,
-    ):
+    def __init__(self, hw_bundle=None):
         self.hw_bundle = hw_bundle
-        self.ingress = VisionIngress(
-            active_uart=active_uart,
-            reserved_uarts=reserved_uarts,
-        )
-        self.state_machine = MarkerStateMachine()
-        # 运行态首次需要推进底座时才创建, 避免纯逻辑测试被硬件依赖绑死
         self.motion_state = None
-        # 控制序号跟随每拍输出递增, 供辅车忽略重复控制报文
-        self._control_seq = 0
-        # 状态机无新输入时沿用上一拍输出, 保持阶段结论稳定
-        self._last_state_output = {"phase": "MARKER_MISSING", "hold": True}
-        self._last_has_target = False
-        self.last_assistant_command = ""
         self._last_self_target = {"kind": "hold"}
-        # 底座快照作为应用层默认回包骨架, 目标暂失时仍能对外给出稳定状态
         self._last_self_base_state = {
             "heading_deg": 0.0,
             "yaw_rate_deg_s": 0.0,
@@ -213,22 +134,8 @@ class MasterApp:
             "odom_y": 0.0,
             "base_ok": 0,
         }
-        self._last_assistant_feedback = None
-        self.last_result = {
-            "selected_target": "idle",
-            "phase": "MARKER_MISSING",
-            "active_uart": active_uart,
-            "reserved_uarts": tuple(reserved_uarts),
-            "self_target": {"kind": "hold"},
-            "self_base_state": dict(self._last_self_base_state),
-            "assistant_feedback": None,
-            "assistant_command": "",
-        }
+        self.last_result = {"self_base_state": dict(self._last_self_base_state)}
         _debug_print("app_init")
-
-    def _next_control_seq(self):
-        self._control_seq += 1
-        return self._control_seq
 
     def _ensure_motion_state(self):
         if self.motion_state is None:
@@ -260,120 +167,56 @@ class MasterApp:
             cycle_token=cycle_token,
         )
 
+    @staticmethod
+    def _build_result(base_snapshot):
+        heading_deg = float(
+            base_snapshot.get("heading_est_deg", base_snapshot.get("heading_deg", 0.0))
+        )
+        odom = base_snapshot.get("odom")
+        if odom is None:
+            odom_x = float(base_snapshot.get("odom_x", 0.0))
+            odom_y = float(base_snapshot.get("odom_y", 0.0))
+        else:
+            odom_x = float(odom[0])
+            odom_y = float(odom[1])
+        return {
+            "self_base_state": {
+                "heading_deg": heading_deg,
+                "yaw_rate_deg_s": float(base_snapshot.get("yaw_rate_deg_s", 0.0)),
+                "odom_x": odom_x,
+                "odom_y": odom_y,
+                "base_ok": 1 if base_snapshot.get("base_ok", 0) else 0,
+            }
+        }
+
     def step(self, observation=None):
         """推进一次主车流程.
 
-        @brief 串起视觉输入、状态判断和二维跟随决策。
+        @brief 旧跟随整链删除后, 主车单拍只刷新底座状态并维持保持目标。
         @param observation 当前观测字典
         @return dict
         """
 
-        # 先拆出当前拍调度字段, 视觉观测本体继续交给 ingress 统一整理
         now_ms = None
         cycle_token = None
         run_motion = False
-        prepared_observation = observation
-        observation_items = None
         if isinstance(observation, dict):
             now_ms = observation.get("now_ms")
             cycle_token = observation.get("cycle_token")
             run_motion = bool(observation.get("run_motion", False))
-            if "assistant_feedback" in observation:
-                self._last_assistant_feedback = observation["assistant_feedback"]
-            if "observations" in observation:
-                observation_items = observation.get("observations") or ()
-                prepared_observation = None
-            else:
-                payload_keys = []
-                for key in observation:
-                    if key not in (
-                        "now_ms",
-                        "cycle_token",
-                        "run_motion",
-                        "assistant_feedback",
-                    ):
-                        payload_keys.append(key)
-                if not payload_keys:
-                    prepared_observation = None
-                elif len(payload_keys) == len(observation):
-                    prepared_observation = observation
-                else:
-                    prepared_observation = {}
-                    for key in payload_keys:
-                        prepared_observation[key] = observation[key]
 
-        # 需要执行底座控制时, 先确保运行态 owner 已经装配完成
+        _ = now_ms
         if run_motion:
             self._ensure_motion_state()
 
-        # 每拍先刷新底座观测, 这样后续决策总能拿到同一时刻的姿态与里程
         base_snapshot = self._refresh_self_base_state(cycle_token=cycle_token)
-
-        # 把双路视觉输入收口成当前应该使用的一份目标观测
-        self.ingress.begin_frame(now_ms=now_ms)
-        if observation_items is not None:
-            for item in observation_items:
-                self.ingress.prepare_observation(item, now_ms=now_ms)
-        else:
-            self.ingress.prepare_observation(prepared_observation, now_ms=now_ms)
-        selected_observation = self.ingress.select_current_target(now_ms=now_ms)
-        has_target = (
-            int(selected_observation.get("valid", 0)) == 1
-            and int(selected_observation.get("fresh", 0)) == 1
-        )
-        has_new_input = bool(selected_observation.get("has_new_input", 0))
-        if has_new_input or has_target != self._last_has_target:
-            self._last_state_output = self.state_machine.step(
-                has_target=has_target,
-                err_x=float(selected_observation.get("err_x", 0.0)),
-                err_y=float(selected_observation.get("err_y", 0.0)),
-                has_new_input=has_new_input,
-            )
-            self._last_has_target = has_target
-        state_output = dict(self._last_state_output)
-
-        selected = dict(selected_observation)
-        selected.update(state_output)
-        selected.update(base_snapshot)
-        selected["control_seq"] = self._next_control_seq()
-
-        # 状态机结论与底座快照拼好后再做控制决策, 保证主辅车输出来自同一拍上下文
-        decision = decide_from_observation(selected)
-        self._last_self_base_state = dict(decision.self_base_state)
-        self_target = self._apply_self_target(decision.self_target)
+        self_target = self._apply_self_target({"kind": "hold"})
         if run_motion:
-            # 只有运行态拍才真正推进电机控制, 纯逻辑拍只更新目标与快照
             run_motion_cycle(
                 self._ensure_motion_state(),
                 hw_bundle=self.hw_bundle,
                 cycle_token=cycle_token,
             )
-        self.last_assistant_command = decision.assistant_command
-        active_uart = str(selected_observation.get("source_uart", "")).strip()
-        if not active_uart:
-            active_uart = str(
-                selected_observation.get("configured_uart", self.ingress.active_uart)
-            )
-        assistant_debug_line = ""
-        if str(selected_observation.get("source_status", "")).strip() == "invalid":
-            raw_line = str(selected_observation.get("debug_raw_line", "")).strip()
-            if raw_line:
-                assistant_debug_line = "debug_parse_invalid,uart=%s,raw=%s" % (
-                    active_uart,
-                    raw_line,
-                )
-
-        # 对外结果只保留 review 和联调需要的关键骨架字段
-        self.last_result = {
-            "selected_target": decision.selected_target,
-            "phase": decision.phase,
-            "active_uart": active_uart,
-            "reserved_uarts": selected_observation.get("reserved_uarts"),
-            "self_target": self_target,
-            "self_base_state": dict(self._last_self_base_state),
-            "assistant_state": decision.assistant_state,
-            "assistant_feedback": self._last_assistant_feedback,
-            "assistant_debug_line": assistant_debug_line,
-            "assistant_command": self.last_assistant_command,
-        }
+        self.last_result = self._build_result(base_snapshot)
+        self._last_self_base_state = dict(self.last_result["self_base_state"])
         return dict(self.last_result)

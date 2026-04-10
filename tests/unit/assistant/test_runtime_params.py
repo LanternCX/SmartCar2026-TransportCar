@@ -24,6 +24,12 @@ def test_assistant_runtime_params_raises_default_follow_position_speed_cap() -> 
     assert runtime_params.FOLLOW_POSITION_MAX_SPEED == 3.0
 
 
+def test_assistant_runtime_params_disable_follow_timeout_by_default() -> None:
+    import assistant.runtime_params as runtime_params
+
+    assert runtime_params.FOLLOW_TIMEOUT_MS == 0
+
+
 def test_assistant_runtime_params_does_not_expose_gyro_scale_board_fact() -> None:
     import assistant.config as config
     import assistant.runtime_params as runtime_params

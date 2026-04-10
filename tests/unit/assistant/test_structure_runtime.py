@@ -8,6 +8,7 @@ def test_assistant_hw_bundle_uses_confirmed_mapping() -> None:
     }
 
     assert hw_bundle["uart"]["uart3"].uart_id == 2
+    assert hw_bundle["uart"]["uart6"].uart_id == 5
     assert hw_bundle["motors"]["m"].port_name == "PWM_C30_DIR_C31"
     assert hw_bundle["motors"]["l"].port_name == "PWM_D6_DIR_D7"
     assert hw_bundle["motors"]["l"].invert is True

@@ -13,11 +13,15 @@ else:
 
 UART_LINE_LIMITS = {
     "uart3": 256,
+    "uart6": 256,
 }
 UART_READ_CHUNKS = {
     "uart3": 96,
+    "uart6": 96,
 }
-UART_READ_BUDGET_CHUNKS = {}
+UART_READ_BUDGET_CHUNKS = {
+    "uart6": 2,
+}
 
 
 class UartPort:

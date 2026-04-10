@@ -55,6 +55,8 @@ class SafetyGuard:
 
         if self.estop_active:
             return True
+        if self.timeout_ms <= 0:
+            return False
         if self.last_command_ms is None:
             return False
         return int(now_ms) - self.last_command_ms >= self.timeout_ms

@@ -85,7 +85,7 @@ def build_hw_bundle():
 class AssistantRuntimeLoop:
     """辅车当前主线运行循环.
 
-    @brief 串起 UART3 收包、执行与最小状态回传。
+    @brief 串起 UART6 收包、执行与最小状态回传。
     """
 
     def __init__(self, hw_bundle, app=None):
@@ -126,23 +126,24 @@ class AssistantRuntimeLoop:
         if app_hw_bundle is not self.hw_bundle:
             raise ValueError("hw_bundle 与 app 必须引用同一套装配")
         cycle_token = object()
-        uart3 = self.hw_bundle["uart"]["uart3"]
+        control_uart = self.hw_bundle["uart"]["uart6"]
+        reply_uart = self.hw_bundle["uart"]["uart3"]
 
         # 高频跟随链路只消费当前拍里最新完整命令, 避免旧包排队拖慢控制闭环
-        reader = getattr(uart3, "read_latest_line", None)
+        reader = getattr(control_uart, "read_latest_line", None)
         if reader is not None:
             line = reader()
         else:
-            line = uart3.read_line()
+            line = control_uart.read_line()
         if line:
             reply = self.app.handle_line(line, now_ms=now_ms, cycle_token=cycle_token)
-            if reply:
-                uart3.write_line(reply)
+            if reply and not str(reply).startswith("K,"):
+                reply_uart.write_line(reply)
 
         # 再执行周期推进, 把超时和最小状态回包统一收口到同一轮末尾
         tick_reply = self.app.tick(now_ms=now_ms, cycle_token=cycle_token)
         if tick_reply:
-            uart3.write_line(tick_reply)
+            reply_uart.write_line(tick_reply)
         return tick_reply
 
 

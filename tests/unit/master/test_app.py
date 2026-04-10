@@ -299,7 +299,7 @@ def test_master_drive_loop_reports_lightweight_control_profile_summary(
             step_calls.append(now_ms)
             if len(step_calls) == 3:
                 raise SystemExit(0)
-            return {"assistant_command": "cmd"}
+            return {"self_target": {"kind": "hold"}}
 
     now_values = iter((100, 105, 200, 205, 610))
     monkeypatch.setattr("master.main._read_now_ms", lambda: next(now_values))
@@ -388,175 +388,47 @@ def test_master_build_capture_ticker_registers_encoder_and_imu_devices(
     assert fake_imu.get_count == 1
 
 
-def test_master_app_only_drives_assistant_in_current_stage() -> None:
+def test_master_app_ignores_removed_follow_payload() -> None:
     from master.app import MasterApp
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+    app = MasterApp()
     result = app.step(
         {
             "uart": "uart6",
             "line": "v=1,s=9,x=12,y=-6",
+            "assistant_feedback": {"state_label": "TRACKING"},
         }
     )
 
-    assert result["self_target"] == {"kind": "hold"}
-    assert result["selected_target"] == "tracked"
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 1.2, 0.0)
-    assert result["phase"] == "ALIGN_X"
-    assert result["active_uart"] == "uart6"
+    assert set(result.keys()) == {"self_base_state"}
+    assert "assistant_command" not in result
+    assert "assistant_state" not in result
+    assert "assistant_feedback" not in result
+    assert "active_uart" not in result
+    assert "reserved_uarts" not in result
 
 
-def test_master_app_enters_center_hold_for_small_error() -> None:
-    from master.app import MasterApp
+def test_master_app_module_no_longer_exports_removed_follow_chain_objects() -> None:
+    import master.app as master_app
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-
-    result = app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=10,x=3,y=-4",
-        }
-    )
-
-    assert result["self_target"] == {"kind": "hold"}
-    assert result["selected_target"] == "tracked"
-    _assert_follow_command_semantics(result["assistant_command"], 1, 0, 0.0, 0.0)
-    assert result["phase"] == "CENTER_HOLD"
+    assert not hasattr(master_app, "VisionIngress")
+    assert not hasattr(master_app, "MarkerStateMachine")
+    assert not hasattr(master_app, "decide_from_observation")
+    assert not hasattr(master_app, "parse_assistant_state")
 
 
-def test_master_app_routes_current_selected_target_before_state_machine() -> None:
-    from master.app import MasterApp
+def test_master_removed_follow_modules_are_not_importable() -> None:
+    import importlib
+    import pytest
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    result = app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=11,x=9,y=0",
-        }
-    )
-
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "ALIGN_X"
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 0.9, 0.0)
-
-
-def test_master_app_zeroes_command_when_selected_report_is_expired() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step({"uart": "uart6", "now_ms": 1200})
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
-    assert result["selected_target"] == "idle"
-    assert result["phase"] == "MARKER_MISSING"
-    assert result["self_target"] == {"kind": "hold"}
-
-
-def test_master_app_uses_selected_target_instead_of_last_arrival() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step(
-        {
-            "uart": "uart8",
-            "line": "v=1,s=8,x=1,y=1",
-            "now_ms": 1010,
-        }
-    )
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "CENTER_HOLD"
-    assert result["active_uart"] == "uart8"
-
-
-def test_master_app_zeroes_command_when_step_receives_no_new_input() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step({"now_ms": 1100})
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "ALIGN_X"
-    assert result["self_target"] == {"kind": "hold"}
-    assert result["assistant_state"] == {
-        "phase": "ALIGN_X",
-        "selected_target": "tracked",
-        "target_valid": 1,
-        "target_fresh": 1,
-    }
-
-
-def test_master_app_keeps_fresh_target_when_same_uart_frame_is_empty() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step({"uart": "uart6", "now_ms": 1100})
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "ALIGN_X"
-    assert result["self_target"] == {"kind": "hold"}
-    assert result["assistant_state"] == {
-        "phase": "ALIGN_X",
-        "selected_target": "tracked",
-        "target_valid": 1,
-        "target_fresh": 1,
-    }
-
-
-def test_master_app_zeroes_command_after_selected_target_leaves_freshness_window() -> (
-    None
-):
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step({"now_ms": 1200})
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
-    assert result["selected_target"] == "idle"
-    assert result["phase"] == "MARKER_MISSING"
+    for module_name in (
+        "master.protocol",
+        "master.vision.decision",
+        "master.vision.ingress",
+        "master.vision.state_machine",
+    ):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
 
 
 def test_master_runtime_loop_uses_same_full_hw_bundle_owner() -> None:
@@ -604,41 +476,6 @@ def test_master_app_reuses_explicit_hw_bundle_without_rebuilding_hw(
     assert app.hw_bundle is hw_bundle
 
 
-def test_master_app_does_not_rejudge_stage_without_new_input(monkeypatch) -> None:
-    from master.app import MasterApp
-
-    class FakeStateMachine:
-        def __init__(self):
-            self.calls = []
-
-        def step(self, **kwargs):
-            self.calls.append(dict(kwargs))
-            if len(self.calls) == 1:
-                return {"phase": "TRACKING", "hold": False}
-            return {"phase": "CENTER_HOLD", "hold": True}
-
-    fake_state_machine = FakeStateMachine()
-    monkeypatch.setattr(
-        "master.app.MarkerStateMachine",
-        lambda: fake_state_machine,
-    )
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-
-    first = app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=9,x=12,y=-6",
-            "now_ms": 1000,
-        }
-    )
-    second = app.step({"now_ms": 1100})
-
-    assert first["phase"] == "TRACKING"
-    assert second["phase"] == "TRACKING"
-    assert len(fake_state_machine.calls) == 1
-
-
 def test_master_app_delays_motion_runtime_until_needed(monkeypatch) -> None:
     from master.app import MasterApp
 
@@ -650,7 +487,7 @@ def test_master_app_delays_motion_runtime_until_needed(monkeypatch) -> None:
 
     monkeypatch.setattr("master.app.create_runtime_state", _create_runtime_state)
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+    app = MasterApp()
     result = app.step(
         {
             "uart": "uart6",
@@ -659,66 +496,7 @@ def test_master_app_delays_motion_runtime_until_needed(monkeypatch) -> None:
     )
 
     assert created["count"] == 0
-    assert result["self_target"] == {"kind": "hold"}
-
-
-def test_master_app_keeps_center_hold_while_target_is_still_fresh() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=10,x=3,y=-4",
-            "now_ms": 1000,
-        }
-    )
-
-    result = app.step({"now_ms": 1100})
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 0, 0.0, 0.0)
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "CENTER_HOLD"
-    assert result["assistant_state"] == {
-        "phase": "CENTER_HOLD",
-        "selected_target": "tracked",
-        "target_valid": 1,
-        "target_fresh": 1,
-    }
-
-
-def test_master_app_falls_back_to_configured_uart_when_no_input_arrives() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-
-    result = app.step(None)
-
-    assert result["active_uart"] == "uart6"
-
-
-def test_master_app_prefers_current_valid_target_over_newer_invalid_report() -> None:
-    from master.app import MasterApp
-
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
-    app.step(
-        {
-            "uart": "uart6",
-            "line": "v=1,s=4,x=12,y=-6",
-        }
-    )
-
-    result = app.step(
-        {
-            "uart": "uart8",
-            "line": "v=0,s=5",
-        }
-    )
-
-    _assert_follow_command_semantics(result["assistant_command"], 2, 1, 1.2, 0.0)
-    assert result["selected_target"] == "tracked"
-    assert result["phase"] == "ALIGN_X"
-    assert result["active_uart"] == "uart6"
+    assert set(result.keys()) == {"self_base_state"}
 
 
 def test_master_app_self_base_state_preserves_runtime_base_ok(monkeypatch) -> None:
@@ -740,7 +518,7 @@ def test_master_app_self_base_state_preserves_runtime_base_ok(monkeypatch) -> No
 
     import master.motion_runtime as runtime
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+    app = MasterApp()
     app.motion_state = runtime.create_runtime_state(hw_bundle=None)
 
     result = app.step(None)
@@ -788,7 +566,7 @@ def test_master_app_runs_base_cycle_through_process_entry(monkeypatch) -> None:
         master_app, "run_motion_cycle", _run_motion_cycle, raising=False
     )
 
-    app = MasterApp(active_uart="uart6", reserved_uarts=("uart8",))
+    app = MasterApp()
 
     result = app.step({"run_motion": True, "cycle_token": cycle_token})
 
@@ -797,15 +575,3 @@ def test_master_app_runs_base_cycle_through_process_entry(monkeypatch) -> None:
     assert calls["apply"] == [({"hw_bundle": None}, {"kind": "hold"})]
     assert calls["control"] == [({"hw_bundle": None}, None, cycle_token)]
     assert result["self_base_state"]["base_ok"] == 1
-
-
-def _assert_follow_command_semantics(command, seq, valid, x, y) -> None:
-    from assistant.protocol import parse_command
-
-    parsed = parse_command(command)
-
-    assert parsed.kind == "follow"
-    assert parsed.seq == seq
-    assert parsed.valid == valid
-    assert parsed.dx == x
-    assert parsed.dy == y

@@ -18,3 +18,12 @@ def test_assistant_safety_holds_estop_until_cleared() -> None:
     guard.clear_estop()
 
     assert guard.should_stop(10) is False
+
+
+def test_assistant_safety_disables_timeout_stop_when_timeout_not_positive() -> None:
+    from assistant.safety import SafetyGuard
+
+    guard = SafetyGuard(timeout_ms=0)
+    guard.mark_command(0)
+
+    assert guard.should_stop(10_000) is False

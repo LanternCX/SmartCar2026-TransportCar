@@ -5,8 +5,8 @@
 @file src/assistant/runtime_params.py
 """
 
-# 主车命令超时停机阈值, 单位毫秒
-FOLLOW_TIMEOUT_MS = 150
+# 主车命令超时停机阈值, 单位毫秒; 设为 0 表示默认关闭这条锁停边界
+FOLLOW_TIMEOUT_MS = 0
 # 主循环控制周期, 单位毫秒
 CONTROL_TICK_MS = 5
 # 轮速长窗回归长度, 用于平滑辨识和控制测速
@@ -19,9 +19,9 @@ FOLLOW_OUTPUT_LIMIT = 10000
 MAX_DUTY = 10000
 # 三路轮速 PID 参数表, 按中轮/左轮/右轮分配
 PID_MAP = {
-    "m": (100, 500, 1),
-    "l": (100, 500, 1),
-    "r": (100, 500, 1),
+    "m": (300, 100, 0),
+    "l": (300, 100, 0),
+    "r": (300, 100, 0),
 }
 # 轮速滤波基础窗口长度
 SPEED_FILTER_WINDOW = 5

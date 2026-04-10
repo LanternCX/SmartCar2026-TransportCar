@@ -7,27 +7,17 @@ def _build_master_hw_bundle(uart3, uart6, uart8) -> dict:
     }
 
 
-def _assert_follow_command_semantics(command, seq, valid, x, y) -> None:
-    from assistant.protocol import parse_command
-
-    parsed = parse_command(command)
-
-    assert parsed.kind == "follow"
-    assert parsed.seq == seq
-    assert parsed.valid == valid
-    assert parsed.dx == x
-    assert parsed.dy == y
-
-
-def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
+def test_master_runtime_loop_no_longer_reads_follow_vision_or_writes_uart3() -> None:
     from master.app import MasterRuntimeLoop
 
     class FakeUart:
         def __init__(self, lines=None):
             self.lines = list(lines or [])
             self.writes = []
+            self.read_count = 0
 
         def read_line(self):
+            self.read_count += 1
             if not self.lines:
                 return None
             return self.lines.pop(0)
@@ -44,12 +34,14 @@ def test_master_runtime_loop_reads_vision_and_writes_follow_command() -> None:
     )
     result = loop.step(now_ms=100)
 
-    _assert_follow_command_semantics(result["assistant_command"], 1, 1, 1.2, 0.0)
-    assert len(uart3.writes) == 1
-    _assert_follow_command_semantics(uart3.writes[0], 1, 1, 1.2, 0.0)
+    assert set(result.keys()) == {"self_base_state"}
+    assert uart3.writes == []
+    assert uart3.read_count == 0
+    assert uart6.read_count == 0
+    assert uart8.read_count == 0
 
 
-def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
+def test_master_runtime_loop_only_passes_runtime_clock_fields_to_app() -> None:
     from master.app import MasterRuntimeLoop
 
     class FakeUart:
@@ -58,25 +50,49 @@ def test_master_runtime_loop_writes_hold_when_no_target_is_available() -> None:
             self.writes = []
 
         def read_line(self):
-            if not self.lines:
-                return None
-            return self.lines.pop(0)
+            raise AssertionError("旧跟随相机不应再被读取")
 
         def write_line(self, payload):
             self.writes.append(payload)
 
+    class FakeApp:
+        def __init__(self, hw_bundle):
+            self.hw_bundle = hw_bundle
+            self.calls = []
+
+        def step(self, observation):
+            self.calls.append(dict(observation))
+            return {
+                "selected_target": "idle",
+                "phase": "IDLE",
+                "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
+            }
+
     uart6 = FakeUart(["v=0,s=1"])
     uart8 = FakeUart()
     uart3 = FakeUart()
+    hw_bundle = _build_master_hw_bundle(uart3=uart3, uart6=uart6, uart8=uart8)
+    app = FakeApp(hw_bundle)
 
-    loop = MasterRuntimeLoop(
-        _build_master_hw_bundle(uart3=uart3, uart6=uart6, uart8=uart8)
-    )
+    loop = MasterRuntimeLoop(hw_bundle, app=app)
     result = loop.step(now_ms=100)
 
-    _assert_follow_command_semantics(result["assistant_command"], 1, 0, 0.0, 0.0)
-    assert len(uart3.writes) == 1
-    _assert_follow_command_semantics(uart3.writes[0], 1, 0, 0.0, 0.0)
+    assert result["phase"] == "IDLE"
+    assert app.calls == [
+        {
+            "now_ms": 100,
+            "run_motion": True,
+            "cycle_token": app.calls[0]["cycle_token"],
+        }
+    ]
+    assert uart3.writes == []
 
 
 def test_master_runtime_loop_step_omits_internal_perf_diag() -> None:
@@ -104,10 +120,16 @@ def test_master_runtime_loop_step_omits_internal_perf_diag() -> None:
 
         def step(self, observation):
             return {
-                "assistant_command": "cmd-once",
-                "selected_target": "tracked",
-                "phase": "ALIGN_X",
+                "selected_target": "idle",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart3 = FakeUart()
@@ -118,12 +140,12 @@ def test_master_runtime_loop_step_omits_internal_perf_diag() -> None:
 
     result = loop.step(now_ms=100)
 
-    assert result["assistant_command"] == "cmd-once"
+    assert result["phase"] == "IDLE"
     assert "perf_diag" not in result
-    assert uart3.writes == ["cmd-once"]
+    assert uart3.writes == []
 
 
-def test_master_runtime_loop_continues_polling_vision_and_writing_controls() -> None:
+def test_master_runtime_loop_keeps_passing_only_runtime_fields_across_steps() -> None:
     from master.app import MasterRuntimeLoop
 
     class FakeUart:
@@ -149,10 +171,16 @@ def test_master_runtime_loop_continues_polling_vision_and_writing_controls() -> 
         def step(self, observation):
             self.observations.append(dict(observation))
             return {
-                "assistant_command": "cmd-%d" % len(self.observations),
-                "selected_target": "red",
-                "phase": "TRACKING",
+                "selected_target": "idle",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart6 = FakeUart(["v=1,s=101,x=12,y=-6"])
@@ -171,23 +199,18 @@ def test_master_runtime_loop_continues_polling_vision_and_writing_controls() -> 
     assert app.observations[0]["now_ms"] == 100
     assert app.observations[0]["run_motion"] is True
     assert isinstance(app.observations[0]["cycle_token"], object)
-    assert app.observations[0]["observations"] == [
-        {"uart": "uart6", "line": "v=1,s=101,x=12,y=-6"},
-        {"uart": "uart8", "line": "v=1,s=102,x=8,y=-4"},
-    ]
+    assert set(app.observations[0].keys()) == {"now_ms", "run_motion", "cycle_token"}
     assert app.observations[1]["now_ms"] == 200
     assert app.observations[1]["run_motion"] is True
-    assert app.observations[1].get("observations") is None
-    assert first_result["assistant_command"] == "cmd-1"
-    assert second_result["assistant_command"] == "cmd-2"
-    assert uart3.writes == ["cmd-1", "cmd-2"]
-    assert uart6.read_count == 2
-    assert uart8.read_count == 2
+    assert set(app.observations[1].keys()) == {"now_ms", "run_motion", "cycle_token"}
+    assert first_result["phase"] == "IDLE"
+    assert second_result["phase"] == "IDLE"
+    assert uart3.writes == []
+    assert uart6.read_count == 0
+    assert uart8.read_count == 0
 
 
-def test_master_runtime_loop_writes_once_when_same_tick_receives_two_vision_inputs() -> (
-    None
-):
+def test_master_runtime_loop_single_step_stays_free_of_removed_follow_inputs() -> None:
     from master.app import MasterRuntimeLoop
 
     class FakeUart:
@@ -211,10 +234,16 @@ def test_master_runtime_loop_writes_once_when_same_tick_receives_two_vision_inpu
         def step(self, observation):
             self.observations.append(dict(observation))
             return {
-                "assistant_command": "cmd-%d" % len(self.observations),
-                "selected_target": "red",
-                "phase": "TRACKING",
+                "selected_target": "idle",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart6 = FakeUart(["v=1,s=101,x=12,y=-6"])
@@ -228,15 +257,12 @@ def test_master_runtime_loop_writes_once_when_same_tick_receives_two_vision_inpu
 
     result = loop.step(now_ms=100)
 
-    assert result["assistant_command"] == "cmd-1"
+    assert result["phase"] == "IDLE"
     assert len(app.observations) == 1
     assert app.observations[0]["now_ms"] == 100
     assert app.observations[0]["run_motion"] is True
-    assert app.observations[0]["observations"] == [
-        {"uart": "uart6", "line": "v=1,s=101,x=12,y=-6"},
-        {"uart": "uart8", "line": "v=1,s=102,x=8,y=-4"},
-    ]
-    assert uart3.writes == ["cmd-1"]
+    assert set(app.observations[0].keys()) == {"now_ms", "run_motion", "cycle_token"}
+    assert uart3.writes == []
 
 
 def test_master_runtime_loop_reuses_provided_uart_bundle_for_default_app(
@@ -258,10 +284,16 @@ def test_master_runtime_loop_reuses_provided_uart_bundle_for_default_app(
 
         def step(self, observation):
             return {
-                "assistant_command": "",
                 "selected_target": "idle",
-                "phase": "MARKER_MISSING",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     def _unexpected_build_hw_bundle():
@@ -305,10 +337,16 @@ def test_master_runtime_loop_accepts_motion_state_owner_exposed_by_app() -> None
 
         def step(self, observation):
             return {
-                "assistant_command": "",
                 "selected_target": "idle",
-                "phase": "MARKER_MISSING",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     loop = MasterRuntimeLoop(hw_bundle, app=DummyApp(runtime_hw_bundle=hw_bundle))
@@ -343,10 +381,16 @@ def test_master_runtime_loop_rejects_runtime_owner_drift_under_same_app_bundle()
 
         def step(self, observation):
             return {
-                "assistant_command": "",
                 "selected_target": "idle",
-                "phase": "MARKER_MISSING",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     with pytest.raises(ValueError, match="唯一 hw_bundle owner|同一套完整装配"):
@@ -525,197 +569,18 @@ def test_master_uart_read_line_works_when_buffer_disallows_delete() -> None:
     assert port.read_line() == "PING"
 
 
-def test_master_vision_uart_read_latest_line_drains_backlog_and_keeps_latest() -> None:
+def test_master_uart_port_no_longer_exposes_removed_latest_line_reader() -> None:
     from master.hw.uart import UartPort
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.buffer = bytearray(b"v=1,s=1,x=1,y=2\r\nv=1,s=2,x=3,y=4\r\n")
-
-        def any(self) -> int:
-            return len(self.buffer)
-
-        def read(self, size=None):
-            if not self.buffer:
-                return None
-            if size is None:
-                size = len(self.buffer)
-            chunk = bytes(self.buffer[:size])
-            del self.buffer[:size]
-            return chunk
 
     port = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(port, "_device", FakeDevice())
 
-    assert port.read_latest_line() == "v=1,s=2,x=3,y=4"
-    assert port.read_latest_line() is None
+    assert not hasattr(port, "read_latest_line")
 
 
-def test_master_vision_uart_read_latest_line_limits_each_read_chunk() -> None:
-    from master.hw.uart import UartPort
+def test_master_hw_uart_module_no_longer_keeps_removed_follow_budget() -> None:
+    import master.hw.uart as uart_module
 
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.buffer = bytearray(b"v=1,s=1,x=1,y=2\r\nv=1,s=2,x=3,y=4\r\n")
-            self.read_sizes = []
-
-        def any(self) -> int:
-            return len(self.buffer)
-
-        def read(self, size=None):
-            self.read_sizes.append(size)
-            if not self.buffer:
-                return None
-            if size is None:
-                size = len(self.buffer)
-            chunk = bytes(self.buffer[:size])
-            del self.buffer[:size]
-            return chunk
-
-    device = FakeDevice()
-    port = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(port, "_device", device)
-
-    port.read_latest_line()
-
-    assert device.read_sizes
-    assert max(device.read_sizes) <= 96
-
-
-def test_master_vision_uart_read_latest_line_skips_bad_lines_and_keeps_last_valid() -> (
-    None
-):
-    from master.hw.uart import UartPort
-    from master.vision.parser import parse_vision_line
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                b"=281,x=9,y=45\r\nv=1,s=297,x=9,y=46\r\n",
-                b"vv=1,s=327,x=9,y=46\r\nv=1,s=328,x=10,y=47\r\n",
-            ]
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    def _keep_valid_visual_line(line):
-        try:
-            parse_vision_line(line)
-        except ValueError:
-            return None
-        return line
-
-    port = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(port, "_device", FakeDevice())
-
-    assert (
-        port.read_latest_line(transform=_keep_valid_visual_line)
-        == "v=1,s=328,x=10,y=47"
-    )
-
-
-def test_master_vision_uart_read_latest_line_returns_none_when_tick_has_only_bad_lines() -> (
-    None
-):
-    from master.hw.uart import UartPort
-    from master.vision.parser import parse_vision_line
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [b"=281,x=9,y=45\r\nvv=1,s=327,x=9,y=46\r\n"]
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    def _keep_valid_visual_line(line):
-        try:
-            parse_vision_line(line)
-        except ValueError:
-            return None
-        return line
-
-    port = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(port, "_device", FakeDevice())
-
-    assert port.read_latest_line(transform=_keep_valid_visual_line) is None
-
-
-def test_master_vision_uart_read_latest_line_stops_after_small_fixed_budget() -> None:
-    from master.hw.uart import UartPort
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                b"v=1,s=1,x=1,y=1\r\n",
-                b"v=1,s=2,x=2,y=2\r\n",
-                b"v=1,s=3,x=3,y=3\r\n",
-            ]
-            self.read_count = 0
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            self.read_count += 1
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    device = FakeDevice()
-    port = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(port, "_device", device)
-
-    assert port.read_latest_line() == "v=1,s=2,x=2,y=2"
-    assert device.read_count == 2
-    assert len(device.chunks) == 1
-
-
-def test_master_vision_uart8_read_latest_line_stops_after_small_fixed_budget() -> None:
-    from master.hw.uart import UartPort
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                b"v=1,s=1,x=1,y=1\r\n",
-                b"v=1,s=2,x=2,y=2\r\n",
-                b"v=1,s=3,x=3,y=3\r\n",
-            ]
-            self.read_count = 0
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            self.read_count += 1
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    device = FakeDevice()
-    port = UartPort(name="uart8", uart_id=8, baudrate=115200)
-    setattr(port, "_device", device)
-
-    assert port.read_latest_line() == "v=1,s=2,x=2,y=2"
-    assert device.read_count == 2
-    assert len(device.chunks) == 1
+    assert not hasattr(uart_module, "UART_READ_BUDGET_CHUNKS")
 
 
 def test_master_uart3_read_line_limits_each_read_chunk() -> None:
@@ -755,306 +620,7 @@ def test_master_uart3_read_line_limits_each_read_chunk() -> None:
     assert max(device.read_sizes) <= 96
 
 
-def test_master_uart3_read_latest_line_keeps_last_valid_state_when_tail_is_invalid() -> (
-    None
-):
-    from master.hw.uart import UartPort
-    from master.protocol import parse_assistant_state
-
-    state_line = (
-        "state=1,state_label=TRACKING,last_seq=7,follow_active=1,"
-        "heading_deg=1.000,target_heading_deg=1.000,yaw_rate_deg_s=0.000,"
-        "odom_x=0.1000,odom_y=0.2000,base_ok=1"
-    )
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.buffer = bytearray(
-                state_line.encode("utf-8") + b"\r\n" + b"noise-without-state=1\r\n"
-            )
-
-        def any(self) -> int:
-            return len(self.buffer)
-
-        def read(self, size=None):
-            if not self.buffer:
-                return None
-            if size is None:
-                size = len(self.buffer)
-            chunk = bytes(self.buffer[:size])
-            del self.buffer[:size]
-            return chunk
-
-    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
-    setattr(port, "_device", FakeDevice())
-
-    assert port.read_latest_line(transform=parse_assistant_state) == {
-        "state_label": "TRACKING",
-        "last_seq": 7,
-        "follow_active": 1,
-        "heading_deg": 1.0,
-        "target_heading_deg": 1.0,
-        "yaw_rate_deg_s": 0.0,
-        "odom_x": 0.1,
-        "odom_y": 0.2,
-        "base_ok": 1,
-    }
-
-
-def test_master_uart3_read_latest_line_still_drains_all_available_chunks() -> None:
-    from master.hw.uart import UartPort
-    from master.protocol import parse_assistant_state
-
-    first_state_line = (
-        "state=1,state_label=TRACKING,last_seq=7,follow_active=1,"
-        "heading_deg=1.000,target_heading_deg=1.000,yaw_rate_deg_s=0.000,"
-        "odom_x=0.1000,odom_y=0.2000,base_ok=1"
-    )
-    last_state_line = (
-        "state=1,state_label=TRACKING,last_seq=9,follow_active=1,"
-        "heading_deg=3.000,target_heading_deg=3.000,yaw_rate_deg_s=0.000,"
-        "odom_x=0.3000,odom_y=0.4000,base_ok=1"
-    )
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                first_state_line.encode("utf-8") + b"\r\n",
-                b"noise-without-state=1\r\n",
-                last_state_line.encode("utf-8") + b"\r\n",
-            ]
-            self.read_count = 0
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            self.read_count += 1
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    device = FakeDevice()
-    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
-    setattr(port, "_device", device)
-
-    assert port.read_latest_line(transform=parse_assistant_state) == {
-        "state_label": "TRACKING",
-        "last_seq": 9,
-        "follow_active": 1,
-        "heading_deg": 3.0,
-        "target_heading_deg": 3.0,
-        "yaw_rate_deg_s": 0.0,
-        "odom_x": 0.3,
-        "odom_y": 0.4,
-        "base_ok": 1,
-    }
-    assert device.read_count == 3
-
-
-def test_master_uart3_read_latest_line_has_no_two_chunk_budget() -> None:
-    from master.hw.uart import UartPort
-    from master.protocol import parse_assistant_state
-
-    last_state_line = (
-        "state=1,state_label=TRACKING,last_seq=11,follow_active=1,"
-        "heading_deg=5.000,target_heading_deg=5.000,yaw_rate_deg_s=0.000,"
-        "odom_x=0.5000,odom_y=0.6000,base_ok=1"
-    )
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                b"noise-without-state=1\r\n",
-                b"state=1,state_label=TRACKING,last_seq=10,follow_active=1,"
-                b"heading_deg=4.000,target_heading_deg=4.000,yaw_rate_deg_s=0.000,"
-                b"odom_x=0.4000,odom_y=0.5000,base_ok=1\r\n",
-                last_state_line.encode("utf-8") + b"\r\n",
-            ]
-            self.read_count = 0
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            self.read_count += 1
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    device = FakeDevice()
-    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
-    setattr(port, "_device", device)
-
-    assert port.read_latest_line(transform=parse_assistant_state) == {
-        "state_label": "TRACKING",
-        "last_seq": 11,
-        "follow_active": 1,
-        "heading_deg": 5.0,
-        "target_heading_deg": 5.0,
-        "yaw_rate_deg_s": 0.0,
-        "odom_x": 0.5,
-        "odom_y": 0.6,
-        "base_ok": 1,
-    }
-    assert device.read_count == 3
-
-
-def test_master_uart3_read_latest_line_propagates_parse_failure_from_transform() -> (
-    None
-):
-    from master.hw.uart import UartPort
-    from master.vision.parser import parse_vision_line
-
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.chunks = [b"=281,x=9,y=45\r\n"]
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    port = UartPort(name="uart3", uart_id=3, baudrate=115200)
-    setattr(port, "_device", FakeDevice())
-
-    import pytest
-
-    with pytest.raises(ValueError, match="empty_key"):
-        port.read_latest_line(transform=parse_vision_line)
-
-
-def test_master_runtime_loop_drops_invalid_vision_line_before_app() -> None:
-    from master.app import MasterRuntimeLoop
-
-    class FakeVisionUart:
-        def read_latest_line(self, transform=None):
-            assert transform is not None
-            return transform("=281,x=9,y=45")
-
-    class FakeUart3:
-        def __init__(self) -> None:
-            self.writes = []
-
-        def read_latest_line(self, transform=None):
-            return None
-
-        def write_line(self, payload):
-            self.writes.append(payload)
-
-    class FakeApp:
-        def __init__(self):
-            self.calls = []
-            self.hw_bundle = {}
-
-        def step(self, observation):
-            self.calls.append(dict(observation))
-            return {
-                "assistant_command": "cmd-hold",
-                "selected_target": "idle",
-                "phase": "MARKER_MISSING",
-                "self_target": {"kind": "hold"},
-            }
-
-    uart3 = FakeUart3()
-    uart6 = FakeVisionUart()
-    uart8 = FakeVisionUart()
-    app = FakeApp()
-    hw_bundle = _build_master_hw_bundle(uart3=uart3, uart6=uart6, uart8=uart8)
-    app.hw_bundle = hw_bundle
-    loop = MasterRuntimeLoop(hw_bundle, app=app)
-
-    loop.step(now_ms=100)
-
-    assert app.calls == [
-        {
-            "now_ms": 100,
-            "run_motion": True,
-            "cycle_token": app.calls[0]["cycle_token"],
-        }
-    ]
-
-
-def test_master_runtime_loop_reads_latest_valid_vision_line_through_uart_port() -> None:
-    from master.app import MasterRuntimeLoop
-    from master.hw.uart import UartPort
-
-    class FakeVisionDevice:
-        def __init__(self) -> None:
-            self.chunks = [
-                b"=281,x=9,y=45\r\nv=1,s=297,x=9,y=46\r\n",
-                b"vv=1,s=327,x=9,y=46\r\nv=1,s=328,x=10,y=47\r\n",
-            ]
-
-        def any(self) -> int:
-            if not self.chunks:
-                return 0
-            return len(self.chunks[0])
-
-        def read(self, size=None):
-            if not self.chunks:
-                return None
-            return self.chunks.pop(0)
-
-    class FakeUart3:
-        def __init__(self) -> None:
-            self.writes = []
-
-        def read_latest_line(self, transform=None):
-            return None
-
-        def write_line(self, payload):
-            self.writes.append(payload)
-
-    class FakeApp:
-        def __init__(self):
-            self.calls = []
-            self.hw_bundle = {}
-
-        def step(self, observation):
-            self.calls.append(dict(observation))
-            return {
-                "assistant_command": "cmd-hold",
-                "selected_target": "idle",
-                "phase": "MARKER_MISSING",
-                "self_target": {"kind": "hold"},
-            }
-
-    uart3 = FakeUart3()
-    uart6 = UartPort(name="uart6", uart_id=6, baudrate=115200)
-    setattr(uart6, "_device", FakeVisionDevice())
-    uart8 = UartPort(name="uart8", uart_id=8, baudrate=115200)
-    setattr(uart8, "_device", FakeVisionDevice())
-    app = FakeApp()
-    hw_bundle = _build_master_hw_bundle(uart3=uart3, uart6=uart6, uart8=uart8)
-    app.hw_bundle = hw_bundle
-    loop = MasterRuntimeLoop(hw_bundle, app=app)
-
-    loop.step(now_ms=100)
-
-    assert app.calls == [
-        {
-            "now_ms": 100,
-            "run_motion": True,
-            "cycle_token": app.calls[0]["cycle_token"],
-            "observations": [
-                {"uart": "uart6", "line": "v=1,s=328,x=10,y=47"},
-                {"uart": "uart8", "line": "v=1,s=328,x=10,y=47"},
-            ],
-        }
-    ]
-
-
-def test_master_runtime_loop_writes_only_assistant_command() -> None:
+def test_master_runtime_loop_does_not_write_legacy_assistant_payload() -> None:
     from master.app import MasterRuntimeLoop
 
     class FakeVisionUart:
@@ -1077,11 +643,16 @@ def test_master_runtime_loop_writes_only_assistant_command() -> None:
 
         def step(self, observation):
             return {
-                "assistant_debug_line": "debug_parse_invalid=1",
-                "assistant_command": "cmd-final",
                 "selected_target": "idle",
-                "phase": "MARKER_MISSING",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart3 = FakeUart3()
@@ -1094,7 +665,7 @@ def test_master_runtime_loop_writes_only_assistant_command() -> None:
 
     loop.step(now_ms=100)
 
-    assert uart3.writes == ["cmd-final"]
+    assert uart3.writes == []
 
 
 def test_master_uart_write_line_writes_payload_and_crlf_separately() -> None:
@@ -1118,7 +689,9 @@ def test_master_uart_write_line_writes_payload_and_crlf_separately() -> None:
     assert written == len(device.writes[0]) + len(device.writes[1])
 
 
-def test_master_runtime_loop_runs_complete_chain_once_per_outer_step() -> None:
+def test_master_runtime_loop_runs_app_once_per_outer_step_without_follow_inputs() -> (
+    None
+):
     from master.app import MasterRuntimeLoop
 
     class FakeUart:
@@ -1142,10 +715,16 @@ def test_master_runtime_loop_runs_complete_chain_once_per_outer_step() -> None:
         def step(self, observation):
             self.calls.append(dict(observation))
             return {
-                "assistant_command": "cmd-once",
-                "selected_target": "red",
-                "phase": "TRACKING",
+                "selected_target": "idle",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart6 = FakeUart(["v=1,s=101,x=12,y=-6"])
@@ -1158,18 +737,15 @@ def test_master_runtime_loop_runs_complete_chain_once_per_outer_step() -> None:
 
     result = loop.step(now_ms=100)
 
-    assert result["assistant_command"] == "cmd-once"
+    assert result["phase"] == "IDLE"
     assert len(app.calls) == 1
     assert app.calls[0]["now_ms"] == 100
     assert app.calls[0]["run_motion"] is True
-    assert app.calls[0]["observations"] == [
-        {"uart": "uart6", "line": "v=1,s=101,x=12,y=-6"},
-        {"uart": "uart8", "line": "v=1,s=102,x=8,y=-4"},
-    ]
-    assert uart3.writes == ["cmd-once"]
+    assert set(app.calls[0].keys()) == {"now_ms", "run_motion", "cycle_token"}
+    assert uart3.writes == []
 
 
-def test_master_runtime_loop_prefers_latest_assistant_feedback_line() -> None:
+def test_master_runtime_loop_no_longer_reads_assistant_feedback() -> None:
     from master.app import MasterRuntimeLoop
 
     state_line = (
@@ -1181,14 +757,11 @@ def test_master_runtime_loop_prefers_latest_assistant_feedback_line() -> None:
     class FakeUart3:
         def __init__(self) -> None:
             self.writes = []
+            self.read_count = 0
 
         def read_line(self):
-            return None
-
-        def read_latest_line(self, transform=None):
-            if transform is None:
-                return state_line
-            return transform(state_line)
+            self.read_count += 1
+            raise AssertionError("旧辅车回包不应再被主车运行时读取")
 
         def write_line(self, payload):
             self.writes.append(payload)
@@ -1205,10 +778,16 @@ def test_master_runtime_loop_prefers_latest_assistant_feedback_line() -> None:
         def step(self, observation):
             self.calls.append(dict(observation))
             return {
-                "assistant_command": "cmd-once",
                 "selected_target": "idle",
-                "phase": "MARKER_MISSING",
+                "phase": "IDLE",
                 "self_target": {"kind": "hold"},
+                "self_base_state": {
+                    "heading_deg": 0.0,
+                    "yaw_rate_deg_s": 0.0,
+                    "odom_x": 0.0,
+                    "odom_y": 0.0,
+                    "base_ok": 0,
+                },
             }
 
     uart3 = FakeUart3()
@@ -1226,17 +805,7 @@ def test_master_runtime_loop_prefers_latest_assistant_feedback_line() -> None:
             "now_ms": 100,
             "run_motion": True,
             "cycle_token": app.calls[0]["cycle_token"],
-            "assistant_feedback": {
-                "state_label": "TRACKING",
-                "last_seq": 7,
-                "follow_active": 1,
-                "heading_deg": 1.0,
-                "target_heading_deg": 1.0,
-                "yaw_rate_deg_s": 0.0,
-                "odom_x": 0.1,
-                "odom_y": 0.2,
-                "base_ok": 1,
-            },
         }
     ]
-    assert uart3.writes == ["cmd-once"]
+    assert uart3.read_count == 0
+    assert uart3.writes == []

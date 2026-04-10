@@ -21,10 +21,6 @@ UART_READ_CHUNKS = {
     "uart6": 96,
     "uart8": 96,
 }
-UART_READ_BUDGET_CHUNKS = {
-    "uart6": 2,
-    "uart8": 2,
-}
 
 
 class UartPort:
@@ -42,7 +38,6 @@ class UartPort:
         self._discard_until_newline = False
         self._line_limit = UART_LINE_LIMITS.get(self.name)
         self._read_chunk_size = UART_READ_CHUNKS.get(self.name)
-        self._read_budget_chunks = UART_READ_BUDGET_CHUNKS.get(self.name)
 
     @staticmethod
     def _find_newline(payload):
@@ -166,47 +161,6 @@ class UartPort:
                 available = min(int(available), int(self._read_chunk_size))
             return device.read(available)
         return device.read(size)
-
-    def read_latest_line(self, transform=None):
-        """尽量清掉积压输入, 但只返回最新一条完整文本行.
-
-        @brief 视觉链路只关心最新观测, 这里把完整积压行在同拍内尽量清空, 避免旧消息继续堆积。
-        """
-
-        latest = None
-        while True:
-            line = self._pop_ready_line()
-            if line is None:
-                break
-            if transform is None:
-                latest = line
-                continue
-            transformed = transform(line)
-            if transformed is not None:
-                latest = transformed
-        read_count = 0
-        while True:
-            if (
-                self._read_budget_chunks is not None
-                and read_count >= self._read_budget_chunks
-            ):
-                break
-            payload = self.read()
-            if payload is None:
-                break
-            read_count += 1
-            self._append_payload(payload)
-            while True:
-                line = self._pop_ready_line()
-                if line is None:
-                    break
-                if transform is None:
-                    latest = line
-                    continue
-                transformed = transform(line)
-                if transformed is not None:
-                    latest = transformed
-        return latest
 
     def write(self, payload):
         """写出原始串口负载.

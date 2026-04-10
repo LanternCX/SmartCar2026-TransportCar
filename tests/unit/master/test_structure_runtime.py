@@ -49,16 +49,6 @@ def test_master_runtime_process_entry_drives_one_cycle() -> None:
     assert snapshot["odom"] == (0.0, 0.0)
 
 
-def test_master_state_module_owns_cross_cycle_state() -> None:
-    from master.state import MasterControlState, MasterRuntimeState
-
-    runtime_state = MasterRuntimeState()
-    control_state = MasterControlState()
-
-    assert hasattr(runtime_state, "heading_deg")
-    assert hasattr(control_state, "yaw_integral")
-
-
 def test_master_runtime_process_state_owns_cross_cycle_state() -> None:
     import master.motion_runtime as runtime
 
@@ -87,60 +77,7 @@ def test_master_runtime_process_state_uses_clear_public_type_name() -> None:
     assert type(state).__name__ == "MotionRuntimeState"
 
 
-def test_master_motion_runtime_legacy_actions_forward_to_process_functions(
-    monkeypatch,
-) -> None:
+def test_master_motion_runtime_module_no_longer_exposes_legacy_object_shell() -> None:
     import master.motion_runtime as runtime
 
-    legacy_runtime = runtime.MotionRuntime()
-    calls = []
-
-    def _fake_apply_motion_target(state, target):
-        calls.append(("apply", state, dict(target)))
-        return {"kind": "hold"}
-
-    def _fake_resolve_heading_hold_target_from_state(
-        state, current_heading_deg, hw_bundle=None, cycle_token=None
-    ):
-        calls.append(
-            (
-                "heading",
-                state,
-                float(current_heading_deg),
-                hw_bundle,
-                cycle_token,
-            )
-        )
-        return {"kind": "vel", "vx": 0.0, "vy": 0.0, "omega": 1.0}
-
-    def _fake_run_motion_cycle(state, hw_bundle=None, cycle_token=None):
-        calls.append(("loop", state, hw_bundle, cycle_token))
-        return {"target": {"kind": "hold"}}
-
-    monkeypatch.setattr(runtime, "apply_motion_target", _fake_apply_motion_target)
-    monkeypatch.setattr(
-        runtime,
-        "resolve_heading_hold_target_from_state",
-        _fake_resolve_heading_hold_target_from_state,
-        raising=False,
-    )
-    monkeypatch.setattr(runtime, "run_motion_cycle", _fake_run_motion_cycle)
-
-    legacy_runtime.apply_self_target({"kind": "hold"})
-    token = object()
-    legacy_runtime.update_heading_hold(current_heading_deg=12.0, cycle_token=token)
-    legacy_runtime.execute_control_loop(cycle_token=token)
-
-    assert calls == [
-        ("apply", legacy_runtime, {"kind": "hold"}),
-        ("heading", legacy_runtime, 12.0, legacy_runtime.hw_bundle, token),
-        ("loop", legacy_runtime, legacy_runtime.hw_bundle, token),
-    ]
-
-
-def test_master_motion_runtime_reuses_process_state_shape() -> None:
-    import master.motion_runtime as runtime
-
-    legacy_runtime = runtime.MotionRuntime()
-
-    assert isinstance(legacy_runtime, runtime.MotionRuntimeState)
+    assert not hasattr(runtime, "MotionRuntime")
