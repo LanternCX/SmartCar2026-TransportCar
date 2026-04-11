@@ -12,7 +12,7 @@ PROBE_LOCAL_PATH = "tools/stage2_smoke_probe.py"
 PROBE_REMOTE_PATH = ".agent/stage2_smoke_probe.py"
 REQUIRED_SNAPSHOTS = ("health", "tick", "imu", "enc", "motor", "vision")
 SETTLE_DELAY_S = 0.3
-SUPPORTED_SOURCE_DIRS = ("src/master", "src/assistant")
+SUPPORTED_SOURCE_DIRS = ("src",)
 
 
 @dataclass
@@ -36,7 +36,7 @@ def _build_mpy_cli_command(source_dir, command_args):
     ] + list(command_args)
 
 
-def build_probe_commands(port, source_dir="src/master"):
+def build_probe_commands(port, source_dir="src"):
     """构造执行 Stage 2 探针所需的 mpy-cli 命令."""
     common = ["--port", port, "--no-interactive", "--yes"]
     return [
@@ -283,7 +283,7 @@ def _is_incremental_delete_miss(result):
     return saw_delete_miss
 
 
-def run_probe(port, source_dir="src/master"):
+def run_probe(port, source_dir="src"):
     """执行完整的 Stage 2 裸片 smoke 流程."""
     plan_cmd, deploy_cmd, upload_cmd, run_cmd, delete_cmd = build_probe_commands(
         port, source_dir=source_dir
@@ -351,8 +351,8 @@ def main(argv=None):
     parser.add_argument(
         "--source-dir",
         choices=SUPPORTED_SOURCE_DIRS,
-        default="src/master",
-        help="显式指定本次 smoke 使用的运行根目录，默认仅主车",
+        default="src",
+        help="显式指定本次 smoke 使用的运行根目录，默认使用 src",
     )
     args = parser.parse_args(argv)
 
