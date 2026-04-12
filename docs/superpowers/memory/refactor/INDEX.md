@@ -7,6 +7,7 @@ refactor
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-12-1 | 2026-04-12 | 将当前正式入口从 `boot.py` 收口为 `main.py` 并切换到按钮长按脚本分发 | `docs/superpowers/memory/refactor/entries/2026-04/2026-04-12-1.md` | 把当前仓库正式入口切到 `main.py`，用 `C8/C9` 长按接管脚本分发，并同步更新入口测试与正式文档口径。 | main-entry, boot, key-handler, startup, docs, tests |
 | 2026-03-24-1 | 2026-03-24 | 将 skill 私有正文迁入对应 skill 并补齐 reference-sync 维护边界 | `docs/superpowers/memory/refactor/entries/2026-03/2026-03-24-1.md` | 把 `mpy-cli`、OpenArt 协议和 `reference-sync` 的职责重新收口为 Skill 持有正式正文、维护信息独立登记的稳定结构，并补齐 git-workflow 的提交尾注禁令。 | skills, reference-sync, mpy-cli, openart, git-workflow, docs |
 | 2026-03-08-1 | 2026-03-08 | 重构设备阶段为 stage2 smoke 与 stage3 人工调试 | `docs/superpowers/memory/refactor/entries/2026-03/2026-03-08-1.md` | 重构设备验证阶段边界，将自动化 smoke 收束到 Stage 2，并把 Stage 3 明确定义为 uart3 人工调试流程。 | stage2, stage3, uart3, mpy-cli, diagnostics |
 | 2026-03-10-1 | 2026-03-10 | 建立工业级全局日志系统并拆分到 diagnostics 包 | `docs/superpowers/memory/refactor/entries/2026-03/2026-03-10-1.md` | 建立统一日志系统并把日志核心从服务编排层收口到 diagnostics 包边界。 | diagnostics, logging, uart3, transport-car, protocol |
