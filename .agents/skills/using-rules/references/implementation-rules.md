@@ -38,26 +38,33 @@
 - 测试驱动开发步骤固定为 RED -> GREEN -> REFACTOR
 - 纯逻辑与确定性行为优先放到 `tests/unit/`
 - 命令、协议与副作用契约优先放到 `tests/contract/`
-- 当前正式自动验证由主机侧测试组成; 需要板端确认时, 通过对话协作记录步骤、结果与复盘要点
+- 硬件路径必须进入 `tests/hil/`, 并在可行时补至少一个主机侧回归
+- 只有不触及设备路径时, 才能在主机侧验证通过后结束
 
 ## 最小执行命令
 
 - 主机侧单元测试: `python3 -m pytest tests/unit -q`
 - 主机侧契约测试: `python3 -m pytest tests/contract -q`
 - 主机侧联合检查: `python3 -m pytest tests/unit tests/contract -q`
+- 设备路径最小 smoke: `python3 tools/run_stage2_smoke.py --port <port>`
 
 ## 完成前最小检查
 
 - 必须保留失败测试先于实现的证据
 - 目标层级测试必须在本地通过
-- 若触及板端路径, 需要补充对话协作中的板端确认记录, 不得只凭串口有输出就视为完成
+- 若触及硬件路径, 必须补 `tests/hil/` 留证
+- 若进入设备路径, 不得只凭串口有输出就视为完成
 
-## 板端路径判定与确认要求
+## 设备路径判定与阶段要求
 
-- 满足任一条件即进入板端路径: 修改硬件驱动层、修改底盘运行时 owner、依赖真实串口/编码器/IMU/电机/ticker、需要证明板端状态或真实动作链路
-- 进入板端路径后, 先完成可保留的本地自动测试, 再通过对话协作确认设备可连接、文件可上传执行、模块可导入、最小诊断可用与现场动作结果
-- 板端确认属于人工联调与归因过程, 以操作步骤、观察结果和复盘记录作为当前正式依据
-- 需要记录的最小信息包括: 操作步骤、预期、实测结果、失败归因与后续复盘要点
+- 满足任一条件即进入设备路径: 修改硬件驱动层、修改底盘运行时 owner、依赖真实串口/编码器/IMU/电机/ticker、需要证明板端状态或真实动作链路
+- `stage2` 只做最小运行与 smoke 验证, 不验证真实硬件动作
+- `stage2` 默认命令顺序固定为 `mpy-cli plan` -> `mpy-cli upload/run/delete` -> smoke 探针
+- `stage2` 必验项必须逐项确认: 设备可连接、文件可上传执行、模块可导入、query / smoke 已注册、安全模式入口可见可用
+- `stage2` 禁止启动真实动作链路, 也不得因失败直接跳过
+- `stage3` 用于人工联调与归因, `uart6` 保持正式链路
+- `stage3` 是人工联调阶段, 不是自动 PASS / FAIL 阶段
+- `tests/hil/` 中必须留下步骤、预期、实测与 PASS / FAIL 结论
 - 联调排查时, 具体硬件事实、视觉协议和失败分类统一回看 `references/hardware-and-protocol.md`
 
 ## 实现阶段内存门禁
@@ -103,20 +110,20 @@
 
 | Asset | Owner | Phase | Class | Trigger | Duplicate | Action | Evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `uart3` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | 板端最小确认 | 最小日志和 query 回包通道 |
-| `uart6` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | 板端最小确认 | 命令和视觉输入通道 |
+| `uart3` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `stage2 probe` | 最小日志和 query 回包通道 |
+| `uart6` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `stage2 probe` | 命令和视觉输入通道 |
 | `oom_count` / `last_oom_stage` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `?health` | 低内存时必须可读 |
 | `last_exception_text` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `?health` | 仅保留最小错误上下文 |
 | 角色 profile | `RuntimeCore` | `core_init` | `A` | boot | no | keep | boot role | 决定主车 / 辅车装配边界 |
-| 最小 query 路由 | `MinimalCommandRuntime` | `core_init` | `A` | boot | no | keep | 板端最小确认 | 仅保活 `health/tick/vision` |
+| 最小 query 路由 | `MinimalCommandRuntime` | `core_init` | `A` | boot | no | keep | `stage2 lite` | 仅保活 `health/tick/vision` |
 | 完整 handlers 装配 | `FullCommandRuntime` | `feature_init` | `C` | first command feature | yes | delay | board trace | 禁止 import-time 全量注册 |
-| `vision_runtime` | `VisionRuntimeService` | `feature_init` | `B` | main role only | yes | split/delay | 板端功能确认 | 主车允许, 辅车禁止 |
-| 视觉状态机推进 | `VisionRuntimeService` | `runtime` | `C` | vision active | yes | delay | 现场观察 | 不是最小启动必需 |
+| `vision_runtime` | `VisionRuntimeService` | `feature_init` | `B` | main role only | yes | split/delay | `stage2 full` | 主车允许, 辅车禁止 |
+| 视觉状态机推进 | `VisionRuntimeService` | `runtime` | `C` | vision active | yes | delay | stage3 observe | 不是最小启动必需 |
 | `chassis_state` | `MotionRuntime` | `feature_init` | `C` | motion activated | yes | move owner | board trace | 禁止同时挂在多个 facade |
 | IMU / 电机 / 编码器 | `MotionRuntime` | `feature_init` | `C` | motion activated | no | delay | board trace | 不应在最小 query 路径常驻 |
 | logger manager | `RuntimeCore` | `core_init` | `A` | boot | no | slim | `?log` / board log | 只保留低分配快路径 |
-| 扩展 diagnostics | `MinimalDiagnostics` 之外的 owner | `feature_init` | `C` | debug feature | yes | delay | 现场观察 | query 优先于 debug 文本 |
-| 现场追踪探针 | tools probe | `diag` | `D` | manual observe | no | temp only | manual run | 默认不参与运行态 |
+| 扩展 diagnostics | `MinimalDiagnostics` 之外的 owner | `feature_init` | `C` | debug feature | yes | delay | stage3 observe | query 优先于 debug 文本 |
+| `stage2_full_trace_probe` | tools probe | `diag` | `D` | manual observe | no | temp only | manual run | 默认不参与运行态 |
 | 模块级可变运行时全局 | none | `import` | `E` | never | n/a | delete | review block | 包括隐式单例和共享缓存 |
 | import-time 自动发现 / 自动注册 | none | `import` | `E` | never | n/a | delete | review block | 直接抬高导入峰值 |
 

@@ -34,7 +34,7 @@ description: Use when completing tasks, implementing major features, or before m
 
 - AI 默认先核对 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`, 判断是否满足要求、保持最小改动并对完赛有正贡献
 - AI 默认执行内存量化检查, 不把 memory 评估转交给用户人工处理
-- 具体收口门禁、设备路径交付要求和板端结果留证要求只写在引用页
+- 具体收口门禁、设备路径交付要求和 HIL 留证要求只写在引用页, 不回填主入口
 
 ## 总则
 
