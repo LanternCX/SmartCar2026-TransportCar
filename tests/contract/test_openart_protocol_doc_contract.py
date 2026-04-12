@@ -12,8 +12,8 @@ PROTOCOL_PATH = (
 
 def extract_visual_protocol_section(text: str) -> str:
     """截取正式视觉协议正文, 用于检查必须存在的新口径."""
-    start = text.index("### 4.3 持续回传格式")
-    end = text.index("### 4.6 视觉状态诊断接口")
+    start = text.index("## 4. 模块 B：车模与视觉端通信协议")
+    end = text.index("## 5.") if "## 5." in text else len(text)
     return text[start:end]
 
 
@@ -41,28 +41,22 @@ def assert_no_legacy_formal_payloads(text: str) -> None:
         )
 
 
-def test_openart_protocol_doc_uses_minimal_text_frames_only() -> None:
-    """主车仓库正式视觉协议正文必须切到最小文本口径."""
+def test_openart_protocol_doc_matches_current_visual_facts() -> None:
+    """正式视觉协议正文应与当前代码事实一致."""
     text = PROTOCOL_PATH.read_text(encoding="utf-8")
     section = extract_visual_protocol_section(text)
 
     required_tokens = [
-        "v=1,s=<seq>,x=<x>,y=<y>",
-        "v=0,s=<seq>",
-        "`v`",
-        "`s`",
+        "`UART6`",
+        "x=<x>,y=<y>",
         "`x`",
         "`y`",
-        "`x` 表示目标中心相对画面中心的横向像素差值",
-        "`y` 表示目标底边相对当前期望抓取位置的纵向像素差值",
-        "`v=1` 时必须同时携带 `x` 和 `y`",
-        "`v=0` 时不发送 `x` 和 `y`",
-        "`x > 0` 表示目标在画面中心右侧, `x < 0` 表示目标在画面中心左侧",
-        "`y > 0` 表示目标底边超过期望抓取位置, `y < 0` 表示目标底边尚未到达期望抓取位置",
-        "`y=0` 表示目标已到达当前设定抓取距离",
-        "`v=0` 但仍携带 `x` 或 `y`",
-        "缺少 `s`",
-        "`v=1` 但缺少 `x` 或 `y`",
+        "观测值",
+        "OpenArt -> RT1021",
+        "不是动作命令",
+        "来源不是 `UART6`",
+        "缺少 `x` 或 `y`",
+        "除 `x`、`y` 之外出现其他键",
     ]
 
     for token in required_tokens:

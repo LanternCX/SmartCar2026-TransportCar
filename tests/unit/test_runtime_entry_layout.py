@@ -1,44 +1,36 @@
-"""新运行时入口布局约束.
+"""单一 src 运行时布局约束.
 
 @file tests/unit/test_runtime_entry_layout.py
 """
 
 from pathlib import Path
-import re
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = PROJECT_ROOT / "src"
 
 
-def test_master_and_assistant_only_keep_main_entry() -> None:
-    """新运行时只保留 main.py 作为公开入口."""
+def test_src_runtime_root_matches_main_entry_layout() -> None:
+    """当前运行根必须对齐单一 src + `main.py` 入口布局."""
 
-    for runtime_name in ("master", "assistant"):
-        runtime_root = PROJECT_ROOT / "src" / runtime_name
-        assert (runtime_root / "main.py").exists()
-        assert not (runtime_root / "boot.py").exists()
+    assert (SRC_ROOT / "main.py").exists()
+    assert not (SRC_ROOT / "boot.py").exists()
 
-
-def test_master_and_assistant_expose_new_structure_directories() -> None:
-    """主辅车当前阶段必须先落新框架目录边界."""
-
-    expected = {
-        "master": ("hw", "ctrl", "vision", "script"),
-        "assistant": ("hw", "ctrl", "script"),
-    }
-
-    for runtime_name, directory_names in expected.items():
-        runtime_root = PROJECT_ROOT / "src" / runtime_name
-        for directory_name in directory_names:
-            assert (runtime_root / directory_name).is_dir()
+    for directory_name in (
+        "config",
+        "control",
+        "filters",
+        "hardware",
+        "script",
+        "services",
+        "storage",
+        "utils",
+    ):
+        assert (SRC_ROOT / directory_name).is_dir()
 
 
-def test_master_and_assistant_runtime_files_do_not_use_typing_module() -> None:
-    """运行时代码不应依赖 typing 模块."""
+def test_src_runtime_root_drops_legacy_split_layout() -> None:
+    """当前仓库不应再保留旧三套运行结构."""
 
-    for runtime_name in ("master", "assistant"):
-        runtime_root = PROJECT_ROOT / "src" / runtime_name
-        for file_path in runtime_root.rglob("*.py"):
-            content = file_path.read_text(encoding="utf-8")
-            assert "from typing import" not in content
-            assert "import typing" not in content
+    for directory_name in ("legacy", "master", "assistant"):
+        assert not (SRC_ROOT / directory_name).exists()

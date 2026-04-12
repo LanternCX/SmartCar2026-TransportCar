@@ -7,7 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
-| 2026-04-10-1 | 2026-04-10 | 完成辅车主动跟随主车的软件侧双仓重构 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-10-1.md` | 完成辅车主动跟随主车的软件侧双仓重构, 包括辅车输入切换、OpenArt 直接 follow 请求输出、主车旧跟随整链删除与双仓文档同步。 | assistant-follow, openart, uart6, master-cleanup, dual-repo, milestone |
+| 2026-04-12-1 | 2026-04-12 | 完成当前视觉协议生效文档与代码事实的基线收口 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-12-1.md` | 记录当前视觉协议生效文档、归档边界与文档契约测试统一收口到代码事实基线的完整里程碑。 | vision, docs, protocol, archive, uart6, milestone |
 | 2026-04-04-1 | 2026-04-04 | 完成主车底盘控制重构阶段的姿态、方向与节拍闭环调试 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-04-1.md` | 记录主车底盘控制重构阶段完成姿态口径统一、方向映射修正、动态 dt 统一和航向保持语义收口的完整里程碑。 | master, chassis-control, heading, yaw, mapping, dynamic-dt, milestone |
 | 2026-03-07-1 | 2026-03-07 | 视觉状态机迁移到主控端 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-07-1.md` | 将视觉状态机职责迁入主控端搬运车运行时，形成主控内部视觉闭环与位置式控制协同。 | vision, uart6, state-machine, transport-car |
 | 2026-03-07-2 | 2026-03-07 | 建立 Stage 3 设备观测诊断链路 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-07-2.md` | 建立可由 agent 主动触发的 Stage 3 板端观测诊断链路，并补齐运行时诊断快照与设备观测入口。 | diagnostics, mpy-cli, hil, observe, transport-car |
