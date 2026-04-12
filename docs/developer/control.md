@@ -1,6 +1,6 @@
 # 电控设计
 
-> 说明：其中与 `boot.py` 入口、角色切换入口、双摄轮询、`UART3` 主辅直连通信相关的旧口径，已由 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 覆盖；若存在冲突，当前以该设计文档为准，待后续统一清理。
+> 说明：当前正式基线使用单一 `src/`。当前入口使用 `main.py` 与 `src/script/*`，脚本分发采用 `C8/C9` 长按；若继续讨论更深层的 3.0 运行时整理，可参考 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md`。
 
 ## 控制目标与主要特性
 
@@ -17,23 +17,24 @@
 
 ## 当前有效口径
 
-- 当前阶段默认只有辅车执行持续运动，主车负责感知、决策、状态机和向辅车下发控制。
-- 主车自身底盘闭环能力仍需保留在目录结构与算法设计中，但当前主线不把它作为默认运行阶段。
-- 当前入口方案是 `main.py` 单入口，按钮长按在 `main.py` 内部分发到辨识脚本与零漂校准脚本。
-- 当前主辅通信方案是 `UART3` 直连，视觉输入为 `UART6` / `UART8` 双路持续接收。
-- 若本文件后文的历史说明与上述当前口径冲突，以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 为准。
+- 当前主线由主车负责感知、决策、状态机和向辅车下发控制，辅车执行持续运动。
+- 主车底盘闭环能力属于通用能力边界，在目录结构与算法设计中一并维护。
+- 当前正式代码结构使用单一 `src/`，相关脚本路径统一按 `src/script/...` 理解。
+- 当前入口组织使用 `main.py` 与 `src/script/*`；按钮长按脚本分发采用当前写法，更深层的 3.0 运行时整理属于下一轮主题。
+- 当前主辅通信方案按 `UART3` 直连理解；视觉输入由主控通过 `UART6` 接收单行 `x=<x>,y=<y>` 观测，并在主控内部完成状态机推进与目标生成。
+- 当前正式验证口径由本地自动测试和对话协作记录组成；板端联调、动作确认与现场复盘统一在协作过程中完成并记录。
 
-## 历史上电入口配置（仅供 legacy 理解）
+## 当前上电入口配置
 
-> 历史归档说明：本节以下内容主要用于理解 `legacy` 旧系统入口，不再作为当前 `master` / `assistant` 运行时的实现依据。当前入口方案以 `docs/superpowers/specs/archive/PR#16/2026-03-30-master-assistant-hardware-design.md` 为准，即删除 `boot.py`、只保留 `main.py` 单入口，并在 `main.py` 内完成按钮脚本分发。
+> 说明：本节描述当前 `src/` 的入口组织与脚本路径；后续若继续推进更深层的 3.0 运行时整理，再按新设计更新这里。
 
-当前 boot.py 已将“角色选择”和“启动入口”拆开：
+当前入口通过 `main.py` 分发启动脚本：
 
 | 条件 | 结果 |
 | :--- | :--- |
-| 长按按钮 1 上电 | 进入 `src/legacy/script/pid_identify.py` |
-| 长按按钮 2 上电 | 进入 `src/legacy/script/calibrate_gyro.py` |
-| 不按按钮上电 | 进入 `src/legacy/script/remote_control.py` |
+| 长按 `C8` 上电 | 进入 `src/script/pid_identify.py` |
+| 长按 `C9` 上电 | 进入 `src/script/calibrate_gyro.py` |
+| 不按按钮上电 | 进入 `src/script/remote_control.py` |
 
 注意：
 
@@ -44,40 +45,37 @@
 ## 参数辨识与校准在系统中的位置
 
 1. **电机参数辨识**（每次更换地面或配重后）
-   - 运行 [src/legacy/script/pid_identify.py](../../src/legacy/script/pid_identify.py) 进行电机特性自动辨识
+   - 运行 [src/script/pid_identify.py](../../src/script/pid_identify.py) 进行电机特性自动辨识
    - 系统将自动计算前馈增益（gain）和时间常数（Tau），保存到 `/flash/ident_params.txt`
    - 这使得后续速度控制能够利用前馈补偿，提高速度环的响应速度
 
 2. **陀螺仪零飘校准**（首次部署和定期校准）
-   - 运行 [src/legacy/script/calibrate_gyro.py](../../src/legacy/script/calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
+   - 运行 [src/script/calibrate_gyro.py](../../src/script/calibrate_gyro.py)，在车模完全静止的情况下校准陀螺仪零点
    - 校准结果保存到 `/flash/gyro_offset.txt`
    - 不进行此步骤会导致航向角漂移
 
-## legacy 代码架构说明（仅供历史对照）
+## 当前代码架构说明
 
 ### 目录结构
 
 ```text
 .
-├── src/                    # 当前运行时代码根目录
-│   ├── legacy/             # 原系统冻结归档
-│   │   ├── boot.py         # 原启动脚本源文件
-│   │   ├── script/         # 原运行/校准/调试脚本
-│   │   ├── config/         # 原配置文件
-│   │   ├── control/        # 原控制算法核心
-│   │   ├── filters/        # 原滤波器实现
-│   │   ├── hardware/       # 原硬件驱动封装
-│   │   ├── services/       # 原业务逻辑服务
-│   │   ├── storage/        # 原参数存储管理
-│   │   └── utils/          # 原通用工具库
-│   ├── master/             # 新主车系统
-│   └── assistant/          # 新辅车系统
+├── src/                    # 当前正式代码根目录
+│   ├── main.py             # 当前启动脚本源文件
+│   ├── script/             # 运行/校准/调试脚本
+│   ├── config/             # 配置文件
+│   ├── control/            # 控制算法核心
+│   ├── filters/            # 滤波器实现
+│   ├── hardware/           # 硬件驱动封装
+│   ├── services/           # 业务逻辑服务
+│   ├── storage/            # 参数存储管理
+│   └── utils/              # 通用工具库
 ├── seekfree_demo/          # 逐飞科技例程(参考用)
 ├── stubs/                  # 代码提示桩文件(用于VSCode补全)
 └── tests/                  # 主机侧测试
 ```
 
-#### [src/legacy/control/](../../src/legacy/control/) - 控制核心模块
+#### [src/control/](../../src/control/) - 控制核心模块
 - `pid_controller.py`：PID 控制器实现（位置式和增量式）
 - `pid_math.py`：PID 运算和饱和处理
 - `pid_store.py`：PID 参数持久化
@@ -87,19 +85,19 @@
   - `Odometry`：基于编码器的里程计（位置和航向角估计）
 - `ident_tools.py`：电机参数辨识工具
 
-#### [src/legacy/filters/](../../src/legacy/filters/) - 滤波算法
+#### [src/filters/](../../src/filters/) - 滤波算法
 - `lowpass_filter.py`：低通滤波
 - `spike_filter.py`：中值滤波（抗脉冲干扰）
 - `diff_limit_filter.py`：差分限幅滤波（防止陡峭跳变）
 - `dual_window_regression_filter.py`：双窗口线性回归滤波（编码器精细化滤波）
 
-#### [src/legacy/services/](../../src/legacy/services/) - 业务逻辑层
+#### [src/services/](../../src/services/) - 业务逻辑层
 - `transport_car.py`：**车模核心单例类**
   - 集中所有硬件初始化、滤波、PID 和运动学
   - 实现 `step()` 主循环，执行 5ms 控制周期
   - 处理速度模式和位置模式的切换逻辑
 
-## legacy 核心控制流程（仅供历史对照）
+## 当前核心控制流程
 
 ```
 1. TransportCar 初始化
@@ -126,7 +124,7 @@
 
 ## 控制模式详解
 
-> 说明：本节描述的是控制算法能力边界，可作为当前重构的算法参考；其中具体入口、角色切换与运行时装配方式不再沿用 legacy 实现。
+> 说明：本节描述当前控制算法能力边界；下一轮若引入新的入口装配方式，应在新设计落地后同步修订本节。
 
 ### 速度模式（Velocity Mode）
 
@@ -216,11 +214,11 @@ IMU 原始数据（加速度 + 角速度）
 
 ### 为什么当前 OpenArt 跟随主线坚持位置式控制, 不改成速度式控制？
 
-当前跟随主线中, OpenArt 返回的是“物体距离目标点的误差”, 而不是原始图像点或直接速度指令。
+当前视觉链路中, 主控接收的是单帧观测点 `x,y`, 再由主控内部状态机解析为后续控制目标。
 
 在这种前提下, 主控与辅车之间更适合传递位置式控制量, 原因如下:
 
-- 视觉侧输出的误差天然更接近位置量
+- 视觉侧输出先经过主控状态机整理，再映射到位置量目标
 - 位置式控制更容易和底盘控制链的阶数对齐
 - 即使 `xy` 积分不准, 也可以通过多次小步修正逐步收敛
 
@@ -230,9 +228,7 @@ IMU 原始数据（加速度 + 角速度）
 
 ### 为什么当前角度控制不依赖视觉角度？
 
-之前尝试过基于视觉方案直接估计角度, 例如 AprilTag, 但实际帧率不足, 不适合当前主线。
-
-另一方面, 经实测只要满足以下条件, 角度链本身已经足够稳定:
+当前角度控制链路独立于视觉观测, 主要依赖板载姿态链本身的稳定性。只要满足以下条件, 角度链本身就具备稳定基础:
 
 - 完成零漂校准
 - 使用合适滤波
@@ -283,9 +279,9 @@ IMU 原始数据（加速度 + 角速度）
 
 实际的通信协议中，为了避免神秘 BUG，一般会先查询 lock 状态，在确认没有 lock 的情况下再发送，防止命令丢失。
 
-这次重构后，系统采用“双链路”策略：
+系统按“双链路”策略工作：
 
 - 外部离散命令（例如手动 `dy=0.2`、`d_angle=90`）仍然使用 `command_lock`。
-- 视觉链路默认不逐帧等待 `?lock`，而是由主控内部状态机在每个控制周期覆盖式刷新目标；若外部离散命令已经锁定底盘，则视觉链路会暂停并重新从 `IDLE` 获取目标。
+- 视觉链路默认不逐帧等待 `?lock`，而是由主控内部状态机在每个控制周期覆盖式刷新目标；若外部离散命令处于底盘锁定状态，则视觉链路会暂停并重新从 `IDLE` 获取目标。
 
-这样既保留了原本相对位置控制的稳定性，又避免了视觉高帧率输入在串口层排队等待造成的跟随迟滞。
+这样可以维持相对位置控制的稳定性，并避免视觉高帧率输入在串口层排队等待造成的跟随迟滞。
