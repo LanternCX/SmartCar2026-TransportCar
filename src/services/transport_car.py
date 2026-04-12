@@ -13,6 +13,7 @@ from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
+from utils.startup_log import startup_log
 from config.params import (
     TICK_MS,
     MAX_DUTY,
@@ -147,6 +148,7 @@ class TransportCar:
         包括电机、编码器、IMU、运动学、PID 控制器、串口等.
         """
         self.diagnostic_mode = bool(diagnostic_mode)
+        startup_log("transport_car", "init start")
 
         # 板载 LED 与停止开关
         self.led = Pin("C4", Pin.OUT, value=True)
@@ -156,15 +158,16 @@ class TransportCar:
         # 串口(保持原波特率与编号)
         self.uart3 = create_uart3()
         self.uart6 = create_uart6()
-        self.uart3.write("System Starting...\r\n")
+        startup_log("transport_car", "uart ready")
 
         # IMU 初始化
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip IMU init.\r\n")
+            startup_log("transport_car", "diagnostic mode skip IMU init")
             self.imu = _NullImu()
         else:
-            self.uart3.write("Initializing IMU...\r\n")
+            startup_log("transport_car", "IMU init start")
             self.imu = create_imu()
+            startup_log("transport_car", "IMU ready")
         self.imu_data = self.imu.get()
 
         # 滤波与姿态估计状态
@@ -189,20 +192,23 @@ class TransportCar:
 
         # Motors and encoders
         if self.diagnostic_mode:
-            self.uart3.write("Diagnostic mode: skip motor/encoder init.\r\n")
+            startup_log("transport_car", "diagnostic mode skip motor/encoder init")
             self.motors = _create_null_motors()
             self.encoders = _create_null_encoders()
         else:
+            startup_log("transport_car", "motor/encoder init start")
             self.motors = create_motors()
             self.encoders = create_encoders()
+            startup_log("transport_car", "motor/encoder ready")
 
         # 辨识参数加载
-        self.uart3.write("Loading identify parameters...\r\n")
+        startup_log("transport_car", "loading calibration data")
         self.ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
         # IMU 零偏加载
         self.imu_offsets = load_gyro_offsets(
-            GYRO_OFFSET_FILE, logger=lambda msg: self.uart3.write(msg + "\r\n")
+            GYRO_OFFSET_FILE,
+            logger=lambda msg: startup_log("transport_car", msg),
         )
 
         # 轮组状态构造:滤波、PID、编码器/电机封装
@@ -247,6 +253,8 @@ class TransportCar:
         self.last_exception_text = "none"
         self._yaw_rate = 0.0
         self._last_gz_raw = 0.0
+        self._boot_step_logged = False
+        self._boot_tick_logged = False
 
         # 相对位移暂存(供 _finalize_route 使用)
         self._pending_dx = None
@@ -267,6 +275,7 @@ class TransportCar:
         )
         self._vision_step_result = None
         self._vision_resolved_target = None
+        startup_log("transport_car", "init complete")
 
     # Public API -----------------------------------------------------
     def mark_tick(self, _tick=None):  # noqa: F841
@@ -339,7 +348,14 @@ class TransportCar:
         返回:
             True 表示继续运行;False 表示检测到致命错误(如急停开关).
         """
+        if not self._boot_step_logged:
+            startup_log("transport_car", "step loop active")
+            self._boot_step_logged = True
+
         if self.pit_flag:
+            if not self._boot_tick_logged:
+                startup_log("transport_car", "first ticker event received")
+                self._boot_tick_logged = True
             # 仅当标志置位时才执行一次完整控制周期
             self._handle_tick()
             self.pit_flag = False

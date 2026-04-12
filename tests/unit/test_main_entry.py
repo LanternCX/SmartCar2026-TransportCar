@@ -66,3 +66,29 @@ def test_main_entry_source_uses_key_handler_and_avoids_role_switch_pins() -> Non
     assert "KEY_HANDLER" in source
     assert '"D8"' not in source
     assert '"D9"' not in source
+
+
+def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
+    """入口阶段必须输出关键启动日志, 便于定位卡住位置."""
+
+    main = load_main_module()
+    launched_scripts = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda script_path: launched_scripts.append(script_path),
+    )
+
+    result = main.main()
+
+    assert result == "script/remote_control.py"
+    assert launched_scripts == ["script/remote_control.py"]
+    assert capsys.readouterr().out.splitlines() == [
+        "[boot] main: entry start",
+        "[boot] main: startup keys=[0, 0, 0, 0]",
+        "[boot] main: selected script=script/remote_control.py",
+        "[boot] main: launching script=script/remote_control.py",
+    ]

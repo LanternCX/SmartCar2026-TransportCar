@@ -3,6 +3,8 @@
 @file src/main.py
 """
 
+from utils.startup_log import startup_log
+
 STARTUP_SETTLE_MS = 100
 KEY_SCAN_PERIOD_MS = 10
 KEY_SCAN_TIMEOUT_MS = 1500
@@ -84,13 +86,17 @@ def _run_script(script_path):
 def main():
     """入口阶段只负责按钮判定和脚本分发."""
 
+    startup_log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
     key_states = _scan_startup_key_states()
+    startup_log("main", "startup keys=%s" % key_states)
     try:
         script_path = resolve_startup_script(key_states)
     except ValueError as exc:
         print(str(exc))
         return None
+    startup_log("main", "selected script=%s" % script_path)
+    startup_log("main", "launching script=%s" % script_path)
     _run_script(script_path)
     return script_path
 
