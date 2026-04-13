@@ -92,20 +92,23 @@ rear=1,angle=-90
 | `vx` | 车体系 X 方向速度目标 | 控制器速度单位 | 速度 | 锁定时忽略,内部限幅到 `V_CMD_MAX`；仅在没有挂起位置目标时直接生效 |
 | `vy` | 车体系 Y 方向速度目标 | 控制器速度单位 | 速度 | 锁定时忽略,内部限幅到 `V_CMD_MAX`；仅在没有挂起位置目标时直接生效 |
 | `omega` / `w` | 角速度目标 | 控制器角速度单位 | 速度 | 锁定时忽略,内部限幅到 `V_CMD_MAX`；仅在没有挂起绝对角目标时直接生效 |
-| `x` | 世界系绝对 X 目标 | 米 | 位置 | 锁定时忽略；进入位置模式 |
-| `y` | 世界系绝对 Y 目标 | 米 | 位置 | 锁定时忽略；进入位置模式 |
-| `dx` | 车体系相对 X 位移 | 米 | 位置 | 锁定时忽略；由 RT1021 转成世界系绝对目标 |
-| `dy` | 车体系相对 Y 位移 | 米 | 位置 | 锁定时忽略；由 RT1021 转成世界系绝对目标 |
-| `angle` / `yaw` | 世界系绝对航向角目标 | 度 | 位置 | 锁定时忽略 |
-| `d_angle` / `dyaw` / `da` | 相对航向角增量 | 度 | 位置 | 锁定时忽略；由 RT1021 叠加到当前目标角 |
+| `x` | 世界系绝对 X 目标 | 米 | 位置 | 可选搭配 `lock`；`lock=1` 时进入等待完成流程，`lock=0` 时按无锁覆盖语义直接刷新目标 |
+| `y` | 世界系绝对 Y 目标 | 米 | 位置 | 可选搭配 `lock`；`lock=1` 时进入等待完成流程，`lock=0` 时按无锁覆盖语义直接刷新目标 |
+| `dx` | 车体系相对 X 位移 | 米 | 位置 | 可选搭配 `lock`；由 RT1021 转成世界系绝对目标，`lock=0` 时新命令直接覆盖当前目标 |
+| `dy` | 车体系相对 Y 位移 | 米 | 位置 | 可选搭配 `lock`；由 RT1021 转成世界系绝对目标，`lock=0` 时新命令直接覆盖当前目标 |
+| `angle` / `yaw` | 世界系绝对航向角目标 | 度 | 位置 | 可选搭配 `lock`；`lock=0` 时新命令直接覆盖当前目标 |
+| `d_angle` / `dyaw` / `da` | 相对航向角增量 | 度 | 位置 | 可选搭配 `lock`；由 RT1021 叠加到当前目标角，`lock=0` 时新命令直接覆盖当前目标 |
 | `rear` | 后轮动作修饰位 | 推荐 `0/1` | 模式 | 实现上 `0` 为关闭、非零为开启；常与锁定动作一起使用；解锁后会自动回到全向模式 |
+| `lock` | 位置/模式命令的等待完成开关 | `0/1` | 修饰位 | 仅作用于同一条消息中的位置类命令与模式命令；`lock=1` 进入 `command_lock`，`lock=0` 不进入 |
 | `reset` / `reset=1` | 运行态复位 | - | 系统 | 不受 `command_lock` 限制；清零里程计/姿态/锁与视觉状态,并重置 `last_cmd` |
 | `print=<text>` | 调试打印 | 文本 | 系统 | 透传到 RT1021 的 `UART3` 输出 |
 
 说明:
 
-- 位置类命令与 `rear` 模式变更会触发 `command_lock`。
-- 速度类命令不会触发 `command_lock`,适合持续遥控；但若旧的 `x/y/angle` 目标仍挂起,位置/角度控制仍会继续优先生效。
+- 位置类命令与 `rear` 模式命令支持可选 `lock` 修饰位；未显式给出时按 `lock=1` 理解。
+- 当位置类命令与 `rear` 模式命令按 `lock=1` 执行时, 会进入 `command_lock` 并等待本次动作完成。
+- 当显式发送 `lock=0` 时, 不进入 `command_lock`；同类新命令直接覆盖当前目标, 适合持续刷新位置式目标。
+- 速度类命令不接受 `lock`, 也不会触发 `command_lock`；新速度命令会清空对应旧位置目标, 防止旧的 `x/y/angle` 目标继续占用控制链。
 - `dx/dy/d_angle` 是“相对目标”,由 RT1021 在本地结合当前位姿换算后执行。
 - `reset` 可以写成裸 `reset`（大小写均可）,也可以写成 `reset=1`。
 - `rear=1` 更适合作为一次动作的修饰条件,而不是长期保持的全局模式；车辆解锁后会自动回到全向模式。
@@ -145,10 +148,10 @@ rear=1,angle=-90
 | 查询指令 | 返回格式 | 用途 | 备注 |
 | :--- | :--- | :--- | :--- |
 | `?pos` | `?pos=x,y,yaw` | 查询当前世界坐标与航向角 | 简洁返回 |
-| `?lock` | `?lock=0/1` | 查询是否处于位置/模式锁定状态 | 简洁返回 |
+| `?lock` | `?lock=0/1` | 查询是否处于等待完成流程 | 只表示当前是否在 `command_lock` |
 | `?log` | `?log=profile:<p>,level:<l>,filter:<m>,color:<0/1>,modules:<list>` | 查询当前运行时日志配置 | `modules` 为空时返回 `none`,`profile` 可能为 `run` / `diag` / `custom` |
 | `?vision` | `?vision=key:value,...` | 查询视觉观测与视觉目标摘要 | 结构化快照 |
-| `?health` | `?health=key:value,...` | 查询系统健康摘要 | 结构化快照 |
+| `?health` | `?health=key:value,...` | 查询系统健康摘要 | 结构化快照；包含 `command_mode` |
 | `?tick` | `?tick=key:value,...` | 查询控制周期统计 | 结构化快照 |
 | `?imu` | `?imu=key:value,...` | 查询 IMU 状态 | 结构化快照 |
 | `?enc` | `?enc=key:value,...` | 查询编码器观测 | 结构化快照 |
@@ -174,15 +177,17 @@ rear=1,angle=-90
 ?lock=1
 ?log=profile:run,level:info,filter:off,color:0,modules:none
 ?vision=state:ALIGN_DX,obs_age_ms:100,obs_x:120.0,obs_y:55.0,target_x:0.2,target_y:0.4,target_angle:15.0
-?health=alive:1,uptime_ms:1500,lock:1,rear:1,last_err:none,vision_state:ALIGN_DX
+?health=alive:1,uptime_ms:1500,lock:1,command_mode:locked,rear:1,last_err:none,vision_state:ALIGN_DX
 ```
 
 ### 3.7 锁语义与互斥关系
 
-- 当发送位置类命令（`x/y/angle/dx/dy/d_angle`）时,RT1021 会进入 `command_lock`
-- 当切换 `rear` 模式且模式确实变化时,RT1021 也会进入 `command_lock`
-- `command_lock=1` 期间,大多数普通控制命令会被忽略,直到动作完成或被 `reset` 打断
-- 旧版 OpenArt 可以通过轮询 `?lock` 实现“先等空闲再发下一条”的同步控制
+- 当发送位置类命令（`x/y/angle/dx/dy/d_angle`）或切换 `rear` 模式时, 若未显式给出 `lock`, 按 `lock=1` 理解
+- 当位置类命令或 `rear` 模式命令按 `lock=1` 执行时, RT1021 会进入 `command_lock`
+- 当显式发送 `lock=0` 时, RT1021 不进入 `command_lock`, 并按无锁覆盖语义直接刷新当前目标
+- `command_lock=1` 只表示当前处在等待完成流程；显式 `lock=0` 的新位置/模式命令仍可直接进入路由并按无锁覆盖语义抢占旧目标
+- `?lock` 只表示是否处在等待完成流程, 不区分当前是 `locked`、`unlocked` 还是 `none` 执行方式
+- `?health` 的 `command_mode` 固定返回 `locked`、`unlocked`、`none`, 用于表达当前命令执行方式
 - 对 `rear=1` 这类仅改模式的短动作,`?lock` 的同步价值相对有限,更推荐把它与 `angle/x/y` 等锁定动作组合发送
 
 注意: 上述锁语义不适用于高频 `follow=1,...` 控制主线。

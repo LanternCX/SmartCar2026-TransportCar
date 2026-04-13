@@ -61,6 +61,10 @@ from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from services.command_router import router as _cmd_router
+from services.command_policy import (
+    build_command_health_fields,
+    finalize_command_route,
+)
 from services.vision_protocol import VisionProtocol
 from services.vision_state_machine import (
     SMState,
@@ -237,6 +241,7 @@ class TransportCar:
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
         self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
+        self.command_mode = "none"
         self.lock_start_time = 0
         self.rear_only_mode = False
         self.last_rear_mode = False
@@ -260,6 +265,7 @@ class TransportCar:
         self._pending_dx = None
         self._pending_dy = None
         self._pending_d_angle = None
+        self._pending_lock = None
         self._rear_mode_changed = False
 
         # 初始化三轮 PID 增益(与旧版一致)
@@ -460,14 +466,14 @@ class TransportCar:
 
     def build_health_snapshot(self):
         """构造系统健康摘要快照."""
-        return {
+        snapshot = {
             "alive": 1,
             "uptime_ms": max(0, self._now_ms() - int(self.boot_time_ms)),
-            "lock": 1 if self.command_lock else 0,
-            "rear": 1 if self._get_active_rear_only_mode() else 0,
             "last_err": self.last_exception_text,
             "vision_state": self._get_vision_state_name(),
         }
+        snapshot.update(build_command_health_fields(self))
+        return snapshot
 
     def get_query_uart(self):
         """返回当前查询响应应写入的串口."""
@@ -900,6 +906,7 @@ class TransportCar:
 
         if angle_ok and pos_ok:
             self.command_lock = False
+            self.command_mode = "none"
             if self.rear_only_mode:
                 # 后轮模式完成后自动回全向并停车
                 self.rear_only_mode = False
@@ -976,66 +983,4 @@ class TransportCar:
         参数:
             dispatched: 本次路由中分发的命令关键字集合.
         """
-        # reset 命令已在 handler 中完整处理,直接返回
-        if "reset" in dispatched:
-            return
-
-        if self.command_lock:
-            # 清空本次暂存(避免残留影响下一次解锁后的指令)
-            self._pending_dx = None
-            self._pending_dy = None
-            self._pending_d_angle = None
-            return
-
-        is_pos_cmd = False
-
-        # 处理相对角度增量
-        if self._pending_d_angle is not None:
-            self.last_cmd["angle"] = self.heading_target + self._pending_d_angle
-            self._pending_d_angle = None
-            is_pos_cmd = True
-
-        # 处理车体系相对位移 → 世界系绝对坐标
-        if self._pending_dx is not None or self._pending_dy is not None:
-            dx_body = self._pending_dx if self._pending_dx is not None else 0.0
-            dy_body = self._pending_dy if self._pending_dy is not None else 0.0
-            theta_rad = math.radians(self.heading_est)
-            cos_t = math.cos(theta_rad)
-            sin_t = math.sin(theta_rad)
-            self.last_cmd["x"] = self.odometry.x + dx_body * cos_t - dy_body * sin_t
-            self.last_cmd["y"] = self.odometry.y + dx_body * sin_t + dy_body * cos_t
-            self.last_cmd.pop("vx", None)
-            self.last_cmd.pop("vy", None)
-            self._pending_dx = None
-            self._pending_dy = None
-            is_pos_cmd = True
-
-        # 判断本次是否含位置/角度指令(由绝对 x/y/angle 直接设置触发)
-        if not is_pos_cmd:
-            is_pos_cmd = (
-                "x" in dispatched
-                or "y" in dispatched
-                or "angle" in dispatched
-                or "yaw" in dispatched
-            )
-
-        # 后轮模式切换触发加锁
-        rear_mode_changed = getattr(self, "_rear_mode_changed", False)
-        self._rear_mode_changed = False
-
-        should_lock = is_pos_cmd or rear_mode_changed
-        if should_lock:
-            if not self.command_lock:
-                self.command_lock = True
-                self.lock_start_time = time.ticks_ms()
-        else:
-            self.command_lock = False
-
-        self.last_rear_mode = self.rear_only_mode
-
-        # 速度模式下即时计算一次逆解(与旧版行为保持一致,仅用于回显)
-        if not is_pos_cmd:
-            vx = self.last_cmd.get("vx") or 0.0
-            vy = self.last_cmd.get("vy") or 0.0
-            omega = self.last_cmd.get("omega") or 0.0
-            self._inverse_kinematics(vx, vy, omega)
+        finalize_command_route(self, dispatched, now_ms=self._now_ms())
