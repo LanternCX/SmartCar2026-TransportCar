@@ -90,7 +90,7 @@ VISION_STATE_NAMES = {
 
 
 class _NullImu:
-    """Stage 2 安全模式下使用的空 IMU."""
+    """诊断模式下使用的空 IMU."""
 
     def get(self):
         """返回全零六轴数据."""
@@ -98,7 +98,7 @@ class _NullImu:
 
 
 class _NullEncoder:
-    """Stage 2 安全模式下使用的空编码器."""
+    """诊断模式下使用的空编码器."""
 
     def get(self):
         """返回零脉冲."""
@@ -106,7 +106,7 @@ class _NullEncoder:
 
 
 class _NullMotor:
-    """Stage 2 安全模式下使用的空电机."""
+    """诊断模式下使用的空电机."""
 
     def __init__(self):
         """初始化空电机占空比记录."""
