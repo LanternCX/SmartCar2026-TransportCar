@@ -80,7 +80,7 @@ def _run_script(script_path):
     import os
 
     os.chdir("/flash")
-    execfile(script_path)
+    execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
 
 
 def main():

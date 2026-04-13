@@ -14,47 +14,7 @@ from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
 from utils.startup_log import startup_log
-from config.params import (
-    TICK_MS,
-    MAX_DUTY,
-    TARGET_SPEED_MAX,
-    POS_MAX_SPEED,
-    POS_KP,
-    POS_TOLERANCE,
-    ANGLE_TOLERANCE,
-    ACTIVE_WHEELS,
-    GYRO_LPF_ALPHA,
-    GYRO_SCALE,
-    YAW_KP,
-    YAW_KI,
-    YAW_KD,
-    YAW_I_MAX,
-    AUTO_OMEGA_MAX,
-    HOLD_SPEED_EPS,
-    IDENT_RESULTS_FILE,
-    GYRO_OFFSET_FILE,
-    PID_MAP,
-    VISION_OBSERVATION_TIMEOUT_MS,
-    VISION_TARGET_X_PX,
-    VISION_TARGET_Y_PX,
-    VISION_ANGLE_KP,
-    VISION_DIST_KP,
-    VISION_DX_KP,
-    VISION_PUSH_DX_KP,
-    VISION_PUSH_DY_M,
-    VISION_PUSH_DISTANCE_M,
-    VISION_PUSH_ANGLE_DEG,
-    VISION_ANGLE_DEADZONE_PX,
-    VISION_ANGLE_REENTRY_PX,
-    VISION_DIST_DEADZONE_PX,
-    VISION_DX_DEADZONE_PX,
-    VISION_HEADING_TOLERANCE_DEG,
-    VISION_STABLE_FRAMES,
-    VISION_MAX_DX_M,
-    VISION_MAX_DY_M,
-    VISION_MAX_D_ANGLE_DEG,
-    VISION_DONE_HOLD_MS,
-)
+from config import params as _params
 from hardware.uart_bus import create_uart3, create_uart6
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
@@ -74,6 +34,47 @@ from services.vision_state_machine import (
     resolve_relative_intent,
 )
 import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
+
+
+TICK_MS = getattr(_params, "TICK_MS")
+MAX_DUTY = getattr(_params, "MAX_DUTY")
+TARGET_SPEED_MAX = getattr(_params, "TARGET_SPEED_MAX")
+POS_MAX_SPEED = getattr(_params, "POS_MAX_SPEED")
+POS_KP = getattr(_params, "POS_KP")
+POS_TOLERANCE = getattr(_params, "POS_TOLERANCE")
+ANGLE_TOLERANCE = getattr(_params, "ANGLE_TOLERANCE")
+ACTIVE_WHEELS = getattr(_params, "ACTIVE_WHEELS")
+GYRO_LPF_ALPHA = getattr(_params, "GYRO_LPF_ALPHA")
+GYRO_SCALE = getattr(_params, "GYRO_SCALE")
+YAW_KP = getattr(_params, "YAW_KP")
+YAW_KI = getattr(_params, "YAW_KI")
+YAW_KD = getattr(_params, "YAW_KD")
+YAW_I_MAX = getattr(_params, "YAW_I_MAX")
+AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
+HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
+IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
+GYRO_OFFSET_FILE = getattr(_params, "GYRO_OFFSET_FILE")
+PID_MAP = getattr(_params, "PID_MAP")
+VISION_OBSERVATION_TIMEOUT_MS = getattr(_params, "VISION_OBSERVATION_TIMEOUT_MS")
+VISION_TARGET_X_PX = getattr(_params, "VISION_TARGET_X_PX")
+VISION_TARGET_Y_PX = getattr(_params, "VISION_TARGET_Y_PX")
+VISION_ANGLE_KP = getattr(_params, "VISION_ANGLE_KP")
+VISION_DIST_KP = getattr(_params, "VISION_DIST_KP")
+VISION_DX_KP = getattr(_params, "VISION_DX_KP")
+VISION_PUSH_DX_KP = getattr(_params, "VISION_PUSH_DX_KP")
+VISION_PUSH_DY_M = getattr(_params, "VISION_PUSH_DY_M")
+VISION_PUSH_DISTANCE_M = getattr(_params, "VISION_PUSH_DISTANCE_M")
+VISION_PUSH_ANGLE_DEG = getattr(_params, "VISION_PUSH_ANGLE_DEG")
+VISION_ANGLE_DEADZONE_PX = getattr(_params, "VISION_ANGLE_DEADZONE_PX")
+VISION_ANGLE_REENTRY_PX = getattr(_params, "VISION_ANGLE_REENTRY_PX")
+VISION_DIST_DEADZONE_PX = getattr(_params, "VISION_DIST_DEADZONE_PX")
+VISION_DX_DEADZONE_PX = getattr(_params, "VISION_DX_DEADZONE_PX")
+VISION_HEADING_TOLERANCE_DEG = getattr(_params, "VISION_HEADING_TOLERANCE_DEG")
+VISION_STABLE_FRAMES = getattr(_params, "VISION_STABLE_FRAMES")
+VISION_MAX_DX_M = getattr(_params, "VISION_MAX_DX_M")
+VISION_MAX_DY_M = getattr(_params, "VISION_MAX_DY_M")
+VISION_MAX_D_ANGLE_DEG = getattr(_params, "VISION_MAX_D_ANGLE_DEG")
+VISION_DONE_HOLD_MS = getattr(_params, "VISION_DONE_HOLD_MS")
 
 
 VISION_STATE_NAMES = {
