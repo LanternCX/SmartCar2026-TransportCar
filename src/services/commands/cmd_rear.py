@@ -17,4 +17,3 @@ def handle(ctx, value):
     new_mode = value != 0
     ctx._rear_mode_changed = new_mode != ctx.rear_only_mode
     ctx.rear_only_mode = new_mode
-    ctx.uart3.write("Rear Only Mode: %s\r\n" % str(ctx.rear_only_mode))

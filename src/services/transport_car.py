@@ -90,7 +90,7 @@ VISION_STATE_NAMES = {
 
 
 class _NullImu:
-    """Stage 2 安全模式下使用的空 IMU."""
+    """诊断模式下使用的空 IMU."""
 
     def get(self):
         """返回全零六轴数据."""
@@ -98,7 +98,7 @@ class _NullImu:
 
 
 class _NullEncoder:
-    """Stage 2 安全模式下使用的空编码器."""
+    """诊断模式下使用的空编码器."""
 
     def get(self):
         """返回零脉冲."""
@@ -106,7 +106,7 @@ class _NullEncoder:
 
 
 class _NullMotor:
-    """Stage 2 安全模式下使用的空电机."""
+    """诊断模式下使用的空电机."""
 
     def __init__(self):
         """初始化空电机占空比记录."""
@@ -408,8 +408,6 @@ class TransportCar:
             if observation is not None:
                 return
 
-        if source == "uart3":
-            self.uart3.write("RCV: %s\r\n" % line)
         self.apply_command(line)
 
     def _refresh_vision_target(self, now_ms=None):
@@ -911,9 +909,6 @@ class TransportCar:
             if self.rear_only_mode:
                 # 后轮模式完成后自动回全向并停车
                 self.rear_only_mode = False
-                self.uart3.write(
-                    "Target Reached. Auto-revert Rear Mode: False. Stopping.\r\n"
-                )
                 self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()

@@ -76,5 +76,3 @@
 - 主机侧单元验证:
   - `python3 -m pytest tests/unit/assistant/test_stability_baseline.py tests/unit/assistant/test_protocol.py tests/unit/assistant/test_safety.py tests/unit/assistant/test_motion_runtime.py tests/unit/assistant/test_app.py -q`
   - `python3 -m pytest tests/unit/master/test_stability_baseline.py tests/unit/master/test_vision_ingress.py tests/unit/master/test_vision_state_machine.py tests/unit/master/test_decision.py tests/unit/master/test_motion_runtime.py tests/unit/master/test_app.py -q`
-- 设备侧 smoke:
-  - `python3 tools/run_stage2_smoke.py --port <port>`

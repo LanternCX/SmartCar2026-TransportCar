@@ -105,7 +105,7 @@
 
 1. `master` 主机侧验证通过, 且 `tests/hil/2026-03-master-minimal-runtime.md` 填入实测结果并给出 PASS / FAIL 结论
 2. `assistant` 主机侧验证通过, 且 `tests/hil/2026-03-assistant-minimal-runtime.md` 填入实测结果并给出 PASS / FAIL 结论
-3. 主辅最小运动级协议已完成联调留证, 且 `tests/hil/2026-03-master-assistant-protocol.md` 填入实测结果并给出 PASS / FAIL 结论
+3. 主辅最小运动级协议已完成协作确认, 且 `tests/hil/2026-03-master-assistant-protocol.md` 填入实测结果并给出 PASS / FAIL 结论
 
 其中“主机侧验证通过”固定指以下命令全部通过, 且不允许以相似测试、子集测试或人工口头说明替代:
 
@@ -136,7 +136,7 @@
 
 1. 先完成 `assistant` 最小系统验证
 2. 再完成 `master` 最小系统验证
-3. 再完成主辅协议联调验证
+3. 再完成主辅协议协作确认
 4. 再标记哪些旧结构只保留参考用途
 5. 最后才决定是否进一步裁剪 `legacy` 中的非关键外围
 
