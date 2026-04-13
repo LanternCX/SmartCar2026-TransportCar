@@ -7,7 +7,7 @@ from utils.startup_log import startup_log
 
 STARTUP_SETTLE_MS = 100
 KEY_SCAN_PERIOD_MS = 10
-KEY_SCAN_TIMEOUT_MS = 1500
+KEY_SCAN_TIMEOUT_MS = 300
 LONG_PRESS_VALUE = 2
 
 SCRIPT_PID_IDENTIFY = "script/pid_identify.py"

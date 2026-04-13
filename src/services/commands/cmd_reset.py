@@ -26,6 +26,8 @@ def handle(ctx, value):
     reset_pi_state(ctx.wheel_states)
     ctx.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     ctx.command_lock = False
+    ctx.command_mode = "none"
+    ctx._pending_lock = None
     ctx._pending_dx = None
     ctx._pending_dy = None
     ctx._pending_d_angle = None

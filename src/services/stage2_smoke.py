@@ -38,6 +38,7 @@ class _LiteContext:
         self.uart3 = _CaptureUart()
         self.uart6 = _CaptureUart()
         self.command_lock = False
+        self.command_mode = "none"
 
     def get_query_uart(self):
         """返回当前查询响应串口."""
@@ -45,7 +46,7 @@ class _LiteContext:
 
     def build_health_snapshot(self):
         """返回最小健康快照."""
-        return {"alive": 1, "mode": "lite"}
+        return {"alive": 1, "mode": "lite", "command_mode": "none"}
 
     def build_tick_snapshot(self):
         """返回最小 tick 快照."""
