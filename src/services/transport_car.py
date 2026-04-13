@@ -408,8 +408,6 @@ class TransportCar:
             if observation is not None:
                 return
 
-        if source == "uart3":
-            self.uart3.write("RCV: %s\r\n" % line)
         self.apply_command(line)
 
     def _refresh_vision_target(self, now_ms=None):
@@ -911,9 +909,6 @@ class TransportCar:
             if self.rear_only_mode:
                 # 后轮模式完成后自动回全向并停车
                 self.rear_only_mode = False
-                self.uart3.write(
-                    "Target Reached. Auto-revert Rear Mode: False. Stopping.\r\n"
-                )
                 self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()
