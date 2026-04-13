@@ -5,9 +5,12 @@
 """
 
 from smartcar import ticker
-from config.params import TICK_MS
+from config import params as _params
 from services.transport_car import TransportCar
 from utils.startup_log import startup_log
+
+
+TICK_MS = getattr(_params, "TICK_MS")
 
 
 startup_log("remote_control", "module start")
