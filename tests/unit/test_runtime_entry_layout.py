@@ -25,6 +25,7 @@ def test_src_runtime_root_matches_main_entry_layout() -> None:
         "services",
         "storage",
         "utils",
+        "vision",
     ):
         assert (SRC_ROOT / directory_name).is_dir()
 
@@ -34,3 +35,16 @@ def test_src_runtime_root_drops_legacy_split_layout() -> None:
 
     for directory_name in ("legacy", "master", "assistant"):
         assert not (SRC_ROOT / directory_name).exists()
+
+
+def test_vision_runtime_uses_role_packages() -> None:
+    """视觉角色入口应组织成 master/assistant 包, 便于后续按职责扩展."""
+
+    vision_root = SRC_ROOT / "vision"
+
+    assert (vision_root / "master").is_dir()
+    assert (vision_root / "master" / "__init__.py").exists()
+    assert (vision_root / "assistant").is_dir()
+    assert (vision_root / "assistant" / "__init__.py").exists()
+    assert not (vision_root / "master_runtime.py").exists()
+    assert not (vision_root / "assistant_runtime.py").exists()

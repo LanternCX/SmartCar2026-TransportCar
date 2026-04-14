@@ -1,0 +1,105 @@
+"""角色视觉运行入口装配约束测试.
+
+@file tests/unit/test_role_vision_layer_factory.py
+"""
+
+from importlib import import_module
+from pathlib import Path
+from types import ModuleType
+import sys
+
+import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = PROJECT_ROOT / "src"
+
+
+def import_vision_package(monkeypatch):
+    """按正常包路径导入角色视觉运行入口装配入口."""
+
+    monkeypatch.syspath_prepend(str(SRC_ROOT))
+    for module_name in (
+        "vision",
+        "vision.master",
+        "vision.master.runtime",
+        "vision.assistant",
+        "vision.assistant.runtime",
+    ):
+        sys.modules.pop(module_name, None)
+    return import_module("vision")
+
+
+def test_create_role_transport_car_selects_master_branch_only(monkeypatch) -> None:
+    """主车装配只能触发主车视觉运行分支."""
+
+    vision_runtime = import_vision_package(monkeypatch)
+    calls = []
+
+    master_module = ModuleType("vision.master")
+    setattr(
+        master_module,
+        "create_transport_car",
+        lambda: calls.append("master") or {"role": "master"},
+    )
+
+    assistant_module = ModuleType("vision.assistant")
+
+    def fail_assistant_create_transport_car():
+        raise AssertionError("assistant branch should not be loaded")
+
+    setattr(
+        assistant_module,
+        "create_transport_car",
+        fail_assistant_create_transport_car,
+    )
+
+    monkeypatch.setitem(sys.modules, "vision.master", master_module)
+    monkeypatch.setitem(sys.modules, "vision.assistant", assistant_module)
+
+    layer = vision_runtime.create_role_transport_car("master")
+
+    assert layer == {"role": "master"}
+    assert calls == ["master"]
+
+
+def test_create_role_transport_car_selects_assistant_branch_only(monkeypatch) -> None:
+    """辅车装配只能触发辅车视觉运行分支."""
+
+    vision_runtime = import_vision_package(monkeypatch)
+    calls = []
+
+    master_module = ModuleType("vision.master")
+
+    def fail_master_create_transport_car():
+        raise AssertionError("master branch should not be loaded")
+
+    setattr(
+        master_module,
+        "create_transport_car",
+        fail_master_create_transport_car,
+    )
+
+    assistant_module = ModuleType("vision.assistant")
+    setattr(
+        assistant_module,
+        "create_transport_car",
+        lambda: calls.append("assistant") or {"role": "assistant"},
+    )
+
+    monkeypatch.setitem(sys.modules, "vision.master", master_module)
+    monkeypatch.setitem(sys.modules, "vision.assistant", assistant_module)
+
+    layer = vision_runtime.create_role_transport_car("assistant")
+
+    assert layer == {"role": "assistant"}
+    assert calls == ["assistant"]
+
+
+def test_create_role_transport_car_rejects_unknown_role(monkeypatch) -> None:
+    """未知角色必须被拒绝, 不能偷偷回默认分支."""
+
+    vision_runtime = import_vision_package(monkeypatch)
+
+    with pytest.raises(ValueError):
+        vision_runtime.create_role_transport_car("unknown")
