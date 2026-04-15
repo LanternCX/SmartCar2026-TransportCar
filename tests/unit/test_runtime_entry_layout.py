@@ -20,18 +20,23 @@ def test_src_runtime_root_matches_main_entry_layout() -> None:
     for directory_name in (
         "command",
         "config",
+        "core",
         "control",
         "filters",
         "hardware",
         "script",
-        "services",
         "storage",
         "utils",
         "vision",
     ):
         assert (SRC_ROOT / directory_name).is_dir()
 
-    assert (SRC_ROOT / "services" / "core.py").exists()
+    assert (SRC_ROOT / "core" / "__init__.py").exists()
+    assert (SRC_ROOT / "core" / "runtime.py").exists()
+    assert (SRC_ROOT / "core" / "diagnostics.py").exists()
+    assert not (SRC_ROOT / "services" / "__init__.py").exists()
+    assert not (SRC_ROOT / "services" / "core.py").exists()
+    assert not (SRC_ROOT / "services" / "diagnostics.py").exists()
 
 
 def test_src_runtime_root_drops_legacy_split_layout() -> None:

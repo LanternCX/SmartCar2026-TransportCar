@@ -290,8 +290,8 @@ def _install_transport_car_stubs() -> None:
 
 def _import_transport_car_module():
     _install_transport_car_stubs()
-    sys.modules.pop("services.core", None)
-    return importlib.import_module("services.core")
+    sys.modules.pop("core.runtime", None)
+    return importlib.import_module("core.runtime")
 
 
 def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> None:

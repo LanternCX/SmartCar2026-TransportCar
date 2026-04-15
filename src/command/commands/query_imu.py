@@ -1,7 +1,7 @@
 """?imu 查询处理器:返回姿态与角速度摘要."""
 
 from command.router import router
-from services.diagnostics import format_query_response
+from core.diagnostics import format_query_response
 
 
 @router.query("imu")

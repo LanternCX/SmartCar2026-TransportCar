@@ -1,7 +1,7 @@
 """?enc 查询处理器:返回编码器观测摘要."""
 
 from command.router import router
-from services.diagnostics import format_query_response
+from core.diagnostics import format_query_response
 
 
 @router.query("enc")

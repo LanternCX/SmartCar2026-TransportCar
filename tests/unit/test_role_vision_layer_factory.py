@@ -117,13 +117,15 @@ def test_master_runtime_builds_shared_transport_car(monkeypatch) -> None:
     """主车运行入口当前应回到共享底盘实现."""
 
     runtime_module = import_runtime_module("vision.master.runtime", monkeypatch)
-    core_module = ModuleType("services.core")
+    core_package = ModuleType("core")
+    core_module = ModuleType("core.runtime")
 
     class _TransportCar:
         pass
 
+    monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
-    monkeypatch.setitem(sys.modules, "services.core", core_module)
+    monkeypatch.setitem(sys.modules, "core.runtime", core_module)
 
     car = runtime_module.create_transport_car()
 
@@ -134,13 +136,15 @@ def test_assistant_runtime_builds_shared_transport_car(monkeypatch) -> None:
     """辅车运行入口必须继续复用共享底盘实现."""
 
     runtime_module = import_runtime_module("vision.assistant.runtime", monkeypatch)
-    core_module = ModuleType("services.core")
+    core_package = ModuleType("core")
+    core_module = ModuleType("core.runtime")
 
     class _TransportCar:
         pass
 
+    monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
-    monkeypatch.setitem(sys.modules, "services.core", core_module)
+    monkeypatch.setitem(sys.modules, "core.runtime", core_module)
 
     car = runtime_module.create_transport_car()
 
