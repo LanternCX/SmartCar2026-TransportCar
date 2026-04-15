@@ -1,6 +1,6 @@
 """rear 后轮模式切换指令处理器."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.command("rear")

@@ -1,6 +1,6 @@
 """dy 相对位移指令处理器:车体系 Y 方向位移暂存."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.command("dy")

@@ -1,7 +1,7 @@
 """vx 速度指令处理器:X 方向速度(车体系)."""
 
 from config import params as _params
-from services.command_router import router
+from command.router import router
 from control.pid_math import clamp
 
 

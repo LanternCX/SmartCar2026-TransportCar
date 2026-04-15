@@ -1,6 +1,6 @@
 """lock 整包锁定语义指令处理器."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.command("lock")

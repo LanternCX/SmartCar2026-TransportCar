@@ -1,6 +1,6 @@
 """d_angle 相对偏航角指令处理器,别名 dyaw / da."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.command("d_angle", "dyaw", "da")

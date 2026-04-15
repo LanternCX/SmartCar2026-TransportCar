@@ -4,6 +4,6 @@
 def create_transport_car():
     """创建主车运行链当前使用的车体实例."""
 
-    from services.transport_car import TransportCar
+    from services.core import TransportCar
 
     return TransportCar()

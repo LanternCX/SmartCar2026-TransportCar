@@ -1,6 +1,6 @@
 """y 坐标指令处理器:绝对 Y 坐标目标(世界系)."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.command("y")

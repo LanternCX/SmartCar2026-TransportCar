@@ -20,8 +20,8 @@ from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from services.command_router import router as _cmd_router
-from services.command_policy import (
+from command.router import router as _cmd_router
+from command.policy import (
     build_command_health_fields,
     finalize_command_route,
 )
@@ -33,7 +33,7 @@ from services.vision_state_machine import (
     VisionStateMachine,
     resolve_relative_intent,
 )
-import services.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
+import command.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
 
 
 TICK_MS = getattr(_params, "TICK_MS")

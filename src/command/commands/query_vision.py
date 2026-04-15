@@ -1,6 +1,6 @@
 """?vision 查询处理器:返回视觉状态机摘要."""
 
-from services.command_router import router
+from command.router import router
 from services.diagnostics import format_query_response
 
 

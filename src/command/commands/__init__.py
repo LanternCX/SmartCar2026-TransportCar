@@ -8,6 +8,7 @@
     在本目录创建 ``cmd_xxx.py``,使用 ``@router.command("key")`` 装饰 handle 函数.
     包初始化时会自动发现并导入该文件,装饰器触发注册.
 """
+
 import os
 import sys
 

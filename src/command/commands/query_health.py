@@ -1,6 +1,6 @@
 """?health 查询处理器:返回运行期健康摘要."""
 
-from services.command_router import router
+from command.router import router
 from services.diagnostics import format_query_response
 
 

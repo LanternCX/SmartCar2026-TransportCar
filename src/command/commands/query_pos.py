@@ -1,6 +1,6 @@
 """?pos 查询处理器:返回当前里程计位置与航向角."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.query("pos")

@@ -67,11 +67,12 @@
 ├── src/                    # 当前正式代码根目录
 │   ├── main.py             # 当前启动脚本源文件
 │   ├── script/             # 运行/校准/调试脚本
+│   ├── command/            # 命令路由与查询处理
 │   ├── config/             # 配置文件
 │   ├── control/            # 控制算法核心
 │   ├── filters/            # 滤波器实现
 │   ├── hardware/           # 硬件驱动封装
-│   ├── services/           # 业务逻辑服务
+│   ├── services/           # 控制执行内核与运行时辅助
 │   ├── storage/            # 参数存储管理
 │   ├── utils/              # 通用工具库
 │   └── vision/             # 角色视觉运行入口与主辅包
@@ -96,11 +97,16 @@
 - `diff_limit_filter.py`：差分限幅滤波（防止陡峭跳变）
 - `dual_window_regression_filter.py`：双窗口线性回归滤波（编码器精细化滤波）
 
-#### [src/services/](../../src/services/) - 业务逻辑层
-- `transport_car.py`：**车模核心单例类**
+#### [src/services/core.py](../../src/services/core.py) - 控制执行内核
+- `TransportCar`：**车体运行主类**
   - 集中所有硬件初始化、滤波、PID 和运动学
   - 实现 `step()` 主循环，执行 5ms 控制周期
   - 处理速度模式和位置模式的切换逻辑
+
+#### [src/command/](../../src/command/) - 命令与查询层
+- `router.py`：命令路由与查询分发
+- `policy.py`：命令收口与模式决策
+- `commands/`：具体命令与查询处理器
 
 #### [src/vision/](../../src/vision/) - 角色视觉运行入口
 - 负责按车号切换主车或辅车当前使用的视觉运行入口

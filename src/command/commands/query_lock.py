@@ -1,6 +1,6 @@
 """?lock 查询处理器:返回当前运动锁定状态."""
 
-from services.command_router import router
+from command.router import router
 
 
 @router.query("lock")

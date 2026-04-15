@@ -14,9 +14,11 @@ def test_src_runtime_root_matches_main_entry_layout() -> None:
     """当前运行根必须对齐单一 src + `main.py` 入口布局."""
 
     assert (SRC_ROOT / "main.py").exists()
+    assert not (SRC_ROOT / "core.py").exists()
     assert not (SRC_ROOT / "boot.py").exists()
 
     for directory_name in (
+        "command",
         "config",
         "control",
         "filters",
@@ -28,6 +30,8 @@ def test_src_runtime_root_matches_main_entry_layout() -> None:
         "vision",
     ):
         assert (SRC_ROOT / directory_name).is_dir()
+
+    assert (SRC_ROOT / "services" / "core.py").exists()
 
 
 def test_src_runtime_root_drops_legacy_split_layout() -> None:
