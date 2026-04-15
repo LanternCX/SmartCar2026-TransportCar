@@ -7,6 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-14-1 | 2026-04-14 | 重写双车协同搬运路线的正式开发文档口径 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-14-1.md` | 重写 strategy、tasks、control 和 vision 四份正式开发文档，使其统一表达新的双车协同搬运路线、关键能力和演进顺序。 | docs, strategy, tasks, control, vision, dual-car, state-machine, feedforward, milestone |
 | 2026-04-12-1 | 2026-04-12 | 完成当前视觉协议生效文档与代码事实的基线收口 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-12-1.md` | 记录当前视觉协议生效文档、归档边界与文档契约测试统一收口到代码事实基线的完整里程碑。 | vision, docs, protocol, archive, uart6, milestone |
 | 2026-04-04-1 | 2026-04-04 | 完成主车底盘控制重构阶段的姿态、方向与节拍闭环调试 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-04-1.md` | 记录主车底盘控制重构阶段完成姿态口径统一、方向映射修正、动态 dt 统一和航向保持语义收口的完整里程碑。 | master, chassis-control, heading, yaw, mapping, dynamic-dt, milestone |
 | 2026-03-07-1 | 2026-03-07 | 视觉状态机迁移到主控端 | `docs/superpowers/memory/milestone/entries/2026-03/2026-03-07-1.md` | 将视觉状态机职责迁入主控端搬运车运行时，形成主控内部视觉闭环与位置式控制协同。 | vision, uart6, state-machine, transport-car |

@@ -10,9 +10,9 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-import services.commands as _commands  # noqa: F401 触发命令与查询注册
+import command.commands as _commands  # noqa: F401 触发命令与查询注册
 
-from services.command_router import router
+from command.router import router
 
 
 class _CaptureUart:
