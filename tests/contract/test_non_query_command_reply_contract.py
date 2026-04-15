@@ -71,8 +71,6 @@ def _install_transport_car_stubs() -> None:
         "hardware.imu",
         "storage.param_manager",
         "config.params",
-        "services.vision_protocol",
-        "services.vision_state_machine",
     ]
     for name in module_names:
         sys.modules.pop(name, None)
@@ -289,69 +287,6 @@ def _install_transport_car_stubs() -> None:
         setattr(config_params, key, value)
     sys.modules["config.params"] = config_params
 
-    vision_protocol = ModuleType("services.vision_protocol")
-
-    class _VisionProtocol:
-        def __init__(self, *args, **kwargs) -> None:
-            return None
-
-        def try_parse_observation(self, *_args, **_kwargs):
-            return None
-
-        def clear(self) -> None:
-            return None
-
-        def get_observation(self, _now_ms):
-            return None
-
-    setattr(vision_protocol, "VisionProtocol", _VisionProtocol)
-    sys.modules["services.vision_protocol"] = vision_protocol
-
-    vision_state_machine = ModuleType("services.vision_state_machine")
-
-    class _SMState:
-        IDLE = 0
-        ALIGN_ANGLE = 1
-        ALIGN_DIST = 2
-        ALIGN_DX = 3
-        ORBITING = 4
-        PUSHING = 5
-        RETURNING = 6
-        DONE = 7
-
-    class _VisionMachineInputs:
-        def __init__(self, **kwargs) -> None:
-            self.__dict__.update(kwargs)
-
-    class _VisionStateConfig:
-        def __init__(self, **kwargs) -> None:
-            self.__dict__.update(kwargs)
-
-    class _VisionStepResult:
-        def __init__(self) -> None:
-            self.intent = None
-
-    class _VisionStateMachine:
-        def __init__(self, _config) -> None:
-            self.state = _SMState.IDLE
-
-        def reset(self) -> None:
-            return None
-
-        def step(self, _inputs):
-            return _VisionStepResult()
-
-    setattr(vision_state_machine, "SMState", _SMState)
-    setattr(vision_state_machine, "VisionMachineInputs", _VisionMachineInputs)
-    setattr(vision_state_machine, "VisionStateConfig", _VisionStateConfig)
-    setattr(vision_state_machine, "VisionStateMachine", _VisionStateMachine)
-    setattr(
-        vision_state_machine,
-        "resolve_relative_intent",
-        lambda *_args, **_kwargs: None,
-    )
-    sys.modules["services.vision_state_machine"] = vision_state_machine
-
 
 def _import_transport_car_module():
     _install_transport_car_stubs()
@@ -363,7 +298,6 @@ def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> No
     transport_car = _import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
     car.uart3 = _CaptureUart()
-    car.vision_protocol = None
     car._router = object()
     calls = []
     car.apply_command = lambda line: calls.append(line)

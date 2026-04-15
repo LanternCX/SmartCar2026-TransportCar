@@ -48,7 +48,12 @@ def test_vision_runtime_uses_role_packages() -> None:
 
     assert (vision_root / "master").is_dir()
     assert (vision_root / "master" / "__init__.py").exists()
+    assert not (vision_root / "master" / "car.py").exists()
+    assert not (vision_root / "master" / "protocol.py").exists()
+    assert not (vision_root / "master" / "state_machine.py").exists()
     assert (vision_root / "assistant").is_dir()
     assert (vision_root / "assistant" / "__init__.py").exists()
     assert not (vision_root / "master_runtime.py").exists()
     assert not (vision_root / "assistant_runtime.py").exists()
+    assert not (SRC_ROOT / "services" / "vision_protocol.py").exists()
+    assert not (SRC_ROOT / "services" / "vision_state_machine.py").exists()

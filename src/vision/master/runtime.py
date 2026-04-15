@@ -2,7 +2,7 @@
 
 
 def create_transport_car():
-    """创建主车运行链当前使用的车体实例."""
+    """创建主车运行链当前使用的共享底盘实例."""
 
     from services.core import TransportCar
 

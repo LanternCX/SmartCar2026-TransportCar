@@ -15,7 +15,7 @@ from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
 from utils.startup_log import startup_log
 from config import params as _params
-from hardware.uart_bus import create_uart3, create_uart6
+from hardware.uart_bus import create_uart3
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
@@ -24,14 +24,6 @@ from command.router import router as _cmd_router
 from command.policy import (
     build_command_health_fields,
     finalize_command_route,
-)
-from services.vision_protocol import VisionProtocol
-from services.vision_state_machine import (
-    SMState,
-    VisionMachineInputs,
-    VisionStateConfig,
-    VisionStateMachine,
-    resolve_relative_intent,
 )
 import command.commands as _commands  # noqa: F401 自动发现,所有 @router.command() 装饰器在此执行
 
@@ -55,38 +47,6 @@ HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
 IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
 GYRO_OFFSET_FILE = getattr(_params, "GYRO_OFFSET_FILE")
 PID_MAP = getattr(_params, "PID_MAP")
-VISION_OBSERVATION_TIMEOUT_MS = getattr(_params, "VISION_OBSERVATION_TIMEOUT_MS")
-VISION_TARGET_X_PX = getattr(_params, "VISION_TARGET_X_PX")
-VISION_TARGET_Y_PX = getattr(_params, "VISION_TARGET_Y_PX")
-VISION_ANGLE_KP = getattr(_params, "VISION_ANGLE_KP")
-VISION_DIST_KP = getattr(_params, "VISION_DIST_KP")
-VISION_DX_KP = getattr(_params, "VISION_DX_KP")
-VISION_PUSH_DX_KP = getattr(_params, "VISION_PUSH_DX_KP")
-VISION_PUSH_DY_M = getattr(_params, "VISION_PUSH_DY_M")
-VISION_PUSH_DISTANCE_M = getattr(_params, "VISION_PUSH_DISTANCE_M")
-VISION_PUSH_ANGLE_DEG = getattr(_params, "VISION_PUSH_ANGLE_DEG")
-VISION_ANGLE_DEADZONE_PX = getattr(_params, "VISION_ANGLE_DEADZONE_PX")
-VISION_ANGLE_REENTRY_PX = getattr(_params, "VISION_ANGLE_REENTRY_PX")
-VISION_DIST_DEADZONE_PX = getattr(_params, "VISION_DIST_DEADZONE_PX")
-VISION_DX_DEADZONE_PX = getattr(_params, "VISION_DX_DEADZONE_PX")
-VISION_HEADING_TOLERANCE_DEG = getattr(_params, "VISION_HEADING_TOLERANCE_DEG")
-VISION_STABLE_FRAMES = getattr(_params, "VISION_STABLE_FRAMES")
-VISION_MAX_DX_M = getattr(_params, "VISION_MAX_DX_M")
-VISION_MAX_DY_M = getattr(_params, "VISION_MAX_DY_M")
-VISION_MAX_D_ANGLE_DEG = getattr(_params, "VISION_MAX_D_ANGLE_DEG")
-VISION_DONE_HOLD_MS = getattr(_params, "VISION_DONE_HOLD_MS")
-
-
-VISION_STATE_NAMES = {
-    SMState.IDLE: "IDLE",
-    SMState.ALIGN_ANGLE: "ALIGN_ANGLE",
-    SMState.ALIGN_DIST: "ALIGN_DIST",
-    SMState.ALIGN_DX: "ALIGN_DX",
-    SMState.ORBITING: "ORBITING",
-    SMState.PUSHING: "PUSHING",
-    SMState.RETURNING: "RETURNING",
-    SMState.DONE: "DONE",
-}
 
 
 class _NullImu:
@@ -162,7 +122,6 @@ class TransportCar:
 
         # 串口(保持原波特率与编号)
         self.uart3 = create_uart3()
-        self.uart6 = create_uart6()
         startup_log("transport_car", "uart ready")
 
         # IMU 初始化
@@ -247,7 +206,6 @@ class TransportCar:
         self.rear_only_mode = False
         self.last_rear_mode = False
         self.rx_buf3 = ""
-        self.rx_buf6 = ""
 
         self.ticker = None
         self.boot_time_ms = self._now_ms()
@@ -274,14 +232,6 @@ class TransportCar:
 
         # 命令路由器:使用单例路由器(命令模块已通过 @router 装饰器完成注册)
         self._router = _cmd_router
-
-        # 视觉协议与状态机
-        self.vision_protocol = VisionProtocol(timeout_ms=VISION_OBSERVATION_TIMEOUT_MS)
-        self.vision_state_machine = VisionStateMachine(
-            self._build_vision_state_config()
-        )
-        self._vision_step_result = None
-        self._vision_resolved_target = None
         startup_log("transport_car", "init complete")
 
     # Public API -----------------------------------------------------
@@ -303,30 +253,6 @@ class TransportCar:
             ticker_obj: ticker 对象,支持 .stop() 方法.
         """
         self.ticker = ticker_obj
-
-    def _build_vision_state_config(self):
-        """构造视觉状态机参数对象."""
-        return VisionStateConfig(
-            target_x_px=VISION_TARGET_X_PX,
-            target_y_px=VISION_TARGET_Y_PX,
-            angle_kp=VISION_ANGLE_KP,
-            dist_kp=VISION_DIST_KP,
-            dx_kp=VISION_DX_KP,
-            push_dx_kp=VISION_PUSH_DX_KP,
-            push_dy_m=VISION_PUSH_DY_M,
-            push_distance_m=VISION_PUSH_DISTANCE_M,
-            push_angle_deg=VISION_PUSH_ANGLE_DEG,
-            angle_deadzone_px=VISION_ANGLE_DEADZONE_PX,
-            angle_reentry_px=VISION_ANGLE_REENTRY_PX,
-            dist_deadzone_px=VISION_DIST_DEADZONE_PX,
-            dx_deadzone_px=VISION_DX_DEADZONE_PX,
-            heading_tolerance_deg=VISION_HEADING_TOLERANCE_DEG,
-            stable_frames=VISION_STABLE_FRAMES,
-            max_dx_m=VISION_MAX_DX_M,
-            max_dy_m=VISION_MAX_DY_M,
-            max_d_angle_deg=VISION_MAX_D_ANGLE_DEG,
-            done_hold_ms=VISION_DONE_HOLD_MS,
-        )
 
     def _now_ms(self):
         """返回当前毫秒时间戳,兼容主机测试环境."""
@@ -401,67 +327,19 @@ class TransportCar:
             self._router.handle_query(line[1:], self, source=source)
             return
 
-        if source == "uart6":
-            observation = self.vision_protocol.try_parse_observation(
-                line, source=source, now_ms=self._now_ms()
-            )
-            if observation is not None:
-                return
-
         self.apply_command(line)
-
-    def _refresh_vision_target(self, now_ms=None):
-        """推进视觉状态机并刷新当前视觉目标."""
-        if now_ms is None:
-            now_ms = self._now_ms()
-
-        if self.command_lock:
-            self.vision_protocol.clear()
-            self.vision_state_machine.reset()
-            self._vision_step_result = None
-            self._vision_resolved_target = None
-            return
-
-        observation = self.vision_protocol.get_observation(now_ms)
-        inputs = VisionMachineInputs(
-            observation=observation,
-            heading_deg=self.heading_est,
-            odom_x=self.odometry.x,
-            odom_y=self.odometry.y,
-            now_ms=now_ms,
-        )
-        self._vision_step_result = self.vision_state_machine.step(inputs)
-        self._vision_resolved_target = resolve_relative_intent(
-            self._vision_step_result.intent,
-            odom_x=self.odometry.x,
-            odom_y=self.odometry.y,
-            heading_deg=self.heading_est,
-        )
 
     def _get_active_position_targets(self):
         """返回当前激活控制源的位置目标."""
-        if self._vision_resolved_target is not None:
-            return self._vision_resolved_target.x, self._vision_resolved_target.y
         return self.last_cmd.get("x"), self.last_cmd.get("y")
 
     def _get_active_angle_command(self):
         """返回当前激活控制源的角度目标."""
-        if self._vision_resolved_target is not None:
-            return self._vision_resolved_target.angle_deg
         return self.last_cmd.get("angle")
 
     def _get_active_rear_only_mode(self):
         """返回当前激活控制源的后轮模式."""
-        if self._vision_resolved_target is not None:
-            return self._vision_resolved_target.rear_only_mode
         return self.rear_only_mode
-
-    def _get_vision_state_name(self):
-        """返回当前视觉状态机状态名."""
-        state = getattr(self.vision_state_machine, "state", None)
-        if state is None:
-            return "UNKNOWN"
-        return VISION_STATE_NAMES.get(int(state), "UNKNOWN")
 
     def build_health_snapshot(self):
         """构造系统健康摘要快照."""
@@ -469,14 +347,13 @@ class TransportCar:
             "alive": 1,
             "uptime_ms": max(0, self._now_ms() - int(self.boot_time_ms)),
             "last_err": self.last_exception_text,
-            "vision_state": self._get_vision_state_name(),
         }
         snapshot.update(build_command_health_fields(self))
         return snapshot
 
     def get_query_uart(self):
         """返回当前查询响应应写入的串口."""
-        return getattr(self, "_query_response_uart", self.uart6)
+        return getattr(self, "_query_response_uart", self.uart3)
 
     def build_tick_snapshot(self):
         """构造控制周期统计快照."""
@@ -519,28 +396,6 @@ class TransportCar:
         snapshot["rear"] = 1 if self._get_active_rear_only_mode() else 0
         return snapshot
 
-    def build_vision_snapshot(self):
-        """构造视觉观测与解析目标快照."""
-        observation = self.vision_protocol.get_observation(now_ms=self._now_ms())
-        snapshot = {
-            "state": self._get_vision_state_name(),
-            "obs_age_ms": None,
-            "obs_x": None,
-            "obs_y": None,
-            "target_x": None,
-            "target_y": None,
-            "target_angle": None,
-        }
-        if observation is not None:
-            snapshot["obs_age_ms"] = self._now_ms() - int(observation.timestamp_ms)
-            snapshot["obs_x"] = float(observation.x)
-            snapshot["obs_y"] = float(observation.y)
-        if self._vision_resolved_target is not None:
-            snapshot["target_x"] = float(self._vision_resolved_target.x)
-            snapshot["target_y"] = float(self._vision_resolved_target.y)
-            snapshot["target_angle"] = float(self._vision_resolved_target.angle_deg)
-        return snapshot
-
     # Internal helpers ----------------------------------------------
     def init_pid(self):
         """按 PID_MAP 配置表初始化三轮速度环增益."""
@@ -580,8 +435,6 @@ class TransportCar:
 
         包括读取编码器、更新滤波器、IMU 更新、PID 控制、运动学变换.
         """
-        self._refresh_vision_target()
-
         # 记录周期计数并闪烁 LED 作为心跳
         self.tick_count += 1
         self.led.toggle()
@@ -726,10 +579,7 @@ class TransportCar:
             目标角速度(限幅在 ±AUTO_OMEGA_MAX 范围内).
         """
         cmd_angle = self._get_active_angle_command()
-        if self._vision_resolved_target is not None:
-            cmd_omega = None
-        else:
-            cmd_omega = self.last_cmd.get("omega")
+        cmd_omega = self.last_cmd.get("omega")
 
         if cmd_angle is not None:
             # 角度模式:目标为绝对角度,PID 产出角速度
@@ -919,11 +769,10 @@ class TransportCar:
                     state["duty"] = 0.0
 
     def _process_uart(self):
-        """轮询两个串口:处理查询和运动指令.
+        """轮询控制串口:处理查询和运动指令.
 
         UART3:收集调试命令(来自 RTT 或其他监控工具).
-        UART6:收集远程操控命令.
-        两个串口均支持查询指令(前缀 "?")和控制指令(key=val 格式).
+        支持查询指令(前缀 "?")和控制指令(key=val 格式).
 
         异常时向串口回写错误信息.
         """
@@ -938,21 +787,6 @@ class TransportCar:
                     line = self.rx_buf3[:idx].rstrip("\r").strip()
                     self.rx_buf3 = self.rx_buf3[idx + 1 :]
                     self._handle_uart_line(line, source="uart3")
-            except Exception as exc:
-                self.last_exception_text = str(exc)
-                self.uart3.write("ERR %s\r\n" % exc)
-
-        buf_len = self.uart6.any()
-        if buf_len:
-            try:
-                self.rx_buf6 += self.uart6.read(buf_len).decode()
-                while True:
-                    idx = self.rx_buf6.find("\n")
-                    if idx == -1:
-                        break
-                    line = self.rx_buf6[:idx].rstrip("\r").strip()
-                    self.rx_buf6 = self.rx_buf6[idx + 1 :]
-                    self._handle_uart_line(line, source="uart6")
             except Exception as exc:
                 self.last_exception_text = str(exc)
                 self.uart3.write("ERR %s\r\n" % exc)

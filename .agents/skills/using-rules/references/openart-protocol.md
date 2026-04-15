@@ -9,7 +9,7 @@
 1. 车模控制协议（遥控协议）
 2. 车模与视觉端通信协议
 
-其中,车模控制协议用于主车到辅车遥控与状态查询；视觉通信协议用于 OpenArt -> RT1021 视觉观测上报。
+其中,车模控制协议用于主车到辅车遥控与状态查询；视觉通信部分当前只记录角色入口骨架与重写边界。
 
 ## 2. 共享传输约定
 
@@ -17,12 +17,12 @@
 
 | 链路 | OpenArt 侧 | RT1021 侧 | 推荐用途 |
 | :--- | :--- | :--- | :--- |
-| 视觉链路 | 视觉发送口 | `UART6` | OpenArt 持续回传视觉观测 |
+| 视觉链路 | 视觉发送口 | 未启用 | 保留主辅角色入口骨架 |
 | 遥控链路 | 主控遥控发送口 | `UART3` | 主车到辅车遥控通信 |
 
 说明:
 
-- RT1021 侧 `UART6` 承接视觉输入, `UART3` 用于主车到辅车遥控通信。
+- RT1021 侧当前只保留视觉角色入口骨架；`UART3` 用于主车到辅车遥控通信。
 
 ### 2.2 传输格式
 
@@ -50,7 +50,7 @@
 - `x`、`y`、`angle` 在遥控协议中表示世界系目标
 - `dx`、`dy`、`d_angle` 在遥控协议中表示车体系相对增量
 
-注意: 视觉协议中也会出现 `x`、`y`,但它们表示图像平面像素坐标,不是世界坐标命令。两者的区分条件见第 4 节。
+注意: 若后续重新引入视觉协议, 视觉字段与世界坐标命令字段仍需显式区分。
 
 ### 2.4 上电入口与车辆角色约定
 
@@ -150,7 +150,6 @@ rear=1,angle=-90
 | `?pos` | `?pos=x,y,yaw` | 查询当前世界坐标与航向角 | 简洁返回 |
 | `?lock` | `?lock=0/1` | 查询是否处于等待完成流程 | 只表示当前是否在 `command_lock` |
 | `?log` | `?log=profile:<p>,level:<l>,filter:<m>,color:<0/1>,modules:<list>` | 查询当前运行时日志配置 | `modules` 为空时返回 `none`,`profile` 可能为 `run` / `diag` / `custom` |
-| `?vision` | `?vision=key:value,...` | 查询视觉观测与视觉目标摘要 | 结构化快照 |
 | `?health` | `?health=key:value,...` | 查询系统健康摘要 | 结构化快照；包含 `command_mode` |
 | `?tick` | `?tick=key:value,...` | 查询控制周期统计 | 结构化快照 |
 | `?imu` | `?imu=key:value,...` | 查询 IMU 状态 | 结构化快照 |
@@ -176,8 +175,7 @@ rear=1,angle=-90
 ?pos=0.125,0.340,15.00
 ?lock=1
 ?log=profile:run,level:info,filter:off,color:0,modules:none
-?vision=state:ALIGN_DX,obs_age_ms:100,obs_x:120.0,obs_y:55.0,target_x:0.2,target_y:0.4,target_angle:15.0
-?health=alive:1,uptime_ms:1500,lock:1,command_mode:locked,rear:1,last_err:none,vision_state:ALIGN_DX
+?health=alive:1,uptime_ms:1500,lock:1,command_mode:locked,rear:1,last_err:none
 ```
 
 ### 3.7 锁语义与互斥关系
@@ -280,90 +278,18 @@ state=1,state_label=BUSY,last_seq=3002,follow_active=1
 
 ### 4.1 视觉链路边界
 
-- 主方向: `OpenArt -> RT1021`
-- RT1021 只在 `UART6` 上接收视觉观测
-- 视觉链路上传的是观测值, 不是动作命令
+- 当前仓库只保留 `vision/master/` 与 `vision/assistant/` 角色入口骨架
+- 当前运行链未启用 OpenArt -> RT1021 正式视觉协议
+- 当前运行链不消费专用视觉串口输入
+- 当前运行链不提供 `?vision` 查询
 
-### 4.2 当前报文格式
+### 4.2 当前代码中的角色入口骨架
 
-视觉输入按单行文本解析, 格式为:
+- `script/remote_control.py` 仍会先识别车号, 再切到 `vision/master/` 或 `vision/assistant/`
+- `vision/master/runtime.py` 与 `vision/assistant/runtime.py` 当前都返回共享底盘实例
+- 新视觉实现落地前, 本节不声明具体观测字段、串口号和视觉查询结构
 
-```text
-x=<x>,y=<y>
-```
+### 4.3 重写前约束
 
-字段语义:
-
-| 字段 | 含义 | 单位 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `x` | 横向观测值 | 像素 | 按浮点数解析 |
-| `y` | 纵向观测值 | 像素 | 按浮点数解析 |
-
-合法示例:
-
-```text
-x=-15,y=18
-x=6,y=12
-```
-
-补充说明:
-
-- 一条消息必须同时包含 `x` 和 `y`
-- 每条消息只接受一组 `x`、`y`
-- 其他字段不会被当作当前视觉观测
-
-### 4.3 不会被当作有效视觉上报的情况
-
-以下消息不会被当作有效视觉上报:
-
-- 来源不是 `UART6`
-- 缺少 `x` 或 `y`
-- 任一数值字段不是数字
-- 同一条消息出现重复键
-- 除 `x`、`y` 之外出现其他键
-
-### 4.4 RT1021 对视觉上报的消费规则
-
-- RT1021 维护最近一帧有效视觉观测
-- 观测在超时窗口内可被状态机继续读取
-- 主车读取到 `x`、`y` 后, 作为后续视觉控制输入
-
-### 4.5 视觉状态诊断接口
-
-`?vision` 用于查看当前视觉观测与解析目标摘要, 当前快照字段如下:
-
-| 字段 | 含义 |
-| :--- | :--- |
-| `state` | 视觉状态机状态名 |
-| `obs_age_ms` | 最近视觉观测距今的时间 |
-| `obs_x` | 最近观测到的横向值 |
-| `obs_y` | 最近观测到的纵向值 |
-| `target_x` | RT1021 当前解析出的世界系目标 `x` |
-| `target_y` | RT1021 当前解析出的世界系目标 `y` |
-| `target_angle` | RT1021 当前解析出的目标航向角 |
-
-视觉状态名包括:
-
-```text
-IDLE
-ALIGN_ANGLE
-ALIGN_DIST
-ALIGN_DX
-ORBITING
-PUSHING
-RETURNING
-DONE
-```
-
-### 4.6 默认交互方式
-
-1. OpenArt 持续发送 `x=<x>,y=<y>` 单行文本
-2. 主车从 `UART6` 读取并缓存最新有效观测
-3. 状态机按需读取这份观测并生成后续控制目标
-4. 如需辅助观察内部状态, 再按需查询 `?vision`
-
-一个最小示例:
-
-```text
-x=-15,y=18
-```
+- 重新引入视觉运行时前, 必须先同步更新本节、`references/hardware-and-protocol.md` 与 `docs/developer/*`
+- 新视觉协议落地前, 不要把任何观测字段、视觉查询字段或状态机状态名写成当前正式事实

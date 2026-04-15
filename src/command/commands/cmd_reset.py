@@ -31,11 +31,3 @@ def handle(ctx, value):
     ctx._pending_dx = None
     ctx._pending_dy = None
     ctx._pending_d_angle = None
-    if hasattr(ctx, "vision_protocol"):
-        ctx.vision_protocol.clear()
-    if hasattr(ctx, "vision_state_machine"):
-        ctx.vision_state_machine.reset()
-    if hasattr(ctx, "_vision_step_result"):
-        ctx._vision_step_result = None
-    if hasattr(ctx, "_vision_resolved_target"):
-        ctx._vision_resolved_target = None

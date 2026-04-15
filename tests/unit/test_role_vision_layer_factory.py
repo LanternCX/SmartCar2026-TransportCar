@@ -30,6 +30,14 @@ def import_vision_package(monkeypatch):
     return import_module("vision")
 
 
+def import_runtime_module(module_name, monkeypatch):
+    """按正常包路径导入指定视觉运行模块."""
+
+    monkeypatch.syspath_prepend(str(SRC_ROOT))
+    sys.modules.pop(module_name, None)
+    return import_module(module_name)
+
+
 def test_create_role_transport_car_selects_master_branch_only(monkeypatch) -> None:
     """主车装配只能触发主车视觉运行分支."""
 
@@ -103,3 +111,37 @@ def test_create_role_transport_car_rejects_unknown_role(monkeypatch) -> None:
 
     with pytest.raises(ValueError):
         vision_runtime.create_role_transport_car("unknown")
+
+
+def test_master_runtime_builds_shared_transport_car(monkeypatch) -> None:
+    """主车运行入口当前应回到共享底盘实现."""
+
+    runtime_module = import_runtime_module("vision.master.runtime", monkeypatch)
+    core_module = ModuleType("services.core")
+
+    class _TransportCar:
+        pass
+
+    setattr(core_module, "TransportCar", _TransportCar)
+    monkeypatch.setitem(sys.modules, "services.core", core_module)
+
+    car = runtime_module.create_transport_car()
+
+    assert isinstance(car, _TransportCar)
+
+
+def test_assistant_runtime_builds_shared_transport_car(monkeypatch) -> None:
+    """辅车运行入口必须继续复用共享底盘实现."""
+
+    runtime_module = import_runtime_module("vision.assistant.runtime", monkeypatch)
+    core_module = ModuleType("services.core")
+
+    class _TransportCar:
+        pass
+
+    setattr(core_module, "TransportCar", _TransportCar)
+    monkeypatch.setitem(sys.modules, "services.core", core_module)
+
+    car = runtime_module.create_transport_car()
+
+    assert isinstance(car, _TransportCar)
