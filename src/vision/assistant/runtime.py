@@ -1,9 +1,15 @@
-"""辅车视觉运行入口."""
+"""辅车视觉运行入口
+
+@file src/vision/assistant/runtime.py
+"""
+
+from vision.assistant.follow_runtime import AssistantFollowRuntime
 
 
-def create_transport_car():
-    """创建辅车运行链当前使用的共享底盘实例."""
+def create_transport_car() -> AssistantFollowRuntime:
+    """创建辅车角色运行时对象
 
-    from core.runtime import TransportCar
+    @brief 给角色分发入口返回辅车专用运行时
+    """
 
-    return TransportCar()
+    return AssistantFollowRuntime()
