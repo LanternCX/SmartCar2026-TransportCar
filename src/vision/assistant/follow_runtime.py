@@ -128,11 +128,6 @@ class AssistantFollowRuntime:
         # 最近一次融合结果引用
         self._last_fusion = None
 
-        process_uart = getattr(car, "_process_uart", None)
-        if process_uart is not None:
-            # UART8 由角色层读取, 这里屏蔽共享底盘对同一串口的重复消费
-            car._process_uart = self._noop_transport_uart
-
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
 
@@ -387,15 +382,6 @@ class AssistantFollowRuntime:
         uart6 = create_uart6()
         self._uart6 = uart6
         return uart6
-
-    @staticmethod
-    def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART8 消费入口
-
-        @brief UART8 已由角色层接管, 这里避免同一串口在内外两层各读一次
-        """
-
-        return None
 
 
 def create_transport_car() -> AssistantFollowRuntime:

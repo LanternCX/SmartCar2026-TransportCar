@@ -15,7 +15,7 @@ from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
 from utils.startup_log import startup_log
 from config import params as _params
-from hardware.uart_bus import create_uart8
+from hardware.uart_bus import create_uart3, create_uart8
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
@@ -120,6 +120,8 @@ class TransportCar:
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
 
+        # 上游控制串口
+        self.uart3 = create_uart3()
         # 主辅正式通信串口
         self.uart8 = create_uart8()
         startup_log("transport_car", "uart ready")
@@ -205,7 +207,7 @@ class TransportCar:
         self.lock_start_time = 0
         self.rear_only_mode = False
         self.last_rear_mode = False
-        self.rx_buf8 = ""
+        self.rx_buf3 = ""
 
         self.ticker = None
         self.boot_time_ms = self._now_ms()
@@ -309,14 +311,14 @@ class TransportCar:
 
         副作用:
             停止 ticker、重置所有 PID 控制器、设置电机占空比为 0、
-            向 UART8 输出 "stop" 信息.
+            向 UART3 输出 "stop" 信息.
         """
         if self.ticker:
             self.ticker.stop()
         reset_pi_state(self.wheel_states)
         for state in self.wheel_states:
             state["motor"].duty(0)
-        self.uart8.write("stop\r\n")
+        self.uart3.write("stop\r\n")
 
     def _handle_uart_line(self, line, source):
         """按来源处理单行串口输入."""
@@ -353,7 +355,7 @@ class TransportCar:
 
     def get_query_uart(self):
         """返回当前查询响应应写入的串口."""
-        return getattr(self, "_query_response_uart", self.uart8)
+        return getattr(self, "_query_response_uart", self.uart3)
 
     def build_tick_snapshot(self):
         """构造控制周期统计快照."""
@@ -771,25 +773,25 @@ class TransportCar:
     def _process_uart(self):
         """轮询控制串口:处理查询和运动指令.
 
-        UART8:处理主辅正式通信链路上的查询与控制命令.
+        UART3:处理上游控制链路上的查询与控制命令.
         支持查询指令(前缀 "?")和控制指令(key=val 格式).
 
         异常时向串口回写错误信息.
         """
-        buf_len = self.uart8.any()
+        buf_len = self.uart3.any()
         if buf_len:
             try:
-                self.rx_buf8 += self.uart8.read(buf_len).decode()
+                self.rx_buf3 += self.uart3.read(buf_len).decode()
                 while True:
-                    idx = self.rx_buf8.find("\n")
+                    idx = self.rx_buf3.find("\n")
                     if idx == -1:
                         break
-                    line = self.rx_buf8[:idx].rstrip("\r").strip()
-                    self.rx_buf8 = self.rx_buf8[idx + 1 :]
-                    self._handle_uart_line(line, source="uart8")
+                    line = self.rx_buf3[:idx].rstrip("\r").strip()
+                    self.rx_buf3 = self.rx_buf3[idx + 1 :]
+                    self._handle_uart_line(line, source="uart3")
             except Exception as exc:
                 self.last_exception_text = str(exc)
-                self.uart8.write("ERR %s\r\n" % exc)
+                self.uart3.write("ERR %s\r\n" % exc)
 
     # Command handling ----------------------------------------------
 

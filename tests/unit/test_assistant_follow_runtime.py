@@ -53,6 +53,7 @@ def install_fake_transport_car(monkeypatch):
     events = []
     core_package = ModuleType("core")
     core_module = ModuleType("core.runtime")
+    uart3 = _FakeUart()
     uart8 = _FakeUart()
 
     class _TransportCar:
@@ -60,11 +61,16 @@ def install_fake_transport_car(monkeypatch):
             self.wheel_states = [{"encoder": "enc-left"}, {"encoder": "enc-right"}]
             self.imu = "imu"
             self.ticker = None
+            self.uart3 = uart3
             self.uart8 = uart8
             self.last_cmd = {"x": 9.0, "y": 8.0, "angle": 7.0}
             self.rear_only_mode = False
             self.command_lock = False
             self.command_mode = "none"
+            self._process_uart = self._original_process_uart
+
+        def _original_process_uart(self) -> None:
+            events.append("transport_process_uart")
 
         def mark_tick(self, tick=None) -> None:
             events.append(("mark_tick", tick))
@@ -111,12 +117,12 @@ def install_fake_transport_car(monkeypatch):
             return {"alive": 1, "last_err": "none"}
 
         def get_query_uart(self):
-            return self.uart8
+            return self.uart3
 
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
     monkeypatch.setitem(sys.modules, "core.runtime", core_module)
-    return events, uart8
+    return events, uart3, uart8
 
 
 def install_fake_uart6_factory(monkeypatch, uart6: _FakeUart) -> None:
@@ -134,7 +140,7 @@ def install_fake_uart6_factory(monkeypatch, uart6: _FakeUart) -> None:
 def test_assistant_follow_runtime_keeps_remote_control_surface(monkeypatch) -> None:
     """辅车角色运行时要保留启动壳依赖的对外外观."""
 
-    events, _uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
     )
@@ -154,7 +160,7 @@ def test_assistant_follow_runtime_keeps_remote_control_surface(monkeypatch) -> N
 def test_assistant_follow_runtime_step_runs_role_cycle_boundary(monkeypatch) -> None:
     """辅车角色运行时的 step 要先进入角色层周期边界再驱动共享底盘."""
 
-    events, _uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
     )
@@ -165,6 +171,22 @@ def test_assistant_follow_runtime_step_runs_role_cycle_boundary(monkeypatch) -> 
 
     assert keep_running is False
     assert events == ["role_cycle", "transport_step"]
+
+
+def test_assistant_follow_runtime_keeps_transport_uart3_processing_active(
+    monkeypatch,
+) -> None:
+    """辅车角色层接管 UART8 后，不应顺手屏蔽共享底盘自己的 UART3 输入链。"""
+
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime()
+    runtime._transport_car._process_uart()
+
+    assert events == ["transport_process_uart"]
 
 
 def test_assistant_package_entry_builds_follow_runtime(monkeypatch) -> None:
@@ -183,7 +205,7 @@ def test_assistant_follow_runtime_prioritizes_role_inputs_and_writes_back_fused_
 ) -> None:
     """辅车角色运行时要优先接管控制协议与视觉输入并写回统一速度目标."""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0\n?health\nrear=1\n"
     uart6 = _FakeUart(["x=0.5,y=-0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -208,7 +230,7 @@ def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
 ) -> None:
     """辅车角色运行时要暴露最小诊断快照供联调查看输入年龄与融合结果."""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=2.0,omega=1.0\n"
     uart6 = _FakeUart(["x=-0.5,y=0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -256,7 +278,7 @@ def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart8_
 ) -> None:
     """混合包里的速度字段要先被角色层截走，剩余字段再透传给共享底盘。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0,vy=2.0,rear=1\n"
     uart6 = _FakeUart(["x=0.25,y=0.5"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -280,7 +302,7 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
 ) -> None:
     """串口读取异常不能把角色层 step 炸掉，并且要留下最小错误信息。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"broken"
     uart8.read_error = ValueError("uart8 boom")
     uart6 = _FakeUart()
@@ -314,7 +336,7 @@ def test_assistant_follow_runtime_preserves_position_and_angle_passthrough_comma
 ) -> None:
     """位置和角度透传命令生效后，角色层不能立刻再用速度写回把它们冲掉。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0,x=12.0,angle=45.0\n"
     uart6 = _FakeUart(["x=0.5,y=0.5"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -339,7 +361,7 @@ def test_assistant_follow_runtime_new_velocity_packet_reclaims_control_after_pos
 ) -> None:
     """位置命令保住后，新的速度包仍要能让角色层重新接管。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"x=12.0,angle=45.0\n"
     uart6 = _FakeUart(["x=0.5,y=0.5"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -365,7 +387,7 @@ def test_assistant_follow_runtime_builds_diagnostics_snapshot_on_demand(
 ) -> None:
     """控制周期不应每拍构造完整诊断快照，只有查询时才组织字典。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=2.0,omega=1.0\n"
     uart6 = _FakeUart(["x=-0.5,y=0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -403,7 +425,7 @@ def test_assistant_follow_runtime_velocity_write_keeps_rear_mode_state(
 ) -> None:
     """rear 命令生效后，角色层每拍速度写回不能顺手清掉共存状态。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"rear=1\nvx=1.0\n"
     uart6 = _FakeUart(["x=0.5,y=0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -428,7 +450,7 @@ def test_assistant_follow_runtime_step_avoids_public_vision_observation_copy(
 ) -> None:
     """角色层内部控制周期读取视觉时不应走公开副本接口。"""
 
-    events, uart8 = install_fake_transport_car(monkeypatch)
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0\n"
     uart6 = _FakeUart(["x=0.5,y=0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)

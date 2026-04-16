@@ -153,7 +153,7 @@ class CommandRouter:
 
         return bool(dispatched)
 
-    def handle_query(self, token, ctx, source="uart8"):
+    def handle_query(self, token, ctx, source="uart3"):
         """
         处理一条查询指令(去掉 "?" 前缀后的 token).
 
@@ -167,10 +167,10 @@ class CommandRouter:
         token = token.strip().lower()
         handler = self._query_handlers.get(token)
         response_uart = getattr(ctx, source, None)
-        if response_uart is None and hasattr(ctx, "uart8"):
-            response_uart = ctx.uart8
         if response_uart is None and hasattr(ctx, "uart3"):
             response_uart = ctx.uart3
+        if response_uart is None and hasattr(ctx, "uart8"):
+            response_uart = ctx.uart8
         if handler:
             had_uart = hasattr(ctx, "_query_response_uart")
             previous_uart = getattr(ctx, "_query_response_uart", None)

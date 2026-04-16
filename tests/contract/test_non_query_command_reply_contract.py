@@ -191,6 +191,7 @@ def _install_transport_car_stubs() -> None:
     sys.modules["utils.startup_log"] = utils_startup_log
 
     hardware_uart_bus = ModuleType("hardware.uart_bus")
+    setattr(hardware_uart_bus, "create_uart3", lambda: _CaptureUart())
     setattr(hardware_uart_bus, "create_uart8", lambda: _CaptureUart())
     setattr(hardware_uart_bus, "create_uart6", lambda: _CaptureUart())
     sys.modules["hardware.uart_bus"] = hardware_uart_bus
@@ -294,18 +295,18 @@ def _import_transport_car_module():
     return importlib.import_module("core.runtime")
 
 
-def test_transport_car_handle_uart8_line_does_not_echo_non_query_command() -> None:
+def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> None:
     transport_car = _import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.uart8 = _CaptureUart()
+    car.uart3 = _CaptureUart()
     car._router = object()
     calls = []
     car.apply_command = lambda line: calls.append(line)
 
-    car._handle_uart_line("rear=1", source="uart8")
+    car._handle_uart_line("rear=1", source="uart3")
 
     assert calls == ["rear=1"]
-    assert car.uart8.messages == []
+    assert car.uart3.messages == []
 
 
 def test_transport_car_unlock_completion_does_not_emit_prompt_text() -> None:
@@ -316,7 +317,7 @@ def test_transport_car_unlock_completion_does_not_emit_prompt_text() -> None:
     car.last_cmd = {}
     car.heading_est = 0.0
     car.rear_only_mode = True
-    car.uart8 = _CaptureUart()
+    car.uart3 = _CaptureUart()
     car.wheel_states = [{"motor": _DummyMotor(), "duty": 1.0}]
     car.yaw_pid = _DummyPid()
     car.yaw_integral = 1.0
@@ -325,24 +326,34 @@ def test_transport_car_unlock_completion_does_not_emit_prompt_text() -> None:
 
     assert car.command_lock is False
     assert car.rear_only_mode is False
-    assert car.uart8.messages == []
+    assert car.uart3.messages == []
+
+
+def test_transport_car_default_query_uart_stays_on_uart3() -> None:
+    transport_car = _import_transport_car_module()
+    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
+    car.uart3 = _CaptureUart()
+    car.uart8 = _CaptureUart()
+
+    assert car.get_query_uart() is car.uart3
 
 
 def test_transport_car_process_uart_keeps_err_output() -> None:
     transport_car = _import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.uart8 = _CaptureUart(incoming=b"boom\n", read_error=RuntimeError("boom"))
+    car.uart3 = _CaptureUart(incoming=b"boom\n", read_error=RuntimeError("boom"))
+    car.uart8 = _CaptureUart()
     car.uart6 = _CaptureUart()
-    car.rx_buf8 = ""
+    car.rx_buf3 = ""
     car.rx_buf6 = ""
     car.last_exception_text = "none"
 
     car._process_uart()
 
     assert car.last_exception_text == "boom"
-    assert len(car.uart8.messages) == 1
-    assert car.uart8.messages[0].startswith("ERR ")
-    assert "boom" in car.uart8.messages[0]
+    assert len(car.uart3.messages) == 1
+    assert car.uart3.messages[0].startswith("ERR ")
+    assert "boom" in car.uart3.messages[0]
 
 
 def test_protocol_doc_stops_describing_print_as_uart3_passthrough() -> None:

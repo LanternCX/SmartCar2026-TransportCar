@@ -25,6 +25,7 @@ class _CaptureUart:
 
 class _QueryContext:
     def __init__(self) -> None:
+        self.uart3 = _CaptureUart()
         self.uart8 = _CaptureUart()
         self.uart6 = _CaptureUart()
         self.rear_only_mode = False
@@ -34,7 +35,7 @@ class _QueryContext:
         return None
 
     def get_query_uart(self):
-        return getattr(self, "_query_response_uart", self.uart6)
+        return getattr(self, "_query_response_uart", self.uart3)
 
     def build_health_snapshot(self):
         return {
@@ -43,13 +44,13 @@ class _QueryContext:
         }
 
 
-def test_rear_still_updates_state_without_uart8_prompt() -> None:
+def test_rear_still_updates_state_without_uart3_prompt() -> None:
     ctx = _QueryContext()
 
     assert router.route("rear=1", ctx) is True
 
     assert ctx.rear_only_mode is True
-    assert ctx.uart8.messages == []
+    assert ctx.uart3.messages == []
 
 
 def test_print_routes_without_emitting_runtime_uart_text() -> None:
@@ -57,22 +58,22 @@ def test_print_routes_without_emitting_runtime_uart_text() -> None:
 
     assert router.route("print=hello world", ctx) is True
 
-    assert ctx.uart8.messages == []
+    assert ctx.uart3.messages == []
     assert ctx.uart6.messages == []
 
 
 def test_health_query_still_returns_health_reply() -> None:
     ctx = _QueryContext()
 
-    assert router.handle_query("health", ctx, source="uart8") is True
+    assert router.handle_query("health", ctx, source="uart3") is True
 
-    assert len(ctx.uart8.messages) == 1
-    assert ctx.uart8.messages[0].startswith("?health=")
+    assert len(ctx.uart3.messages) == 1
+    assert ctx.uart3.messages[0].startswith("?health=")
 
 
 def test_missing_query_still_returns_unknown_reply() -> None:
     ctx = _QueryContext()
 
-    assert router.handle_query("missing", ctx, source="uart8") is False
+    assert router.handle_query("missing", ctx, source="uart3") is False
 
-    assert ctx.uart8.messages == ["?unknown=missing\r\n"]
+    assert ctx.uart3.messages == ["?unknown=missing\r\n"]

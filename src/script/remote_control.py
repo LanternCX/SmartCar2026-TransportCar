@@ -1,7 +1,7 @@
 """搬运车远程控制主程序.
 
 初始化搬运车控制系统并启动 5ms 周期的控制循环.
-支持通过 UART8 和 UART6 参与正式运行链输入编排.
+支持通过 UART3 接收上游控制, 并按角色使用 UART8 / UART6.
 """
 
 from smartcar import ticker
