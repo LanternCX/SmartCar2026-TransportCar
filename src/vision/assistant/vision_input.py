@@ -6,11 +6,11 @@
 import math
 
 
-# 输入来源不属于 UART6 或不符合视觉协议
+# 不属于视觉输入层的输入状态
 CONSUME_IGNORED = "ignored"
-# 输入符合 x=<x>,y=<y> 协议并刷新观测缓存
+# 有效视觉输入状态
 CONSUME_ACCEPTED = "accepted"
-# 输入命中了视觉入口, 但格式或数值非法
+# 命中视觉协议但内容非法的输入状态
 CONSUME_INVALID = "invalid"
 
 
@@ -51,11 +51,11 @@ class AssistantVisionInput:
     __slots__ = ("_validity_ms", "_now_ms", "_last_observation")
 
     def __init__(self, validity_ms: int = 150, now_ms=None) -> None:
-        # 视觉超时后直接失效, 让融合层据此降级或停下
+        # 视觉观测有效期, 单位 ms
         self._validity_ms = int(validity_ms)
-        # 测试可注入时间函数, 让超时语义稳定可测
+        # 毫秒时间函数
         self._now_ms = now_ms or _default_now_ms
-        # 只保留最近一次视觉观测, 避免过期观测在角色层累积
+        # 最近一次视觉观测缓存
         self._last_observation = None
 
     def consume(self, source: str, line: str) -> str:

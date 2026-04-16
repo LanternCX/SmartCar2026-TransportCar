@@ -20,7 +20,7 @@ from vision.assistant.vision_input import (
 )
 
 
-# 融合后的统一输出使用共享底盘的速度幅值边界
+# 融合输出速度上限
 TARGET_SPEED_MAX = getattr(_params, "TARGET_SPEED_MAX")
 
 
@@ -93,34 +93,39 @@ class AssistantFollowRuntime:
     def __init__(self, now_ms=None, uart6=None) -> None:
         from core.runtime import TransportCar
 
-        # 共享底盘承担真实控制执行, 角色层在外层接管输入和融合
+        # 共享底盘实例
         car = TransportCar()
         self._transport_car = car
-        # 启动壳依赖这些外观字段, 这里保持和共享底盘一致
+        # 轮组状态视图
         self.wheel_states = car.wheel_states
+        # IMU 视图
         self.imu = car.imu
-        # 统一时间源, 让输入超时和测试注入共用同一套时钟
+        # 角色层毫秒时基
         self._now_ms = now_ms or _default_now_ms
-        # 两路输入层分别缓存 UART3 控制协议和 UART6 视觉协议
+        # UART3 速度控制输入层
         self._control_input = ControlProtocolInput(now_ms=self._now_ms)
+        # UART6 视觉输入层
         self._vision_input = AssistantVisionInput(now_ms=self._now_ms)
-        # 融合层只负责把两路输入收口成统一速度目标
+        # 速度融合器
         self._fusion = VelocityFusion(
             output_limit=TARGET_SPEED_MAX,
             degraded_output_limit=TARGET_SPEED_MAX / 3.0,
         )
-        # UART6 延迟创建, 避免主机侧导入时提前碰真实硬件
+        # UART6 对象引用
         self._uart6 = uart6
-        # 两个串口各自保留残余文本, 处理跨拍分段输入
+        # UART3 未成行文本缓冲
         self._rx_buf3 = ""
+        # UART6 未成行文本缓冲
         self._rx_buf6 = ""
-        # 最近一次输入状态和错误文本只保留最小诊断所需信息
+        # UART3 输入状态标签
         self._control_input_status = "idle"
+        # UART6 输入状态标签
         self._vision_input_status = "idle"
+        # 最近一次错误文本
         self._last_error_text = "none"
-        # 位置/角度透传命令生效时, 下一拍先暂停速度写回
+        # 位置/角度透传保护标志
         self._hold_passthrough_targets = False
-        # 最近一次融合结果单独缓存, 只有查询诊断时才展开成完整字典
+        # 最近一次融合结果引用
         self._last_fusion = None
 
         process_uart = getattr(car, "_process_uart", None)

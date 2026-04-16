@@ -8,13 +8,13 @@ import math
 from config import params as _params
 
 
-# 速度字段使用共享控制协议的同一组幅值边界
+# 速度字段幅值边界, 单位与共享控制协议保持一致
 V_CMD_MAX = getattr(_params, "V_CMD_MAX")
-# 这一行不属于速度控制输入层的消费范围
+# 不属于速度控制输入层的输入状态
 CONSUME_IGNORED = "ignored"
-# 这一行被识别为有效速度控制量并刷新缓存
+# 有效速度控制输入状态
 CONSUME_ACCEPTED = "accepted"
-# 这一行命中了速度字段, 但内容非法
+# 命中速度字段但内容非法的输入状态
 CONSUME_INVALID = "invalid"
 
 
@@ -62,11 +62,11 @@ class ControlProtocolInput:
     __slots__ = ("_validity_ms", "_now_ms", "_last_control")
 
     def __init__(self, validity_ms: int = 150, now_ms=None) -> None:
-        # 控制量超时后直接失效, 避免角色层长期保留过期节奏
+        # 控制量有效期, 单位 ms
         self._validity_ms = int(validity_ms)
-        # 时间函数允许测试注入, 避免协议层依赖真实时钟
+        # 毫秒时间函数
         self._now_ms = now_ms or _default_now_ms
-        # 只保留最近一次速度控制量, 让角色层按最新节奏运行
+        # 最近一次速度控制量缓存
         self._last_control = None
 
     def consume(self, line: str) -> str:

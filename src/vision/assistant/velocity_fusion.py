@@ -3,13 +3,13 @@
 @file src/vision/assistant/velocity_fusion.py
 """
 
-# 没有任何有效输入时, 角色层输出零速度
+# 无有效输入状态
 STATE_IDLE = "idle"
-# 控制协议和视觉观测同时有效, 按正式跟随输出
+# 双输入跟随状态
 STATE_TRACKING = "tracking"
-# 只剩视觉观测时按降级速度纠偏
+# 视觉单独纠偏状态
 STATE_VISION_ONLY = "vision_only"
-# 视觉失效时立即停下, 避免盲跑
+# 视觉失效停下状态
 STATE_FAULT_STOP = "fault_stop"
 
 
