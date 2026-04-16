@@ -113,8 +113,8 @@ def test_create_role_transport_car_rejects_unknown_role(monkeypatch) -> None:
         vision_runtime.create_role_transport_car("unknown")
 
 
-def test_master_runtime_builds_shared_transport_car(monkeypatch) -> None:
-    """主车运行入口当前应回到共享底盘实现."""
+def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
+    """主车运行入口必须创建主车角色运行时对象."""
 
     runtime_module = import_runtime_module("vision.master.runtime", monkeypatch)
     core_package = ModuleType("core")
@@ -140,7 +140,9 @@ def test_master_runtime_builds_shared_transport_car(monkeypatch) -> None:
 
     car = runtime_module.create_transport_car()
 
-    assert isinstance(car, _TransportCar)
+    assert car.__class__.__name__ == "MasterForwardRuntime"
+    assert not isinstance(car, _TransportCar)
+    assert isinstance(car._transport_car, _TransportCar)
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
