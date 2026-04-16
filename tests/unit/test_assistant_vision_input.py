@@ -51,7 +51,7 @@ def test_accepts_uart6_vision_packet_and_refreshes_cached_observation() -> None:
 def test_ignores_non_uart6_and_non_vision_lines() -> None:
     vision_input = AssistantVisionInput(validity_ms=50, now_ms=lambda: 0)
 
-    assert vision_input.consume("UART3", "x=1,y=2") == CONSUME_IGNORED
+    assert vision_input.consume("UART8", "x=1,y=2") == CONSUME_IGNORED
     assert vision_input.consume("UART6", "?vision") == CONSUME_IGNORED
     assert vision_input.consume("UART6", "vx=1") == CONSUME_IGNORED
     assert vision_input.consume("UART6", "x=1") == CONSUME_IGNORED

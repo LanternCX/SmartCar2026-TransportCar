@@ -39,7 +39,7 @@ def _default_now_ms() -> int:
 
 
 def _is_velocity_fragment(fragment: str) -> bool:
-    """判断 UART3 文本片段是否属于速度字段
+    """判断 UART8 文本片段是否属于速度字段
 
     @brief 只接管 vx / vy / omega / w, 其余字段交给共享底盘处理
     """
@@ -102,7 +102,7 @@ class AssistantFollowRuntime:
         self.imu = car.imu
         # 角色层毫秒时基
         self._now_ms = now_ms or _default_now_ms
-        # UART3 速度控制输入层
+        # UART8 速度控制输入层
         self._control_input = ControlProtocolInput(now_ms=self._now_ms)
         # UART6 视觉输入层
         self._vision_input = AssistantVisionInput(now_ms=self._now_ms)
@@ -113,11 +113,11 @@ class AssistantFollowRuntime:
         )
         # UART6 对象引用
         self._uart6 = uart6
-        # UART3 未成行文本缓冲
-        self._rx_buf3 = ""
+        # UART8 未成行文本缓冲
+        self._rx_buf8 = ""
         # UART6 未成行文本缓冲
         self._rx_buf6 = ""
-        # UART3 输入状态标签
+        # UART8 输入状态标签
         self._control_input_status = "idle"
         # UART6 输入状态标签
         self._vision_input_status = "idle"
@@ -130,7 +130,7 @@ class AssistantFollowRuntime:
 
         process_uart = getattr(car, "_process_uart", None)
         if process_uart is not None:
-            # UART3 由角色层读取, 这里屏蔽共享底盘对同一串口的重复消费
+            # UART8 由角色层读取, 这里屏蔽共享底盘对同一串口的重复消费
             car._process_uart = self._noop_transport_uart
 
     def mark_tick(self, tick=None) -> None:
@@ -170,7 +170,7 @@ class AssistantFollowRuntime:
         @brief 这一拍先接管两路输入, 再生成统一速度目标并刷新最小状态
         """
 
-        self._process_uart3()
+        self._process_uart8()
         self._process_uart6()
         control = self._control_input.get_active_control()
         vision = self._vision_input.get_active_observation_ref()
@@ -198,29 +198,29 @@ class AssistantFollowRuntime:
             self._last_fusion,
         )
 
-    def _process_uart3(self) -> None:
-        # UART3 同时承载速度字段和普通控制命令, 这里先拆分再决定接管或透传
-        uart3 = self._transport_car.uart3
-        buf_len = uart3.any()
+    def _process_uart8(self) -> None:
+        # UART8 同时承载速度字段和普通控制命令, 这里先拆分再决定接管或透传
+        uart8 = self._transport_car.uart8
+        buf_len = uart8.any()
         if not buf_len:
             self._control_input_status = self._resolve_control_input_status()
             return
 
         try:
-            self._rx_buf3 += uart3.read(buf_len).decode()
+            self._rx_buf8 += uart8.read(buf_len).decode()
         except Exception as exc:
             self._control_input_status = "error"
-            self._record_error("uart3 read failed", exc)
+            self._record_error("uart8 read failed", exc)
             return
 
         while True:
-            idx = self._rx_buf3.find("\n")
+            idx = self._rx_buf8.find("\n")
             if idx == -1:
                 self._control_input_status = self._resolve_control_input_status()
                 return
-            line = self._rx_buf3[:idx].rstrip("\r").strip()
-            self._rx_buf3 = self._rx_buf3[idx + 1 :]
-            consume_result, passthrough_line = self._consume_uart3_line(line)
+            line = self._rx_buf8[:idx].rstrip("\r").strip()
+            self._rx_buf8 = self._rx_buf8[idx + 1 :]
+            consume_result, passthrough_line = self._consume_uart8_line(line)
             if consume_result == CONTROL_CONSUME_ACCEPTED:
                 self._control_input_status = "accepted"
                 self._hold_passthrough_targets = False
@@ -232,9 +232,9 @@ class AssistantFollowRuntime:
                 if _has_position_target_command(passthrough_line):
                     # 位置目标透传后先保住共享底盘上的目标状态, 等下一拍再判断是否让位
                     self._hold_passthrough_targets = True
-                self._transport_car._handle_uart_line(passthrough_line, source="uart3")
+                self._transport_car._handle_uart_line(passthrough_line, source="uart8")
 
-    def _consume_uart3_line(self, line: str):
+    def _consume_uart8_line(self, line: str):
         # 混合包先拆出速度字段, 这样速度接管和普通命令透传就不会互相踩掉
         text = line.strip()
         if not text or text.startswith("?"):
@@ -390,9 +390,9 @@ class AssistantFollowRuntime:
 
     @staticmethod
     def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART3 消费入口
+        """屏蔽共享底盘自己的 UART8 消费入口
 
-        @brief UART3 已由角色层接管, 这里避免同一串口在内外两层各读一次
+        @brief UART8 已由角色层接管, 这里避免同一串口在内外两层各读一次
         """
 
         return None

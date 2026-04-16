@@ -1,4 +1,4 @@
-"""辅车 UART3 速度控制协议输入测试."""
+"""辅车 UART8 速度控制协议输入测试."""
 
 import sys
 from pathlib import Path

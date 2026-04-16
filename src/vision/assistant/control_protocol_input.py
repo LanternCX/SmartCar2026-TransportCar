@@ -1,4 +1,4 @@
-"""辅车 UART3 速度控制协议输入层
+"""辅车 UART8 速度控制协议输入层
 
 @file src/vision/assistant/control_protocol_input.py
 """
@@ -54,7 +54,7 @@ class VelocityControl:
 
 
 class ControlProtocolInput:
-    """识别并缓存 UART3 上的速度控制包
+    """识别并缓存 UART8 上的速度控制包
 
     @brief 只接管现有控制协议中的速度字段, 不处理其他命令
     """

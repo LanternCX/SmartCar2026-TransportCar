@@ -28,7 +28,7 @@ def _canonical_velocity_key(key: str) -> str:
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观.
 
-    @brief 在共享底盘外层接管 UART3, 完成速度字段转发和原始命令透传
+    @brief 在共享底盘外层接管 UART8, 完成速度字段转发和原始命令透传
     """
 
     def __init__(self) -> None:
@@ -38,11 +38,11 @@ class MasterForwardRuntime:
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu
-        self._rx_buf3 = ""
+        self._rx_buf8 = ""
         self._last_error_text = "none"
 
         if getattr(car, "_process_uart", None) is not None:
-            # UART3 已由主车角色层接管, 共享底盘不再重复读取
+            # UART8 已由主车角色层接管, 共享底盘不再重复读取
             car._process_uart = self._noop_transport_uart
 
     def mark_tick(self, tick=None) -> None:
@@ -67,32 +67,32 @@ class MasterForwardRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程."""
 
-        self._process_uart3()
+        self._process_uart8()
 
-    def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理完整命令."""
+    def _process_uart8(self) -> None:
+        """接管 UART8 按行读取并处理完整命令."""
 
-        uart3 = self._transport_car.uart3
-        buf_len = uart3.any()
+        uart8 = self._transport_car.uart8
+        buf_len = uart8.any()
         if not buf_len:
             return
 
         try:
-            self._rx_buf3 += uart3.read(buf_len).decode()
+            self._rx_buf8 += uart8.read(buf_len).decode()
         except Exception:
-            self._record_error("uart3 read failed")
+            self._record_error("uart8 read failed")
             return
 
         while True:
-            idx = self._rx_buf3.find("\n")
+            idx = self._rx_buf8.find("\n")
             if idx == -1:
                 return
-            line = self._rx_buf3[:idx].rstrip("\r").strip()
-            self._rx_buf3 = self._rx_buf3[idx + 1 :]
-            self._handle_uart3_line(line)
+            line = self._rx_buf8[:idx].rstrip("\r").strip()
+            self._rx_buf8 = self._rx_buf8[idx + 1 :]
+            self._handle_uart8_line(line)
 
-    def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 原始命令行."""
+    def _handle_uart8_line(self, line: str) -> None:
+        """处理单条 UART8 原始命令行."""
 
         if not line:
             return
@@ -100,7 +100,7 @@ class MasterForwardRuntime:
         forward_line = self._extract_forward_line(line)
         if forward_line:
             self._write_forward_line(forward_line)
-        self._transport_car._handle_uart_line(line, source="uart3")
+        self._transport_car._handle_uart_line(line, source="uart8")
 
     def _extract_forward_line(self, line: str) -> str:
         """从原始命令中抽取可转发的速度字段文本."""
@@ -140,12 +140,12 @@ class MasterForwardRuntime:
         return ",".join(ordered_fields)
 
     def _write_forward_line(self, line: str) -> None:
-        """把速度转发行写到 UART3 上行链路."""
+        """把速度转发行写到 UART8 上行链路."""
 
         try:
-            self._transport_car.uart3.write("%s\r\n" % line)
+            self._transport_car.uart8.write("%s\r\n" % line)
         except Exception:
-            self._record_error("uart3 forward write failed")
+            self._record_error("uart8 forward write failed")
 
     def _record_error(self, text: str) -> None:
         """记录最小错误文本供联调使用."""
@@ -155,6 +155,6 @@ class MasterForwardRuntime:
 
     @staticmethod
     def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART3 消费入口."""
+        """屏蔽共享底盘自己的 UART8 消费入口."""
 
         return None
