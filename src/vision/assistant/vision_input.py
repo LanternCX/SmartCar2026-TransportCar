@@ -31,7 +31,7 @@ def _default_now_ms() -> int:
 class VisionObservation:
     """最近一次有效的视觉观测快照
 
-    @brief 保存角色层可用的本地视觉纠偏输入
+    @brief 保存角色层可观察的本地视觉输入
     """
 
     __slots__ = ("x", "y", "timestamp_ms")

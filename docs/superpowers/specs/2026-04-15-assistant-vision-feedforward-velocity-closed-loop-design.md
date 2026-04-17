@@ -1,5 +1,8 @@
 # 2026-04-15 辅车视觉层速度前馈与本地视觉闭环设计
 
+> 状态: Archive
+> 当前约束以 `docs/developer/control.md`、`docs/developer/vision.md` 与 `.agents/skills/using-rules/references/strategy-and-control.md` 为准。
+
 ## 背景
 
 当前仓库已经在 `src/vision/` 下为主车与辅车预留了角色层入口, 其中 `src/vision/assistant/` 是辅车运行链的正式角色边界。

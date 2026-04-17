@@ -3,16 +3,11 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
+import math
+
 from config import params as _params
 
-from vision.assistant.control_protocol_input import (
-    CONSUME_ACCEPTED as CONTROL_CONSUME_ACCEPTED,
-    CONSUME_IGNORED as CONTROL_CONSUME_IGNORED,
-    CONSUME_INVALID as CONTROL_CONSUME_INVALID,
-    ControlProtocolInput,
-)
 from vision.assistant.diagnostics import build_follow_snapshot
-from vision.assistant.velocity_fusion import FusionResult, VelocityFusion
 from vision.assistant.vision_input import (
     CONSUME_ACCEPTED as VISION_CONSUME_ACCEPTED,
     CONSUME_INVALID as VISION_CONSUME_INVALID,
@@ -20,8 +15,7 @@ from vision.assistant.vision_input import (
 )
 
 
-# 融合输出速度上限
-TARGET_SPEED_MAX = getattr(_params, "TARGET_SPEED_MAX")
+V_CMD_MAX = getattr(_params, "V_CMD_MAX")
 
 
 def _default_now_ms() -> int:
@@ -36,19 +30,6 @@ def _default_now_ms() -> int:
     if ticks_ms is not None:
         return int(ticks_ms())
     return int(time.time() * 1000)
-
-
-def _is_velocity_fragment(fragment: str) -> bool:
-    """判断 UART8 文本片段是否属于速度字段
-
-    @brief 只接管 vx / vy / omega / w, 其余字段交给共享底盘处理
-    """
-
-    text = fragment.strip()
-    if not text or "=" not in text:
-        return False
-    key = text.split("=", 1)[0].strip().lower()
-    return key in ("vx", "vy", "omega", "w")
 
 
 def _build_input_status(snapshot: dict, last_status: str) -> str:
@@ -68,12 +49,15 @@ def _build_input_status(snapshot: dict, last_status: str) -> str:
     return "idle"
 
 
+def _is_velocity_fragment(fragment: str) -> bool:
+    text = fragment.strip()
+    if not text or "=" not in text:
+        return False
+    key = text.split("=", 1)[0].strip().lower()
+    return key in ("vx", "vy", "omega", "w")
+
+
 def _has_position_target_command(text: str) -> bool:
-    """判断透传命令里是否含有位置或角度目标
-
-    @brief 这些目标需要短暂压住角色层速度写回, 避免同拍被立即冲掉
-    """
-
     for fragment in text.split(","):
         item = fragment.strip()
         if not item or "=" not in item:
@@ -84,10 +68,29 @@ def _has_position_target_command(text: str) -> bool:
     return False
 
 
+def _canonical_velocity_key(key: str):
+    key = key.strip().lower()
+    if key == "vx":
+        return "vx"
+    if key == "vy":
+        return "vy"
+    if key == "omega" or key == "w":
+        return "omega"
+    return None
+
+
+def _clamp_command_value(value: float) -> float:
+    if value > V_CMD_MAX:
+        return float(V_CMD_MAX)
+    if value < -V_CMD_MAX:
+        return float(-V_CMD_MAX)
+    return float(value)
+
+
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观
 
-    @brief 在共享底盘外层接管串口输入、速度融合和角色层诊断
+    @brief 在共享底盘外层接管 UART8 / UART6 输入与角色层诊断
     """
 
     def __init__(self, now_ms=None, uart6=None) -> None:
@@ -102,15 +105,8 @@ class AssistantFollowRuntime:
         self.imu = car.imu
         # 角色层毫秒时基
         self._now_ms = now_ms or _default_now_ms
-        # UART8 速度控制输入层
-        self._control_input = ControlProtocolInput(now_ms=self._now_ms)
         # UART6 视觉输入层
         self._vision_input = AssistantVisionInput(now_ms=self._now_ms)
-        # 速度融合器
-        self._fusion = VelocityFusion(
-            output_limit=TARGET_SPEED_MAX,
-            degraded_output_limit=TARGET_SPEED_MAX / 3.0,
-        )
         # UART6 对象引用
         self._uart6 = uart6
         # UART8 未成行文本缓冲
@@ -118,15 +114,15 @@ class AssistantFollowRuntime:
         # UART6 未成行文本缓冲
         self._rx_buf6 = ""
         # UART8 输入状态标签
-        self._control_input_status = "idle"
+        self._uart8_input_status = "idle"
+        # 最近一次前馈速度量
+        self._feedforward_velocity = None
         # UART6 输入状态标签
         self._vision_input_status = "idle"
         # 最近一次错误文本
         self._last_error_text = "none"
         # 位置/角度透传保护标志
         self._hold_passthrough_targets = False
-        # 最近一次融合结果引用
-        self._last_fusion = None
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -147,32 +143,24 @@ class AssistantFollowRuntime:
     def step(self) -> bool:
         """执行一拍辅车角色运行时
 
-        @brief 先跑角色层输入接管和融合, 再进入共享底盘的执行周期
+        @brief 先跑角色层输入接管与观测记录, 再进入共享底盘的执行周期
         """
 
         try:
             self._run_role_cycle()
         except Exception as exc:
             self._record_error("role_cycle failed", exc)
-            fusion = self._fusion.fuse(control=None, vision=None)
-            self._write_fused_velocity(fusion)
-            self._refresh_runtime_state(fusion)
         return self._transport_car.step()
 
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程
 
-        @brief 这一拍先接管两路输入, 再生成统一速度目标并刷新最小状态
+        @brief 这一拍先接管两路输入, 再把前馈和视觉修正通过共享底盘入口写回
         """
 
         self._process_uart8()
         self._process_uart6()
-        control = self._control_input.get_active_control()
-        vision = self._vision_input.get_active_observation_ref()
-        fusion = self._fusion.fuse(control=control, vision=vision)
-        if not self._should_skip_velocity_write():
-            self._write_fused_velocity(fusion)
-        self._refresh_runtime_state(fusion)
+        self._write_effective_velocity()
 
     def build_follow_snapshot(self) -> dict:
         """返回辅车角色层最小诊断快照
@@ -180,60 +168,57 @@ class AssistantFollowRuntime:
         @brief 只有外部需要观察时才组织完整字典, 避免控制周期反复分配
         """
 
-        control_snapshot = self._control_input.snapshot()
         vision_snapshot = self._vision_input.snapshot()
-        control_status = self._resolve_control_input_status(control_snapshot)
         vision_status = self._resolve_vision_input_status(vision_snapshot)
         return build_follow_snapshot(
-            control_snapshot,
-            control_status,
+            self._build_transport_command_snapshot(),
+            self._uart8_input_status,
             vision_snapshot,
             vision_status,
             self._last_error_text,
-            self._last_fusion,
         )
 
     def _process_uart8(self) -> None:
-        # UART8 同时承载速度字段和普通控制命令, 这里先拆分再决定接管或透传
+        # UART8 同时承载速度字段和普通命令, 角色层只接管速度量的来源状态
         uart8 = self._transport_car.uart8
         buf_len = uart8.any()
         if not buf_len:
-            self._control_input_status = self._resolve_control_input_status()
+            self._uart8_input_status = self._resolve_uart8_input_status()
             return
 
         try:
             self._rx_buf8 += uart8.read(buf_len).decode()
         except Exception as exc:
-            self._control_input_status = "error"
+            self._uart8_input_status = "error"
             self._record_error("uart8 read failed", exc)
             return
 
         while True:
             idx = self._rx_buf8.find("\n")
             if idx == -1:
-                self._control_input_status = self._resolve_control_input_status()
+                self._uart8_input_status = self._resolve_uart8_input_status()
                 return
             line = self._rx_buf8[:idx].rstrip("\r").strip()
             self._rx_buf8 = self._rx_buf8[idx + 1 :]
             consume_result, passthrough_line = self._consume_uart8_line(line)
-            if consume_result == CONTROL_CONSUME_ACCEPTED:
-                self._control_input_status = "accepted"
+            if consume_result == "accepted":
+                self._uart8_input_status = "active"
                 self._hold_passthrough_targets = False
-            elif consume_result == CONTROL_CONSUME_INVALID:
-                self._control_input_status = "invalid"
-            elif consume_result == CONTROL_CONSUME_IGNORED:
-                self._control_input_status = self._resolve_control_input_status()
+            elif consume_result == "invalid":
+                self._uart8_input_status = "invalid"
+            else:
+                self._uart8_input_status = self._resolve_uart8_input_status()
             if passthrough_line:
                 if _has_position_target_command(passthrough_line):
-                    # 位置目标透传后先保住共享底盘上的目标状态, 等下一拍再判断是否让位
                     self._hold_passthrough_targets = True
+                    if consume_result != "accepted":
+                        self._feedforward_velocity = None
                 self._transport_car._handle_uart_line(passthrough_line, source="uart8")
 
     def _consume_uart8_line(self, line: str):
-        # 混合包先拆出速度字段, 这样速度接管和普通命令透传就不会互相踩掉
         text = line.strip()
         if not text or text.startswith("?"):
-            return CONTROL_CONSUME_IGNORED, text
+            return "ignored", text
 
         velocity_fragments = []
         passthrough_fragments = []
@@ -246,16 +231,47 @@ class AssistantFollowRuntime:
             else:
                 passthrough_fragments.append(item)
 
-        consume_result = CONTROL_CONSUME_IGNORED
+        consume_result = "ignored"
         if velocity_fragments:
-            consume_result = self._control_input.consume(",".join(velocity_fragments))
+            consume_result = self._consume_velocity_fragments(
+                ",".join(velocity_fragments)
+            )
 
         passthrough_line = None
         if passthrough_fragments:
             passthrough_line = ",".join(passthrough_fragments)
-        elif consume_result == CONTROL_CONSUME_IGNORED:
+        elif consume_result == "ignored":
             passthrough_line = text
         return consume_result, passthrough_line
+
+    def _consume_velocity_fragments(self, text: str) -> str:
+        parsed = {}
+        for fragment in text.split(","):
+            item = fragment.strip()
+            if not item or "=" not in item:
+                return "ignored"
+            key, value_text = item.split("=", 1)
+            canonical_key = _canonical_velocity_key(key)
+            if canonical_key is None:
+                return "ignored"
+            if canonical_key in parsed:
+                return "invalid"
+            try:
+                value = float(value_text.strip())
+            except ValueError:
+                return "invalid"
+            if not math.isfinite(value):
+                return "invalid"
+            parsed[canonical_key] = _clamp_command_value(value)
+
+        velocity = self._feedforward_velocity
+        if velocity is None:
+            velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        else:
+            velocity = dict(velocity)
+        velocity.update(parsed)
+        self._feedforward_velocity = velocity
+        return "accepted"
 
     def _process_uart6(self) -> None:
         # UART6 只服务辅车角色层, 共享底盘不参与这一侧视觉输入消费
@@ -299,62 +315,19 @@ class AssistantFollowRuntime:
             elif consume_result == VISION_CONSUME_INVALID:
                 self._vision_input_status = "invalid"
 
-    def _write_fused_velocity(self, fusion: FusionResult) -> None:
-        # 速度重新接管时只清理位置/角度目标, 不重走共享底盘整包收口, 避免顺手改坏共存状态
-        last_cmd = self._transport_car.last_cmd
-        if (
-            last_cmd.get("x") is not None
-            or last_cmd.get("y") is not None
-            or last_cmd.get("angle") is not None
-        ):
-            last_cmd.pop("x", None)
-            last_cmd.pop("y", None)
-            last_cmd.pop("angle", None)
-        last_cmd["vx"] = float(fusion.vx)
-        last_cmd["vy"] = float(fusion.vy)
-        last_cmd["omega"] = float(fusion.omega)
-
-    def _should_skip_velocity_write(self) -> bool:
-        # 只在共享底盘仍挂着位置/角度目标时暂停速度写回
-        if not self._hold_passthrough_targets:
-            return False
-
-        last_cmd = self._transport_car.last_cmd
-        active = (
-            last_cmd.get("x") is not None
-            or last_cmd.get("y") is not None
-            or last_cmd.get("angle") is not None
-        )
-        if not active:
-            self._hold_passthrough_targets = False
-            return False
-        return True
-
-    def _refresh_runtime_state(self, fusion: object) -> None:
-        # 控制周期里只缓存轻量状态, 完整诊断字典留到查询时再构造
-        self._last_fusion = fusion
-        self._control_input_status = self._resolve_control_input_status()
-        self._vision_input_status = self._resolve_vision_input_status()
-
-    def _resolve_control_input_status(self, snapshot=None) -> str:
-        if snapshot is None:
-            snapshot = self._build_control_snapshot_fast()
-        return _build_input_status(snapshot, self._control_input_status)
-
     def _resolve_vision_input_status(self, snapshot=None) -> str:
         if snapshot is None:
             snapshot = self._build_vision_snapshot_fast()
         return _build_input_status(snapshot, self._vision_input_status)
 
-    def _build_control_snapshot_fast(self) -> dict:
-        # 热路径只保留状态判断必需字段, 避免每拍复制完整控制量字典
-        control = self._control_input.get_active_control()
-        if control is not None:
-            return {"valid": True, "timestamp_ms": int(control.timestamp_ms)}
-        cached = getattr(self._control_input, "_last_control")
-        if cached is None:
-            return {"valid": False, "timestamp_ms": None}
-        return {"valid": False, "timestamp_ms": int(cached.timestamp_ms)}
+    def _resolve_uart8_input_status(self) -> str:
+        if self._uart8_input_status == "error":
+            return "error"
+        if self._uart8_input_status == "invalid":
+            return "invalid"
+        if self._feedforward_velocity is not None:
+            return "active"
+        return "idle"
 
     def _build_vision_snapshot_fast(self) -> dict:
         # 视觉侧同样只取有效性和时间戳, 完整快照只在对外诊断时构造
@@ -370,6 +343,47 @@ class AssistantFollowRuntime:
         # 只保留最近一次错误文本, 方便现场联调判断先出问题的输入来源
         self._last_error_text = "%s: %s" % (prefix, exc)
         self._transport_car.last_exception_text = self._last_error_text
+
+    def _write_effective_velocity(self) -> None:
+        if self._should_skip_velocity_write():
+            return
+        velocity = self._feedforward_velocity
+        if velocity is None:
+            return
+
+        vx = float(velocity.get("vx", 0.0))
+        vy = float(velocity.get("vy", 0.0))
+        omega = float(velocity.get("omega", 0.0))
+        vision = self._vision_input.get_active_observation_ref()
+        if vision is not None:
+            vx += float(vision.x)
+            vy += float(vision.y)
+        self._transport_car._handle_uart_line(
+            self._format_velocity_command(vx, vy, omega), source="uart8"
+        )
+
+    def _should_skip_velocity_write(self) -> bool:
+        if not self._hold_passthrough_targets:
+            return False
+
+        last_cmd = self._transport_car.last_cmd
+        active = (
+            last_cmd.get("x") is not None
+            or last_cmd.get("y") is not None
+            or last_cmd.get("angle") is not None
+        )
+        if not active:
+            self._hold_passthrough_targets = False
+            return False
+        return True
+
+    @staticmethod
+    def _format_velocity_command(vx: float, vy: float, omega: float) -> str:
+        return "vx=%s,vy=%s,omega=%s" % (vx, vy, omega)
+
+    def _build_transport_command_snapshot(self) -> dict:
+        # 角色层只导出共享底盘当前真实生效的命令状态, 不再额外维护 UART8 速度缓存
+        return dict(self._transport_car.last_cmd)
 
     def _get_uart6(self):
         # 需要读取视觉时再创建 UART6, 避免角色对象构造期碰硬件

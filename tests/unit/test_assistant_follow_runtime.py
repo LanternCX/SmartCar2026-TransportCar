@@ -85,6 +85,7 @@ def install_fake_transport_car(monkeypatch):
 
         def _handle_uart_line(self, line: str, source: str) -> None:
             events.append(("handle_uart_line", source, line))
+            dispatched = set()
             for fragment in line.split(","):
                 item = fragment.strip()
                 if not item or "=" not in item:
@@ -92,8 +93,12 @@ def install_fake_transport_car(monkeypatch):
                 key, value_text = item.split("=", 1)
                 key = key.strip()
                 value_text = value_text.strip()
+                if key in ("vx", "vy", "omega"):
+                    self.last_cmd[key] = float(value_text)
+                    dispatched.add(key)
                 if key in ("x", "y", "angle"):
                     self.last_cmd[key] = float(value_text)
+                    dispatched.add(key)
                 if key in ("x", "y"):
                     self.last_cmd.pop("vx", None)
                     self.last_cmd.pop("vy", None)
@@ -103,6 +108,9 @@ def install_fake_transport_car(monkeypatch):
                     self.rear_only_mode = value_text == "1"
                     self.command_lock = self.rear_only_mode
                     self.command_mode = "locked" if self.rear_only_mode else "none"
+                    dispatched.add(key)
+            if dispatched:
+                self._finalize_route(dispatched)
 
         def _finalize_route(self, dispatched) -> None:
             events.append(("finalize_route", tuple(sorted(dispatched))))
@@ -200,10 +208,10 @@ def test_assistant_package_entry_builds_follow_runtime(monkeypatch) -> None:
     assert runtime.__class__.__name__ == "AssistantFollowRuntime"
 
 
-def test_assistant_follow_runtime_prioritizes_role_inputs_and_writes_back_fused_velocity(
+def test_assistant_follow_runtime_prioritizes_role_inputs_and_routes_effective_speed_through_transport(
     monkeypatch,
 ) -> None:
-    """辅车角色运行时要优先接管控制协议与视觉输入并写回统一速度目标."""
+    """辅车角色层要保留前馈和视觉修正，但最终速度仍走共享底盘入口。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0\n?health\nrear=1\n"
@@ -223,12 +231,71 @@ def test_assistant_follow_runtime_prioritizes_role_inputs_and_writes_back_fused_
     assert ("handle_uart_line", "uart8", "?health") in events
     assert ("handle_uart_line", "uart8", "rear=1") in events
     assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": -0.25, "omega": 0.0}
+    assert runtime._transport_car.rear_only_mode is True
+    assert runtime._transport_car.command_lock is False
+    assert runtime._transport_car.command_mode == "none"
+
+
+def test_assistant_follow_runtime_routes_corrected_speed_through_transport_when_vision_is_present(
+    monkeypatch,
+) -> None:
+    """视觉输入存在时，修正后的速度也必须通过共享底盘入口生效。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=1.0,vy=-2.0,omega=0.5\n"
+    uart6 = _FakeUart(["x=0.5,y=-0.25"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+
+    assert ("handle_uart_line", "uart8", "vx=1.0,vy=-2.0,omega=0.5") not in events
+    assert ("handle_uart_line", "uart8", "vx=1.5,vy=-2.25,omega=0.5") in events
+    assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": -2.25, "omega": 0.5}
+
+
+def test_assistant_follow_runtime_keeps_last_uart8_velocity_without_old_timeout(
+    monkeypatch,
+) -> None:
+    """UART8 速度命令应像 UART3 一样持续生效，不能沿用旧的超时清零语义。"""
+
+    class _FakeClock:
+        def __init__(self, initial_ms: int = 0) -> None:
+            self.now_ms = initial_ms
+
+        def advance(self, delta_ms: int) -> None:
+            self.now_ms += delta_ms
+
+        def __call__(self) -> int:
+            return self.now_ms
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    clock = _FakeClock(100)
+    uart8._buffer = b"vx=2.0,omega=0.5\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=clock)
+
+    runtime.step()
+    clock.advance(200)
+    runtime.step()
+
+    assert events[-1] == "transport_step"
+    assert runtime._transport_car.last_cmd == {"vx": 2.0, "vy": 0.0, "omega": 0.5}
 
 
 def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
     monkeypatch,
 ) -> None:
-    """辅车角色运行时要暴露最小诊断快照供联调查看输入年龄与融合结果."""
+    """辅车角色运行时要暴露当前生效速度和本地视觉观测状态。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=2.0,omega=1.0\n"
@@ -243,25 +310,9 @@ def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
     snapshot = runtime.build_follow_snapshot()
 
     assert events[-1] == "transport_step"
-    assert snapshot["state"] == "tracking"
-    assert snapshot["control_age_ms"] == 0
-    assert snapshot["vision_age_ms"] == 0
-    assert snapshot["control_contribution"] == {"vx": 2.0, "vy": 0.0, "omega": 1.0}
-    assert snapshot["vision_contribution"] == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
-    assert snapshot["fusion_output"] == {
-        "vx": 1.5,
-        "vy": 0.25,
-        "omega": 1.0,
-    }
-    assert snapshot["control_input"] == {
-        "valid": True,
-        "vx": 2.0,
-        "vy": 0.0,
-        "omega": 1.0,
-        "timestamp_ms": 100,
-        "age_ms": 0,
-    }
-    assert snapshot["control_input_status"] == "active"
+    assert snapshot["state"] == "active"
+    assert snapshot["transport_command"] == {"vx": 1.5, "vy": 0.25, "omega": 1.0}
+    assert snapshot["uart8_input_status"] == "active"
     assert snapshot["vision_input"] == {
         "valid": True,
         "x": -0.5,
@@ -273,10 +324,80 @@ def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
     assert snapshot["last_error_text"] == "none"
 
 
+def test_assistant_follow_runtime_keeps_feedforward_when_vision_is_missing(
+    monkeypatch,
+) -> None:
+    """UART6 没有观测时，UART8 速度包要按共享底盘原生语义直接生效。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=2.0,vy=-1.0,omega=0.5\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert events[-1] == "transport_step"
+    assert runtime._transport_car.last_cmd == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
+    assert snapshot["state"] == "active"
+    assert snapshot["transport_command"] == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
+    assert snapshot["vision_input"]["valid"] is False
+    assert snapshot["vision_input_status"] == "idle"
+
+
+def test_assistant_follow_runtime_routes_velocity_back_through_transport_when_vision_is_missing(
+    monkeypatch,
+) -> None:
+    """无视觉时的速度写回仍要走共享底盘入口，而不是角色层直写内部状态。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=2.0,vy=-1.0,omega=0.5\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    routed = []
+
+    def routed_handle(line: str, source: str) -> None:
+        routed.append((source, line))
+        dispatched = set()
+        for fragment in line.split(","):
+            item = fragment.strip()
+            if not item or "=" not in item:
+                continue
+            key, value_text = item.split("=", 1)
+            key = key.strip()
+            if key not in ("vx", "vy", "omega"):
+                continue
+            runtime._transport_car.last_cmd[key] = float(value_text)
+            dispatched.add(key)
+        if dispatched:
+            runtime._transport_car._finalize_route(dispatched)
+
+    monkeypatch.setattr(runtime._transport_car, "_handle_uart_line", routed_handle)
+    runtime._transport_car.command_lock = True
+    runtime._transport_car.command_mode = "locked"
+
+    runtime.step()
+
+    assert routed == [("uart8", "vx=2.0,vy=-1.0,omega=0.5")]
+    assert runtime._transport_car.last_cmd == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
+    assert runtime._transport_car.command_lock is False
+    assert runtime._transport_car.command_mode == "none"
+
+
 def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart8_packet(
     monkeypatch,
 ) -> None:
-    """混合包里的速度字段要先被角色层截走，剩余字段再透传给共享底盘。"""
+    """混合包里的速度字段要先被角色层接管，再把修正后的速度交回共享底盘。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0,vy=2.0,rear=1\n"
@@ -295,6 +416,7 @@ def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart8_
     assert ("handle_uart_line", "uart8", "vx=1.0,vy=2.0,rear=1") not in events
     assert ("handle_uart_line", "uart8", "rear=1") in events
     assert runtime._transport_car.last_cmd == {"vx": 1.25, "vy": 2.5, "omega": 0.0}
+    assert runtime._transport_car.rear_only_mode is True
 
 
 def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
@@ -319,11 +441,10 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
 
     assert keep_running is False
     assert events[-1] == "transport_step"
-    assert runtime._transport_car.last_cmd == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert runtime._transport_car.last_cmd == {"x": 9.0, "y": 8.0, "angle": 7.0}
     assert snapshot["state"] == "idle"
-    assert snapshot["control_input_status"] == "error"
+    assert snapshot["uart8_input_status"] == "error"
     assert snapshot["vision_input_status"] == "error"
-    assert snapshot["control_input"]["valid"] is False
     assert snapshot["vision_input"]["valid"] is False
     assert (
         snapshot["last_error_text"]
@@ -417,13 +538,13 @@ def test_assistant_follow_runtime_builds_diagnostics_snapshot_on_demand(
     snapshot = runtime.build_follow_snapshot()
 
     assert len(build_calls) == 1
-    assert snapshot["fusion_output"] == {"vx": 1.5, "vy": 0.25, "omega": 1.0}
+    assert snapshot["transport_command"] == {"vx": 1.5, "vy": 0.25, "omega": 1.0}
 
 
 def test_assistant_follow_runtime_velocity_write_keeps_rear_mode_state(
     monkeypatch,
 ) -> None:
-    """rear 命令生效后，角色层每拍速度写回不能顺手清掉共存状态。"""
+    """rear 命令生效后，角色层速度写回要保住 rear_only_mode，并沿共享底盘速度入口执行。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"rear=1\nvx=1.0\n"
@@ -441,8 +562,8 @@ def test_assistant_follow_runtime_velocity_write_keeps_rear_mode_state(
     assert ("handle_uart_line", "uart8", "rear=1") in events
     assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": 0.25, "omega": 0.0}
     assert runtime._transport_car.rear_only_mode is True
-    assert runtime._transport_car.command_lock is True
-    assert runtime._transport_car.command_mode == "locked"
+    assert runtime._transport_car.command_lock is False
+    assert runtime._transport_car.command_mode == "none"
 
 
 def test_assistant_follow_runtime_step_avoids_public_vision_observation_copy(

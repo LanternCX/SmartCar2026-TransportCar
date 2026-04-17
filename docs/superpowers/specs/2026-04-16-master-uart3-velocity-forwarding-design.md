@@ -1,6 +1,7 @@
 # 2026-04-16 主车 UART3 速度转发角色层设计
 
-> 状态: archive
+> 状态: Archive
+> 当前约束以 `docs/developer/control.md`、`docs/developer/vision.md` 与 `.agents/skills/using-rules/references/strategy-and-control.md` 为准。
 
 ## 背景
 

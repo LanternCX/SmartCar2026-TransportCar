@@ -1,7 +1,8 @@
 # 辅车视觉层速度前馈与本地视觉闭环 Implementation Plan
 
-> 状态: Active
+> 状态: Archive
 > **给 Agent 工作者:** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务逐项实现。步骤统一使用复选框 `- [ ]` 维护执行状态。
+> 当前约束以 `docs/developer/control.md`、`docs/developer/vision.md` 与 `.agents/skills/using-rules/references/strategy-and-control.md` 为准。
 
 **Goal:** 在不改 `TransportCar` 与 `services/` 共享内核、也不改现有主辅通信协议的前提下, 让 `src/vision/assistant/` 正式接管辅车本地视觉与 `UART3` 上现有控制协议中的速度控制量, 在角色层完成速度融合并把结果接入辅车现有速度执行主链。
 
