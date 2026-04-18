@@ -21,7 +21,7 @@
   负责解析 `UART3` 上现有控制协议中的速度控制包, 维护最近一次有效控制量与超时判断。
 
 - Create: `src/vision/assistant/vision_input.py`
-  负责接入辅车本地视觉输入, 复用当前 `x=<x>,y=<y>` 解析语义并维护有效期。
+  负责接入辅车本地视觉输入, 解析当前 `vx=<vx>,vy=<vy>` 文本并维护有效期。
 
 - Create: `src/vision/assistant/velocity_fusion.py`
   负责把现有控制协议中的速度控制量与本地视觉纠偏统一为辅车最终速度目标, 同时产出最小状态。
@@ -190,7 +190,7 @@
 
 在 `tests/unit/test_assistant_vision_input.py` 中锁定以下行为:
 
-1. 只消费 `UART6` 上的 `x=<x>,y=<y>` 输入。
+1. 只消费 `UART6` 上的 `vx=<vx>,vy=<vy>` 输入。
 2. 合法输入会刷新最近一次视觉观测缓存。
 3. 超时后视觉观测会失效。
 4. 非法输入不会污染最近一次有效观测。
@@ -211,7 +211,7 @@
 在 `src/vision/assistant/vision_input.py` 中实现最小适配层。这里推荐复用现有的 `services.vision_protocol.VisionProtocol` 解析规则, 但要把消费边界留在 `vision/assistant`:
 
 1. 角色层负责决定哪些输入由本地视觉消费。
-2. 共享解析器只作为现成的 `x=<x>,y=<y>` 解析工具使用。
+2. 解析边界固定在角色层自己的 `vx=<vx>,vy=<vy>` 输入适配里。
 3. 视觉输入适配层负责输出当前观测、有效期和最小只读快照。
 
 - [ ] **Step 4: 重新运行本地视觉输入测试确认通过**

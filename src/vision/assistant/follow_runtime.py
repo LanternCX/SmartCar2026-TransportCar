@@ -3,19 +3,8 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
-import math
-
-from config import params as _params
-
 from vision.assistant.diagnostics import build_follow_snapshot
-from vision.assistant.vision_input import (
-    CONSUME_ACCEPTED as VISION_CONSUME_ACCEPTED,
-    CONSUME_INVALID as VISION_CONSUME_INVALID,
-    AssistantVisionInput,
-)
-
-
-V_CMD_MAX = getattr(_params, "V_CMD_MAX")
+from vision.assistant.velocity_packet import CONSUME_ACCEPTED, split_velocity_line
 
 
 def _default_now_ms() -> int:
@@ -32,31 +21,6 @@ def _default_now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _build_input_status(snapshot: dict, last_status: str) -> str:
-    """把缓存快照和最近状态收口成统一输入状态
-
-    @brief 优先保留 error / invalid 语义, 避免被空闲快照覆盖掉
-    """
-
-    if last_status == "error":
-        return "error"
-    if last_status == "invalid":
-        return "invalid"
-    if snapshot.get("valid"):
-        return "active"
-    if snapshot.get("timestamp_ms") is not None:
-        return "expired"
-    return "idle"
-
-
-def _is_velocity_fragment(fragment: str) -> bool:
-    text = fragment.strip()
-    if not text or "=" not in text:
-        return False
-    key = text.split("=", 1)[0].strip().lower()
-    return key in ("vx", "vy", "omega", "w")
-
-
 def _has_position_target_command(text: str) -> bool:
     for fragment in text.split(","):
         item = fragment.strip()
@@ -68,32 +32,13 @@ def _has_position_target_command(text: str) -> bool:
     return False
 
 
-def _canonical_velocity_key(key: str):
-    key = key.strip().lower()
-    if key == "vx":
-        return "vx"
-    if key == "vy":
-        return "vy"
-    if key == "omega" or key == "w":
-        return "omega"
-    return None
-
-
-def _clamp_command_value(value: float) -> float:
-    if value > V_CMD_MAX:
-        return float(V_CMD_MAX)
-    if value < -V_CMD_MAX:
-        return float(-V_CMD_MAX)
-    return float(value)
-
-
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观
 
     @brief 在共享底盘外层接管 UART8 / UART6 输入与角色层诊断
     """
 
-    def __init__(self, now_ms=None, uart6=None) -> None:
+    def __init__(self, now_ms=None, uart6=None, uart8=None) -> None:
         from core.runtime import TransportCar
 
         # 共享底盘实例
@@ -105,24 +50,28 @@ class AssistantFollowRuntime:
         self.imu = car.imu
         # 角色层毫秒时基
         self._now_ms = now_ms or _default_now_ms
-        # UART6 视觉输入层
-        self._vision_input = AssistantVisionInput(now_ms=self._now_ms)
-        # UART6 对象引用
-        self._uart6 = uart6
-        # UART8 未成行文本缓冲
-        self._rx_buf8 = ""
-        # UART6 未成行文本缓冲
-        self._rx_buf6 = ""
-        # UART8 输入状态标签
-        self._uart8_input_status = "idle"
-        # 最近一次前馈速度量
-        self._feedforward_velocity = None
-        # UART6 输入状态标签
-        self._vision_input_status = "idle"
         # 最近一次错误文本
         self._last_error_text = "none"
+        # 双路速度输入状态
+        self._inputs = {
+            "uart6": {
+                "uart": uart6,
+                "buffer": "",
+                "status": "idle",
+                "velocity": None,
+                "factory": "create_uart6",
+            },
+            "uart8": {
+                "uart": uart8,
+                "buffer": "",
+                "status": "idle",
+                "velocity": None,
+                "factory": "create_uart8",
+            },
+        }
         # 位置/角度透传保护标志
         self._hold_passthrough_targets = False
+        self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -158,8 +107,12 @@ class AssistantFollowRuntime:
         @brief 这一拍先接管两路输入, 再把前馈和视觉修正通过共享底盘入口写回
         """
 
-        self._process_uart8()
-        self._process_uart6()
+        uart6_has_velocity, uart6_has_position = self._process_input("uart6")
+        uart8_has_velocity, uart8_has_position = self._process_input("uart8")
+        if uart8_has_position or uart6_has_position:
+            self._hold_passthrough_targets = True
+        elif uart8_has_velocity or uart6_has_velocity:
+            self._hold_passthrough_targets = False
         self._write_effective_velocity()
 
     def build_follow_snapshot(self) -> dict:
@@ -168,176 +121,91 @@ class AssistantFollowRuntime:
         @brief 只有外部需要观察时才组织完整字典, 避免控制周期反复分配
         """
 
-        vision_snapshot = self._vision_input.snapshot()
-        vision_status = self._resolve_vision_input_status(vision_snapshot)
         return build_follow_snapshot(
             self._build_transport_command_snapshot(),
-            self._uart8_input_status,
-            vision_snapshot,
-            vision_status,
+            self._inputs["uart6"]["status"],
+            self._inputs["uart8"]["status"],
             self._last_error_text,
         )
 
-    def _process_uart8(self) -> None:
-        # UART8 同时承载速度字段和普通命令, 角色层只接管速度量的来源状态
-        uart8 = self._transport_car.uart8
-        buf_len = uart8.any()
+    def _ensure_uart_ready(self) -> None:
+        uart_bus = None
+        try:
+            import hardware.uart_bus as uart_bus  # type: ignore
+        except Exception:
+            uart_bus = None
+
+        for source, state in self._inputs.items():
+            if state["uart"] is not None:
+                continue
+            try:
+                if uart_bus is None:
+                    raise RuntimeError("uart_bus unavailable")
+                factory = getattr(uart_bus, state["factory"])
+                state["uart"] = factory()
+            except Exception as exc:
+                state["status"] = "error"
+                self._record_error("%s init failed" % source, exc)
+                return
+
+    def _process_input(self, source: str):
+        state = self._inputs[source]
+        uart = state["uart"]
+        if uart is None:
+            state["status"] = self._resolve_input_status(source)
+            return False, False
+
+        buf_len = uart.any()
         if not buf_len:
-            self._uart8_input_status = self._resolve_uart8_input_status()
-            return
+            state["status"] = self._resolve_input_status(source)
+            return False, False
+
+        has_velocity = False
+        has_position_passthrough = False
 
         try:
-            self._rx_buf8 += uart8.read(buf_len).decode()
+            state["buffer"] += uart.read(buf_len).decode()
+        except UnicodeDecodeError as exc:
+            state["status"] = "error"
+            self._record_error("%s decode failed" % source, exc)
+            return False, False
         except Exception as exc:
-            self._uart8_input_status = "error"
-            self._record_error("uart8 read failed", exc)
-            return
+            state["status"] = "error"
+            self._record_error("%s read failed" % source, exc)
+            return False, False
 
         while True:
-            idx = self._rx_buf8.find("\n")
+            idx = state["buffer"].find("\n")
             if idx == -1:
-                self._uart8_input_status = self._resolve_uart8_input_status()
-                return
-            line = self._rx_buf8[:idx].rstrip("\r").strip()
-            self._rx_buf8 = self._rx_buf8[idx + 1 :]
-            consume_result, passthrough_line = self._consume_uart8_line(line)
-            if consume_result == "accepted":
-                self._uart8_input_status = "active"
-                self._hold_passthrough_targets = False
+                state["status"] = self._resolve_input_status(source)
+                return has_velocity, has_position_passthrough
+            line = state["buffer"][:idx].rstrip("\r").strip()
+            state["buffer"] = state["buffer"][idx + 1 :]
+            consume_result, parsed, passthrough_line = split_velocity_line(line)
+            if consume_result == CONSUME_ACCEPTED and parsed is not None:
+                state["velocity"] = parsed
+                state["status"] = "active"
+                has_velocity = True
             elif consume_result == "invalid":
-                self._uart8_input_status = "invalid"
+                state["status"] = "invalid"
             else:
-                self._uart8_input_status = self._resolve_uart8_input_status()
+                state["status"] = self._resolve_input_status(source)
             if passthrough_line:
                 if _has_position_target_command(passthrough_line):
-                    self._hold_passthrough_targets = True
-                    if consume_result != "accepted":
-                        self._feedforward_velocity = None
-                self._transport_car._handle_uart_line(passthrough_line, source="uart8")
+                    has_position_passthrough = True
+                    if consume_result != CONSUME_ACCEPTED:
+                        state["velocity"] = None
+                self._transport_car._handle_uart_line(passthrough_line, source=source)
 
-    def _consume_uart8_line(self, line: str):
-        text = line.strip()
-        if not text or text.startswith("?"):
-            return "ignored", text
-
-        velocity_fragments = []
-        passthrough_fragments = []
-        for fragment in text.split(","):
-            item = fragment.strip()
-            if not item:
-                continue
-            if _is_velocity_fragment(item):
-                velocity_fragments.append(item)
-            else:
-                passthrough_fragments.append(item)
-
-        consume_result = "ignored"
-        if velocity_fragments:
-            consume_result = self._consume_velocity_fragments(
-                ",".join(velocity_fragments)
-            )
-
-        passthrough_line = None
-        if passthrough_fragments:
-            passthrough_line = ",".join(passthrough_fragments)
-        elif consume_result == "ignored":
-            passthrough_line = text
-        return consume_result, passthrough_line
-
-    def _consume_velocity_fragments(self, text: str) -> str:
-        parsed = {}
-        for fragment in text.split(","):
-            item = fragment.strip()
-            if not item or "=" not in item:
-                return "ignored"
-            key, value_text = item.split("=", 1)
-            canonical_key = _canonical_velocity_key(key)
-            if canonical_key is None:
-                return "ignored"
-            if canonical_key in parsed:
-                return "invalid"
-            try:
-                value = float(value_text.strip())
-            except ValueError:
-                return "invalid"
-            if not math.isfinite(value):
-                return "invalid"
-            parsed[canonical_key] = _clamp_command_value(value)
-
-        velocity = self._feedforward_velocity
-        if velocity is None:
-            velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-        else:
-            velocity = dict(velocity)
-        velocity.update(parsed)
-        self._feedforward_velocity = velocity
-        return "accepted"
-
-    def _process_uart6(self) -> None:
-        # UART6 只服务辅车角色层, 共享底盘不参与这一侧视觉输入消费
-        try:
-            uart6 = self._get_uart6()
-        except Exception as exc:
-            self._vision_input_status = "error"
-            self._record_error("uart6 init failed", exc)
-            return
-
-        if uart6 is None:
-            self._vision_input_status = self._resolve_vision_input_status()
-            return
-
-        buf_len = uart6.any()
-        if not buf_len:
-            self._vision_input_status = self._resolve_vision_input_status()
-            return
-
-        try:
-            self._rx_buf6 += uart6.read(buf_len).decode()
-        except UnicodeDecodeError as exc:
-            self._vision_input_status = "error"
-            self._record_error("uart6 decode failed", exc)
-            return
-        except Exception as exc:
-            self._vision_input_status = "error"
-            self._record_error("uart6 read failed", exc)
-            return
-
-        while True:
-            idx = self._rx_buf6.find("\n")
-            if idx == -1:
-                self._vision_input_status = self._resolve_vision_input_status()
-                return
-            line = self._rx_buf6[:idx].rstrip("\r").strip()
-            self._rx_buf6 = self._rx_buf6[idx + 1 :]
-            consume_result = self._vision_input.consume("UART6", line)
-            if consume_result == VISION_CONSUME_ACCEPTED:
-                self._vision_input_status = "accepted"
-            elif consume_result == VISION_CONSUME_INVALID:
-                self._vision_input_status = "invalid"
-
-    def _resolve_vision_input_status(self, snapshot=None) -> str:
-        if snapshot is None:
-            snapshot = self._build_vision_snapshot_fast()
-        return _build_input_status(snapshot, self._vision_input_status)
-
-    def _resolve_uart8_input_status(self) -> str:
-        if self._uart8_input_status == "error":
+    def _resolve_input_status(self, source: str) -> str:
+        state = self._inputs[source]
+        if state["status"] == "error":
             return "error"
-        if self._uart8_input_status == "invalid":
+        if state["status"] == "invalid":
             return "invalid"
-        if self._feedforward_velocity is not None:
+        if state["velocity"] is not None:
             return "active"
         return "idle"
-
-    def _build_vision_snapshot_fast(self) -> dict:
-        # 视觉侧同样只取有效性和时间戳, 完整快照只在对外诊断时构造
-        vision = self._vision_input.get_active_observation_ref()
-        if vision is not None:
-            return {"valid": True, "timestamp_ms": int(vision.timestamp_ms)}
-        cached = getattr(self._vision_input, "_last_observation")
-        if cached is None:
-            return {"valid": False, "timestamp_ms": None}
-        return {"valid": False, "timestamp_ms": int(cached.timestamp_ms)}
 
     def _record_error(self, prefix: str, exc: Exception) -> None:
         # 只保留最近一次错误文本, 方便现场联调判断先出问题的输入来源
@@ -347,19 +215,22 @@ class AssistantFollowRuntime:
     def _write_effective_velocity(self) -> None:
         if self._should_skip_velocity_write():
             return
-        velocity = self._feedforward_velocity
-        if velocity is None:
+        uart6_velocity = self._inputs["uart6"]["velocity"]
+        uart8_velocity = self._inputs["uart8"]["velocity"]
+        if uart6_velocity is None and uart8_velocity is None:
             return
+        if uart6_velocity is None:
+            uart6_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        if uart8_velocity is None:
+            uart8_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
 
-        vx = float(velocity.get("vx", 0.0))
-        vy = float(velocity.get("vy", 0.0))
-        omega = float(velocity.get("omega", 0.0))
-        vision = self._vision_input.get_active_observation_ref()
-        if vision is not None:
-            vx += float(vision.x)
-            vy += float(vision.y)
+        vx = float(uart6_velocity.get("vx", 0.0)) + float(uart8_velocity.get("vx", 0.0))
+        vy = float(uart6_velocity.get("vy", 0.0)) + float(uart8_velocity.get("vy", 0.0))
+        omega = float(uart6_velocity.get("omega", 0.0)) + float(
+            uart8_velocity.get("omega", 0.0)
+        )
         self._transport_car._handle_uart_line(
-            self._format_velocity_command(vx, vy, omega), source="uart8"
+            self._format_velocity_command(vx, vy, omega), source="assistant"
         )
 
     def _should_skip_velocity_write(self) -> bool:
@@ -382,20 +253,8 @@ class AssistantFollowRuntime:
         return "vx=%s,vy=%s,omega=%s" % (vx, vy, omega)
 
     def _build_transport_command_snapshot(self) -> dict:
-        # 角色层只导出共享底盘当前真实生效的命令状态, 不再额外维护 UART8 速度缓存
+        # 角色层只导出共享底盘当前真实生效的命令状态
         return dict(self._transport_car.last_cmd)
-
-    def _get_uart6(self):
-        # 需要读取视觉时再创建 UART6, 避免角色对象构造期碰硬件
-        uart6 = self._uart6
-        if uart6 is not None:
-            return uart6
-
-        from hardware.uart_bus import create_uart6
-
-        uart6 = create_uart6()
-        self._uart6 = uart6
-        return uart6
 
 
 def create_transport_car() -> AssistantFollowRuntime:

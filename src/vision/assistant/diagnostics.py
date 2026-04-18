@@ -6,25 +6,23 @@
 
 def build_follow_snapshot(
     transport_command: dict,
+    uart6_status: str,
     uart8_status: str,
-    vision_snapshot: dict,
-    vision_status: str,
     last_error_text: str,
 ) -> dict:
     """组织辅车角色层最小诊断快照
 
-    @brief 只导出当前共享底盘命令状态和本地观测状态, 不再暴露旧的融合语义
+    @brief 只导出当前共享底盘命令状态和两路速度输入状态
     """
 
     state = "idle"
-    if uart8_status == "active" or vision_status == "active":
+    if uart6_status == "active" or uart8_status == "active":
         state = "active"
 
     return {
         "state": state,
         "transport_command": transport_command,
+        "uart6_input_status": uart6_status,
         "uart8_input_status": uart8_status,
-        "vision_input": vision_snapshot,
-        "vision_input_status": vision_status,
         "last_error_text": last_error_text,
     }

@@ -1,17 +1,14 @@
-"""辅车 UART6 本地视觉输入层
+"""辅车视觉向量缓存层
 
 @file src/vision/assistant/vision_input.py
 """
 
-import math
-
-
-# 不属于视觉输入层的输入状态
-CONSUME_IGNORED = "ignored"
-# 有效视觉输入状态
-CONSUME_ACCEPTED = "accepted"
-# 命中视觉协议但内容非法的输入状态
-CONSUME_INVALID = "invalid"
+from vision.assistant.velocity_packet import (
+    CONSUME_ACCEPTED,
+    CONSUME_IGNORED,
+    CONSUME_INVALID,
+    split_velocity_line,
+)
 
 
 def _default_now_ms() -> int:
@@ -34,69 +31,73 @@ class VisionObservation:
     @brief 保存角色层可观察的本地视觉输入
     """
 
-    __slots__ = ("x", "y", "timestamp_ms")
+    __slots__ = ("x", "y", "omega", "timestamp_ms")
 
-    def __init__(self, x: float, y: float, timestamp_ms: int) -> None:
+    def __init__(self, x: float, y: float, omega: float, timestamp_ms: int) -> None:
         self.x = x
         self.y = y
+        self.omega = omega
         self.timestamp_ms = timestamp_ms
 
 
 class AssistantVisionInput:
-    """识别并缓存 UART6 上的 x/y 视觉观测
+    """识别并缓存指定来源上的视觉向量
 
-    @brief 严格按 x=<x>,y=<y> 协议接收本地视觉输入
+    @brief 以共享速度字段语义接收指定来源输入，并缓存成角色层观测
     """
 
-    __slots__ = ("_validity_ms", "_now_ms", "_last_observation")
+    __slots__ = ("_now_ms", "_last_observation", "_source_name")
 
-    def __init__(self, validity_ms: int = 150, now_ms=None) -> None:
-        # 视觉观测有效期, 单位 ms
-        self._validity_ms = int(validity_ms)
+    def __init__(self, now_ms=None, source_name: str = "UART8") -> None:
         # 毫秒时间函数
         self._now_ms = now_ms or _default_now_ms
         # 最近一次视觉观测缓存
         self._last_observation = None
+        # 当前视觉向量来源标签
+        self._source_name = str(source_name).strip().upper()
 
     def consume(self, source: str, line: str) -> str:
         """尝试消费一行视觉协议
 
-        @brief 只接受 UART6 上的 x=<x>,y=<y>, 避免把其他串口文本误识别成视觉输入
+        @brief 只消费配置来源上的速度字段，供独立文本入口把当前包解释为视觉贡献向量
         """
 
-        if source.strip().upper() != "UART6":
+        if source.strip().upper() != self._source_name:
             return CONSUME_IGNORED
 
-        text = line.strip()
-        if not text or text.startswith("?") or "=" not in text:
-            return CONSUME_IGNORED
+        consume_result, parsed, _passthrough_line = split_velocity_line(line)
+        if consume_result != CONSUME_ACCEPTED or parsed is None:
+            return consume_result
 
-        # 协议固定为两字段定序输入, 这里故意不放宽顺序和字段数量
-        parts = text.split(",")
-        if len(parts) == 1:
-            return CONSUME_IGNORED
-        if len(parts) != 2:
-            return CONSUME_INVALID
-
-        x_text, y_text = parts
-        if not x_text.startswith("x=") or not y_text.startswith("y="):
-            return CONSUME_INVALID
-
-        try:
-            x_value = float(x_text[2:])
-            y_value = float(y_text[2:])
-        except ValueError:
-            return CONSUME_INVALID
-
-        if not math.isfinite(x_value) or not math.isfinite(y_value):
-            return CONSUME_INVALID
-
-        self._last_observation = VisionObservation(
-            x=x_value,
-            y=y_value,
-            timestamp_ms=self._read_now_ms(),
-        )
+        self.record_velocity_vector(parsed)
         return CONSUME_ACCEPTED
+
+    def record_velocity_vector(self, parsed: dict) -> None:
+        """缓存一份已解析好的速度向量。
+
+        @brief 供角色运行时在共享解析边界之后直接写入视觉向量缓存
+        """
+
+        observation = self._last_observation
+        timestamp_ms = self._read_now_ms()
+        if observation is None:
+            self._last_observation = VisionObservation(
+                x=float(parsed.get("vx", 0.0)),
+                y=float(parsed.get("vy", 0.0)),
+                omega=float(parsed.get("omega", 0.0)),
+                timestamp_ms=timestamp_ms,
+            )
+            return
+
+        observation.x = float(parsed.get("vx", 0.0))
+        observation.y = float(parsed.get("vy", 0.0))
+        observation.omega = float(parsed.get("omega", 0.0))
+        observation.timestamp_ms = timestamp_ms
+
+    def has_observation(self) -> bool:
+        """返回是否已有视觉向量缓存。"""
+
+        return self._last_observation is not None
 
     def get_active_observation(self):
         """返回仍在有效期内的观测副本
@@ -110,6 +111,7 @@ class AssistantVisionInput:
         return VisionObservation(
             x=observation.x,
             y=observation.y,
+            omega=observation.omega,
             timestamp_ms=observation.timestamp_ms,
         )
 
@@ -120,10 +122,6 @@ class AssistantVisionInput:
         """
 
         observation = self._last_observation
-        if observation is None:
-            return None
-        if self._read_now_ms() - observation.timestamp_ms > self._validity_ms:
-            return None
         return observation
 
     def get_observation_age_ms(self):
@@ -137,6 +135,11 @@ class AssistantVisionInput:
             return None
         return max(0, self._read_now_ms() - observation.timestamp_ms)
 
+    def clear(self) -> None:
+        """清空当前缓存观测。"""
+
+        self._last_observation = None
+
     def snapshot(self) -> dict:
         """返回视觉缓存的只读快照
 
@@ -149,6 +152,7 @@ class AssistantVisionInput:
                 "valid": False,
                 "x": None,
                 "y": None,
+                "omega": None,
                 "timestamp_ms": None,
                 "age_ms": None,
             }
@@ -157,6 +161,7 @@ class AssistantVisionInput:
             "valid": self.get_active_observation() is not None,
             "x": observation.x,
             "y": observation.y,
+            "omega": observation.omega,
             "timestamp_ms": observation.timestamp_ms,
             "age_ms": self.get_observation_age_ms(),
         }
