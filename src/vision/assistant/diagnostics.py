@@ -8,6 +8,8 @@ def build_follow_snapshot(
     transport_command: dict,
     uart6_status: str,
     uart8_status: str,
+    uart6_velocity: dict,
+    uart8_velocity: dict,
     last_error_text: str,
 ) -> dict:
     """组织辅车角色层最小诊断快照
@@ -24,5 +26,7 @@ def build_follow_snapshot(
         "transport_command": transport_command,
         "uart6_input_status": uart6_status,
         "uart8_input_status": uart8_status,
+        "uart6_velocity": uart6_velocity,
+        "uart8_velocity": uart8_velocity,
         "last_error_text": last_error_text,
     }

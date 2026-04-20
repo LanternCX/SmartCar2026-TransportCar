@@ -409,10 +409,10 @@ def test_assistant_follow_runtime_keeps_last_uart8_velocity_without_old_timeout(
     assert runtime._transport_car.last_cmd == {"vx": 2.0, "vy": 0.0, "omega": 0.5}
 
 
-def test_assistant_follow_runtime_keeps_last_uart6_velocity_without_extra_timeout(
+def test_assistant_follow_runtime_keeps_last_uart6_vx_vy_without_extra_timeout(
     monkeypatch,
 ) -> None:
-    """UART6 速度输入也应持续生效，不能比 UART8 多一层额外过期。"""
+    """UART6 视觉输入也应持续保持上一包，但只保留自己的 vx 和 vy 贡献。"""
 
     class _FakeClock:
         def __init__(self, initial_ms: int = 0) -> None:
@@ -441,7 +441,7 @@ def test_assistant_follow_runtime_keeps_last_uart6_velocity_without_extra_timeou
     runtime.step()
 
     assert events[-1] == "transport_step"
-    assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.25, "omega": 1.0}
+    assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.25, "omega": 0.0}
 
 
 def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
@@ -466,6 +466,8 @@ def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
     assert snapshot["transport_command"] == {"vx": 1.5, "vy": 0.25, "omega": 1.0}
     assert snapshot["uart6_input_status"] == "active"
     assert snapshot["uart8_input_status"] == "active"
+    assert snapshot["uart6_velocity"] == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
+    assert snapshot["uart8_velocity"] == {"vx": 2.0, "vy": 0.0, "omega": 1.0}
     assert snapshot["last_error_text"] == "none"
 
 
@@ -548,10 +550,10 @@ def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforwar
     assert snapshot["uart8_input_status"] == "active"
 
 
-def test_assistant_follow_runtime_uart6_velocity_packet_matches_uart8_semantics(
+def test_assistant_follow_runtime_uart6_packet_only_contributes_vx_vy(
     monkeypatch,
 ) -> None:
-    """UART6 速度包应和 UART8 一样支持乱序、空格、缺省轴与 omega。"""
+    """UART6 视觉包只贡献 vx 和 vy，不能把自身 omega 带进最终输出。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b""
@@ -566,7 +568,7 @@ def test_assistant_follow_runtime_uart6_velocity_packet_matches_uart8_semantics(
     runtime.step()
 
     assert events[-1] == "transport_step"
-    assert runtime._transport_car.last_cmd == {"vx": -0.5, "vy": 0.25, "omega": -1.5}
+    assert runtime._transport_car.last_cmd == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
 
 
 def test_assistant_follow_runtime_matches_uart8_and_uart6_for_same_velocity_vector(
@@ -636,7 +638,7 @@ def test_assistant_follow_runtime_uart6_velocity_reclaims_control_after_position
 def test_assistant_follow_runtime_zero_feedforward_packet_clears_old_omega_before_adding_vision(
     monkeypatch,
 ) -> None:
-    """前馈归零后，视觉叠加结果不能继续带着旧的 omega 残留。"""
+    """前馈显式零包后，视觉叠加结果不能继续带着旧的 omega 残留。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=0,vy=0,omega=3\n"
@@ -648,13 +650,65 @@ def test_assistant_follow_runtime_zero_feedforward_packet_clears_old_omega_befor
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
 
     runtime.step()
-    uart8._buffer = b"vx=0,vy=0\n"
+    uart8._buffer = b"vx=0,vy=0,omega=0\n"
     uart6._buffer = b"vx=-4.6,vy=0\n"
 
     runtime.step()
 
     assert events[-1] == "transport_step"
     assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
+
+
+def test_assistant_follow_runtime_zero_vision_packet_only_clears_uart6_contribution(
+    monkeypatch,
+) -> None:
+    """UART6 显式零包只清视觉侧自己的 vx 和 vy，不能把 UART8 前馈贡献一起清掉。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=2.0,vy=1.0,omega=0.5\n"
+    uart6 = _FakeUart(["vx=0.5,vy=-0.25\n"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    after_both_active = dict(runtime._transport_car.last_cmd)
+    uart6._buffer = b"vx=0,vy=0\n"
+    runtime.step()
+    after_uart6_zero = dict(runtime._transport_car.last_cmd)
+
+    assert events[-1] == "transport_step"
+    assert after_both_active == {"vx": 2.5, "vy": 0.75, "omega": 0.5}
+    assert after_uart6_zero == {"vx": 2.0, "vy": 1.0, "omega": 0.5}
+
+
+def test_assistant_follow_runtime_async_inputs_keep_last_packet_without_waiting(
+    monkeypatch,
+) -> None:
+    """两路异步到包时不互相等待，UART6 保持上一包并与 UART8 新包直接裸相加。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b""
+    uart6 = _FakeUart(["vx=0.5,vy=-0.25,omega=9.0"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    after_uart6_only = dict(runtime._transport_car.last_cmd)
+    uart8._buffer = b"vx=2.0,vy=1.0,omega=0.5\n"
+    runtime.step()
+    after_uart8_updates = dict(runtime._transport_car.last_cmd)
+
+    assert events[-1] == "transport_step"
+    assert after_uart6_only == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
+    assert after_uart8_updates == {"vx": 2.5, "vy": 0.75, "omega": 0.5}
 
 
 def test_assistant_follow_runtime_routes_velocity_back_through_transport_when_vision_is_missing(
@@ -729,11 +783,11 @@ def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart8_
 def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart6_packet(
     monkeypatch,
 ) -> None:
-    """UART6 混合包也要先截取速度字段，再把其余字段透传到底盘。"""
+    """UART6 混合包也要先截取视觉速度字段，再把其余字段透传到底盘。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"vx=1.0,vy=2.0\n"
-    uart6 = _FakeUart(["vx=0.25,vy=0.5,rear=1"])
+    uart6 = _FakeUart(["vx=0.25,vy=0.5,omega=7.0,rear=1"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -745,7 +799,7 @@ def test_assistant_follow_runtime_intercepts_velocity_fields_inside_mixed_uart6_
 
     assert ("handle_uart_line", "uart6", "vx=0.25") not in events
     assert ("handle_uart_line", "uart6", "vy=0.5") not in events
-    assert ("handle_uart_line", "uart6", "vx=0.25,vy=0.5,rear=1") not in events
+    assert ("handle_uart_line", "uart6", "vx=0.25,vy=0.5,omega=7.0,rear=1") not in events
     assert ("handle_uart_line", "uart6", "rear=1") in events
     assert runtime._transport_car.last_cmd == {"vx": 1.25, "vy": 2.5, "omega": 0.0}
     assert runtime._transport_car.rear_only_mode is True

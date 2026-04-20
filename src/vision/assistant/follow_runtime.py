@@ -35,7 +35,7 @@ def _has_position_target_command(text: str) -> bool:
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART8 / UART6 输入与角色层诊断
+    @brief 在共享底盘外层接管 UART8 前馈输入、UART6 视觉输入与角色层诊断
     """
 
     def __init__(self, now_ms=None, uart6=None, uart8=None) -> None:
@@ -52,7 +52,7 @@ class AssistantFollowRuntime:
         self._now_ms = now_ms or _default_now_ms
         # 最近一次错误文本
         self._last_error_text = "none"
-        # 双路速度输入状态
+        # 双路输入状态: UART8 提供前馈, UART6 提供视觉速度
         self._inputs = {
             "uart6": {
                 "uart": uart6,
@@ -104,7 +104,7 @@ class AssistantFollowRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程
 
-        @brief 这一拍先接管两路输入, 再把前馈和视觉修正通过共享底盘入口写回
+        @brief 这一拍先接管前馈和视觉输入, 再把融合后的速度通过共享底盘入口写回
         """
 
         uart6_has_velocity, uart6_has_position = self._process_input("uart6")
@@ -125,6 +125,8 @@ class AssistantFollowRuntime:
             self._build_transport_command_snapshot(),
             self._inputs["uart6"]["status"],
             self._inputs["uart8"]["status"],
+            self._build_velocity_snapshot("uart6"),
+            self._build_velocity_snapshot("uart8"),
             self._last_error_text,
         )
 
@@ -183,7 +185,7 @@ class AssistantFollowRuntime:
             state["buffer"] = state["buffer"][idx + 1 :]
             consume_result, parsed, passthrough_line = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
-                state["velocity"] = parsed
+                state["velocity"] = self._normalize_input_velocity(source, parsed)
                 state["status"] = "active"
                 has_velocity = True
             elif consume_result == "invalid":
@@ -226,12 +228,21 @@ class AssistantFollowRuntime:
 
         vx = float(uart6_velocity.get("vx", 0.0)) + float(uart8_velocity.get("vx", 0.0))
         vy = float(uart6_velocity.get("vy", 0.0)) + float(uart8_velocity.get("vy", 0.0))
-        omega = float(uart6_velocity.get("omega", 0.0)) + float(
-            uart8_velocity.get("omega", 0.0)
-        )
+        omega = float(uart8_velocity.get("omega", 0.0))
         self._transport_car._handle_uart_line(
             self._format_velocity_command(vx, vy, omega), source="assistant"
         )
+
+    @staticmethod
+    def _normalize_input_velocity(source: str, parsed: dict) -> dict:
+        velocity = {
+            "vx": float(parsed.get("vx", 0.0)),
+            "vy": float(parsed.get("vy", 0.0)),
+            "omega": 0.0,
+        }
+        if source == "uart8":
+            velocity["omega"] = float(parsed.get("omega", 0.0))
+        return velocity
 
     def _should_skip_velocity_write(self) -> bool:
         if not self._hold_passthrough_targets:
@@ -255,6 +266,16 @@ class AssistantFollowRuntime:
     def _build_transport_command_snapshot(self) -> dict:
         # 角色层只导出共享底盘当前真实生效的命令状态
         return dict(self._transport_car.last_cmd)
+
+    def _build_velocity_snapshot(self, source: str) -> dict:
+        velocity = self._inputs[source]["velocity"]
+        if velocity is None:
+            return {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        return {
+            "vx": float(velocity.get("vx", 0.0)),
+            "vy": float(velocity.get("vy", 0.0)),
+            "omega": float(velocity.get("omega", 0.0)),
+        }
 
 
 def create_transport_car() -> AssistantFollowRuntime:
