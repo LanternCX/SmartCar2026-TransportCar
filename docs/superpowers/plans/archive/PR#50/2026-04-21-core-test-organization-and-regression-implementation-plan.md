@@ -2,7 +2,7 @@
 
 > 状态: Archive
 > **给 Agent 工作者:** 必须使用 `superpowers:subagent-driven-development` 按任务逐项实现, 步骤统一使用复选框 `- [ ]` 维护执行状态。
-> 当前约束以 `docs/superpowers/specs/2026-04-21-core-test-organization-and-regression-design.md`、`docs/developer/strategy.md`、`docs/developer/tasks.md` 与 `tests/README.md` 为准。
+> 当前约束以 `docs/superpowers/specs/archive/PR#50/2026-04-21-core-test-organization-and-regression-design.md`、`docs/developer/strategy.md`、`docs/developer/tasks.md` 与 `tests/README.md` 为准。
 
 **目标:** 把 `core` 测试整理成 `tests/unit/core/` 独立目录, 并在迁移现有散落测试的同时补齐 `src/core/runtime.py` 与 `src/core/diagnostics.py` 的系统回归测试和行为测试。
 

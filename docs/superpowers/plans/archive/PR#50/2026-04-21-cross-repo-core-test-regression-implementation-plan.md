@@ -2,7 +2,7 @@
 
 > 状态: Archive
 > **给 Agent 工作者:** 必须使用 `superpowers:subagent-driven-development` 按任务逐项实现, 步骤统一使用复选框 `- [ ]` 维护执行状态。
-> 当前约束以 `docs/superpowers/specs/2026-04-21-cross-repo-core-test-regression-design.md`、`tests/README.md` 与 `../SmartCar2026-Vision/AGENTS.md` 为准。
+> 当前约束以 `docs/superpowers/specs/archive/PR#50/2026-04-21-cross-repo-core-test-regression-design.md`、`tests/README.md` 与 `../SmartCar2026-Vision/AGENTS.md` 为准。
 
 **目标:** 为车端仓库与 Vision 仓库补上一层更适合后续 TDD 的核心回归测试和行为测试, 并增加最小通信协议对齐测试。
 

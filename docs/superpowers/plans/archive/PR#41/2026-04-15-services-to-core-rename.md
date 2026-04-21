@@ -1,5 +1,7 @@
 # services 改名为 core Implementation Plan
 
+> 状态: Archive
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将当前正式运行时包从 `src/services/` 硬切迁移到 `src/core/`，同步导入、测试和正式文档，不保留兼容层。

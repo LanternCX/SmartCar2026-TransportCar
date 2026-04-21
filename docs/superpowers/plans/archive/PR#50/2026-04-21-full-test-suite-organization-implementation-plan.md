@@ -2,7 +2,7 @@
 
 > 状态: Archive
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-> 当前约束以 `docs/superpowers/specs/2026-04-21-full-test-suite-organization-design.md`、`docs/developer/strategy.md`、`docs/developer/tasks.md`、`tests/README.md` 与 `tests/AGENTS.md` 为准。
+> 当前约束以 `docs/superpowers/specs/archive/PR#50/2026-04-21-full-test-suite-organization-design.md`、`docs/developer/strategy.md`、`docs/developer/tasks.md`、`tests/README.md` 与 `tests/AGENTS.md` 为准。
 
 **Goal:** 把整个车端仓库 `tests/` 目录按模块与契约类型重新分层, 并在搬迁过程中补齐少量关键回归测试和行为测试。
 

@@ -1,6 +1,6 @@
 # 主车 UART3 速度转发实现计划
 
-> 状态: archive
+> 状态: Archive
 > **For agentic workers:** 必须使用 `superpowers:subagent-driven-development` 执行本计划, 按任务逐项落地并在每个任务后完成自检。
 
 **目标:** 让主车角色层只响应 `UART3` 下行控制, 并把其中辅车已支持的 `vx / vy / omega` 速度字段经 `UART3` 上行转发给辅车, 同时保持主车本地控制链不变。

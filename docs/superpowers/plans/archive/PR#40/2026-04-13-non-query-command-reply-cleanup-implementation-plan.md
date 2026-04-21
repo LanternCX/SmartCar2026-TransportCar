@@ -1,5 +1,7 @@
 # 非查询命令回包收口实现计划
 
+> 状态: Archive
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 来执行本计划。步骤使用 checkbox (`- [ ]`) 语法跟踪。
 
 **Goal:** 删除当前运行时里非查询命令的主动提示回包, 同时保留查询回包和真正执行异常时的错误输出。

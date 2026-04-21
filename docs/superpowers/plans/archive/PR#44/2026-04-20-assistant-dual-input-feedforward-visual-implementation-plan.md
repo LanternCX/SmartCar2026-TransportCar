@@ -2,7 +2,7 @@
 
 > 状态: Archive
 > **给 Agent 工作者:** 必须使用 `superpowers:subagent-driven-development` 按任务逐项实现, 步骤统一使用复选框 `- [ ]` 维护执行状态。
-> 当前约束以 `docs/superpowers/specs/2026-04-20-assistant-dual-input-feedforward-visual-design.md`、`docs/developer/control.md`、`docs/developer/vision.md` 与 `.agents/skills/using-rules/references/strategy-and-control.md` 为准。
+> 当前约束以 `docs/superpowers/specs/archive/PR#44/2026-04-20-assistant-dual-input-feedforward-visual-design.md`、`docs/developer/control.md`、`docs/developer/vision.md` 与 `.agents/skills/using-rules/references/strategy-and-control.md` 为准。
 
 **目标:** 让辅车 `UART6` 作为视觉输入、`UART8` 作为前馈输入, 两路都保持上一包、异步读取, 并在每个控制拍对 `vx / vy` 做按轴裸相加后写回共享底盘速度入口。
 

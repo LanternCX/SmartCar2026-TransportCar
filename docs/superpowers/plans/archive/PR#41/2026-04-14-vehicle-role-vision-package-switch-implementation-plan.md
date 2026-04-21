@@ -1,5 +1,7 @@
 # 车号识别驱动的主辅车视觉包切换 Implementation Plan
 
+> 状态: Archive
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在不重构当前大文件与不引入全局共享可变状态的前提下, 让运行时先识别车号, 再切换主车或辅车的视觉包, 为后续辅车视觉校准与主车速度前馈留出稳定边界。

@@ -1,5 +1,7 @@
 # 双车协同搬运路线重规划文档改造实现计划
 
+> 状态: Archive
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 来执行本计划。步骤使用 checkbox (`- [ ]`) 语法跟踪。
 
 **Goal:** 在不改变现有开发文档架构的前提下，重写 `strategy / tasks / control / vision` 四份文档，使其统一表达新的双车协同搬运路线与项目演进方向。
@@ -26,7 +28,7 @@
 - Modify: `docs/developer/tasks.md`
 - Modify: `docs/developer/control.md`
 - Modify: `docs/developer/vision.md`
-- Reference: `docs/superpowers/specs/2026-04-14-dual-car-route-evolution-docs-design.md`
+- Reference: `docs/superpowers/specs/archive/PR#41/2026-04-14-dual-car-route-evolution-docs-design.md`
 
 ## 任务拆分
 
