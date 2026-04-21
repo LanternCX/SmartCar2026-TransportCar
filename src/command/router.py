@@ -169,6 +169,8 @@ class CommandRouter:
         response_uart = getattr(ctx, source, None)
         if response_uart is None and hasattr(ctx, "uart3"):
             response_uart = ctx.uart3
+        if response_uart is None and hasattr(ctx, "uart8"):
+            response_uart = ctx.uart8
         if handler:
             had_uart = hasattr(ctx, "_query_response_uart")
             previous_uart = getattr(ctx, "_query_response_uart", None)

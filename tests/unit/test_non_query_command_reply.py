@@ -26,6 +26,7 @@ class _CaptureUart:
 class _QueryContext:
     def __init__(self) -> None:
         self.uart3 = _CaptureUart()
+        self.uart8 = _CaptureUart()
         self.uart6 = _CaptureUart()
         self.rear_only_mode = False
         self._rear_mode_changed = False
@@ -34,7 +35,7 @@ class _QueryContext:
         return None
 
     def get_query_uart(self):
-        return getattr(self, "_query_response_uart", self.uart6)
+        return getattr(self, "_query_response_uart", self.uart3)
 
     def build_health_snapshot(self):
         return {

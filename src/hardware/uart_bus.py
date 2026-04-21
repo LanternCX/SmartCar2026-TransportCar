@@ -1,12 +1,13 @@
 """UART 初始化封装."""
+
 from machine import UART
 
 
 def create_uart3():
     """创建并初始化 UART3.
-    
-    UART3 用于数据采样和调试输出,波特率 115200.
-    
+
+    UART3 用于上游控制命令与查询回包,波特率 115200.
+
     返回:
         UART(2) 对象,已初始化至 115200 bps.
     """
@@ -15,11 +16,25 @@ def create_uart3():
     return uart3
 
 
+def create_uart8():
+    """创建并初始化 UART8.
+
+    UART8 用于主车到辅车的正式通信链路,波特率 115200.
+
+    返回:
+        UART(7) 对象,已初始化至 115200 bps.
+    """
+
+    uart8 = UART(7)
+    uart8.init(115200)
+    return uart8
+
+
 def create_uart6():
     """创建并初始化 UART6.
-    
-    UART6 用于命令接收和查询响应,波特率 115200.
-    
+
+    UART6 用于辅车本地视觉输入,波特率 115200.
+
     返回:
         UART(5) 对象,已初始化至 115200 bps.
     """

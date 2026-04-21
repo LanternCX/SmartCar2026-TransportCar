@@ -5,6 +5,7 @@
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -16,6 +17,7 @@ MAIN_PATH = PROJECT_ROOT / "src" / "main.py"
 def load_main_module():
     """按文件路径加载入口模块."""
 
+    sys.modules.pop("utils.startup_log", None)
     spec = spec_from_file_location("transport_main_entry", MAIN_PATH)
     assert spec is not None
     assert spec.loader is not None

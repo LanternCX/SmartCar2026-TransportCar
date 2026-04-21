@@ -1,9 +1,15 @@
-"""主车视觉运行入口."""
+"""主车视觉运行入口.
+
+@file src/vision/master/runtime.py
+"""
+
+from vision.master.forward_runtime import MasterForwardRuntime
 
 
-def create_transport_car():
-    """创建主车运行链当前使用的共享底盘实例."""
+def create_transport_car() -> MasterForwardRuntime:
+    """创建主车角色运行时对象.
 
-    from core.runtime import TransportCar
+    @brief 给角色分发入口返回主车专用运行时
+    """
 
-    return TransportCar()
+    return MasterForwardRuntime()

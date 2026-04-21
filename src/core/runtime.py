@@ -15,7 +15,7 @@ from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
 from utils.startup_log import startup_log
 from config import params as _params
-from hardware.uart_bus import create_uart3
+from hardware.uart_bus import create_uart3, create_uart8
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
@@ -120,8 +120,10 @@ class TransportCar:
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
 
-        # 串口(保持原波特率与编号)
+        # 上游控制串口
         self.uart3 = create_uart3()
+        # 主辅正式通信串口
+        self.uart8 = create_uart8()
         startup_log("transport_car", "uart ready")
 
         # IMU 初始化
@@ -771,7 +773,7 @@ class TransportCar:
     def _process_uart(self):
         """轮询控制串口:处理查询和运动指令.
 
-        UART3:收集调试命令(来自 RTT 或其他监控工具).
+        UART3:处理上游控制链路上的查询与控制命令.
         支持查询指令(前缀 "?")和控制指令(key=val 格式).
 
         异常时向串口回写错误信息.

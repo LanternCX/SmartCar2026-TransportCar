@@ -192,6 +192,7 @@ def _install_transport_car_stubs() -> None:
 
     hardware_uart_bus = ModuleType("hardware.uart_bus")
     setattr(hardware_uart_bus, "create_uart3", lambda: _CaptureUart())
+    setattr(hardware_uart_bus, "create_uart8", lambda: _CaptureUart())
     setattr(hardware_uart_bus, "create_uart6", lambda: _CaptureUart())
     sys.modules["hardware.uart_bus"] = hardware_uart_bus
 
@@ -328,10 +329,20 @@ def test_transport_car_unlock_completion_does_not_emit_prompt_text() -> None:
     assert car.uart3.messages == []
 
 
+def test_transport_car_default_query_uart_stays_on_uart3() -> None:
+    transport_car = _import_transport_car_module()
+    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
+    car.uart3 = _CaptureUart()
+    car.uart8 = _CaptureUart()
+
+    assert car.get_query_uart() is car.uart3
+
+
 def test_transport_car_process_uart_keeps_err_output() -> None:
     transport_car = _import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
     car.uart3 = _CaptureUart(incoming=b"boom\n", read_error=RuntimeError("boom"))
+    car.uart8 = _CaptureUart()
     car.uart6 = _CaptureUart()
     car.rx_buf3 = ""
     car.rx_buf6 = ""
