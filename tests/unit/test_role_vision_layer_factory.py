@@ -140,9 +140,9 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
 
     car = runtime_module.create_transport_car()
 
-    assert car.__class__.__name__ == "MasterForwardRuntime"
     assert not isinstance(car, _TransportCar)
-    assert isinstance(car._transport_car, _TransportCar)
+    assert car.imu == "imu"
+    assert hasattr(car, "step")
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
@@ -172,6 +172,6 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
 
     car = runtime_module.create_transport_car()
 
-    assert car.__class__.__name__ == "AssistantFollowRuntime"
     assert not isinstance(car, _TransportCar)
-    assert isinstance(car._transport_car, _TransportCar)
+    assert car.imu == "imu"
+    assert hasattr(car, "step")

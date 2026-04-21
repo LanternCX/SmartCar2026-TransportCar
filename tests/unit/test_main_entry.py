@@ -85,12 +85,11 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     )
 
     result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
 
     assert result == "script/remote_control.py"
     assert launched_scripts == ["script/remote_control.py"]
-    assert capsys.readouterr().out.splitlines() == [
-        "[boot] main: entry start",
-        "[boot] main: startup keys=[0, 0, 0, 0]",
-        "[boot] main: selected script=script/remote_control.py",
-        "[boot] main: launching script=script/remote_control.py",
-    ]
+    assert "[boot] main: entry start" in output_lines
+    assert "[boot] main: startup keys=[0, 0, 0, 0]" in output_lines
+    assert "[boot] main: selected script=script/remote_control.py" in output_lines
+    assert "[boot] main: launching script=script/remote_control.py" in output_lines

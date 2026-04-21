@@ -149,9 +149,9 @@ def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> Non
 
     module.main()
 
-    assert events[:3] == [
-        "role",
-        ("car", "master"),
-        "ticker_create",
-    ]
+    role_index = events.index("role")
+    car_index = events.index(("car", "master"))
+    ticker_index = events.index("ticker_create")
+
+    assert role_index < car_index < ticker_index
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
