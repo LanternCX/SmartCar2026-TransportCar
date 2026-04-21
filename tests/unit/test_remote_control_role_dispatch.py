@@ -155,3 +155,51 @@ def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> Non
 
     assert role_index < car_index < ticker_index
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
+
+
+def test_remote_control_main_returns_assistant_role_and_dispatches_it(
+    monkeypatch,
+) -> None:
+    """运行入口切到辅车角色时, 返回值和运行时装配都要保持同一个角色."""
+
+    module, _state = load_remote_control_module(monkeypatch)
+    events = []
+    setattr(module, "read_vehicle_role", lambda: "assistant")
+    setattr(
+        module,
+        "create_role_transport_car",
+        lambda role: (
+            events.append(("car", role))
+            or type(
+                "_Car",
+                (),
+                {
+                    "wheel_states": [{"encoder": "enc_l"}, {"encoder": "enc_r"}],
+                    "imu": "imu",
+                    "mark_tick": lambda self, _tick=None: None,
+                    "set_ticker": lambda self, _ticker: None,
+                    "step": lambda self: False,
+                },
+            )()
+        ),
+    )
+    setattr(
+        module,
+        "_create_ticker",
+        lambda: type(
+            "_Ticker",
+            (),
+            {
+                "capture_list": lambda self, *items: None,
+                "callback": lambda self, callback_fn: None,
+                "start": lambda self, tick_ms: None,
+            },
+        )(),
+    )
+    setattr(module, "startup_log", lambda *_args, **_kwargs: None)
+
+    role = module.main()
+
+    assert role == "assistant"
+    assert ("car", "assistant") in events
+    assert len(events) == 1

@@ -275,6 +275,27 @@ def test_master_forward_runtime_keeps_running_when_forward_write_fails(
     assert runtime._transport_car.last_exception_text == "uart8 forward write failed"
 
 
+def test_master_forward_runtime_keeps_later_lines_running_after_invalid_velocity(
+    monkeypatch,
+) -> None:
+    """同一批 UART3 输入里前一条非法速度失败后, 后续合法命令仍要继续转发."""
+
+    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart3._buffer = b"vx=oops\nvx=1.0,omega=0.5\n"
+    forward_runtime_module = import_master_module(
+        "vision.master.forward_runtime", monkeypatch
+    )
+
+    runtime = forward_runtime_module.MasterForwardRuntime()
+
+    runtime.step()
+
+    assert uart8.messages == ["vx=1.0,omega=0.5\r\n"]
+    assert ("handle_uart_line", "uart3", "vx=oops") in events
+    assert ("handle_uart_line", "uart3", "vx=1.0,omega=0.5") in events
+    assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=oops"
+
+
 def test_master_forward_runtime_rejects_non_finite_velocity_field(
     monkeypatch,
 ) -> None:

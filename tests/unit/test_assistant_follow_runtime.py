@@ -823,6 +823,31 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
     assert snapshot["last_error_text"] == "uart8 read failed: uart8 boom"
 
 
+def test_assistant_follow_runtime_keeps_uart8_effective_velocity_when_uart6_packet_is_invalid(
+    monkeypatch,
+) -> None:
+    """UART6 当前包非法时, UART8 的有效速度仍要继续走完整角色链路."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=1.5,omega=0.25\n"
+    uart6 = _FakeUart(["vx=0.5,vx=1.0"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    keep_running = runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert keep_running is False
+    assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": 0.0, "omega": 0.25}
+    assert ("handle_uart_line", "assistant", "vx=1.5,vy=0.0,omega=0.25") in events
+    assert snapshot["uart6_input_status"] == "invalid"
+    assert snapshot["uart8_input_status"] == "active"
+
+
 def test_assistant_follow_runtime_records_uart8_decode_errors_symmetrically(
     monkeypatch,
 ) -> None:
@@ -869,6 +894,35 @@ def test_assistant_follow_runtime_preserves_position_and_angle_passthrough_comma
     second_cmd = dict(runtime._transport_car.last_cmd)
 
     assert ("handle_uart_line", "uart8", "x=12.0,angle=45.0") in events
+    assert first_cmd["x"] == 12.0
+    assert first_cmd["angle"] == 45.0
+    assert "vx" not in first_cmd
+    assert second_cmd["x"] == 12.0
+    assert second_cmd["angle"] == 45.0
+    assert "vx" not in second_cmd
+
+
+def test_assistant_follow_runtime_preserves_uart6_position_passthrough_commands(
+    monkeypatch,
+) -> None:
+    """UART6 透传出位置目标后, 角色层也不能立刻再写回速度把它冲掉."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=1.0\n"
+    uart6 = _FakeUart(["vx=0.5,x=12.0,angle=45.0"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    first_cmd = dict(runtime._transport_car.last_cmd)
+    runtime.step()
+    second_cmd = dict(runtime._transport_car.last_cmd)
+
+    assert ("handle_uart_line", "uart6", "x=12.0,angle=45.0") in events
     assert first_cmd["x"] == 12.0
     assert first_cmd["angle"] == 45.0
     assert "vx" not in first_cmd

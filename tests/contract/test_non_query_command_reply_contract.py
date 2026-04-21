@@ -247,6 +247,7 @@ def _install_transport_car_stubs() -> None:
         "TICK_MS": 5,
         "MAX_DUTY": 1000,
         "TARGET_SPEED_MAX": 100.0,
+        "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
         "POS_TOLERANCE": 0.01,
@@ -293,6 +294,12 @@ def _import_transport_car_module():
     _install_transport_car_stubs()
     sys.modules.pop("core.runtime", None)
     return importlib.import_module("core.runtime")
+
+
+def _import_velocity_packet_module():
+    _install_transport_car_stubs()
+    sys.modules.pop("vision.assistant.velocity_packet", None)
+    return importlib.import_module("vision.assistant.velocity_packet")
 
 
 def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> None:
@@ -354,6 +361,32 @@ def test_transport_car_process_uart_keeps_err_output() -> None:
     assert len(car.uart3.messages) == 1
     assert car.uart3.messages[0].startswith("ERR ")
     assert "boom" in car.uart3.messages[0]
+
+
+def test_assistant_velocity_protocol_accepts_minimal_vx_vy_zero_frame() -> None:
+    """车端当前协议面应继续识别 vx/vy 零值帧."""
+    velocity_packet = _import_velocity_packet_module()
+
+    consume_result, parsed, passthrough_line = velocity_packet.split_velocity_line(
+        "vx=0,vy=0"
+    )
+
+    assert consume_result == velocity_packet.CONSUME_ACCEPTED
+    assert parsed == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert passthrough_line is None
+
+
+def test_assistant_velocity_protocol_keeps_follow_metadata_outside_current_mainline() -> None:
+    """旧的 follow 元信息不属于当前正式速度协议面."""
+    velocity_packet = _import_velocity_packet_module()
+
+    consume_result, parsed, passthrough_line = velocity_packet.split_velocity_line(
+        "follow=1,seq=3,valid=0,dx=0,dy=0"
+    )
+
+    assert consume_result == velocity_packet.CONSUME_IGNORED
+    assert parsed is None
+    assert passthrough_line == "follow=1,seq=3,valid=0,dx=0,dy=0"
 
 
 def test_protocol_doc_stops_describing_print_as_uart3_passthrough() -> None:
