@@ -1,0 +1,72 @@
+name: pr-template-check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const errors = [];
+
+            // 获取 PR 修改的文件列表
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            // 判断是否为板端相关变更
+            const boardPaths = ['src/', 'seekfree_demo/', '.mpy-cli.toml'];
+            const isBoardRelated = files.some(file =>
+              boardPaths.some(path => file.filename.startsWith(path))
+            );
+
+            if (!body.includes('## 说明')) {
+              errors.push('缺少 "## 说明" 部分');
+            } else {
+              const desc = body.split('## 说明')[1]?.split('##')[0]?.trim();
+              if (!desc || desc.length < 10) {
+                errors.push('"## 说明" 部分内容过短或为空');
+              }
+            }
+
+            if (!body.includes('## 概要')) {
+              errors.push('缺少 "## 概要" 部分');
+            } else {
+              const summary = body.split('## 概要')[1]?.split('##')[0]?.trim();
+              if (!summary || summary.length < 10) {
+                errors.push('"## 概要" 部分内容过短或为空');
+              }
+            }
+
+            if (!body.includes('## 检查清单')) {
+              errors.push('缺少 "## 检查清单" 部分');
+            } else {
+              const checklist = body.split('## 检查清单')[1]?.trim() || '';
+              if (!checklist.includes('- [x] 已人工审核 PR 内容')) {
+                errors.push('检查清单未勾选 "已人工审核 PR 内容"');
+              }
+              if (!checklist.includes('- [x] 已核对 AI 撰写的概要')) {
+                errors.push('检查清单未勾选 "已核对 AI 撰写的概要"');
+              }
+              if (!checklist.includes('- [x] 相关文档已更新（如有变更）')) {
+                errors.push('检查清单未勾选 "相关文档已更新（如有变更）"');
+              }
+              if (isBoardRelated && !checklist.includes('- [x] 已进行板端测试（如涉及上板端代码）')) {
+                errors.push('PR 涉及板端代码，检查清单未勾选 "已进行板端测试（如涉及上板端代码）"');
+              }
+            }
+
+            if (errors.length > 0) {
+              core.setFailed('PR 描述不符合模板要求：\n' + errors.join('\n'));
+            }
