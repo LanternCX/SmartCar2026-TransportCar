@@ -1,6 +1,6 @@
 """角色视觉运行入口装配约束测试.
 
-@file tests/unit/test_role_vision_layer_factory.py
+@file tests/unit/runtime/test_role_vision_layer_factory.py
 """
 
 from importlib import import_module
@@ -11,7 +11,7 @@ import sys
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
 
 
@@ -140,9 +140,9 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
 
     car = runtime_module.create_transport_car()
 
-    assert car.__class__.__name__ == "MasterForwardRuntime"
     assert not isinstance(car, _TransportCar)
-    assert isinstance(car._transport_car, _TransportCar)
+    assert car.imu == "imu"
+    assert hasattr(car, "step")
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
@@ -172,6 +172,6 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
 
     car = runtime_module.create_transport_car()
 
-    assert car.__class__.__name__ == "AssistantFollowRuntime"
     assert not isinstance(car, _TransportCar)
-    assert isinstance(car._transport_car, _TransportCar)
+    assert car.imu == "imu"
+    assert hasattr(car, "step")

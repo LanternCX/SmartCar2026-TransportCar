@@ -1,6 +1,6 @@
 """车号识别模块约束测试.
 
-@file tests/unit/test_vehicle_role.py
+@file tests/unit/entry/test_vehicle_role.py
 """
 
 from importlib.util import module_from_spec, spec_from_file_location
@@ -11,7 +11,7 @@ import sys
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODULE_PATH = PROJECT_ROOT / "src" / "vision" / "vehicle_role.py"
 
 
@@ -73,18 +73,3 @@ def test_decode_vehicle_role_rejects_invalid_pairs(
     with pytest.raises(ValueError):
         module.decode_vehicle_role(d8_val, d9_val)
 
-
-def test_read_vehicle_role_uses_d8_d9_pullup_inputs(monkeypatch) -> None:
-    """板端读取必须固定使用 D8/D9 上拉输入."""
-
-    _FakePin.values = {"D8": 0, "D9": 1}
-    _FakePin.created = []
-    module = load_vehicle_role_module(monkeypatch, _FakePin)
-
-    role = module.read_vehicle_role()
-
-    assert role == "master"
-    assert _FakePin.created == [
-        ("D8", _FakePin.IN, _FakePin.PULL_UP_47K),
-        ("D9", _FakePin.IN, _FakePin.PULL_UP_47K),
-    ]

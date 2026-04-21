@@ -1,4 +1,4 @@
-"""非查询命令回包行为契约测试."""
+"""`core.runtime` 测试公用桩与导入辅助."""
 
 import importlib
 import sys
@@ -6,18 +6,16 @@ from pathlib import Path
 from types import ModuleType
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src"
 if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-PROTOCOL_PATH = (
-    ROOT / ".agents" / "skills" / "using-rules" / "references" / "openart-protocol.md"
-)
 
+class CaptureUart:
+    """最小串口桩, 用于记录写入并可选注入读取异常."""
 
-class _CaptureUart:
     def __init__(self, incoming=b"", read_error=None) -> None:
         self.messages = []
         self._incoming = incoming
@@ -37,7 +35,9 @@ class _CaptureUart:
         return data
 
 
-class _DummyMotor:
+class DummyMotor:
+    """最小电机桩."""
+
     def __init__(self) -> None:
         self.duties = []
 
@@ -45,7 +45,9 @@ class _DummyMotor:
         self.duties.append(value)
 
 
-class _DummyPid:
+class DummyPid:
+    """最小 PID 桩."""
+
     def __init__(self) -> None:
         self.reset_count = 0
 
@@ -53,7 +55,34 @@ class _DummyPid:
         self.reset_count += 1
 
 
-def _install_transport_car_stubs() -> None:
+class RecordingController:
+    """记录目标输入的最小控制器桩."""
+
+    def __init__(self, return_value=0.0) -> None:
+        self.return_value = return_value
+        self.update_calls = []
+        self.reset_count = 0
+
+    def update(self, target, measured, dt_s):
+        self.update_calls.append((target, measured, dt_s))
+        return self.return_value
+
+    def reset(self) -> None:
+        self.reset_count += 1
+
+
+class DummyTicker:
+    """最小 ticker 桩."""
+
+    def __init__(self) -> None:
+        self.stop_count = 0
+
+    def stop(self) -> None:
+        self.stop_count += 1
+
+
+def install_transport_car_stubs() -> None:
+    """安装 `core.runtime` 在主机侧测试所需的最小依赖桩."""
     module_names = [
         "machine",
         "control.wheel",
@@ -191,9 +220,8 @@ def _install_transport_car_stubs() -> None:
     sys.modules["utils.startup_log"] = utils_startup_log
 
     hardware_uart_bus = ModuleType("hardware.uart_bus")
-    setattr(hardware_uart_bus, "create_uart3", lambda: _CaptureUart())
-    setattr(hardware_uart_bus, "create_uart8", lambda: _CaptureUart())
-    setattr(hardware_uart_bus, "create_uart6", lambda: _CaptureUart())
+    setattr(hardware_uart_bus, "create_uart3", lambda: CaptureUart())
+    setattr(hardware_uart_bus, "create_uart8", lambda: CaptureUart())
     sys.modules["hardware.uart_bus"] = hardware_uart_bus
 
     hardware_motors = ModuleType("hardware.motors")
@@ -201,9 +229,9 @@ def _install_transport_car_stubs() -> None:
         hardware_motors,
         "create_motors",
         lambda: {
-            "m": _DummyMotor(),
-            "l": _DummyMotor(),
-            "r": _DummyMotor(),
+            "m": DummyMotor(),
+            "l": DummyMotor(),
+            "r": DummyMotor(),
         },
     )
     sys.modules["hardware.motors"] = hardware_motors
@@ -247,6 +275,7 @@ def _install_transport_car_stubs() -> None:
         "TICK_MS": 5,
         "MAX_DUTY": 1000,
         "TARGET_SPEED_MAX": 100.0,
+        "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
         "POS_TOLERANCE": 0.01,
@@ -289,78 +318,17 @@ def _install_transport_car_stubs() -> None:
     sys.modules["config.params"] = config_params
 
 
-def _import_transport_car_module():
-    _install_transport_car_stubs()
+def import_transport_car_module():
+    """重新导入带测试桩的 `core.runtime` 模块."""
+    install_transport_car_stubs()
     sys.modules.pop("core.runtime", None)
     return importlib.import_module("core.runtime")
 
 
-def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> None:
-    transport_car = _import_transport_car_module()
+def make_minimal_transport_car(**attrs):
+    """构造未走初始化流程的最小 `TransportCar` 测试对象."""
+    transport_car = import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.uart3 = _CaptureUart()
-    car._router = object()
-    calls = []
-    car.apply_command = lambda line: calls.append(line)
-
-    car._handle_uart_line("rear=1", source="uart3")
-
-    assert calls == ["rear=1"]
-    assert car.uart3.messages == []
-
-
-def test_transport_car_unlock_completion_does_not_emit_prompt_text() -> None:
-    transport_car = _import_transport_car_module()
-    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.command_lock = True
-    car.command_mode = "locked"
-    car.last_cmd = {}
-    car.heading_est = 0.0
-    car.rear_only_mode = True
-    car.uart3 = _CaptureUart()
-    car.wheel_states = [{"motor": _DummyMotor(), "duty": 1.0}]
-    car.yaw_pid = _DummyPid()
-    car.yaw_integral = 1.0
-
-    car._check_unlock()
-
-    assert car.command_lock is False
-    assert car.rear_only_mode is False
-    assert car.uart3.messages == []
-
-
-def test_transport_car_default_query_uart_stays_on_uart3() -> None:
-    transport_car = _import_transport_car_module()
-    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.uart3 = _CaptureUart()
-    car.uart8 = _CaptureUart()
-
-    assert car.get_query_uart() is car.uart3
-
-
-def test_transport_car_process_uart_keeps_err_output() -> None:
-    transport_car = _import_transport_car_module()
-    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    car.uart3 = _CaptureUart(incoming=b"boom\n", read_error=RuntimeError("boom"))
-    car.uart8 = _CaptureUart()
-    car.uart6 = _CaptureUart()
-    car.rx_buf3 = ""
-    car.rx_buf6 = ""
-    car.last_exception_text = "none"
-
-    car._process_uart()
-
-    assert car.last_exception_text == "boom"
-    assert len(car.uart3.messages) == 1
-    assert car.uart3.messages[0].startswith("ERR ")
-    assert "boom" in car.uart3.messages[0]
-
-
-def test_protocol_doc_stops_describing_print_as_uart3_passthrough() -> None:
-    text = PROTOCOL_PATH.read_text(encoding="utf-8")
-    print_lines = [line for line in text.splitlines() if "`print" in line]
-
-    assert "透传到 RT1021 的 `UART3` 输出" not in text
-    assert print_lines
-    assert all("透传" not in line for line in print_lines)
-    assert all("UART3" not in line for line in print_lines)
+    for key, value in attrs.items():
+        setattr(car, key, value)
+    return transport_car, car
