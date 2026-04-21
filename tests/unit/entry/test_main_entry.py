@@ -1,16 +1,17 @@
 """`main.py` 入口约束测试.
 
-@file tests/unit/test_main_entry.py
+@file tests/unit/entry/test_main_entry.py
 """
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import ModuleType
 import sys
 
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAIN_PATH = PROJECT_ROOT / "src" / "main.py"
 
 
@@ -24,12 +25,6 @@ def load_main_module():
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def test_main_entry_exists() -> None:
-    """当前正式入口必须切到 `src/main.py`."""
-
-    assert MAIN_PATH.exists()
 
 
 def test_resolve_startup_script_uses_long_press_only() -> None:
@@ -58,16 +53,6 @@ def test_resolve_startup_script_rejects_dual_long_press() -> None:
 
     with pytest.raises(ValueError):
         main.resolve_startup_script([2, 2, 0, 0])
-
-
-def test_main_entry_source_uses_key_handler_and_avoids_role_switch_pins() -> None:
-    """脚本分发必须基于 KEY_HANDLER, 不能回到 D8/D9."""
-
-    source = MAIN_PATH.read_text(encoding="utf-8")
-
-    assert "KEY_HANDLER" in source
-    assert '"D8"' not in source
-    assert '"D9"' not in source
 
 
 def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:

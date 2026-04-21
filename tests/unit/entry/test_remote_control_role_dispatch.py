@@ -1,6 +1,6 @@
 """remote_control 角色分流启动壳测试.
 
-@file tests/unit/test_remote_control_role_dispatch.py
+@file tests/unit/entry/test_remote_control_role_dispatch.py
 """
 
 from importlib.util import module_from_spec, spec_from_file_location
@@ -9,7 +9,7 @@ from types import ModuleType
 import sys
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REMOTE_CONTROL_PATH = PROJECT_ROOT / "src" / "script" / "remote_control.py"
 
 

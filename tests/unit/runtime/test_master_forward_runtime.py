@@ -1,6 +1,6 @@
 """主车角色运行时最小行为测试.
 
-@file tests/unit/test_master_forward_runtime.py
+@file tests/unit/runtime/test_master_forward_runtime.py
 """
 
 from importlib import import_module
@@ -10,7 +10,7 @@ from typing import Optional
 import sys
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
 
 

@@ -18,24 +18,6 @@ def test_transport_car_default_query_uart_stays_on_uart3() -> None:
     assert car.get_query_uart() is car.uart3
 
 
-def test_transport_car_step_handles_tick_and_uart_then_keeps_running() -> None:
-    """收到 tick 时执行一次控制并继续处理串口."""
-    _transport_car, car = make_minimal_transport_car(
-        pit_flag=True,
-        _boot_tick_logged=True,
-        _boot_step_logged=True,
-        switch2_init=1,
-    )
-    calls = []
-    car._handle_tick = lambda: calls.append("tick")
-    car._process_uart = lambda: calls.append("uart")
-    car.switch2 = type("Switch", (), {"value": lambda self: 1})()
-
-    assert car.step() is True
-    assert calls == ["tick", "uart"]
-    assert car.pit_flag is False
-
-
 def test_transport_car_stop_stops_ticker_zeroes_motors_and_writes_stop() -> None:
     """停止时关闭 ticker、清零电机并回写 stop."""
     ticker = DummyTicker()

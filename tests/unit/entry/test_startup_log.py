@@ -1,6 +1,6 @@
 """启动日志工具测试.
 
-@file tests/unit/test_startup_log.py
+@file tests/unit/entry/test_startup_log.py
 """
 
 from utils.startup_log import startup_log

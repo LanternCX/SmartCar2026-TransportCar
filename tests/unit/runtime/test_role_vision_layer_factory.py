@@ -1,6 +1,6 @@
 """角色视觉运行入口装配约束测试.
 
-@file tests/unit/test_role_vision_layer_factory.py
+@file tests/unit/runtime/test_role_vision_layer_factory.py
 """
 
 from importlib import import_module
@@ -11,7 +11,7 @@ import sys
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
 
 

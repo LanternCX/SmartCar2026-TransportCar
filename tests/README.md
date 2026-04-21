@@ -2,12 +2,20 @@
 
 当前仓库的正式测试体系由本地自动测试组成，用于主机侧快速回归。
 
-- `tests/unit/`：主机侧快速回归测试
+- `tests/unit/`：主机侧行为测试与回归测试
+- `tests/unit/core/`：共享底盘与诊断层测试
+- `tests/unit/entry/`：入口、启动与角色分流测试
+- `tests/unit/runtime/`：角色运行时行为与装配测试
+- `tests/unit/command/`：命令路由与策略语义测试
+- `tests/unit/vision/`：车端视觉速度解析与辅助状态测试
+- `tests/contract/protocol/`：协议字段、报文格式与运行时协议契约测试
 
 ## 本地命令
 
 ```bash
 python3 -m pytest tests/unit -q
+python3 -m pytest tests/contract/protocol -q
+python3 -m pytest tests/unit tests/contract/protocol -q
 ```
 
 ## 板端确认
