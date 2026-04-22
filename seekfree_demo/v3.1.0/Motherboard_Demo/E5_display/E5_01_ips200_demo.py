@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 display 库
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的屏幕接口测试
 
@@ -75,26 +74,26 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     LCD_SPI_SELECT = 1
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("LCD_CS_PIN  : " + LCD_CS_PIN)
-print("LCD_RST_PIN : " + LCD_RST_PIN)
-print("LCD_DC_PIN  : " + LCD_DC_PIN)
-print("LCD_BLK_PIN : " + LCD_BLK_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_CS_PIN  : " + LCD_CS_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_RST_PIN : " + LCD_RST_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_DC_PIN  : " + LCD_DC_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_BLK_PIN : " + LCD_BLK_PIN)  # pyright: ignore[reportOperatorIssue]
 print("LCD_SPI_SELECT : " + str(LCD_SPI_SELECT))
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 定义片选引脚 拉高拉低一次 CS 片选确保屏幕通信时序正常
-cs = Pin(LCD_CS_PIN, Pin.OUT, value=True)
+cs = Pin(LCD_CS_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
 cs.high()
 cs.low()
 
 # 定义控制引脚
-rst = Pin(LCD_RST_PIN, Pin.OUT, value=True)
-dc  = Pin(LCD_DC_PIN , Pin.OUT, value=True)
-blk = Pin(LCD_BLK_PIN, Pin.OUT, value=True)
+rst = Pin(LCD_RST_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
+dc  = Pin(LCD_DC_PIN , Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
+blk = Pin(LCD_BLK_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
 
 # ------------------------------------------------------------------------------
 #   构造接口 用于构建一个 LCD_Drv 对象

@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 IMU660RX 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板与 IMU660RX 模块测试
 
@@ -47,10 +46,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 显示帮助信息
@@ -125,7 +124,7 @@ while True:
     # 如果拨码开关打开 对应引脚拉低 就退出循环
     # 这么做是为了防止写错代码导致异常 有一个退出的手段
     if switch2.value() != state2:
-        pit1.stop()
+        pit1.stop()  # pyright: ignore[reportUndefinedVariable]
         print("Test program stop.")
         break
     

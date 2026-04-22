@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 SPI 类接口
 # 使用 RT1021-MicroPython 核心板
 # 可以用杜邦线将 MOSI 与 MISO 短接测试 也可以接入传感器
@@ -39,10 +38,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # ------------------------------------------------------------------------------
@@ -71,7 +70,7 @@ elif BOARD_TYPE == 'RT1021_144P_2P54':
     SPI_SELECT = 1      # Select LPSPI2 Input id = 1
 elif BOARD_TYPE == 'RT1021_100P_2P54':
     SPI_SELECT = 0      # Select LPSPI1 Input id = 0
-spi = SPI(SPI_SELECT)
+spi = SPI(SPI_SELECT)  # pyright: ignore[reportArgumentType]
 
 # SPI 接口 :
 # ------------------------------------------------------------------------------

@@ -1,113 +1,198 @@
-from typing import Any, List, Optional, Sequence
+from typing import Optional, Sequence, overload
 from machine import Pin
 
-__all__ = ["LCD_Drv", "LCD"]
+__all__ = ["LCD_Drv", "LCD", "IPS200PRO", "IPS114"]
+
 
 class LCD_Drv:
     """LCD 驱动接口，负责底层 SPI 通信配置。"""
 
-    LCD200_TYPE: int  #: IPS200 屏幕类型
+    LCD200_TYPE: int
+    LCD114_TYPE: int
 
     def __init__(
         self, SPI_INDEX: int, BAUDRATE: int, DC_PIN: Pin, RST_PIN: Pin, LCD_TYPE: int
-    ) -> None:
-        """
-        Args:
-            SPI_INDEX: SPI 接口索引
-            BAUDRATE: SPI 速率 (e.g. 60000000)
-            DC_PIN: 命令/数据选择引脚
-            RST_PIN: 复位引脚
-            LCD_TYPE: 屏幕类型常量
-        """
-        ...
+    ) -> None: ...
+
 
 class LCD:
     """LCD 显示操作类。"""
 
-    def __init__(self, drv: LCD_Drv) -> None:
-        """
-        Args:
-            drv: LCD_Drv 驱动实例
-        """
-        ...
-
-    def color(self, pcolor: int, bgcolor: int) -> None:
-        """
-        设置全局前景色和背景色。
-
-        Args:
-            pcolor: 前景色 (RGB565)
-            bgcolor: 背景色 (RGB565)
-        """
-        ...
-
-    def mode(self, dir: int) -> None:
-        """
-        设置显示方向。
-
-        Args:
-            dir: 0:竖屏, 1:横屏, 2:竖屏180度, 3:横屏180度
-        """
-        ...
-
-    def clear(self, color: Optional[int] = None) -> None:
-        """
-        清屏。
-
-        Args:
-            color: 可选，清屏颜色。如果不填使用背景色。
-        """
-        ...
-
-    def str12(self, x: int, y: int, str: str, color: Optional[int] = None) -> None:
-        """
-        显示 12 号字体字符串。
-        """
-        ...
-
-    def str16(self, x: int, y: int, str: str, color: Optional[int] = None) -> None:
-        """
-        显示 16 号字体字符串。
-        """
-        ...
-
-    def str24(self, x: int, y: int, str: str, color: Optional[int] = None) -> None:
-        """
-        显示 24 号字体字符串。
-        """
-        ...
-
-    def str32(self, x: int, y: int, str: str, color: Optional[int] = None) -> None:
-        """
-        显示 32 号字体字符串。
-        """
-        ...
-
+    def __init__(self, drv: LCD_Drv) -> None: ...
+    def color(self, pcolor: int, bgcolor: int) -> None: ...
+    def mode(self, dir: int) -> None: ...
+    def clear(self, color: Optional[int] = None) -> None: ...
+    def str12(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str16(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str24(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str32(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
     def line(
         self, x1: int, y1: int, x2: int, y2: int, color: int, thick: int = 1
-    ) -> None:
-        """
-        画线。
-        Args:
-            x1, y1: 起点坐标
-            x2, y2: 终点坐标
-            color: 颜色
-            thick: 线宽
-        """
-        ...
-
+    ) -> None: ...
     def wave(
         self, x: int, y: int, width: int, height: int, data: Sequence[int], max: int
-    ) -> None:
-        """
-        显示波形。
+    ) -> None: ...
 
-        Args:
-            x: 起始显示 X 坐标
-            y: 起始显示 Y 坐标
-            width: 数据显示宽度
-            height: 数据显示高度
-            data: 数据对象 (List[int])
-            max: 数据最大值 (归一化用)
-        """
-        ...
+
+class IPS200PRO:
+    """IPS200PRO 屏幕组件库。"""
+
+    TITLE_LEFT: int
+    TITLE_RIGHT: int
+    TITLE_TOP: int
+    TITLE_BOTTOM: int
+
+    PAGE_ANIM_OFF: int
+    PAGE_ANIM_ON: int
+
+    FONT_SIZE_12: int
+    FONT_SIZE_14: int
+    FONT_SIZE_16: int
+    FONT_SIZE_18: int
+    FONT_SIZE_20: int
+    FONT_SIZE_22: int
+    FONT_SIZE_24: int
+    FONT_SIZE_26: int
+    FONT_SIZE_28: int
+    FONT_SIZE_30: int
+    FONT_SIZE_32: int
+    FONT_SIZE_34: int
+    FONT_SIZE_36: int
+    FONT_SIZE_40: int
+
+    COLOR_FOREGROUND: int
+    COLOR_BACKGROUND: int
+    COLOR_PAGE_SELECTED_TEXT: int
+    COLOR_PAGE_SELECTED_BG: int
+    COLOR_BORDER: int
+    COLOR_TABLE_SELECTED_BG: int
+    COLOR_MRTER_INDICATOR: int
+    COLOR_MRTER_TICKS: int
+    COLOR_CLOCK_HOUR: int
+    COLOR_CLOCK_MINUTE: int
+    COLOR_CLOCK_SECOND: int
+    COLOR_CLOCK_TICKS: int
+    COLOR_CALENDAR_YEAR: int
+    COLOR_CALENDAR_WEEK: int
+    COLOR_CALENDAR_TODAY: int
+
+    PORTRAIT: int
+    PORTRAIT_180: int
+    CROSSWISE: int
+    CROSSWISE_180: int
+
+    METER_SPEED: int
+    METER_ANGLE: int
+
+    CLOCK_ANALOG: int
+    CLOCK_DIGITAL: int
+
+    LABEL_SCROLL: int
+    LABEL_SCROLL_CIRCULAR: int
+
+    CALENDAR_CHINESE: int
+    CALENDAR_ENGLISH: int
+
+    def __init__(self, title_position: int = TITLE_BOTTOM, title_high: int = 30) -> None: ...
+
+    @staticmethod
+    def help() -> None: ...
+    def info(self) -> None: ...
+
+    def page_create(self, page_name: str) -> int: ...
+    @staticmethod
+    def help_page() -> None: ...
+    def page_name(self, page_id: int, page_name: str) -> None: ...
+    def page_switch(self, page_id: int, anim_enable: int = PAGE_ANIM_OFF) -> None: ...
+
+    @overload
+    @staticmethod
+    def rgb888_to_rgb565(rgb888: int) -> int: ...
+    @overload
+    @staticmethod
+    def rgb888_to_rgb565(red: int, green: int, blue: int) -> int: ...
+
+    def set_font(self, widgets_id: int, font: int) -> None: ...
+    def set_color(self, widgets_id: int, type: int, color: int) -> None: ...
+    def set_hidden(self, widgets_id: int, enable: bool) -> None: ...
+    def set_backlight(self, backlight: int) -> None: ...
+    def set_dir(self, dir: int) -> None: ...
+    def set_position(self, widgets_id: int, x: int, y: int) -> None: ...
+    def set_parent(self, widgets_id1: int, widgets_id2: int) -> None: ...
+
+    def container_create(self, x: int, y: int, width: int, height: int) -> int: ...
+    @staticmethod
+    def help_container() -> None: ...
+    def container_radius(self, container_id: int, border_width: int, radius: int) -> None: ...
+
+    @staticmethod
+    def help_label() -> None: ...
+    @staticmethod
+    def help_meter() -> None: ...
+    @staticmethod
+    def help_clock() -> None: ...
+    @staticmethod
+    def help_progress_bar() -> None: ...
+    @staticmethod
+    def help_calendar() -> None: ...
+
+    def system_time(self, hour: int, minute: int, second: int) -> None: ...
+    def system_date(self, year: int, month: int, day: int) -> None: ...
+
+    def calendar_create(self, x: int, y: int, width: int, height: int) -> int: ...
+    def calendar_locate(self, year: int, month: int, mode: int) -> None: ...
+
+    def label_create(
+        self, x: int, y: int, width: int, height: int, text: str = "", mode: int = 0
+    ) -> int: ...
+    def label_string(self, label_id: int, text: str) -> None: ...
+    def label_mode(self, label_id: int, mode: int) -> None: ...
+
+    def meter_create(self, x: int, y: int, width: int, type: int) -> int: ...
+    def meter_value(self, meter_id: int, value: int) -> None: ...
+
+    def clock_create(self, x: int, y: int, width: int, type: int) -> int: ...
+
+    def progress_bar_create(self, x: int, y: int, width: int, height: int) -> int: ...
+    def progress_bar_value(self, progress_bar_id: int, value1: int, value2: int) -> None: ...
+
+    def table_create(self, x: int, y: int, row: int, col: int) -> int: ...
+    @staticmethod
+    def help_table() -> None: ...
+    def table_string(self, table_id: int, row: int, col: int, text: str) -> None: ...
+    def table_col_width(self, table_id: int, col: int, width: int) -> None: ...
+    def table_select(self, table_id: int, row: int, col: int) -> None: ...
+
+    def waveform_create(self, x: int, y: int, width: int, height: int) -> int: ...
+    @staticmethod
+    def help_waveform() -> None: ...
+    def waveform_mode(self, waveform_id: int, enable: bool) -> None: ...
+    @overload
+    def waveform_value(
+        self, waveform_id: int, channel: int, value: int, color: int = 0xF800
+    ) -> None: ...
+    @overload
+    def waveform_value(
+        self, waveform_id: int, channel: int, data_list: Sequence[int], color: int = 0xF800
+    ) -> None: ...
+    def waveform_line(self, waveform_id: int, line_id: int, enable: bool = True) -> None: ...
+    def waveform_clear(self, waveform_id: int) -> None: ...
+
+
+class IPS114:
+    """IPS114 屏幕组件库。"""
+
+    def __init__(self) -> None: ...
+    def color(self, pcolor: int, bgcolor: int) -> None: ...
+    def mode(self, dir: int) -> None: ...
+    def clear(self, color: Optional[int] = None) -> None: ...
+    def str12(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str16(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str24(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def str32(self, x: int, y: int, str: str, color: Optional[int] = None) -> None: ...
+    def line(
+        self, x1: int, y1: int, x2: int, y2: int, color: int, thick: int = 1
+    ) -> None: ...
+    def wave(
+        self, x: int, y: int, width: int, height: int, data: Sequence[int], max: int
+    ) -> None: ...

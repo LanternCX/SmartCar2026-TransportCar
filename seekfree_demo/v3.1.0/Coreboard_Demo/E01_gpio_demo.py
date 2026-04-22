@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 Pin 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的蜂鸣器与拨码开关
 
@@ -53,9 +52,9 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     BEEP_PIN = 'C9'
 
 print("LED_PIN     : " + LED_PIN )
-print("SWITCH1_PIN : " + SWITCH1_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("BEEP_PIN    : " + BEEP_PIN)
+print("SWITCH1_PIN : " + SWITCH1_PIN)  # pyright: ignore[reportOperatorIssue]
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("BEEP_PIN    : " + BEEP_PIN)  # pyright: ignore[reportOperatorIssue]
 
 # ------------------------------------------------------------------------------
 #   构造接口 是标准 MicroPython 的 machine.Pin 模块
@@ -68,9 +67,9 @@ print("BEEP_PIN    : " + BEEP_PIN)
 #       return          返回内容    |   正常情况下返回对应 Pin 的对象
 # ------------------------------------------------------------------------------
 led     = Pin(LED_PIN , Pin.OUT, value = True)
-switch1 = Pin(SWITCH1_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
-beep    = Pin(BEEP_PIN, Pin.OUT, value = False)
+switch1 = Pin(SWITCH1_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
+beep    = Pin(BEEP_PIN, Pin.OUT, value = False)  # pyright: ignore[reportArgumentType]
 state1  = switch1.value()
 state2  = switch2.value()
 time.sleep_ms(500)

@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 IPS200PRO 库
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的屏幕接口测试
 
@@ -35,10 +34,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 IPS200PRO.help()
@@ -139,11 +138,11 @@ waveform_id1 = ips200pro.waveform_create(  0,   0, 240, 100)
 waveform_id2 = ips200pro.waveform_create(  0, 100, 240, 100)
 time.sleep_ms(500)
 
-wave_sin_1 = array('h', [0] * (250))
-wave_sin_2 = array('h', [0] * (200))
-wave_sin_3 = array('h', [0] * (150))
-wave_sin_4 = array('h', [0] * (100))
-wave_sin_5 = array('h', [0] * ( 50))
+wave_sin_1 = array('h', [0] * (250))  # pyright: ignore[reportUndefinedVariable]
+wave_sin_2 = array('h', [0] * (200))  # pyright: ignore[reportUndefinedVariable]
+wave_sin_3 = array('h', [0] * (150))  # pyright: ignore[reportUndefinedVariable]
+wave_sin_4 = array('h', [0] * (100))  # pyright: ignore[reportUndefinedVariable]
+wave_sin_5 = array('h', [0] * ( 50))  # pyright: ignore[reportUndefinedVariable]
 
 # 生成正弦波形数组
 #   generate_sine_wave(min_val, max_val, arr)
@@ -164,9 +163,9 @@ def generate_sine_wave (min_val, max_val, arr):
     # 生成正弦波数据
     for i in range(length):
         # 计算角度（0到2π之间的一个完整周期）
-        angle = 2 * math.pi * i / length
+        angle = 2 * math.pi * i / length  # pyright: ignore[reportUndefinedVariable]
         # 计算正弦值并缩放到指定范围
-        value = amplitude * math.sin(angle) + offset
+        value = amplitude * math.sin(angle) + offset  # pyright: ignore[reportUndefinedVariable]
         arr[i] = int(value)
 
 generate_sine_wave(  0, 100, wave_sin_1)

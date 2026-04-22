@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 smartcar 库的 encoder 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的编码器接口测试
 
@@ -76,14 +75,14 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     ENCODER2_PHASE_B_PIN = 'D3'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("ENCODER1_PHASE_A_PIN : " + ENCODER1_PHASE_A_PIN)
-print("ENCODER1_PHASE_B_PIN : " + ENCODER1_PHASE_B_PIN)
-print("ENCODER2_PHASE_A_PIN : " + ENCODER2_PHASE_A_PIN)
-print("ENCODER2_PHASE_B_PIN : " + ENCODER2_PHASE_B_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("ENCODER1_PHASE_A_PIN : " + ENCODER1_PHASE_A_PIN)  # pyright: ignore[reportOperatorIssue]
+print("ENCODER1_PHASE_B_PIN : " + ENCODER1_PHASE_B_PIN)  # pyright: ignore[reportOperatorIssue]
+print("ENCODER2_PHASE_A_PIN : " + ENCODER2_PHASE_A_PIN)  # pyright: ignore[reportOperatorIssue]
+print("ENCODER2_PHASE_B_PIN : " + ENCODER2_PHASE_B_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # ------------------------------------------------------------------------------
@@ -95,8 +94,8 @@ state2  = switch2.value()
 #       capture_div     模块索引    |   可选参数 关键字输入 设置采集触发分频
 #       return          返回内容    |   正常情况下返回对应 encoder 的对象
 # ------------------------------------------------------------------------------
-encoder_1 = encoder(ENCODER1_PHASE_A_PIN, ENCODER1_PHASE_B_PIN, True, capture_div = 10)
-encoder_2 = encoder(ENCODER2_PHASE_A_PIN, ENCODER2_PHASE_B_PIN)
+encoder_1 = encoder(ENCODER1_PHASE_A_PIN, ENCODER1_PHASE_B_PIN, True, capture_div = 10)  # pyright: ignore[reportArgumentType]
+encoder_2 = encoder(ENCODER2_PHASE_A_PIN, ENCODER2_PHASE_B_PIN)  # pyright: ignore[reportArgumentType]
 # 对应学习板的编码器接口 1/2
 
 # encoder 接口 :

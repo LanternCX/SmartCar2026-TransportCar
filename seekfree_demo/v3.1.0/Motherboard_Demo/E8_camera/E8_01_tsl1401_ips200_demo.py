@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 TSL1401 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板与 TSL1401 IPS200 模块测试
 
@@ -83,23 +82,23 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     LCD_SPI_SELECT = 1
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("LCD_CS_PIN  : " + LCD_CS_PIN)
-print("LCD_RST_PIN : " + LCD_RST_PIN)
-print("LCD_DC_PIN  : " + LCD_DC_PIN)
-print("LCD_BLK_PIN : " + LCD_BLK_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_CS_PIN  : " + LCD_CS_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_RST_PIN : " + LCD_RST_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_DC_PIN  : " + LCD_DC_PIN)  # pyright: ignore[reportOperatorIssue]
+print("LCD_BLK_PIN : " + LCD_BLK_PIN)  # pyright: ignore[reportOperatorIssue]
 print("LCD_SPI_SELECT : " + str(LCD_SPI_SELECT))
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
-cs = Pin(LCD_CS_PIN, Pin.OUT, value=True)
+cs = Pin(LCD_CS_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
 cs.high()
 cs.low()
-rst = Pin(LCD_RST_PIN, Pin.OUT, value=True)
-dc  = Pin(LCD_DC_PIN , Pin.OUT, value=True)
-blk = Pin(LCD_BLK_PIN, Pin.OUT, value=True)
+rst = Pin(LCD_RST_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
+dc  = Pin(LCD_DC_PIN , Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
+blk = Pin(LCD_BLK_PIN, Pin.OUT, value=True)  # pyright: ignore[reportArgumentType]
 drv = LCD_Drv(SPI_INDEX = 2, BAUDRATE = 60000000, DC_PIN = dc, RST_PIN = rst, LCD_TYPE = LCD_Drv.LCD200_TYPE)
 lcd = LCD(drv)
 lcd.color(0xFFFF, 0x0000)
@@ -183,8 +182,8 @@ while True:
         lcd.wave(0,  0, 128, 64, ccd_data1, max = 4095)
         lcd.wave(0, 64, 128, 64, ccd_data2, max = 4095)
         if BOARD_TYPE != 'RT1021_100P_2P54':
-            lcd.wave(0,128, 128, 64, ccd_data3, max = 4095)
-            lcd.wave(0,192, 128, 64, ccd_data4, max = 4095)
+            lcd.wave(0,128, 128, 64, ccd_data3, max = 4095)  # pyright: ignore[reportArgumentType]
+            lcd.wave(0,192, 128, 64, ccd_data4, max = 4095)  # pyright: ignore[reportArgumentType]
         
         ticker_flag = False
     

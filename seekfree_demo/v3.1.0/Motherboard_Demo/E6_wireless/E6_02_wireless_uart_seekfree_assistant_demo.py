@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 WIRELESS_UART 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板与无线串口模块测试
 # 当 SWITCH2 引脚电平出现变化时退出测试程序
@@ -56,10 +55,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 显示帮助信息
@@ -113,7 +112,7 @@ data_flag = wireless.data_analysis()
 data_wave = [0,0,0,0,0,0,0,0]
 for i in range(0,8):
     # get_data 获取调参通道数据 只有一个参数范围 [0, 7]
-    data_wave[i] = wireless.get_data(i)
+    data_wave[i] = wireless.get_data(i)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
 while True:
     time.sleep_ms(50)
@@ -125,7 +124,7 @@ while True:
         # 判断哪个通道有数据更新
         if (data_flag[i]):
             # 数据更新到缓冲
-            data_wave[i] = wireless.get_data(i)
+            data_wave[i] = wireless.get_data(i)  # pyright: ignore[reportArgumentType, reportCallIssue]
             # 将更新的通道数据输出到 Thonny 的控制台
             print("Data[{:<6}] updata : {:<.3f}.\r\n".format(i,data_wave[i]))
             

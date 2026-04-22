@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 TSL1401 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板与 TSL1401 IPS200PRO 模块测试
 
@@ -51,10 +50,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 ips200pro = IPS200PRO(IPS200PRO.TITLE_BOTTOM, 20)
@@ -150,8 +149,8 @@ while True:
             data_buffer1[i] = int(ccd_data1[i] / 40.95)
             data_buffer2[i] = int(ccd_data2[i] / 40.95)
             if BOARD_TYPE != 'RT1021_100P_2P54':
-                data_buffer3[i] = int(ccd_data3[i] / 40.95)
-                data_buffer4[i] = int(ccd_data4[i] / 40.95)
+                data_buffer3[i] = int(ccd_data3[i] / 40.95)  # pyright: ignore[reportOptionalSubscript]
+                data_buffer4[i] = int(ccd_data4[i] / 40.95)  # pyright: ignore[reportOptionalSubscript]
         
         ips200pro.waveform_value(waveform_id, 1, data_buffer1, 0xF800)
         ips200pro.waveform_value(waveform_id, 2, data_buffer2, 0x07E0)

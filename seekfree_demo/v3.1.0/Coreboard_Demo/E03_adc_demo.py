@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 ADC 类接口
 # 使用 RT1021-MicroPython 核心板
 # 搭配对应拓展学习板的电池电压检测电路
@@ -57,12 +56,12 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     INDUCTOR1_ADC_PIN = 'B14'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("POWER_ADC_PIN : " + ((POWER_ADC_PIN)if(None != POWER_ADC_PIN)else("N/A")))
-print("INDUCTOR1_ADC_PIN : " + INDUCTOR1_ADC_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("POWER_ADC_PIN : " + ((POWER_ADC_PIN)if(None != POWER_ADC_PIN)else("N/A")))  # pyright: ignore[reportOperatorIssue]
+print("INDUCTOR1_ADC_PIN : " + INDUCTOR1_ADC_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # ------------------------------------------------------------------------------
@@ -72,8 +71,8 @@ state2  = switch2.value()
 #       return          返回内容    |   正常情况下返回对应 ADC 通道的对象
 # ------------------------------------------------------------------------------
 if(None != POWER_ADC_PIN):
-    power_adc = ADC(POWER_ADC_PIN)
-inductor1_adc = ADC(INDUCTOR1_ADC_PIN)
+    power_adc = ADC(POWER_ADC_PIN)  # pyright: ignore[reportArgumentType]
+inductor1_adc = ADC(INDUCTOR1_ADC_PIN)  # pyright: ignore[reportArgumentType]
 
 # ADC 接口 :
 # ------------------------------------------------------------------------------

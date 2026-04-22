@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 PWM 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的舵机接口
 
@@ -53,11 +52,11 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SERVO1_PIN = 'C20'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("SERVO1_PIN  : " + SERVO1_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("SERVO1_PIN  : " + SERVO1_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 定义一个角度与占空比换算的函数 传入参数为 PWM 的频率和目标角度
@@ -85,7 +84,7 @@ duty = duty_angle(pwm_servo_hz, angle)
 #       duty            占空比值    |   必要参数 关键字输入 范围 [1, 65535]
 #       return          返回内容    |   正常情况下返回对应 PWM 通道的对象
 # ------------------------------------------------------------------------------
-pwm_servo = PWM(SERVO1_PIN, pwm_servo_hz, duty_u16 = duty)
+pwm_servo = PWM(SERVO1_PIN, pwm_servo_hz, duty_u16 = duty)  # pyright: ignore[reportArgumentType]
 
 # PWM 接口 :
 # ------------------------------------------------------------------------------

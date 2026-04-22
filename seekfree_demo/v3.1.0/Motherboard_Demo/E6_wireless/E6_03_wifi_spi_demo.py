@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 WIFI_SPI 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板与 WIFI_SPI 模块测试
 # 当 SWITCH2 引脚电平出现变化时退出测试程序
@@ -66,10 +65,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     SWITCH2_PIN = 'C19'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 while BOARD_TYPE == 'RT1021_100P_2P54':

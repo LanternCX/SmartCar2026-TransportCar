@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 BLDC_CONTROLLER 类接口
 # 使用 RT1021-MicroPython 核心板搭配 STC 无刷电调测试
 
@@ -56,12 +55,12 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     BLDC_CONTROLLER2_SELECT = BLDC_CONTROLLER.PWM_B27
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("KEY4_PIN    : " + KEY4_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("KEY4_PIN    : " + KEY4_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
-key4    = Pin(KEY4_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
+key4    = Pin(KEY4_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 显示帮助信息
@@ -87,8 +86,8 @@ dir = 1
 #       freq            信号频率    |   可选参数 关键字参数 PWM 频率 范围 50-300 默认 50
 #       highlevel_us    高电平值    |   可选参数 关键字参数 初始的高电平时长 范围 [1000-2000] 默认 1000
 # ------------------------------------------------------------------------------
-bldc1 = BLDC_CONTROLLER(BLDC_CONTROLLER1_SELECT, freq=300, highlevel_us = 1000)
-bldc2 = BLDC_CONTROLLER(BLDC_CONTROLLER2_SELECT, freq=300, highlevel_us = 1000)
+bldc1 = BLDC_CONTROLLER(BLDC_CONTROLLER1_SELECT, freq=300, highlevel_us = 1000)  # pyright: ignore[reportArgumentType]
+bldc2 = BLDC_CONTROLLER(BLDC_CONTROLLER2_SELECT, freq=300, highlevel_us = 1000)  # pyright: ignore[reportArgumentType]
 
 # BLDC_CONTROLLER 接口 :
 # ------------------------------------------------------------------------------

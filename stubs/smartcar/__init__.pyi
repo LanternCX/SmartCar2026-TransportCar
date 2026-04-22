@@ -92,12 +92,13 @@ class ADC_Group:
 class encoder:
     """正交编码器接口。"""
 
-    def __init__(self, phaseA: str, phaseB: str, invert: bool = False) -> None:
+    def __init__(self, phaseA: str, phaseB: str, invert: bool = False, capture_div: int = 1) -> None:
         """
         Args:
             phaseA: A 相引脚
             phaseB: B 相引脚
             invert: 是否反转方向
+            capture_div: 采集触发分频
         """
         ...
 

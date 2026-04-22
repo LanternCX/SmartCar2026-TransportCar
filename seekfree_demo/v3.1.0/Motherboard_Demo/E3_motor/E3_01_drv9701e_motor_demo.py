@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 seekfree 库的 MOTOR_CONTROLLER 类接口
 # 使用 RT1021-MicroPython 核心板搭配 DRV8701 双驱模块进行测试
 
@@ -54,10 +53,10 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     MOTOR_CHANNEL2_SELECT = MOTOR_CONTROLLER.PWM_C25_DIR_C27
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 显示帮助信息
@@ -76,8 +75,8 @@ motor_4 = None
 #       invert          反向设置    |   可选参数 关键字参数 是否反向 默认为 False 可以通过这个参数调整电机方向极性
 #       return          返回内容    |   正常情况下返回对应 MOTOR_CONTROLLER 的对象
 # ------------------------------------------------------------------------------
-motor_1 = MOTOR_CONTROLLER(MOTOR_CHANNEL1_SELECT, 13000, duty = 0, invert = False)
-motor_2 = MOTOR_CONTROLLER(MOTOR_CHANNEL2_SELECT, 13000, duty = 0, invert = True)
+motor_1 = MOTOR_CONTROLLER(MOTOR_CHANNEL1_SELECT, 13000, duty = 0, invert = False)  # pyright: ignore[reportArgumentType]
+motor_2 = MOTOR_CONTROLLER(MOTOR_CHANNEL2_SELECT, 13000, duty = 0, invert = True)  # pyright: ignore[reportArgumentType]
 if ((MOTOR_CHANNEL3_SELECT != None) and (MOTOR_CHANNEL4_SELECT != None)):
     motor_3 = MOTOR_CONTROLLER(MOTOR_CHANNEL3_SELECT, 13000, duty = 0, invert = False)
     motor_4 = MOTOR_CONTROLLER(MOTOR_CHANNEL4_SELECT, 13000, duty = 0, invert = True)
@@ -103,8 +102,8 @@ if ((MOTOR_CHANNEL3_SELECT != None) and (MOTOR_CHANNEL4_SELECT != None)):
 motor_1.info()
 motor_2.info()
 if ((MOTOR_CHANNEL3_SELECT != None) and (MOTOR_CHANNEL4_SELECT != None)):
-    motor_3.info()
-    motor_4.info()
+    motor_3.info()  # pyright: ignore[reportOptionalMemberAccess]
+    motor_4.info()  # pyright: ignore[reportOptionalMemberAccess]
 
 motor_dir = 1
 motor_duty = 0
@@ -128,8 +127,8 @@ while True:
     motor_1.duty(motor_duty)
     motor_2.duty(motor_duty)
     if ((MOTOR_CHANNEL3_SELECT != None) and (MOTOR_CHANNEL4_SELECT != None)):
-        motor_3.duty(motor_duty)
-        motor_4.duty(motor_duty)
+        motor_3.duty(motor_duty)  # pyright: ignore[reportOptionalMemberAccess]
+        motor_4.duty(motor_duty)  # pyright: ignore[reportOptionalMemberAccess]
     
     # 如果拨码开关打开 对应引脚拉低 就退出循环
     # 这么做是为了防止写错代码导致异常 有一个退出的手段

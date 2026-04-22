@@ -1,4 +1,3 @@
-
 # 本示例程序用于测试核心板的引脚是否正常
 
 # 使用 RT1021-MicroPython 核心板单独测试
@@ -105,7 +104,7 @@ led_state           = 0
 if BOARD_TYPE == 'RT1021_100P_2P54':
     # 挨个检查上拉输入时 每个引脚自身的电平状态 理论上什么都不接 上拉读取为高电平
     # 如果读取到低电平 那么就证明有问题
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.IN, pull = Pin.PULL_UP_22K, value = True)
         if pin_obj.value() != True:
             print(pin_index + " state error. Can not pull to VCC.\r\n")
@@ -116,7 +115,7 @@ if BOARD_TYPE == 'RT1021_100P_2P54':
 
     # 挨个检查开漏输出低时 每个引脚自身的电平状态 理论上什么都不接 此时输出低读取就为低
     # 如果读取到高电平 那么就证明有问题
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)
         if pin_obj.value() != False:
             print(pin_index + " state error. Can not pull to GND.\r\n")
@@ -126,20 +125,20 @@ if BOARD_TYPE == 'RT1021_100P_2P54':
         del(pin_obj)
 
     # 再将所有引脚设置为开漏输出高 避免原状态干扰
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         del(pin_obj)
 
     # 挨个检查开漏输出低时 其它引脚自身的电平状态 理论上其它引脚会维持之前的高电平
     # 如果读取到低电平 那么就证明有问题
     count = 0
-    while count < len(pin_list):
-        pin_obj1 = Pin(pin_list[count], Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)
-        for pin_index in pin_list:
-            if(pin_index != pin_list[count]):
+    while count < len(pin_list):  # pyright: ignore[reportArgumentType]
+        pin_obj1 = Pin(pin_list[count], Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)  # pyright: ignore[reportOptionalSubscript]
+        for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
+            if(pin_index != pin_list[count]):  # pyright: ignore[reportOptionalSubscript]
                 pin_obj2 = Pin(pin_index, Pin.IN, pull = Pin.PULL_UP_22K, value = True)
                 if pin_obj2.value() != True:
-                    print(pin_list[count] + " and " + pin_index + " may shortcircuit.\r\n")
+                    print(pin_list[count] + " and " + pin_index + " may shortcircuit.\r\n")  # pyright: ignore[reportOptionalSubscript]
                     while True:
                         time.sleep_ms(50)
                         led.toggle()
@@ -148,18 +147,18 @@ if BOARD_TYPE == 'RT1021_100P_2P54':
         count = count + 1
 
     # 再将所有引脚设置为开漏输出高
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         del(pin_obj)
 else:
     # 先将所有引脚设置为开漏输出高 避免原状态干扰
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         del(pin_obj)
 
     # 挨个检查开漏输出高时 每个引脚自身的电平状态 理论上什么都不接 上拉读取为高电平
     # 如果读取到低电平 那么就证明有问题
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         if pin_obj.value() != True:
             print(pin_index + " state error. Can not pull to VCC.\r\n")
@@ -170,7 +169,7 @@ else:
 
     # 挨个检查开漏输出低时 每个引脚自身的电平状态 理论上什么都不接 此时输出低读取就为低
     # 如果读取到高电平 那么就证明有问题
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)
         if pin_obj.value() != False:
             print(pin_index + " state error. Can not pull to GND.\r\n")
@@ -180,20 +179,20 @@ else:
         del(pin_obj)
 
     # 再将所有引脚设置为开漏输出高 避免原状态干扰
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         del(pin_obj)
 
     # 挨个检查开漏输出低时 其它引脚自身的电平状态 理论上其它引脚会维持之前的高电平
     # 如果读取到低电平 那么就证明有问题
     count = 0
-    while count < len(pin_list):
-        pin_obj1 = Pin(pin_list[count], Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)
-        for pin_index in pin_list:
-            if(pin_index != pin_list[count]):
+    while count < len(pin_list):  # pyright: ignore[reportArgumentType]
+        pin_obj1 = Pin(pin_list[count], Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = False)  # pyright: ignore[reportOptionalSubscript]
+        for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
+            if(pin_index != pin_list[count]):  # pyright: ignore[reportOptionalSubscript]
                 pin_obj2 = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
                 if pin_obj2.value() != True:
-                    print(pin_list[count] + " and " + pin_index + " may shortcircuit.\r\n")
+                    print(pin_list[count] + " and " + pin_index + " may shortcircuit.\r\n")  # pyright: ignore[reportOptionalSubscript]
                     while True:
                         time.sleep_ms(50)
                         led.toggle()
@@ -202,7 +201,7 @@ else:
         count = count + 1
 
     # 再将所有引脚设置为开漏输出高
-    for pin_index in pin_list:
+    for pin_index in pin_list:  # pyright: ignore[reportOptionalIterable]
         pin_obj = Pin(pin_index, Pin.OPEN_DRAIN, pull = Pin.PULL_UP, value = True)
         del(pin_obj)
 

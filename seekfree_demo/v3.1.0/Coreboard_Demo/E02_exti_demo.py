@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 machine 库的 Pin 类接口的外部中断
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的按键
 
@@ -46,12 +45,12 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     KEY1_PIN = 'D20'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("KEY1_PIN    : " + KEY1_PIN)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("KEY1_PIN    : " + KEY1_PIN)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
-key1    = Pin(KEY1_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
+key1    = Pin(KEY1_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # 新建变量用于 标识 计数 状态保存

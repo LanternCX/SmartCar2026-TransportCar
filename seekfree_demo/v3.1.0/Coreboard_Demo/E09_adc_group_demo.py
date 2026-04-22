@@ -1,4 +1,3 @@
-
 # 本示例程序演示如何使用 smartcar 库的 ADC_Group 类接口
 # 使用 RT1021-MicroPython 核心板搭配对应拓展学习板的四路电磁运放接口
 
@@ -59,12 +58,12 @@ elif BOARD_TYPE == 'RT1021_100P_2P54':
     ADC_GROUP_CHANNLE2 = 'B15'
 
 print("LED_PIN     : " + LED_PIN)
-print("SWITCH2_PIN : " + SWITCH2_PIN)
-print("ADC_GROUP_CHANNLE1 : " + ADC_GROUP_CHANNLE1)
-print("ADC_GROUP_CHANNLE2 : " + ADC_GROUP_CHANNLE2)
+print("SWITCH2_PIN : " + SWITCH2_PIN)  # pyright: ignore[reportOperatorIssue]
+print("ADC_GROUP_CHANNLE1 : " + ADC_GROUP_CHANNLE1)  # pyright: ignore[reportOperatorIssue]
+print("ADC_GROUP_CHANNLE2 : " + ADC_GROUP_CHANNLE2)  # pyright: ignore[reportOperatorIssue]
 
 led     = Pin(LED_PIN, Pin.OUT, value = True)
-switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)
+switch2 = Pin(SWITCH2_PIN, Pin.IN , pull = Pin.PULL_UP_47K)  # pyright: ignore[reportArgumentType]
 state2  = switch2.value()
 
 # ------------------------------------------------------------------------------
@@ -100,8 +99,8 @@ adc_group = ADC_Group(1)
 # ------------------------------------------------------------------------------
 
 # 将通道添加进来
-adc_group.addch(ADC_GROUP_CHANNLE1)
-adc_group.addch(ADC_GROUP_CHANNLE2)
+adc_group.addch(ADC_GROUP_CHANNLE1)  # pyright: ignore[reportArgumentType]
+adc_group.addch(ADC_GROUP_CHANNLE2)  # pyright: ignore[reportArgumentType]
 
 ticker_flag = False
 ticker_count = 0
