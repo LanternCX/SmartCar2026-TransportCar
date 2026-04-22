@@ -1,4 +1,7 @@
-from typing import Any, List, Optional, Union
+from array import array as array
+from typing import List, Optional, Union, overload
+from display import IPS114, IPS200PRO
+from machine import BOARD_TYPE, BOARD_VERSION
 
 __all__ = [
     "MOTOR_CONTROLLER",
@@ -10,6 +13,10 @@ __all__ = [
     "TSL1401",
     "WIRELESS_UART",
     "WIFI_SPI",
+    "IPS200PRO",
+    "IPS114",
+    "BOARD_TYPE",
+    "BOARD_VERSION",
 ]
 
 class MOTOR_CONTROLLER:
@@ -23,6 +30,10 @@ class MOTOR_CONTROLLER:
     PWM_C28_PWM_C29: int
     PWM_D4_PWM_D5: int
     PWM_D6_PWM_D7: int
+    PWM_C24_DIR_C26: int
+    PWM_C25_DIR_C27: int
+    PWM_C24_PWM_C26: int
+    PWM_C25_PWM_C27: int
 
     def __init__(
         self, index: int, freq: int, duty: int = 0, invert: bool = False
@@ -54,6 +65,8 @@ class BLDC_CONTROLLER:
 
     PWM_C25: int
     PWM_C27: int
+    PWM_B26: int
+    PWM_B27: int
 
     def __init__(self, index: int, freq: int = 50, highlevel_us: int = 1000) -> None:
         """
@@ -108,10 +121,27 @@ class KEY_HANDLER:
 class IMU660RX:
     """6轴 IMU 传感器 (LSM6DSO)。"""
 
-    def __init__(self, capture_div: int = 1) -> None:
+    # 型号类型常量
+    TYPE_AUTO: int
+    TYPE_RA: int
+    TYPE_RB: int
+    TYPE_RC: int
+
+    # 硬解频率常量
+    RATE_15HZ: int
+    RATE_30HZ: int
+    RATE_60HZ: int
+    RATE_120HZ: int
+    RATE_240HZ: int
+    RATE_480HZ: int
+    RATE_DISABLE: int
+
+    def __init__(self, capture_div: int = 1, imu_type: int = TYPE_AUTO, quar_rate: int = RATE_DISABLE) -> None:
         """
         Args:
             capture_div: 采集分频
+            imu_type: 模块型号
+            quar_rate: 硬解频率
         """
         ...
 
@@ -126,6 +156,8 @@ class IMU660RX:
         """
         ...
 
+    def get_euler(self) -> List[float]: ...
+    def get_quarternion(self) -> List[float]: ...
     def read(self) -> List[int]: ...
     def info(self) -> None: ...
     @staticmethod
@@ -210,12 +242,17 @@ class WIRELESS_UART:
         """发送虚拟示波器数据。"""
         ...
 
-    def send_ccd_image(self, index: int) -> None: ...
+    def send_ccd_image(self, index: int, color: int = 0x0000) -> None: ...
     def data_analysis(self) -> List[int]:
         """解析接收数据。"""
         ...
 
+    @overload
+    def get_data(self) -> List[float]: ...
+    @overload
     def get_data(self, index: int) -> float: ...
+    def receive_bytearray(self, data: Union[bytearray, memoryview, array], length: int) -> int: ...
+    def send_bytearray(self, data: Union[bytes, bytearray, memoryview, array], length: int) -> None: ...
     def info(self) -> None: ...
     @staticmethod
     def help() -> None: ...
@@ -247,9 +284,13 @@ class WIFI_SPI:
         d7: float = 0,
         d8: float = 0,
     ) -> None: ...
-    def send_ccd_image(self, index: int) -> None: ...
+    def send_ccd_image(self, index: int, color: int = 0x0000) -> None: ...
     def data_analysis(self) -> List[int]: ...
-    def get_data(self, index: int) -> float:
+    @overload
+    def get_data(self) -> List[float]: ...
+    @overload
+    def get_data(self, index: int) -> float: ...
+    def get_data(self, index: int = ...) -> Union[List[float], float]:
         """
         获取调参数据。
 
@@ -260,6 +301,8 @@ class WIFI_SPI:
         """
         ...
 
+    def receive_bytearray(self, data: Union[bytearray, memoryview, array], length: int) -> int: ...
+    def send_bytearray(self, data: Union[bytes, bytearray, memoryview, array], length: int) -> None: ...
     def info(self) -> None: ...
     @staticmethod
     def help() -> None: ...

@@ -1,7 +1,9 @@
-from typing import Any, Callable, Optional, Sequence, Union, List
+from typing import Any, Callable, List, Literal, Optional, Sequence, Union
 import os as os
 
 __all__ = [
+    "BOARD_TYPE",
+    "BOARD_VERSION",
     "execfile",
     "reset",
     "soft_reset",
@@ -23,6 +25,13 @@ __all__ = [
 """
 Machine 模块包含与特定硬件相关的函数。
 """
+
+# --- Board Constants ---
+BOARD_TYPE: Literal["RT1021_144P_BTB", "RT1021_144P_2P54", "RT1021_100P_2P54"]
+"""当前开发板类型，如 'RT1021_144P_BTB'。"""
+
+BOARD_VERSION: str
+"""当前开发板版本信息。"""
 
 # --- Global Functions in this port ---
 def execfile(filename: str) -> None:
