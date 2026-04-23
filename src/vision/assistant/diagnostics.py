@@ -14,7 +14,15 @@ def build_follow_snapshot(
 ) -> dict:
     """组织辅车角色层最小诊断快照
 
-    @brief 只导出当前共享底盘命令状态和两路速度输入状态
+    只导出当前共享底盘命令状态和两路速度输入状态
+
+    @param transport_command 共享底盘命令状态
+    @param uart6_status UART6 输入状态
+    @param uart8_status UART8 输入状态
+    @param uart6_velocity UART6 速度输入
+    @param uart8_velocity UART8 速度输入
+    @param last_error_text 最近错误文本
+    @return 诊断快照字典
     """
 
     state = "idle"

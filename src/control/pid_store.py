@@ -1,20 +1,29 @@
-"""PID 参数与辨识参数的持久化工具.
+"""@file pid_store.py
+@brief PID 参数与系统辨识参数的持久化工具
 
-提供保存和加载 PID 参数、系统辨识结果(增益和时间常数)的函数.
+提供 PID 参数(增益和辨识参数)的保存和加载功能, 支持跨运行的参数恢复
 """
 import io
 
 
 def save_pid_params(path, states, hardness):
-    """保存 PID 参数到文件.
-    
-    参数:
-        path: 文件路径.
-        states: 轮子状态列表.
-        hardness: 调谐硬度级别.
-    
-    副作用:
-        创建或覆盖指定文件.
+    """@brief 保存 PID 参数到文件
+
+    将所有轮子的系统增益、时间常数、PID 增益以及调谐硬度级别写入文件,
+    格式为文本行, 便于手动编辑和审查
+
+    @details
+    文件格式:
+    ```
+    hardness <级别>
+    <轮子名> <增益> <时间常数> <kp> <ki>
+    <其余轮子参数行>
+    ```
+    浮点数默认保留 6 位小数, 使用空格分隔
+
+    @param path 文件路径, 若文件已存在则覆盖
+    @param states 轮子状态列表, 每个状态字典应包含 "name"、"id_gain"、"id_tau"、"kp"、"ki" 字段
+    @param hardness 调谐硬度级别字符串, 如 "soft"、"hard" 等
     """
     f = io.open(path, "w")
     try:
@@ -30,14 +39,20 @@ def save_pid_params(path, states, hardness):
 
 
 def save_ident_params(path, states):
-    """保存系统辨识参数(增益和时间常数)到文件.
-    
-    参数:
-        path: 文件路径.
-        states: 轮子状态列表.
-    
-    副作用:
-        创建或覆盖指定文件;跳过增益或时间常数为 None 的轮子.
+    """@brief 保存系统辨识参数(增益和时间常数)到文件
+
+    仅保存系统增益和时间常数, 不包含 PID 增益, 用于独立存储辨识结果
+    仅保存已成功辨识的轮子(id_gain 和 id_tau 不为 None)
+
+    @details
+    文件格式:
+    ```
+    <轮子名> <增益> <时间常数>
+    <其余轮子参数行>
+    ```
+
+    @param path 文件路径
+    @param states 轮子状态列表, 每个状态字典应包含 "name"、"id_gain"、"id_tau" 字段
     """
     f = io.open(path, "w")
     try:
@@ -52,14 +67,21 @@ def save_ident_params(path, states):
 
 
 def load_ident_params(path):
-    """从文件加载系统辨识参数.
-    
-    参数:
-        path: 文件路径.
-    
-    返回:
-        字典,格式:{轮子名 -> {"gain": float, "tau": float}}.
-        若文件不存在或读取失败,返回空字典.
+    """@brief 从文件加载系统辨识参数
+
+    按行解析文件, 提取轮子名称、增益和时间常数, 忽略格式错误的行
+
+    @details
+    预期文件格式:
+    ```
+    <轮子名> <增益> <时间常数>
+    <其余轮子参数行>
+    ```
+    每行至少需要 3 个字段; 缺少字段或数值解析失败的行会被跳过
+
+    @param path 文件路径
+    @return 字典, 格式: {轮子名 -> {"gain": float, "tau": float}}
+            若文件不存在或无法读取, 返回空字典
     """
     meta = {}
     try:
@@ -89,18 +111,28 @@ def load_ident_params(path):
 
 
 def load_pid_params(path):
-    """从文件加载 PID 参数.
-    
-    参数:
-        path: 文件路径.
-    
-    返回:
-        字典,格式:
-        {
-            "hardness": str 或 None,
-            "params": {轮子名 -> {"gain", "tau", "kp", "ki"}}
-        }
-        若文件不存在或读取失败,返回默认空字典.
+    """@brief 从文件加载 PID 参数
+
+    解析包含硬度级别和各轮子参数的文件, 返回汇总字典
+    格式错误的行会被忽略, 允许部分数据缺失
+
+    @details
+    预期文件格式:
+    ```
+    hardness <级别>
+    <轮子名> <增益> <时间常数> <kp> <ki>
+    <其余轮子参数行>
+    ```
+    第一行可选: 若以 "hardness" 开头, 则提取硬度级别
+    数据行需要至少 5 个字段; 不足的行被跳过
+
+    @param path 文件路径
+    @return 字典, 格式
+            {
+                "hardness": 硬度级别字符串或 None,
+                "params": {轮子名 -> {"gain": float, "tau": float, "kp": float, "ki": float}}
+            }
+            若文件不存在或无法读取, 返回 {"hardness": None, "params": {}}
     """
     meta = {"hardness": None, "params": {}}
     try:

@@ -10,7 +10,9 @@ from vision.assistant.velocity_packet import CONSUME_ACCEPTED, split_velocity_li
 def _default_now_ms() -> int:
     """读取毫秒时间
 
-    @brief 同时兼容板端 ticks_ms 和主机测试环境
+    同时兼容板端 ticks_ms 和主机测试环境
+
+    @return 当前毫秒时间戳
     """
 
     import time
@@ -22,6 +24,12 @@ def _default_now_ms() -> int:
 
 
 def _has_translational_position_target_command(text: str) -> bool:
+    """检查文本中是否包含平移位置目标命令
+
+    @param text 待检查的命令文本
+    @return 是否包含平移位置目标命令
+    """
+
     for fragment in text.split(","):
         item = fragment.strip()
         if not item or "=" not in item:
@@ -33,6 +41,12 @@ def _has_translational_position_target_command(text: str) -> bool:
 
 
 def _has_angular_velocity_fragment(text: str) -> bool:
+    """检查文本中是否包含角速度字段
+
+    @param text 待检查的命令文本
+    @return 是否包含角速度字段
+    """
+
     for fragment in text.split(","):
         item = fragment.strip()
         if not item or "=" not in item:
@@ -46,24 +60,18 @@ def _has_angular_velocity_fragment(text: str) -> bool:
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART8 前馈输入、UART6 视觉输入与角色层诊断
+    在共享底盘外层接管 UART8 前馈输入、UART6 视觉输入与角色层诊断
     """
 
     def __init__(self, now_ms=None, uart6=None, uart8=None) -> None:
         from core.runtime import TransportCar
 
-        # 共享底盘实例
         car = TransportCar()
         self._transport_car = car
-        # 轮组状态视图
         self.wheel_states = car.wheel_states
-        # IMU 视图
         self.imu = car.imu
-        # 角色层毫秒时基
         self._now_ms = now_ms or _default_now_ms
-        # 最近一次错误文本
         self._last_error_text = "none"
-        # 双路输入状态: UART8 提供前馈, UART6 提供视觉速度
         self._inputs = {
             "uart6": {
                 "uart": uart6,
@@ -80,14 +88,15 @@ class AssistantFollowRuntime:
                 "factory": "create_uart8",
             },
         }
-        # 只对平移位置透传做保护, 单独角度透传允许继续写回线速度
         self._hold_passthrough_targets = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
 
-        @brief 角色层不改时钟节拍, tick 入口仍由共享底盘处理
+        角色层不改时钟节拍, tick 入口仍由共享底盘处理
+
+        @param tick 节拍值
         """
 
         self._transport_car.mark_tick(tick)
@@ -95,7 +104,9 @@ class AssistantFollowRuntime:
     def set_ticker(self, ticker_obj: object) -> None:
         """转发 ticker 对象
 
-        @brief 让共享底盘持有真实的控制周期驱动器
+        让共享底盘持有真实的控制周期驱动器
+
+        @param ticker_obj ticker 对象
         """
 
         self._transport_car.set_ticker(ticker_obj)
@@ -103,7 +114,9 @@ class AssistantFollowRuntime:
     def step(self) -> bool:
         """执行一拍辅车角色运行时
 
-        @brief 先跑角色层输入接管与观测记录, 再进入共享底盘的执行周期
+        先跑角色层输入接管与观测记录, 再进入共享底盘的执行周期
+
+        @return 是否继续运行
         """
 
         try:
@@ -115,7 +128,7 @@ class AssistantFollowRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程
 
-        @brief 这一拍先接管前馈和视觉输入, 再把融合后的速度通过共享底盘入口写回
+        这一拍先接管前馈和视觉输入, 再把融合后的速度通过共享底盘入口写回
         """
 
         uart6_has_velocity, uart6_has_translation_target = self._process_input("uart6")
@@ -129,7 +142,9 @@ class AssistantFollowRuntime:
     def build_follow_snapshot(self) -> dict:
         """返回辅车角色层最小诊断快照
 
-        @brief 只有外部需要观察时才组织完整字典, 避免控制周期反复分配
+        只有外部需要观察时才组织完整字典, 避免控制周期反复分配
+
+        @return 诊断快照字典
         """
 
         return build_follow_snapshot(
@@ -142,6 +157,8 @@ class AssistantFollowRuntime:
         )
 
     def _ensure_uart_ready(self) -> None:
+        """确保 UART 实例已就绪"""
+
         uart_bus = None
         try:
             import hardware.uart_bus as uart_bus  # type: ignore
@@ -162,6 +179,12 @@ class AssistantFollowRuntime:
                 return
 
     def _process_input(self, source: str):
+        """处理指定来源的输入数据
+
+        @param source 输入来源标识
+        @return 是否包含速度字段和是否包含平移位置目标的元组
+        """
+
         state = self._inputs[source]
         uart = state["uart"]
         if uart is None:
@@ -192,8 +215,8 @@ class AssistantFollowRuntime:
             if idx == -1:
                 state["status"] = self._resolve_input_status(source)
                 return has_velocity, has_translation_target_passthrough
-            line = state["buffer"][:idx].rstrip("\r").strip()
-            state["buffer"] = state["buffer"][idx + 1 :]
+            line = state["buffer"][: idx].rstrip("\r").strip()
+            state["buffer"] = state["buffer"][idx + 1 : ]
             has_omega_fragment = _has_angular_velocity_fragment(line)
             consume_result, parsed, passthrough_line = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
@@ -214,6 +237,12 @@ class AssistantFollowRuntime:
                 self._transport_car._handle_uart_line(passthrough_line, source=source)
 
     def _resolve_input_status(self, source: str) -> str:
+        """解析输入源的当前状态
+
+        @param source 输入来源标识
+        @return 输入源状态字符串
+        """
+
         state = self._inputs[source]
         if state["status"] == "error":
             return "error"
@@ -224,11 +253,20 @@ class AssistantFollowRuntime:
         return "idle"
 
     def _record_error(self, prefix: str, exc: Exception) -> None:
-        # 只保留最近一次错误文本, 方便现场联调判断先出问题的输入来源
+        """记录错误信息
+
+        只保留最近一次错误文本, 方便现场联调判断先出问题的输入来源
+
+        @param prefix 错误前缀
+        @param exc 异常对象
+        """
+
         self._last_error_text = "%s: %s" % (prefix, exc)
         self._transport_car.last_exception_text = self._last_error_text
 
     def _write_effective_velocity(self) -> None:
+        """将融合后的有效速度写入共享底盘"""
+
         if self._should_skip_velocity_write():
             return
         uart6_velocity = self._inputs["uart6"]["velocity"]
@@ -251,6 +289,14 @@ class AssistantFollowRuntime:
 
     @staticmethod
     def _normalize_input_velocity(source: str, parsed: dict, has_omega_fragment: bool) -> dict:
+        """规范化输入速度数据
+
+        @param source 输入来源标识
+        @param parsed 解析后的速度字典
+        @param has_omega_fragment 是否包含角速度字段
+        @return 规范化后的速度字典
+        """
+
         velocity = {
             "vx": float(parsed.get("vx", 0.0)),
             "vy": float(parsed.get("vy", 0.0)),
@@ -263,6 +309,11 @@ class AssistantFollowRuntime:
         return velocity
 
     def _should_skip_velocity_write(self) -> bool:
+        """判断是否应该跳过速度写入
+
+        @return 是否应该跳过
+        """
+
         if not self._hold_passthrough_targets:
             return False
 
@@ -279,15 +330,35 @@ class AssistantFollowRuntime:
 
     @staticmethod
     def _format_velocity_command(vx: float, vy: float, omega) -> str:
+        """格式化速度命令
+
+        @param vx X 方向速度
+        @param vy Y 方向速度
+        @param omega 角速度
+        @return 格式化后的命令字符串
+        """
+
         if omega is None:
             return "vx=%s,vy=%s" % (vx, vy)
         return "vx=%s,vy=%s,omega=%s" % (vx, vy, omega)
 
     def _build_transport_command_snapshot(self) -> dict:
-        # 角色层只导出共享底盘当前真实生效的命令状态
+        """构建共享底盘命令快照
+
+        角色层只导出共享底盘当前真实生效的命令状态
+
+        @return 命令快照字典
+        """
+
         return dict(self._transport_car.last_cmd)
 
     def _build_velocity_snapshot(self, source: str) -> dict:
+        """构建速度快照
+
+        @param source 输入来源标识
+        @return 速度快照字典
+        """
+
         velocity = self._inputs[source]["velocity"]
         if velocity is None:
             return {"vx": 0.0, "vy": 0.0, "omega": 0.0}
@@ -301,7 +372,9 @@ class AssistantFollowRuntime:
 def create_transport_car() -> AssistantFollowRuntime:
     """创建辅车角色运行时对象
 
-    @brief 给角色分发入口返回会进入控制周期的辅车运行时
+    给角色分发入口返回会进入控制周期的辅车运行时
+
+    @return 辅车运行时实例
     """
 
     return AssistantFollowRuntime()

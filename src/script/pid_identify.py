@@ -1,11 +1,13 @@
-"""PID 参数系统辨识脚本.
+"""PID 参数系统辨识脚本
 
-通过阶跃输入激励电机,采集速度响应,辨识一阶系统参数(增益、时间常数),
-最后计算最优 PI 增益并保存至 Flash.
+@file src/script/pid_identify.py
+@brief 通过阶跃激励来辨识电机的一阶系统参数, 并计算最优 PI 增益
+
+@details 通过阶跃输入激励电机, 采集速度响应, 辨识一阶系统参数 (增益、时间常数), 最后计算最优 PI 增益并保存至 Flash
 
 流程:
-1. 启动 PIT 中断(5ms 周期)
-2. 依次对三轮施加 IDENT_STEP_DUTY 占空比,持续 IDENT_DURATION_MS 毫秒
+1. 启动 PIT 中断 (5ms 周期)
+2. 依次对三轮施加 IDENT_STEP_DUTY 占空比, 持续 IDENT_DURATION_MS 毫秒
 3. 记录速度响应
 4. 对每轮进行一阶系统辨识
 5. 使用辨识结果反演计算 PI 增益
@@ -27,29 +29,29 @@ from control.ident_tools import (
 import gc
 
 
-# 采样/控制周期 (ms)
+# 采样/控制周期, 单位毫秒
 TICK_MS = 5
-# 占空比上限
+# PWM 占空比上限, 范围 0 ~ 10000
 MAX_DUTY = 10000
-# 辨识阶跃幅值
+# 辨识阶跃幅值, 单位为占空比值, 施加到电机的激励强度
 IDENT_STEP_DUTY = 5000
-# 辨识持续时间
+# 辨识持续时间, 单位毫秒, 每轮的激励持续时长
 IDENT_DURATION_MS = 4000
-# 环形缓存深度
+# 环形缓存深度, 用于存储速度采样历史
 IDENT_MAX_SAMPLES = min(IDENT_DURATION_MS // TICK_MS + 10, 600)
-# 参与辨识的电机
+# 参与辨识的电机列表 (中心、左、右)
 TARGET_WHEELS = ("m", "l", "r")
-# IMC 硬度(越小越激进)
+# IMC 硬度参数 (越小越激进), 影响 PI 增益计算的保守程度
 HARDNESS = "soft"
-# KP 安全上限(降低防止过激)
+# KP 安全上限, 防止计算结果过激
 KP_MAX = 200.0
-# KI 安全上限(降低防止过激)
+# KI 安全上限, 防止计算结果过激
 KI_MAX = 20000.0
-# 额外增益倍数(降低整体环路增益)
+# 额外增益倍数, 用于降低整体环路增益, 增加系统稳定性裕度
 GAIN_BOOST = 0.5
-# 保存位置
+# PID 参数保存路径, 用于后续控制环节加载
 PID_PARAM_FILE = "/flash/pid_params.txt"
-# 记录 tau/gain
+# 辨识结果记录路径, 用于记录时间常数和增益
 IDENT_RESULTS_FILE = "/flash/ident_params.txt"
 
 
@@ -109,13 +111,13 @@ ident_start_tick = None
 
 
 def pit_handler(tick):
-    """PIT 中断处理程序,标记进行一次控制周期.
-    
+    """PIT 中断处理程序,标记进行一次控制周期
+
     参数:
-        tick: 中断参数(未使用).
-    
+        tick: 中断参数(未使用)
+
     副作用:
-        设置全局 pit_flag 为 True,主循环据此执行一次辨识采样周期.
+        设置全局 pit_flag 为 True,主循环据此执行一次辨识采样周期
     """
     global pit_flag
     pit_flag = True

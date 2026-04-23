@@ -1,4 +1,7 @@
-"""dy 相对位移指令处理器:车体系 Y 方向位移暂存."""
+"""
+@file cmd_dy.py
+@brief dy 相对位移指令处理器: 车体系 Y 方向位移暂存
+"""
 
 from command.router import router
 
@@ -6,12 +9,15 @@ from command.router import router
 @router.command("dy")
 def handle(ctx, value):
     """
-    暂存车体系 Y 方向相对位移(m),允许新整包命令覆盖旧目标.
+    @brief 暂存车体系 Y 方向相对位移(m), 在整包路由完成后统一转换坐标系
 
-    实际的世界坐标转换由 TransportCar._finalize_route() 在所有 key 路由完成后统一执行.
+    @details
+    不直接修改 ctx.last_cmd, 而是将车体系相对位移值存储在 ctx._pending_dy 中
+    由 TransportCar._finalize_route() 在所有 key 路由完成后, 将车体系相对位移
+    转换为世界系坐标增量, 再应用到世界系目标位置, 实现坐标转换的原子性
+    新的整包命令可直接覆盖旧增量
 
-    参数:
-        ctx:   TransportCar 实例.
-        value: 车体系 Y 方向相对位移(m).
+    @param ctx   TransportCar 实例
+    @param value 车体系 Y 方向相对位移(m), 正值左移, 负值右移
     """
     ctx._pending_dy = value

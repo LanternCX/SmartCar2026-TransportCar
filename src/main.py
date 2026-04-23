@@ -1,23 +1,34 @@
-"""当前仓库正式单入口.
+"""当前仓库正式单入口
 
 @file src/main.py
 """
 
 from utils.startup_log import startup_log
 
+# 启动后等待时间, 等待外设稳定
 STARTUP_SETTLE_MS = 100
+# 按键扫描周期
 KEY_SCAN_PERIOD_MS = 10
+# 按键扫描超时时间
 KEY_SCAN_TIMEOUT_MS = 300
+# 长按判定值
 LONG_PRESS_VALUE = 2
 
+# PID 辨识脚本路径
 SCRIPT_PID_IDENTIFY = "script/pid_identify.py"
+# 陀螺仪校准脚本路径
 SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
+# 遥控主脚本路径
 SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
 
 
 def resolve_startup_script(key_states):
-    """根据按键状态决定启动脚本."""
+    """根据按键状态决定启动脚本
 
+    @param key_states 按键状态列表
+    @return 启动脚本路径
+    @throws ValueError C8 与 C9 同时长按时抛出
+    """
     key1_held = _read_key_state(key_states, 0) == LONG_PRESS_VALUE
     key2_held = _read_key_state(key_states, 1) == LONG_PRESS_VALUE
     if key1_held and key2_held:
@@ -30,16 +41,31 @@ def resolve_startup_script(key_states):
 
 
 def _read_key_state(key_states, index):
+    """读取指定索引的按键状态
+
+    @param key_states 按键状态列表
+    @param index 索引
+    @return 按键状态值, 越界时返回 0
+    """
     if index >= len(key_states):
         return 0
     return int(key_states[index])
 
 
 def _copy_key_states(key_states):
+    """复制按键状态列表
+
+    @param key_states 按键状态列表
+    @return 新的按键状态列表
+    """
     return [int(value) for value in key_states]
 
 
 def _sleep_ms(delay_ms):
+    """毫秒级延时, 兼容 MicroPython 和 CPython
+
+    @param delay_ms 延时毫秒数
+    """
     import time
 
     sleep_ms = getattr(time, "sleep_ms", None)
@@ -50,10 +76,17 @@ def _sleep_ms(delay_ms):
 
 
 def _noop_ticker_callback(_ticker_obj):
+    """空 ticker 回调函数, 用于初始化阶段占位"""
     return None
 
 
 def _scan_startup_key_states():
+    """扫描启动按键状态
+
+    在超时时间内轮询按键, 检测是否有长按事件
+
+    @return 按键状态快照列表
+    """
     from smartcar import ticker
     from seekfree import KEY_HANDLER
 
@@ -77,6 +110,10 @@ def _scan_startup_key_states():
 
 
 def _run_script(script_path):
+    """执行指定脚本
+
+    @param script_path 脚本路径
+    """
     import os
 
     os.chdir("/flash")
@@ -84,7 +121,7 @@ def _run_script(script_path):
 
 
 def main():
-    """入口阶段只负责按钮判定和脚本分发."""
+    """入口阶段只负责按钮判定和脚本分发"""
 
     startup_log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
