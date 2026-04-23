@@ -11,6 +11,24 @@ def _get_active_rear_flag(ctx) -> bool:
     return bool(getattr(ctx, "rear_only_mode", False))
 
 
+def _has_active_translation_target(ctx) -> bool:
+    """返回当前是否存在激活中的平移位置目标."""
+
+    getter = getattr(ctx, "_has_active_translation_target", None)
+    if getter is not None:
+        return bool(getter())
+    return ctx.last_cmd.get("x") is not None or ctx.last_cmd.get("y") is not None
+
+
+def _has_active_rotation_target(ctx) -> bool:
+    """返回当前是否存在激活中的转向位置目标."""
+
+    getter = getattr(ctx, "_has_active_rotation_target", None)
+    if getter is not None:
+        return bool(getter())
+    return ctx.last_cmd.get("angle") is not None
+
+
 def build_command_health_fields(ctx) -> dict:
     """构造命令相关健康字段."""
     return {
@@ -20,15 +38,17 @@ def build_command_health_fields(ctx) -> dict:
     }
 
 
-def _apply_pending_relative_targets(ctx) -> bool:
+def _apply_pending_relative_targets(ctx):
     """消费相对位姿暂存并写回绝对目标."""
-    is_position_packet = False
+
+    has_translation_position = False
+    has_rotation_position = False
 
     if getattr(ctx, "_pending_d_angle", None) is not None:
         ctx.last_cmd["angle"] = float(ctx.heading_target) + float(ctx._pending_d_angle)
         ctx.last_cmd.pop("omega", None)
         ctx._pending_d_angle = None
-        is_position_packet = True
+        has_rotation_position = True
 
     if (
         getattr(ctx, "_pending_dx", None) is not None
@@ -45,18 +65,24 @@ def _apply_pending_relative_targets(ctx) -> bool:
         ctx.last_cmd.pop("vy", None)
         ctx._pending_dx = None
         ctx._pending_dy = None
-        is_position_packet = True
+        has_translation_position = True
 
-    return is_position_packet
+    return has_translation_position, has_rotation_position
 
 
-def _clear_position_targets(ctx) -> None:
-    """清理位置式目标,让速度命令直接接管."""
+def _clear_translation_targets(ctx) -> None:
+    """清理平移位置式目标,让 `vx/vy` 直接接管."""
+
     ctx.last_cmd.pop("x", None)
     ctx.last_cmd.pop("y", None)
-    ctx.last_cmd.pop("angle", None)
     ctx._pending_dx = None
     ctx._pending_dy = None
+
+
+def _clear_rotation_targets(ctx) -> None:
+    """清理转向位置式目标,让 `omega/w` 直接接管."""
+
+    ctx.last_cmd.pop("angle", None)
     ctx._pending_d_angle = None
 
 
@@ -74,26 +100,32 @@ def finalize_command_route(ctx, dispatched, now_ms: int) -> None:
     if "angle" in dispatched or "yaw" in dispatched:
         ctx.last_cmd.pop("omega", None)
 
-    is_position_packet = _apply_pending_relative_targets(ctx)
-    if not is_position_packet:
-        is_position_packet = (
-            "x" in dispatched
-            or "y" in dispatched
-            or "angle" in dispatched
-            or "yaw" in dispatched
-        )
+    (
+        has_translation_position_packet,
+        has_rotation_position_packet,
+    ) = _apply_pending_relative_targets(ctx)
+    if not has_translation_position_packet:
+        has_translation_position_packet = "x" in dispatched or "y" in dispatched
+    if not has_rotation_position_packet:
+        has_rotation_position_packet = "angle" in dispatched or "yaw" in dispatched
 
-    is_velocity_packet = (
-        "vx" in dispatched
-        or "vy" in dispatched
-        or "omega" in dispatched
-        or "w" in dispatched
-    )
-    if is_velocity_packet:
-        _clear_position_targets(ctx)
-        ctx.command_lock = False
-        ctx.command_mode = "none"
-    elif is_position_packet or rear_mode_changed:
+    has_translation_velocity_packet = "vx" in dispatched or "vy" in dispatched
+    has_rotation_velocity_packet = "omega" in dispatched or "w" in dispatched
+
+    if has_translation_velocity_packet:
+        _clear_translation_targets(ctx)
+    if has_rotation_velocity_packet:
+        _clear_rotation_targets(ctx)
+
+    has_active_translation_target = _has_active_translation_target(ctx)
+    has_active_rotation_target = _has_active_rotation_target(ctx)
+    has_active_pose_target = has_active_translation_target or has_active_rotation_target
+
+    has_new_pose_target = (
+        has_translation_position_packet and has_active_translation_target
+    ) or (has_rotation_position_packet and has_active_rotation_target)
+
+    if has_new_pose_target or rear_mode_changed:
         if pending_lock is None:
             should_lock = True
         else:
@@ -104,6 +136,8 @@ def finalize_command_route(ctx, dispatched, now_ms: int) -> None:
             ctx.lock_start_time = int(now_ms)
         else:
             ctx.command_mode = "unlocked"
+    elif has_active_pose_target:
+        ctx.command_mode = "locked" if ctx.command_lock else "unlocked"
     else:
         ctx.command_lock = False
         ctx.command_mode = "none"
@@ -112,7 +146,7 @@ def finalize_command_route(ctx, dispatched, now_ms: int) -> None:
     if hasattr(ctx, "last_rear_mode"):
         ctx.last_rear_mode = bool(getattr(ctx, "rear_only_mode", False))
 
-    if not is_position_packet and hasattr(ctx, "_inverse_kinematics"):
+    if not has_active_pose_target and hasattr(ctx, "_inverse_kinematics"):
         vx_val = ctx.last_cmd.get("vx") or 0.0
         vy_val = ctx.last_cmd.get("vy") or 0.0
         omega_val = ctx.last_cmd.get("omega") or 0.0
