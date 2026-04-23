@@ -81,7 +81,7 @@ def test_assistant_follow_runtime_uses_vision_only_when_feedforward_is_missing(
     runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
-    assert ("handle_uart_line", "assistant", "vx=0.5,vy=-0.25,omega=0.0") in events
+    assert ("handle_uart_line", "assistant", "vx=0.5,vy=-0.25") in events
     assert runtime._transport_car.last_cmd == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
     assert snapshot["state"] == "active"
     assert snapshot["transport_command"] == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
@@ -107,7 +107,7 @@ def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforwar
     runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
-    assert ("handle_uart_line", "assistant", "vx=-4.6,vy=0.0,omega=0.0") in events
+    assert ("handle_uart_line", "assistant", "vx=-4.6,vy=0.0") in events
     assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["transport_command"] == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["uart6_input_status"] == "idle"

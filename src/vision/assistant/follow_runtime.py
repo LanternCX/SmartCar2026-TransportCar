@@ -21,13 +21,24 @@ def _default_now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _has_position_target_command(text: str) -> bool:
+def _has_translational_position_target_command(text: str) -> bool:
     for fragment in text.split(","):
         item = fragment.strip()
         if not item or "=" not in item:
             continue
         key = item.split("=", 1)[0].strip().lower()
-        if key in ("x", "y", "angle", "yaw", "dx", "dy", "d_angle"):
+        if key in ("x", "y", "dx", "dy"):
+            return True
+    return False
+
+
+def _has_angular_velocity_fragment(text: str) -> bool:
+    for fragment in text.split(","):
+        item = fragment.strip()
+        if not item or "=" not in item:
+            continue
+        key = item.split("=", 1)[0].strip().lower()
+        if key in ("omega", "w"):
             return True
     return False
 
@@ -69,7 +80,7 @@ class AssistantFollowRuntime:
                 "factory": "create_uart8",
             },
         }
-        # 位置/角度透传保护标志
+        # 只对平移位置透传做保护, 单独角度透传允许继续写回线速度
         self._hold_passthrough_targets = False
         self._ensure_uart_ready()
 
@@ -107,9 +118,9 @@ class AssistantFollowRuntime:
         @brief 这一拍先接管前馈和视觉输入, 再把融合后的速度通过共享底盘入口写回
         """
 
-        uart6_has_velocity, uart6_has_position = self._process_input("uart6")
-        uart8_has_velocity, uart8_has_position = self._process_input("uart8")
-        if uart8_has_position or uart6_has_position:
+        uart6_has_velocity, uart6_has_translation_target = self._process_input("uart6")
+        uart8_has_velocity, uart8_has_translation_target = self._process_input("uart8")
+        if uart8_has_translation_target or uart6_has_translation_target:
             self._hold_passthrough_targets = True
         elif uart8_has_velocity or uart6_has_velocity:
             self._hold_passthrough_targets = False
@@ -163,7 +174,7 @@ class AssistantFollowRuntime:
             return False, False
 
         has_velocity = False
-        has_position_passthrough = False
+        has_translation_target_passthrough = False
 
         try:
             state["buffer"] += uart.read(buf_len).decode()
@@ -180,12 +191,15 @@ class AssistantFollowRuntime:
             idx = state["buffer"].find("\n")
             if idx == -1:
                 state["status"] = self._resolve_input_status(source)
-                return has_velocity, has_position_passthrough
+                return has_velocity, has_translation_target_passthrough
             line = state["buffer"][:idx].rstrip("\r").strip()
             state["buffer"] = state["buffer"][idx + 1 :]
+            has_omega_fragment = _has_angular_velocity_fragment(line)
             consume_result, parsed, passthrough_line = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
-                state["velocity"] = self._normalize_input_velocity(source, parsed)
+                state["velocity"] = self._normalize_input_velocity(
+                    source, parsed, has_omega_fragment
+                )
                 state["status"] = "active"
                 has_velocity = True
             elif consume_result == "invalid":
@@ -193,8 +207,8 @@ class AssistantFollowRuntime:
             else:
                 state["status"] = self._resolve_input_status(source)
             if passthrough_line:
-                if _has_position_target_command(passthrough_line):
-                    has_position_passthrough = True
+                if _has_translational_position_target_command(passthrough_line):
+                    has_translation_target_passthrough = True
                     if consume_result != CONSUME_ACCEPTED:
                         state["velocity"] = None
                 self._transport_car._handle_uart_line(passthrough_line, source=source)
@@ -228,39 +242,45 @@ class AssistantFollowRuntime:
 
         vx = float(uart6_velocity.get("vx", 0.0)) + float(uart8_velocity.get("vx", 0.0))
         vy = float(uart6_velocity.get("vy", 0.0)) + float(uart8_velocity.get("vy", 0.0))
-        omega = float(uart8_velocity.get("omega", 0.0))
+        omega = None
+        if uart8_velocity.get("has_omega"):
+            omega = float(uart8_velocity.get("omega", 0.0))
         self._transport_car._handle_uart_line(
             self._format_velocity_command(vx, vy, omega), source="assistant"
         )
 
     @staticmethod
-    def _normalize_input_velocity(source: str, parsed: dict) -> dict:
+    def _normalize_input_velocity(source: str, parsed: dict, has_omega_fragment: bool) -> dict:
         velocity = {
             "vx": float(parsed.get("vx", 0.0)),
             "vy": float(parsed.get("vy", 0.0)),
             "omega": 0.0,
+            "has_omega": False,
         }
         if source == "uart8":
             velocity["omega"] = float(parsed.get("omega", 0.0))
+            velocity["has_omega"] = bool(has_omega_fragment)
         return velocity
 
     def _should_skip_velocity_write(self) -> bool:
         if not self._hold_passthrough_targets:
             return False
 
-        last_cmd = self._transport_car.last_cmd
-        active = (
-            last_cmd.get("x") is not None
-            or last_cmd.get("y") is not None
-            or last_cmd.get("angle") is not None
-        )
+        active_getter = getattr(self._transport_car, "_has_active_translation_target", None)
+        if active_getter is not None:
+            active = bool(active_getter())
+        else:
+            last_cmd = self._transport_car.last_cmd
+            active = last_cmd.get("x") is not None or last_cmd.get("y") is not None
         if not active:
             self._hold_passthrough_targets = False
             return False
         return True
 
     @staticmethod
-    def _format_velocity_command(vx: float, vy: float, omega: float) -> str:
+    def _format_velocity_command(vx: float, vy: float, omega) -> str:
+        if omega is None:
+            return "vx=%s,vy=%s" % (vx, vy)
         return "vx=%s,vy=%s,omega=%s" % (vx, vy, omega)
 
     def _build_transport_command_snapshot(self) -> dict:

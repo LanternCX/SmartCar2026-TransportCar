@@ -169,7 +169,7 @@ def test_assistant_follow_runtime_matches_uart8_and_uart6_for_same_velocity_vect
 def test_assistant_follow_runtime_uart6_velocity_reclaims_control_after_position_mode(
     monkeypatch,
 ) -> None:
-    """UART6 新速度包到来后，也要像 UART8 一样从位置目标手里接回控制权。"""
+    """UART6 新速度包到来后，只接回平移轴控制，角度目标继续保留。"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"x=12.0,angle=45.0\n"
@@ -185,7 +185,7 @@ def test_assistant_follow_runtime_uart6_velocity_reclaims_control_after_position
     uart6._buffer = b"vx=-4.6,vy=0\n"
     runtime.step()
 
-    assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
+    assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "angle": 45.0}
     assert runtime._transport_car.command_lock is False
     assert runtime._transport_car.command_mode == "none"
 
@@ -384,6 +384,66 @@ def test_assistant_follow_runtime_preserves_position_and_angle_passthrough_comma
     assert second_cmd["x"] == 12.0
     assert second_cmd["angle"] == 45.0
     assert "vx" not in second_cmd
+
+
+def test_assistant_follow_runtime_uses_core_translation_state_for_writeback_gate(
+    monkeypatch,
+) -> None:
+    """是否阻断平移写回应由共享底盘状态决定，而不是角色层直接猜 last_cmd 结构。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b""
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    runtime._hold_passthrough_targets = True
+    runtime._transport_car.last_cmd = {"angle": 45.0}
+    runtime._transport_car._has_active_translation_target = lambda: True
+    runtime._inputs["uart8"]["velocity"] = {
+        "vx": 1.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    runtime._inputs["uart6"]["velocity"] = {
+        "vx": 0.5,
+        "vy": 0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+    runtime._write_effective_velocity()
+
+    assert ("handle_uart_line", "assistant", "vx=1.5,vy=0.5") not in events
+
+
+def test_assistant_follow_runtime_allows_angle_passthrough_to_coexist_with_velocity(
+    monkeypatch,
+) -> None:
+    """单独角度透传时, 角色层仍要继续写回线速度, 让辅车能边走边转。"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"vx=1.0,angle=45.0\n"
+    uart6 = _FakeUart(["vx=0.5,vy=0.5"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    first_cmd = dict(runtime._transport_car.last_cmd)
+    runtime.step()
+    second_cmd = dict(runtime._transport_car.last_cmd)
+
+    assert ("handle_uart_line", "uart8", "angle=45.0") in events
+    assert first_cmd == {"vx": 1.5, "vy": 0.5, "angle": 45.0}
+    assert second_cmd == {"vx": 1.5, "vy": 0.5, "angle": 45.0}
 
 
 def test_assistant_follow_runtime_preserves_uart6_position_passthrough_commands(

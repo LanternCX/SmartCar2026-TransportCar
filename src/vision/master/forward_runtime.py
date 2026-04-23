@@ -28,7 +28,7 @@ def _canonical_velocity_key(key: str) -> str:
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观.
 
-    @brief 在共享底盘外层接管 UART3, 并把速度字段转发到 UART8
+    @brief 在共享底盘外层接管 UART3, 并把速度字段与由角速度派生的角度字段转发到 UART8
     """
 
     def __init__(self) -> None:
@@ -103,7 +103,10 @@ class MasterForwardRuntime:
         self._transport_car._handle_uart_line(line, source="uart3")
 
     def _extract_forward_line(self, line: str) -> str:
-        """从原始命令中抽取可转发的速度字段文本."""
+        """从原始命令中抽取可转发的速度字段文本.
+
+        上游发来的是角速度(omega), 但转发给辅车时要替换为当前绝对角度(angle).
+        """
 
         text = line.strip()
         if not text or text.startswith("?"):
@@ -132,11 +135,18 @@ class MasterForwardRuntime:
                 return ""
             fields[_canonical_velocity_key(key)] = value
 
+        if not fields:
+            return ""
+
         ordered_fields = []
-        for key in ("vx", "vy", "omega"):
+        for key in ("vx", "vy"):
             value = fields.get(key)
             if value is not None:
                 ordered_fields.append("%s=%s" % (key, value))
+        if fields.get("omega") is not None:
+            # 上游显式给角速度时, 辅车侧只接收主车当前绝对角度
+            heading = getattr(self._transport_car, "heading_est", 0.0)
+            ordered_fields.append("angle=%s" % heading)
         return ",".join(ordered_fields)
 
     def _write_forward_line(self, line: str) -> None:
