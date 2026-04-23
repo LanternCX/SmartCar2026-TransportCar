@@ -18,18 +18,13 @@ jobs:
             const body = context.payload.pull_request.body || '';
             const errors = [];
 
-            // 获取 PR 修改的文件列表
             const { data: files } = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.issue.number,
             });
 
-            // 判断是否为板端相关变更
-            const boardPaths = ['src/', 'seekfree_demo/', '.mpy-cli.toml'];
-            const isBoardRelated = files.some(file =>
-              boardPaths.some(path => file.filename.startsWith(path))
-            );
+            const isBoardRelated = files.some(file => file.filename.startsWith('src/'));
 
             if (!body.includes('## 说明')) {
               errors.push('缺少 "## 说明" 部分');
@@ -53,17 +48,20 @@ jobs:
               errors.push('缺少 "## 检查清单" 部分');
             } else {
               const checklist = body.split('## 检查清单')[1]?.trim() || '';
-              if (!checklist.includes('- [x] 已人工审核 PR 内容')) {
+              if (!checklist.match(/^- \[[xX]\] 已人工审核 PR 内容$/m)) {
                 errors.push('检查清单未勾选 "已人工审核 PR 内容"');
               }
-              if (!checklist.includes('- [x] 已核对 AI 撰写的概要')) {
-                errors.push('检查清单未勾选 "已核对 AI 撰写的概要"');
+              if (!checklist.match(/^- \[[xX]\] 已人工核对概要$/m)) {
+                errors.push('检查清单未勾选 "已人工核对概要"');
               }
-              if (!checklist.includes('- [x] 相关文档已更新（如有变更）')) {
-                errors.push('检查清单未勾选 "相关文档已更新（如有变更）"');
+              if (!checklist.match(/^- \[[xX]\] 相关文档已更新$/m)) {
+                errors.push('检查清单未勾选 "相关文档已更新"');
               }
-              if (isBoardRelated && !checklist.includes('- [x] 已进行板端测试（如涉及上板端代码）')) {
-                errors.push('PR 涉及板端代码，检查清单未勾选 "已进行板端测试（如涉及上板端代码）"');
+              if (!checklist.match(/^- \[[xX]\] 已归档 PR 有关 spec\/plan$/m)) {
+                errors.push('检查清单未勾选 "已归档 PR 有关 spec/plan"');
+              }
+              if (isBoardRelated && !checklist.match(/^- \[[xX]\] 已进行板端测试$/m)) {
+                errors.push('PR 涉及 src 目录改动，检查清单未勾选 "已进行板端测试"');
               }
             }
 
