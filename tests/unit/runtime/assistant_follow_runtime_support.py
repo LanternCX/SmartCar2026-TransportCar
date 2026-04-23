@@ -76,7 +76,7 @@ def install_fake_transport_car(monkeypatch):
             self.ticker = None
             self.uart3 = uart3
             self.uart8 = uart8
-            self.last_cmd = {"x": 9.0, "y": 8.0, "angle": 7.0}
+            self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
             self.rear_only_mode = False
             self.command_lock = False
             self.command_mode = "none"
@@ -127,12 +127,25 @@ def install_fake_transport_car(monkeypatch):
 
         def _finalize_route(self, dispatched) -> None:
             events.append(("finalize_route", tuple(sorted(dispatched))))
-            if "vx" in dispatched or "vy" in dispatched or "omega" in dispatched:
+            if "vx" in dispatched or "vy" in dispatched:
                 self.last_cmd.pop("x", None)
                 self.last_cmd.pop("y", None)
+            if "omega" in dispatched:
                 self.last_cmd.pop("angle", None)
+
+            active_pose_target = self._has_active_pose_target()
+            if not active_pose_target:
                 self.command_lock = False
                 self.command_mode = "none"
+
+        def _has_active_translation_target(self) -> bool:
+            return self.last_cmd.get("x") is not None or self.last_cmd.get("y") is not None
+
+        def _has_active_rotation_target(self) -> bool:
+            return self.last_cmd.get("angle") is not None
+
+        def _has_active_pose_target(self) -> bool:
+            return self._has_active_translation_target() or self._has_active_rotation_target()
 
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}

@@ -66,6 +66,7 @@ def install_fake_transport_car(monkeypatch):
             self.uart3 = uart3
             self.uart8 = uart8
             self.last_exception_text = "none"
+            self.heading_est = 0.0
             self._process_uart = self._original_process_uart
 
         def _original_process_uart(self) -> None:
@@ -162,7 +163,7 @@ def test_master_forward_runtime_forwards_velocity_and_keeps_raw_line_for_transpo
     """纯速度命令要上行转发给辅车，同时原始整行继续交给主车底盘。"""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0,vy=-2.5,omega=3.0\n"
+    uart3._buffer = b"vx=1.0,vy=-2.5\n"
     forward_runtime_module = import_master_module(
         "vision.master.forward_runtime", monkeypatch
     )
@@ -172,8 +173,8 @@ def test_master_forward_runtime_forwards_velocity_and_keeps_raw_line_for_transpo
     keep_running = runtime.step()
 
     assert keep_running is False
-    assert uart8.messages == ["vx=1.0,vy=-2.5,omega=3.0\r\n"]
-    assert ("handle_uart_line", "uart3", "vx=1.0,vy=-2.5,omega=3.0") in events
+    assert uart8.messages == ["vx=1.0,vy=-2.5\r\n"]
+    assert ("handle_uart_line", "uart3", "vx=1.0,vy=-2.5") in events
 
 
 def test_master_forward_runtime_only_forwards_velocity_fields_from_mixed_command(
@@ -182,23 +183,24 @@ def test_master_forward_runtime_only_forwards_velocity_fields_from_mixed_command
     """混合命令只转发速度字段，非速度内容仍只留给主车本地处理。"""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"rear=1,vx=1.0,angle=90,w=-0.5\n"
+    uart3._buffer = b"rear=1,vx=1.0,angle=90,omega=-0.5\n"
     forward_runtime_module = import_master_module(
         "vision.master.forward_runtime", monkeypatch
     )
 
     runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._transport_car.heading_est = 15.0
 
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,omega=-0.5\r\n"]
-    assert ("handle_uart_line", "uart3", "rear=1,vx=1.0,angle=90,w=-0.5") in events
+    assert uart8.messages == ["vx=1.0,angle=15.0\r\n"]
+    assert ("handle_uart_line", "uart3", "rear=1,vx=1.0,angle=90,omega=-0.5") in events
 
 
 def test_master_forward_runtime_folds_w_alias_and_keeps_last_angular_velocity(
     monkeypatch,
-) -> None:
-    """同包同时出现 w 和 omega 时, 转发链要折叠成单个 omega 字段."""
+):
+    """同包同时出现 w 和 omega 时, 转发链要折叠成单个 angle 字段."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart3._buffer = b"vx=1.0,w=-0.5,omega=2.0\n"
@@ -207,11 +209,32 @@ def test_master_forward_runtime_folds_w_alias_and_keeps_last_angular_velocity(
     )
 
     runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._transport_car.heading_est = 30.0
 
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,omega=2.0\r\n"]
+    assert uart8.messages == ["vx=1.0,angle=30.0\r\n"]
     assert ("handle_uart_line", "uart3", "vx=1.0,w=-0.5,omega=2.0") in events
+
+
+def test_master_forward_runtime_replaces_omega_with_current_heading(
+    monkeypatch,
+) -> None:
+    """角速度字段要替换成当前绝对角度 heading_est 再转发给辅车。"""
+
+    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart3._buffer = b"vx=1.0,omega=0.5\n"
+    forward_runtime_module = import_master_module(
+        "vision.master.forward_runtime", monkeypatch
+    )
+
+    runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._transport_car.heading_est = 45.0
+
+    runtime.step()
+
+    assert uart8.messages == ["vx=1.0,angle=45.0\r\n"]
+    assert ("handle_uart_line", "uart3", "vx=1.0,omega=0.5") in events
 
 
 def test_master_forward_runtime_does_not_forward_query_or_non_velocity_command(
@@ -287,10 +310,11 @@ def test_master_forward_runtime_keeps_later_lines_running_after_invalid_velocity
     )
 
     runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._transport_car.heading_est = 45.0
 
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,omega=0.5\r\n"]
+    assert uart8.messages == ["vx=1.0,angle=45.0\r\n"]
     assert ("handle_uart_line", "uart3", "vx=oops") in events
     assert ("handle_uart_line", "uart3", "vx=1.0,omega=0.5") in events
     assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=oops"

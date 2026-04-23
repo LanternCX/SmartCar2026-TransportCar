@@ -174,16 +174,28 @@ def test_omega_packet_clears_angle_target_and_exits_command_mode() -> None:
     assert ctx.command_lock is False
 
 
-def test_velocity_packet_clears_angle_target_and_exits_command_mode() -> None:
+def test_velocity_packet_keeps_angle_target_and_lock_mode() -> None:
     ctx = _RouteContext()
 
     assert router.route("angle=45,lock=1", ctx) is True
     assert router.route("vx=12", ctx) is True
 
-    assert "angle" not in ctx.last_cmd
+    assert ctx.last_cmd["angle"] == 45.0
     assert ctx.last_cmd["vx"] == 12.0
-    assert ctx.command_mode == "none"
-    assert ctx.command_lock is False
+    assert ctx.command_mode == "locked"
+    assert ctx.command_lock is True
+
+
+def test_omega_packet_keeps_xy_target_and_lock_mode() -> None:
+    ctx = _RouteContext()
+
+    assert router.route("x=1.5,lock=1", ctx) is True
+    assert router.route("omega=12", ctx) is True
+
+    assert ctx.last_cmd["x"] == 1.5
+    assert ctx.last_cmd["omega"] == 12.0
+    assert ctx.command_mode == "locked"
+    assert ctx.command_lock is True
 
 
 def test_reset_clears_command_mode_and_pending_lock() -> None:

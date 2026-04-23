@@ -335,9 +335,25 @@ class TransportCar:
         """返回当前激活控制源的位置目标."""
         return self.last_cmd.get("x"), self.last_cmd.get("y")
 
+    def _has_active_translation_target(self):
+        """返回当前是否存在激活中的平移位置目标."""
+
+        cmd_x, cmd_y = self._get_active_position_targets()
+        return cmd_x is not None or cmd_y is not None
+
     def _get_active_angle_command(self):
         """返回当前激活控制源的角度目标."""
         return self.last_cmd.get("angle")
+
+    def _has_active_rotation_target(self):
+        """返回当前是否存在激活中的转向位置目标."""
+
+        return self._get_active_angle_command() is not None
+
+    def _has_active_pose_target(self):
+        """返回当前是否存在任一位置式目标."""
+
+        return self._has_active_translation_target() or self._has_active_rotation_target()
 
     def _get_active_rear_only_mode(self):
         """返回当前激活控制源的后轮模式."""
@@ -736,13 +752,13 @@ class TransportCar:
             return
 
         angle_ok = True
-        if self.last_cmd.get("angle") is not None:
+        if self._has_active_rotation_target():
             err_angle = abs(self.heading_target - self.heading_est)
             if err_angle > ANGLE_TOLERANCE:
                 angle_ok = False
 
         pos_ok = True
-        if self.last_cmd.get("x") is not None or self.last_cmd.get("y") is not None:
+        if self._has_active_translation_target():
             tx_chk = self.last_cmd.get("x")
             ty_chk = self.last_cmd.get("y")
             tx_val = tx_chk if tx_chk is not None else 0.0
