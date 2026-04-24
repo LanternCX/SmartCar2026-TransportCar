@@ -10,7 +10,7 @@
 
 | 文档名称 | 外部或历史来源 | 当前正式落点 | 更新时机或同步触发条件 |
 | --- | --- | --- | --- |
-| `mpy-cli` 正式文档 | 已删除的根 `docs/` 旧 mpy-cli 正文；上游工具文档与仓库内实际命令行为 | `.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md` | `mpy-cli` 命令、参数、路径约定、无交互流程或排障结论变化时 |
+| `mpy-cli` 正式文档 | `@../mpy-cli-dev` 仓库中的 `README.md`、`docs/developer-guide.md`、`mpy_cli/` 与 `tests/` | `@../mpy-cli-dev` | `mpy-cli` 命令、参数、路径约定、无交互流程、编译行为或排障结论变化时 |
 | OpenArt 协议正文 | 已删除的根 `docs/` 旧 OpenArt 协议正文；设备通信协议原始约定与仓库内已确认实现 | `.agents/skills/using-rules/references/openart-protocol.md` | 协议字段、链路约定、兼容说明、示例报文或硬件连接约束变化时 |
 | `problem_statement` 题面使用说明 | 本地维护对象：`docs/problem_statement/README.md` | `docs/problem_statement/README.md` | 题面文档结构、阅读顺序、维护方式或目录组织调整时 |
 | `problem_statement` 来源与追溯 | 本地维护对象：`docs/problem_statement/sources.md` | `docs/problem_statement/sources.md` | 官方题面来源、抓取链路、本地产物映射或清洗依据变化时 |

@@ -1,4 +1,4 @@
-"""辅车速度包共享解析.
+"""辅车速度包共享解析
 
 @file src/vision/assistant/velocity_packet.py
 """
@@ -16,6 +16,12 @@ V_CMD_MAX = getattr(_params, "V_CMD_MAX")
 
 
 def is_velocity_fragment(fragment: str) -> bool:
+    """判断片段是否为速度字段
+
+    @param fragment 待判断的文本片段
+    @return 是否为速度字段
+    """
+
     text = fragment.strip()
     if not text or "=" not in text:
         return False
@@ -24,6 +30,12 @@ def is_velocity_fragment(fragment: str) -> bool:
 
 
 def canonical_velocity_key(key: str):
+    """将速度字段名规范化为标准形式
+
+    @param key 原始字段名
+    @return 规范化后的字段名或 None
+    """
+
     key = key.strip().lower()
     if key == "vx":
         return "vx"
@@ -35,6 +47,12 @@ def canonical_velocity_key(key: str):
 
 
 def clamp_command_value(value: float) -> float:
+    """将命令值限制在有效范围内
+
+    @param value 原始值
+    @return 限制后的值
+    """
+
     if value > V_CMD_MAX:
         return float(V_CMD_MAX)
     if value < -V_CMD_MAX:
@@ -43,6 +61,12 @@ def clamp_command_value(value: float) -> float:
 
 
 def parse_velocity_fragments(fragments):
+    """解析速度字段片段
+
+    @param fragments 字段片段列表
+    @return 消费结果状态和解析后的速度字典元组
+    """
+
     parsed = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     seen_keys = set()
     accepted = False
@@ -73,6 +97,14 @@ def parse_velocity_fragments(fragments):
 
 
 def split_velocity_line(line: str):
+    """分割速度命令行
+
+    将命令行分割为速度字段和非速度字段两部分
+
+    @param line 原始命令行
+    @return 消费结果状态、解析后的速度字典、透传命令行元组
+    """
+
     text = line.strip()
     if not text or text.startswith("?"):
         return CONSUME_IGNORED, None, text

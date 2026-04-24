@@ -1,10 +1,18 @@
-"""命令路由收口与健康字段辅助逻辑."""
+"""命令路由收口与健康字段辅助逻辑
+
+本模块负责命令路由的最终处理, 包括相对位姿目标的消费与转换、
+位置/速度模式的冲突解决、锁定状态的判定以及健康字段的构造
+"""
 
 import math
 
 
 def _get_active_rear_flag(ctx) -> bool:
-    """返回当前有效的后轮模式状态."""
+    """获取当前有效的后轮模式状态
+
+    @param ctx: 控制器上下文对象, 包含 rear_only_mode 状态
+    @return: 若后轮模式激活返回 True, 否则返回 False
+    """
     getter = getattr(ctx, "_get_active_rear_only_mode", None)
     if getter is not None:
         return bool(getter())
@@ -12,8 +20,11 @@ def _get_active_rear_flag(ctx) -> bool:
 
 
 def _has_active_translation_target(ctx) -> bool:
-    """返回当前是否存在激活中的平移位置目标."""
+    """检查是否存在激活中的平移位置目标
 
+    @param ctx: 控制器上下文对象, 包含 last_cmd 命令状态
+    @return: 若存在 x 或 y 位置目标返回 True, 否则返回 False
+    """
     getter = getattr(ctx, "_has_active_translation_target", None)
     if getter is not None:
         return bool(getter())
@@ -21,8 +32,11 @@ def _has_active_translation_target(ctx) -> bool:
 
 
 def _has_active_rotation_target(ctx) -> bool:
-    """返回当前是否存在激活中的转向位置目标."""
+    """检查是否存在激活中的转向位置目标
 
+    @param ctx: 控制器上下文对象, 包含 last_cmd 命令状态
+    @return: 若存在 angle 角度目标返回 True, 否则返回 False
+    """
     getter = getattr(ctx, "_has_active_rotation_target", None)
     if getter is not None:
         return bool(getter())
@@ -30,7 +44,11 @@ def _has_active_rotation_target(ctx) -> bool:
 
 
 def build_command_health_fields(ctx) -> dict:
-    """构造命令相关健康字段."""
+    """构造命令相关健康字段字典
+
+    @param ctx: 控制器上下文对象
+    @return: 包含锁定状态、后轮模式、命令模式的字典
+    """
     return {
         "lock": 1 if getattr(ctx, "command_lock", False) else 0,
         "rear": 1 if _get_active_rear_flag(ctx) else 0,
@@ -39,8 +57,16 @@ def build_command_health_fields(ctx) -> dict:
 
 
 def _apply_pending_relative_targets(ctx):
-    """消费相对位姿暂存并写回绝对目标."""
+    """消费相对位姿暂存并转换为绝对目标写入命令
 
+    将暂存的相对位移(dx, dy)和相对角度(d_angle)转换为
+    世界坐标系下的绝对位置目标, 写入 last_cmd
+
+    @param ctx: 控制器上下文对象, 包含 _pending_dx、_pending_dy、
+                _pending_d_angle 等暂存字段以及 odometry、heading_target
+    @return: (has_translation_position, has_rotation_position) 元组
+             分别表示是否存在平移和旋转位置目标
+    """
     has_translation_position = False
     has_rotation_position = False
 
@@ -71,8 +97,14 @@ def _apply_pending_relative_targets(ctx):
 
 
 def _clear_translation_targets(ctx) -> None:
-    """清理平移位置式目标,让 `vx/vy` 直接接管."""
+    """清理平移位置式目标, 切换到速度控制模式
 
+    清除 x、y 位置目标以及暂存的相对位移, 使得 vx/vy 速度命令
+    可以直接接管控制
+
+    @param ctx: 控制器上下文对象
+    @return: None
+    """
     ctx.last_cmd.pop("x", None)
     ctx.last_cmd.pop("y", None)
     ctx._pending_dx = None
@@ -80,14 +112,33 @@ def _clear_translation_targets(ctx) -> None:
 
 
 def _clear_rotation_targets(ctx) -> None:
-    """清理转向位置式目标,让 `omega/w` 直接接管."""
+    """清理转向位置式目标, 切换到角速度控制模式
 
+    清除 angle 角度目标以及暂存的相对角度, 使得 omega/w 角速度命令
+    可以直接接管控制
+
+    @param ctx: 控制器上下文对象
+    @return: None
+    """
     ctx.last_cmd.pop("angle", None)
     ctx._pending_d_angle = None
 
 
 def finalize_command_route(ctx, dispatched, now_ms: int) -> None:
-    """在整包命令完成分发后统一决定锁定与模式."""
+    """在整包命令完成分发后统一决定锁定与模式
+
+    该函数是命令路由的最终处理点, 负责:
+    - 处理 reset 命令的特殊逻辑
+    - 消费相对位姿暂存
+    - 解决位置模式与速度模式的冲突
+    - 根据新目标或模式变化决定是否进入锁定状态
+    - 更新命令模式标识
+
+    @param ctx: 控制器上下文对象
+    @param dispatched: 本次命令包中已分发的字段集合
+    @param now_ms: 当前时间戳(毫秒), 用于记录锁定开始时间
+    @return: None
+    """
     if "reset" in dispatched:
         ctx._pending_lock = None
         ctx.command_mode = "none"

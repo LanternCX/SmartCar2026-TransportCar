@@ -14,7 +14,9 @@ from vision.assistant.velocity_packet import (
 def _default_now_ms() -> int:
     """读取毫秒时间
 
-    @brief 兼容板端 ticks_ms 和主机测试环境
+    兼容板端 ticks_ms 和主机测试环境
+
+    @return 当前毫秒时间戳
     """
 
     import time
@@ -28,7 +30,7 @@ def _default_now_ms() -> int:
 class VisionObservation:
     """最近一次有效的视觉观测快照
 
-    @brief 保存角色层可观察的本地视觉输入
+    保存角色层可观察的本地视觉输入
     """
 
     __slots__ = ("x", "y", "omega", "timestamp_ms")
@@ -43,23 +45,24 @@ class VisionObservation:
 class AssistantVisionInput:
     """识别并缓存指定来源上的视觉向量
 
-    @brief 以共享速度字段语义接收指定来源输入，并缓存成角色层观测
+    以共享速度字段语义接收指定来源输入, 并缓存成角色层观测
     """
 
     __slots__ = ("_now_ms", "_last_observation", "_source_name")
 
     def __init__(self, now_ms=None, source_name: str = "UART8") -> None:
-        # 毫秒时间函数
         self._now_ms = now_ms or _default_now_ms
-        # 最近一次视觉观测缓存
         self._last_observation = None
-        # 当前视觉向量来源标签
         self._source_name = str(source_name).strip().upper()
 
     def consume(self, source: str, line: str) -> str:
         """尝试消费一行视觉协议
 
-        @brief 只消费配置来源上的速度字段，供独立文本入口把当前包解释为视觉贡献向量
+        只消费配置来源上的速度字段, 供独立文本入口把当前包解释为视觉贡献向量
+
+        @param source 数据来源标识
+        @param line 原始命令行
+        @return 消费结果状态
         """
 
         if source.strip().upper() != self._source_name:
@@ -73,9 +76,11 @@ class AssistantVisionInput:
         return CONSUME_ACCEPTED
 
     def record_velocity_vector(self, parsed: dict) -> None:
-        """缓存一份已解析好的速度向量。
+        """缓存一份已解析好的速度向量
 
-        @brief 供角色运行时在共享解析边界之后直接写入视觉向量缓存
+        供角色运行时在共享解析边界之后直接写入视觉向量缓存
+
+        @param parsed 解析后的速度字典
         """
 
         observation = self._last_observation
@@ -95,14 +100,19 @@ class AssistantVisionInput:
         observation.timestamp_ms = timestamp_ms
 
     def has_observation(self) -> bool:
-        """返回是否已有视觉向量缓存。"""
+        """返回是否已有视觉向量缓存
+
+        @return 是否存在缓存观测
+        """
 
         return self._last_observation is not None
 
     def get_active_observation(self):
         """返回仍在有效期内的观测副本
 
-        @brief 对外查询时返回副本, 避免外部改坏内部缓存
+        对外查询时返回副本, 避免外部改坏内部缓存
+
+        @return 观测副本或 None
         """
 
         observation = self.get_active_observation_ref()
@@ -118,7 +128,9 @@ class AssistantVisionInput:
     def get_active_observation_ref(self):
         """返回内部缓存的有效观测引用
 
-        @brief 只给角色层热路径只读使用, 减少控制周期里的复制开销
+        只给角色层热路径只读使用, 减少控制周期里的复制开销
+
+        @return 观测引用或 None
         """
 
         observation = self._last_observation
@@ -127,7 +139,9 @@ class AssistantVisionInput:
     def get_observation_age_ms(self):
         """返回有效观测年龄
 
-        @brief 诊断时用年龄区分观测是否已过期
+        诊断时用年龄区分观测是否已过期
+
+        @return 观测年龄毫秒数或 None
         """
 
         observation = self.get_active_observation()
@@ -136,14 +150,16 @@ class AssistantVisionInput:
         return max(0, self._read_now_ms() - observation.timestamp_ms)
 
     def clear(self) -> None:
-        """清空当前缓存观测。"""
+        """清空当前缓存观测"""
 
         self._last_observation = None
 
     def snapshot(self) -> dict:
         """返回视觉缓存的只读快照
 
-        @brief 诊断层导出完整字段, 热路径不直接依赖这里
+        诊断层导出完整字段, 热路径不直接依赖这里
+
+        @return 快照字典
         """
 
         observation = self._last_observation
@@ -167,4 +183,9 @@ class AssistantVisionInput:
         }
 
     def _read_now_ms(self) -> int:
+        """读取当前毫秒时间
+
+        @return 当前毫秒时间戳
+        """
+
         return int(self._now_ms())

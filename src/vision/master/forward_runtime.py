@@ -1,4 +1,4 @@
-"""主车角色运行时主体.
+"""主车角色运行时主体
 
 @file src/vision/master/forward_runtime.py
 """
@@ -12,13 +12,21 @@ V_CMD_MAX = getattr(_params, "V_CMD_MAX")
 
 
 def _is_velocity_key(key: str) -> bool:
-    """判断字段名是否属于当前允许转发的速度字段."""
+    """判断字段名是否属于当前允许转发的速度字段
+
+    @param key 字段名称
+    @return 是否为速度字段
+    """
 
     return key in ("vx", "vy", "omega", "w")
 
 
 def _canonical_velocity_key(key: str) -> str:
-    """把速度字段别名收口成辅车当前统一消费的字段名."""
+    """把速度字段别名收口成辅车当前统一消费的字段名
+
+    @param key 原始字段名
+    @return 规范化后的字段名
+    """
 
     if key == "w":
         return "omega"
@@ -26,7 +34,7 @@ def _canonical_velocity_key(key: str) -> str:
 
 
 class MasterForwardRuntime:
-    """基于共享底盘装配主车角色运行时外观.
+    """基于共享底盘装配主车角色运行时外观
 
     @brief 在共享底盘外层接管 UART3, 并把速度字段与由角速度派生的角度字段转发到 UART8
     """
@@ -42,21 +50,29 @@ class MasterForwardRuntime:
         self._last_error_text = "none"
 
         if getattr(car, "_process_uart", None) is not None:
-            # UART3 已由主车角色层接管, 共享底盘不再重复读取
             car._process_uart = self._noop_transport_uart
 
     def mark_tick(self, tick=None) -> None:
-        """转发 ticker 中断标记."""
+        """转发 ticker 中断标记
+
+        @param tick 节拍值
+        """
 
         self._transport_car.mark_tick(tick)
 
     def set_ticker(self, ticker_obj: object) -> None:
-        """转发 ticker 对象."""
+        """转发 ticker 对象
+
+        @param ticker_obj ticker 对象
+        """
 
         self._transport_car.set_ticker(ticker_obj)
 
     def step(self) -> bool:
-        """执行一拍主车角色运行时."""
+        """执行一拍主车角色运行时
+
+        @return 是否继续运行
+        """
 
         try:
             self._run_role_cycle()
@@ -65,12 +81,12 @@ class MasterForwardRuntime:
         return self._transport_car.step()
 
     def _run_role_cycle(self) -> None:
-        """执行角色层单拍流程."""
+        """执行角色层单拍流程"""
 
         self._process_uart3()
 
     def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理完整命令."""
+        """接管 UART3 按行读取并处理完整命令"""
 
         uart3 = self._transport_car.uart3
         buf_len = uart3.any()
@@ -87,12 +103,15 @@ class MasterForwardRuntime:
             idx = self._rx_buf3.find("\n")
             if idx == -1:
                 return
-            line = self._rx_buf3[:idx].rstrip("\r").strip()
-            self._rx_buf3 = self._rx_buf3[idx + 1 :]
+            line = self._rx_buf3[: idx].rstrip("\r").strip()
+            self._rx_buf3 = self._rx_buf3[idx + 1 : ]
             self._handle_uart3_line(line)
 
     def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 原始命令行."""
+        """处理单条 UART3 原始命令行
+
+        @param line 原始命令行
+        """
 
         if not line:
             return
@@ -103,9 +122,12 @@ class MasterForwardRuntime:
         self._transport_car._handle_uart_line(line, source="uart3")
 
     def _extract_forward_line(self, line: str) -> str:
-        """从原始命令中抽取可转发的速度字段文本.
+        """从原始命令中抽取可转发的速度字段文本
 
-        上游发来的是角速度(omega), 但转发给辅车时要替换为当前绝对角度(angle).
+        上游发来的是角速度(omega), 但转发给辅车时要替换为当前绝对角度(angle)
+
+        @param line 原始命令行
+        @return 可转发的速度字段文本
         """
 
         text = line.strip()
@@ -144,13 +166,15 @@ class MasterForwardRuntime:
             if value is not None:
                 ordered_fields.append("%s=%s" % (key, value))
         if fields.get("omega") is not None:
-            # 上游显式给角速度时, 辅车侧只接收主车当前绝对角度
             heading = getattr(self._transport_car, "heading_est", 0.0)
             ordered_fields.append("angle=%s" % heading)
         return ",".join(ordered_fields)
 
     def _write_forward_line(self, line: str) -> None:
-        """把速度转发行写到 UART8 主辅通信链路."""
+        """把速度转发行写到 UART8 主辅通信链路
+
+        @param line 要转发的速度字段文本
+        """
 
         try:
             self._transport_car.uart8.write("%s\r\n" % line)
@@ -158,13 +182,16 @@ class MasterForwardRuntime:
             self._record_error("uart8 forward write failed")
 
     def _record_error(self, text: str) -> None:
-        """记录最小错误文本供联调使用."""
+        """记录最小错误文本供联调使用
+
+        @param text 错误描述
+        """
 
         self._last_error_text = text
         self._transport_car.last_exception_text = text
 
     @staticmethod
     def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART3 消费入口."""
+        """屏蔽共享底盘自己的 UART3 消费入口"""
 
         return None

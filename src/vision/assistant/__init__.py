@@ -6,5 +6,4 @@
 from vision.assistant.follow_runtime import AssistantFollowRuntime
 from vision.assistant.runtime import create_transport_car
 
-# 对外只暴露辅车角色运行时类型和创建入口
 __all__ = ["AssistantFollowRuntime", "create_transport_car"]

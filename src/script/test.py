@@ -1,6 +1,9 @@
-"""速度环测试与调试脚本.
+"""速度环测试与调试脚本
 
-此脚本独立于主控制系统,用于逐轮进行速度环闭环测试和参数验证.
+@file src/script/test.py
+@brief 独立于主控制系统的速度环单轮闭环测试工具
+
+@details 此脚本用于逐轮进行速度环闭环测试, 验证 PID 参数效果, 无需完整的视觉/决策系统
 """
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
@@ -14,27 +17,28 @@ from filters.diff_limit_filter import DiffLimitFilter
 import gc
 
 
-# 采样/控制周期 (ms)
+# 采样/控制周期, 单位毫秒
 TICK_MS = 5
-# 占空比上限,匹配期望 2000-5000 区间
+# PWM 占空比上限, 范围 0 ~ 10000
 MAX_DUTY = 10000
-# 默认目标速度
+# 默认目标速度, 单位 m/s, 可在运行时通过命令修改
 TARGET_SPEEDS = {"m": 0.0, "l": -5.0, "r": 5.0}
-# 目标速度安全上限
+# 目标速度安全上限, 超过此值的指令会被截断
 TARGET_SPEED_MAX = 30.0
-# 参与闭环的电机
+# 参与闭环的电机列表
 ACTIVE_WHEELS = ("m", "l", "r")
 # ACTIVE_WHEELS = ("r",)
 
-# 辨识参数文件
+# 辨识参数文件路径, 用于加载电机增益和时间常数
 IDENT_RESULTS_FILE = "/flash/ident_params.txt"
 
 # PID_MAP = {
-#     "m": (100, 500, 1),
-#     "l": (100, 500, 1),
-#     "r": (100, 500, 1),
+#     "m": (100, 500, 1)
+#     "l": (100, 500, 1)
+#     "r": (100, 500, 1)
 # }
 
+# 初始 PID 参数 (P, D, P2 前馈), 全为 0 用于调试
 PID_MAP = {
     "m": (0, 0, 0),
     "l": (0, 0, 0),
@@ -43,13 +47,13 @@ PID_MAP = {
 
 
 def load_ident_lookup(path):
-    """从文件加载辨识的 (gain, tau) 映射.
-    
+    """从文件加载辨识的 (gain, tau) 映射
+
     参数:
-        path: 辨识参数文件路径.
-    
+        path: 辨识参数文件路径
+
     返回:
-        字典 {轮子名 -> (gain, tau)}.
+        字典 {轮子名 -> (gain, tau)}
     """
     meta = load_ident_params(path)
     lookup = {}
@@ -111,13 +115,13 @@ target_speeds = dict(TARGET_SPEEDS)
 
 
 def pit_handler(tick):
-    """PIT 中断处理程序,标记进行一次控制周期.
-    
+    """PIT 中断处理程序,标记进行一次控制周期
+
     参数:
-        tick: 中断参数(未使用).
-    
+        tick: 中断参数(未使用)
+
     副作用:
-        设置全局 pit_flag 为 True,主循环据此执行一次速度环计算.
+        设置全局 pit_flag 为 True,主循环据此执行一次速度环计算
     """
     global pit_flag
     pit_flag = True
@@ -125,9 +129,9 @@ def pit_handler(tick):
 
 
 def init_pid():
-    """初始化速度环 PID 参数.
-    
-    从 PID_MAP 读取每个轮子的增益配置,同步辨识参数以供调试显示.
+    """初始化速度环 PID 参数
+
+    从 PID_MAP 读取每个轮子的增益配置,同步辨识参数以供调试显示
     """
     for state in wheel_states:
         kp_val, ki_val, ki2_val = PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
