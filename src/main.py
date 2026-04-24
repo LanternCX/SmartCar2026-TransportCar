@@ -22,6 +22,26 @@ SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
 SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
 
 
+def _path_exists(path):
+    import os
+
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def resolve_existing_startup_script(script_path):
+    """根据板端实际文件选择启动脚本路径."""
+
+    if script_path.endswith(".py"):
+        compiled_path = script_path[:-3] + ".mpy"
+        if _path_exists(compiled_path):
+            return compiled_path
+    return script_path
+
+
 def resolve_startup_script(key_states):
     """根据按键状态决定启动脚本
 
@@ -109,15 +129,46 @@ def _scan_startup_key_states():
         key_ticker.stop()
 
 
+def _chdir_flash():
+    """切换到板端 Flash 根目录"""
+    import os
+
+    os.chdir("/flash")
+
+
+def _import_module(module_name):
+    """导入指定模块
+
+    @param module_name 模块全名
+    @return 导入后的模块对象
+    """
+    return __import__(module_name, None, None, ["*"])
+
+
+def _script_path_to_module_name(script_path):
+    """将脚本路径转换为模块名
+
+    @param script_path 脚本路径
+    @return 模块名
+    """
+    if script_path.endswith(".mpy"):
+        script_path = script_path[:-4]
+    elif script_path.endswith(".py"):
+        script_path = script_path[:-3]
+    return script_path.replace("/", ".")
+
+
 def _run_script(script_path):
     """执行指定脚本
 
     @param script_path 脚本路径
+    @return 脚本执行结果
     """
-    import os
-
-    os.chdir("/flash")
-    execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
+    _chdir_flash()
+    if script_path.endswith(".mpy"):
+        module = _import_module(_script_path_to_module_name(script_path))
+        return module.main()
+    return execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
 
 
 def main():
@@ -128,7 +179,7 @@ def main():
     key_states = _scan_startup_key_states()
     startup_log("main", "startup keys=%s" % key_states)
     try:
-        script_path = resolve_startup_script(key_states)
+        script_path = resolve_existing_startup_script(resolve_startup_script(key_states))
     except ValueError as exc:
         print(str(exc))
         return None
