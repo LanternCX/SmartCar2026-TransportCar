@@ -10,12 +10,12 @@
 
 ### `mpy-cli` 正式文档
 
-- 来源：已删除的根 `docs/` 旧 mpy-cli 正文、上游工具文档、仓库内实际工具行为
-- 正式落点：`.agents/skills/mpy-cli-tool/references/mpy-cli-manual.md`
+- 来源：`@../mpy-cli-dev` 仓库中的 `README.md`、`docs/developer-guide.md`、`mpy_cli/`、`tests/`
+- 正式落点：`@../mpy-cli-dev`
 - 维护检查项：
   - [ ] 命令与参数说明仍和当前工具行为一致
   - [ ] 路径边界、`source_dir`、`device_upload_dir` 等约定没有过期
-  - [ ] 轻量入口页仍能路由到正式正文
+  - [ ] 当前仓库的 Skill 与轻量入口页仍能路由到 `@../mpy-cli-dev`
   - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
 
 ### OpenArt 协议正文

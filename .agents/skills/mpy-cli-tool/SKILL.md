@@ -6,7 +6,7 @@ description: Use when initializing, configuring, scanning ports, planning, deplo
 # mpy-cli 工具
 
 ## 概述
-这里是 `mpy-cli` 的统一入口。主 Skill 只保留命令索引、场景路由和高风险边界，完整命令手册统一维护在 `references/mpy-cli-manual.md`。
+这里是 `mpy-cli` 的统一入口。主 Skill 只保留命令索引、场景路由和高风险边界，完整命令手册与实际实现统一以 @../mpy-cli-dev 仓库为准。
 
 ## 适用场景
 - 首次在本仓库接入 `mpy-cli`
@@ -23,13 +23,14 @@ description: Use when initializing, configuring, scanning ports, planning, deplo
 - 单文件运维：`upload`, `run`, `delete`, `tree`
 
 ## 手册入口
-- 完整命令手册：`references/mpy-cli-manual.md`
-- 需要查参数、无交互调用、安装方式、路径映射和常见问题时，优先进入该手册
+- 正式来源仓库：@../mpy-cli-dev
+- 需要查参数、无交互调用、安装方式、路径映射和常见问题时，优先查看该仓库中的 `README.md`
+- 需要确认真实行为时，再核对该仓库中的 `mpy_cli/` 与 `tests/`
 
 ## 路由规则
 - 想先知道有哪些命令，或确认 `source_dir`、`device_upload_dir`、`.mpyignore` 边界 -> `references/command-and-path-boundaries.md`
 - 想排查端口、扫描、部署失败 -> `references/troubleshooting.md`
-- 需要完整正文时，以上入口页都应继续路由到 `references/mpy-cli-manual.md`
+- 需要完整正文时，以上入口页都应继续路由到 @../mpy-cli-dev
 
 ## 安全门禁
 - 串口未知时先 `mpy-cli list`

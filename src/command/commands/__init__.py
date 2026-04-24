@@ -1,5 +1,5 @@
 """
-命令处理器包:自动发现并导入所有 cmd_*.py / query_*.py 模块.
+命令处理器包:自动发现并导入所有 cmd_* / query_* 模块.
 
 每个模块在导入时通过 ``@router.command()`` / ``@router.query()`` 装饰器
 自动完成注册,无需手动维护处理器列表.
@@ -30,11 +30,19 @@ def _autodiscover():
         pkg_dir = "."
 
     try:
+        seen = set()
         for fname in sorted(os.listdir(pkg_dir)):
-            if not fname.endswith(".py"):
+            if fname.endswith(".py"):
+                stem = fname[:-3]
+            elif fname.endswith(".mpy"):
+                stem = fname[:-4]
+            else:
                 continue
-            if fname.startswith("cmd_") or fname.startswith("query_"):
-                modname = __name__ + "." + fname[:-3]
+            if stem in seen:
+                continue
+            seen.add(stem)
+            if stem.startswith("cmd_") or stem.startswith("query_"):
+                modname = __name__ + "." + stem
                 if modname not in sys.modules:
                     __import__(modname)
     except Exception:
