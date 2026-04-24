@@ -24,7 +24,7 @@ def decode_vehicle_role(d8_value: int, d9_value: int) -> str:
     if d8_state == 1 and d9_state == 0:
         return ROLE_ASSISTANT
 
-    raise ValueError("invalid vehicle role pins: D8=%d, D9=%d" % (d8_state, d9_state))
+    raise ValueError("invalid vehicle role pins: D8=%d,D9=%d" % (d8_state, d9_state))
 
 
 def _read_role_pin(pin_name: str) -> int:

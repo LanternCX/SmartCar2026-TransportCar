@@ -24,5 +24,5 @@ def handle(ctx):
     - yaw: 航向角(度, 范围 -180~180)
     """
     ctx.get_query_uart().write(
-        "?pos=%.3f, %.3f, %.2f\r\n" % (ctx.odometry.x, ctx.odometry.y, ctx.heading_est)
+        "?pos=%.3f,%.3f,%.2f\r\n" % (ctx.odometry.x, ctx.odometry.y, ctx.heading_est)
     )
