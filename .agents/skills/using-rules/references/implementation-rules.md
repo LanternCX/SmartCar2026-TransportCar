@@ -73,7 +73,7 @@
 - 模块级可变运行时全局属于禁止项
 - 可延迟功能若被放回构造期无条件初始化, 视为实现阶段阻断项
 - 热路径新增大字符串拼接、大临时容器或无解释动态分配时, 必须先证明必要性
-- 低内存下 `?health`、`?tick` 必须保持最小诊断面可用
+- 低内存下必须保持最小诊断面可用
 
 > 这里的台账与分类只用于实现阶段自检, 不能替代板端实测结果或最终收口评审结论。
 
@@ -110,14 +110,14 @@
 | Asset | Owner | Phase | Class | Trigger | Duplicate | Action | Evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `uart3` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | 板端最小确认 | 最小日志和 query 回包通道 |
-| `oom_count` / `last_oom_stage` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `?health` | 低内存时必须可读 |
-| `last_exception_text` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | `?health` | 仅保留最小错误上下文 |
+| `oom_count` / `last_oom_stage` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | 最小健康诊断 | 低内存时必须可读 |
+| `last_exception_text` | `RuntimeCore` | `core_init` | `A` | boot | no | keep | 最小健康诊断 | 仅保留最小错误上下文 |
 | 角色 profile | `RuntimeCore` | `core_init` | `A` | boot | no | keep | boot role | 决定主车 / 辅车装配边界 |
 | 最小 query 路由 | `MinimalCommandRuntime` | `core_init` | `A` | boot | no | keep | 板端最小确认 | 仅保活 `health/tick` |
 | 完整 handlers 装配 | `FullCommandRuntime` | `feature_init` | `C` | first command feature | yes | delay | board trace | 禁止 import-time 全量注册 |
 | `chassis_state` | `MotionRuntime` | `feature_init` | `C` | motion activated | yes | move owner | board trace | 禁止同时挂在多个 facade |
 | IMU / 电机 / 编码器 | `MotionRuntime` | `feature_init` | `C` | motion activated | no | delay | board trace | 不应在最小 query 路径常驻 |
-| logger manager | `RuntimeCore` | `core_init` | `A` | boot | no | slim | `?log` / board log | 只保留低分配快路径 |
+| logger manager | `RuntimeCore` | `core_init` | `A` | boot | no | slim | board log | 只保留低分配快路径 |
 | 扩展 diagnostics | `MinimalDiagnostics` 之外的 owner | `feature_init` | `C` | debug feature | yes | delay | 现场观察 | query 优先于 debug 文本 |
 | 现场追踪探针 | tools probe | `diag` | `D` | manual observe | no | temp only | manual run | 默认不参与运行态 |
 | 模块级可变运行时全局 | none | `import` | `E` | never | n/a | delete | review block | 包括隐式单例和共享缓存 |

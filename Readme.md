@@ -12,5 +12,7 @@
 
 - [总体方案](docs/developer/strategy.md)
 - [电控设计](docs/developer/control.md)
+- [串口协议](docs/developer/protocol.md)
+- [状态机定义](docs/developer/state.md)
 - [视觉设计](docs/developer/vision.md)
 - [任务路线](docs/developer/tasks.md)

@@ -9,7 +9,7 @@ description: Use when implementing or refactoring code in this repository and ne
 
 这是当前仓库规则与知识的统一入口。
 本 Skill 只承接实现前与实现中的规则查询, 把执行规则压缩为 5 组固定入口。
-其中完整 OpenArt 协议正文统一维护在 `references/openart-protocol.md`, 主入口继续通过硬件与协议页做路由。
+其中正式串口通信协议正文统一维护在 `docs/developer/protocol.md`, 主入口继续通过硬件与协议页做路由。
 
 ## When to Use
 
@@ -22,7 +22,7 @@ description: Use when implementing or refactoring code in this repository and ne
 - 项目方向、任务优先级、控制/视觉主线与 Legacy 清理入口 -> `references/developer-docs.md`
 - 实现阶段通用约束、目录边界、TDD、内存装配门禁 -> `references/implementation-rules.md`
 - 注释风格、文档字符串规范与注释示例 -> `references/comment-rules.md`
-- 硬件事实、串口链路、视觉协议、坐标与联调语义 -> `references/hardware-and-protocol.md`（完整协议正文继续路由到 `references/openart-protocol.md`）
+- 硬件事实、串口链路、视觉协议、坐标与联调语义 -> `references/hardware-and-protocol.md`（正式协议正文继续路由到 `docs/developer/protocol.md`）
 - 比赛目标、双车协同、控制层级、调参与诊断顺序 -> `references/strategy-and-control.md`
 - `docs/superpowers/specs/` 与 `docs/superpowers/plans/` 的归档、搬运与目录整理 -> `references/superpowers-doc-archive.md`
 

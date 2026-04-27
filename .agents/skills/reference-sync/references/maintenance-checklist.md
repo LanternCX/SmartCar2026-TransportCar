@@ -18,14 +18,15 @@
   - [ ] 当前仓库的 Skill 与轻量入口页仍能路由到 `@../mpy-cli-dev`
   - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
 
-### OpenArt 协议正文
+### 串口通信协议正文
 
-- 来源：已删除的根 `docs/` 旧 OpenArt 协议正文、协议原始约定、仓库内已确认实现
-- 正式落点：`.agents/skills/using-rules/references/openart-protocol.md`
+- 来源：协议原始约定、仓库内当前实现和协作过程形成的低带宽约束
+- 正式落点：`docs/developer/protocol.md`
 - 维护检查项：
-  - [ ] 协议字段、链路约定、示例与兼容说明仍然有效
+  - [ ] 协议字段、链路约定和示例报文仍然有效
   - [ ] `using-rules` 入口页仍能路由到正式正文
   - [ ] 正文没有混入来源追溯类维护信息
+  - [ ] 正文没有维护其他格式兼容层或多套字段双轨说明
   - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
 
 ### `problem_statement` 文档集
