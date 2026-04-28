@@ -23,6 +23,7 @@ description: Use when repository reference documents need to be imported, refres
 - 想确认来源记录、追溯要求与质量检查 -> `references/source-and-quality.md`
 - 想查看文档来源、正式落点与触发条件 -> `references/source-registry.md`
 - 想查看持续维护对象与检查项 -> `references/maintenance-checklist.md`
+- 想整理 `docs/superpowers/specs/` 与 `docs/superpowers/plans/` -> `references/superpowers-doc-archive.md`
 - 模板资产 -> `assets/import-template.md`, `assets/source-record-template.md`
 
 ## 仓库规则

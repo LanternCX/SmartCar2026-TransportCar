@@ -29,6 +29,16 @@
   - [ ] 正文没有维护其他格式兼容层或多套字段双轨说明
   - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
 
+### `docs/superpowers` 协作文档归档规则
+
+- 来源：仓库内 specs / plans 协作流程与归档约定
+- 正式落点：`.agents/skills/reference-sync/references/superpowers-doc-archive.md`
+- 维护检查项：
+  - [ ] specs / plans 根目录和 archive 目录规则仍然有效
+  - [ ] 当前入口文档没有继续路由到 `using-rules` 的归档页
+  - [ ] 搬运规则没有混入具体设计正文或执行正文
+  - [ ] 本页与 `source-registry.md` 的来源和落点描述一致
+
 ### `problem_statement` 文档集
 
 - 来源：官方题面、官方问答、题面抓取与清洗记录、仓库内既有维护文档

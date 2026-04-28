@@ -20,8 +20,8 @@
 - 修改：`docs/AGENTS.md`
 - 修改：`README.md`
 - 修改：`.agents/skills/using-rules/SKILL.md`
-- 修改：`.agents/skills/using-rules/references/hardware-and-protocol.md`
-- 修改：`.agents/skills/using-rules/references/strategy-and-control.md`
+- 修改：`.agents/skills/using-rules/references/hardware-protocol.md`
+- 修改：`.agents/skills/using-rules/references/control-vision-runtime.md`
 - 删除：`.agents/skills/using-rules/references/openart-protocol.md`
 - 修改：`.agents/skills/reference-sync/references/source-registry.md`
 - 修改：`.agents/skills/reference-sync/references/maintenance-checklist.md`

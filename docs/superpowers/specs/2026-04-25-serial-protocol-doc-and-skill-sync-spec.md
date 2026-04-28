@@ -204,21 +204,21 @@ Skill 约束不承载完整协议正文。它只负责提醒 Agent 在实现或�
 
 建议更新位置：
 
-1. `.agents/skills/using-rules/references/hardware-and-protocol.md`
+1. `.agents/skills/using-rules/references/hardware-protocol.md`
    - 明确正式串口协议正文位于 `docs/developer/protocol.md`。
    - 保留串口链路低带宽约束。
    - 保留高频包短包优先约束。
    - 保留 TCP 同步包的重复发送、ACK、幂等处理约束。
    - 保留协议重构不保留兼容层约束。
 
-2. `.agents/skills/using-rules/references/strategy-and-control.md`
+2. `.agents/skills/using-rules/references/control-vision-runtime.md`
    - 只补充“协议同步与业务状态机设计分离”的约束。
    - 不写具体模块职责。
 
 3. `.agents/skills/using-rules/SKILL.md`
    - 若路由说明仍写完整 OpenArt 协议正文在 Skill 私有页，应改为路由到 `docs/developer/protocol.md`。
 
-4. `.agents/skills/using-rules/references/implementation-rules.md`
+4. `.agents/skills/using-rules/references/implementation-core.md`
    - 本次不需要更新；后续进入代码实现时再补实现门禁。
 
 ## 13. 非目标
