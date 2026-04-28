@@ -192,7 +192,7 @@ type=stream,state=12,vx=1.2,vy=0.3
    - 只保留视觉侧需要知道的协议分层口径。
    - 不写具体视觉任务分工。
 
-4. `docs/developer/strategy.md` 或 `docs/developer/tasks.md`
+4. `docs/developer/strategy.md`
    - 仅在需要时补充“串口协议正文在 `docs/developer/protocol.md`”的索引说明。
 
 5. `docs/AGENTS.md` 与 `README.md`

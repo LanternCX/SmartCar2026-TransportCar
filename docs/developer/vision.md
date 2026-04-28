@@ -1,6 +1,6 @@
 # 视觉设计
 
-> 说明：本文件描述当前视觉链路事实与项目路线中的视觉职责。链路与控制职责以 `docs/developer/control.md` 和 `docs/developer/protocol.md` 为准；路线目标联读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`。
+> 说明：本文件描述当前视觉链路事实与项目路线中的视觉职责。链路与控制职责以 `docs/developer/control.md` 和 `docs/developer/protocol.md` 为准；路线目标见 `docs/developer/strategy.md`。
 
 ## 串口协议入口
 

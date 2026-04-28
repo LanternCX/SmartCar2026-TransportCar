@@ -1,6 +1,6 @@
 # docs 索引
 
-- 默认先读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`
+- 默认先读 `docs/developer/strategy.md`
 - 协议专题看 `docs/developer/protocol.md`，状态机编号看 `docs/developer/state.md`
 - 控制与视觉专题看 `docs/developer/control.md`、`docs/developer/vision.md`
 - 赛题规则从 `docs/problem_statement/README.md` 进入，再按顺序读 `spec.md`、`qa.md`、`sources.md`
