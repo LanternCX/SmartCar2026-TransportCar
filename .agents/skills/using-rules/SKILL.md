@@ -19,7 +19,7 @@ description: Use when implementing or refactoring code in this repository and ne
 
 ## Routing Rules
 
-- 项目方向、任务优先级、控制/视觉主线与 Legacy 清理入口 -> `references/developer-docs.md`
+- 项目方向、任务优先级、控制主线与视觉口径 -> `references/developer-docs.md`
 - 实现阶段通用约束、目录边界、TDD、内存装配门禁 -> `references/implementation-rules.md`
 - 注释风格、文档字符串规范与注释示例 -> `references/comment-rules.md`
 - 硬件事实、串口链路、视觉协议、坐标与联调语义 -> `references/hardware-and-protocol.md`（正式协议正文继续路由到 `docs/developer/protocol.md`）
@@ -28,7 +28,7 @@ description: Use when implementing or refactoring code in this repository and ne
 
 ## First Check
 
-- 若任务涉及项目方向、阶段目标、控制主线、视觉主线或 Legacy 边界, 先查看 `references/developer-docs.md`
+- 若任务涉及项目方向、阶段目标、控制主线或视觉主线, 先查看 `references/developer-docs.md`
 - 其中默认优先阅读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`
 
 ## Mandatory Gates

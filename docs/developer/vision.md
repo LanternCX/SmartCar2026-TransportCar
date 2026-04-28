@@ -1,6 +1,6 @@
 # 视觉设计
 
-> 说明：本文件描述当前视觉链路事实与项目路线中的视觉职责。若与 `docs/developer/control.md` 或已确认的专项设计冲突，以后者为准；若讨论的是更高层路线目标，再联读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`。
+> 说明：本文件描述当前视觉链路事实与项目路线中的视觉职责。链路与控制职责以 `docs/developer/control.md` 和 `docs/developer/protocol.md` 为准；路线目标联读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`。
 
 ## 串口协议入口
 
@@ -15,7 +15,7 @@
 - `vision/assistant/follow_runtime.py` 会创建辅车角色运行时对象，并在 `step()` 控制周期中参与双路速度输入读取编排和底盘调度。
 - 辅车角色层在控制周期内统一编排 `UART8` 与 `UART6` 的读取：两路字段按 [串口通信协议](protocol.md) 的链路定义解释，非速度片段同样继续交给共享底盘；任一路单独存在时也可以直接形成最终速度。
 - 辅车当前实现把 `UART8` 解释为前馈输入、把 `UART6` 解释为视觉输入；最终生效的 `vx / vy` 通过两路按轴裸相加形成，`omega` 当前只由 `UART8` 提供；角色层对两路都采用“保持上一包”的语义，不额外追加等待式同步逻辑。
-- 视觉代码可以按设备侧分别维护，但角色入口统一在 `vision/master/` 与 `vision/assistant/` 下；其中主车包当前只承担串口转发职责，视觉消费入口留给后续专项设计。
+- 视觉代码可以按设备侧分别维护，但角色入口统一在 `vision/master/` 与 `vision/assistant/` 下；其中主车包只承担串口转发职责。
 - 正常运行入口会先识别车号，再切到 `vision/master/` 或 `vision/assistant/` 对应包。
 - 辅车车体提供可识别标记，辅车底盘不处理图像数据。
 
