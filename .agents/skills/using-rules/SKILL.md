@@ -19,7 +19,7 @@ description: Use when implementing or refactoring code in this repository and ne
 ## 最短阅读路径
 
 1. 先判断任务是否依赖项目方向或阶段目标。
-   - 需要方向背景时, 先读 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`。
+   - 需要方向背景时, 先读 `docs/developer/strategy.md`。
    - 只做局部实现且方向已明确时, 不强制展开整套方向文档。
 2. 所有代码实现与重构任务先读 `references/implementation-core.md`。
 3. 按触发条件追加读取对应 reference, 不要把全部 reference 当成默认必读。

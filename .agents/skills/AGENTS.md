@@ -10,7 +10,7 @@
 
 ## 当前 Skill 索引
 
-- 用户主 review 正文只看 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`
+- 用户主 review 正文优先看 `docs/developer/strategy.md`
 - 其余 memory / TDD / Skill 写作方法正文不再作为用户主 review 正文, 相关规则改由对应 Skill 私有入口承接
 - `using-rules`：仓库规则、协议、硬件事实和知识入口
 - `reference-sync`：参考文档更新、外部资料同步、规则清洗入口

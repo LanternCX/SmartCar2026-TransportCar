@@ -3,7 +3,7 @@
 ## 适用范围
 
 - 本页用于控制链、角色运行入口、视觉速度输入、调参与诊断顺序相关实现。
-- 项目路线目标以 `docs/developer/strategy.md` 为准, 任务推进顺序以 `docs/developer/tasks.md` 为准。
+- 项目路线目标以 `docs/developer/strategy.md` 为准, 任务推进顺序以 issue 管理为准。
 - 控制事实以 `docs/developer/control.md` 为准, 视觉职责以 `docs/developer/vision.md` 为准, 串口字段以 `docs/developer/protocol.md` 为准。
 
 ## 项目与角色边界
