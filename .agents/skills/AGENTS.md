@@ -1,21 +1,20 @@
 ## Rules
-1. 不要在撰写 skill 文档的时候展现任何的"历史性口吻"。例如：不再保留xxx，现在是xxx 等等携带时态的口吻，文档必须和当下代码对齐。如果携带历史性口吻会造成读者的困惑。历史变更已经在 git log 中有较为完整的体现了。
-2. 如果发生了仓库的代码修改，需要检查本仓库是否和代码中的具体实现对齐。应该避免文档和实现出现较大差异。
+1. Skill 文档只描述当前事实、当前职责和当前路由，不写迁移解释、版本对比或历史变更说明。
+2. 修改 Skill 文档时，先核对本目录索引、相关 `references/`、正式代码与正式开发文档，避免入口和实现脱节。
+3. 规则按渐进式路径组织：主入口只给用途、边界和路由；具体规则放入最少数量的 reference 页；高风险细节只在触发场景下加载。
 
-## 说明
-2. 本目录只存 Skill 实现、`references/` 与 `assets/`，技能索引也只维护在这里，避免污染仓库根 `AGENTS.md` 常驻上下文。
-3. 仓库主入口与流程入口优先使用最短、最自然的名字。
-4. 工具型 Skill 可使用 `*-tool` 后缀。
-5. 扩展 superpowers 的本地 Skill 不得与上游同名覆盖，统一使用 `project-extension-*` 前缀。
+## Directory Rules
+1. 本目录只存 Skill 实现、`references/` 与 `assets/`；Skill 索引维护在本文件。
+2. 仓库主入口与流程入口优先使用最短、最自然的名字。
+3. 工具型 Skill 可使用 `*-tool` 后缀。
+4. 扩展 superpowers 的本地 Skill 不与上游同名覆盖，统一使用 `project-extension-*` 前缀。
 
-## 当前 Skill 索引
+## Skill Index
 
-- 用户主 review 正文只看 `docs/developer/strategy.md` 与 `docs/developer/tasks.md`
-- 其余 memory / TDD / Skill 写作方法正文不再作为用户主 review 正文, 相关规则改由对应 Skill 私有入口承接
-- `using-rules`：仓库规则、协议、硬件事实和知识入口
-- `reference-sync`：参考文档更新、外部资料同步、规则清洗入口
-- `project-extension-writing-skills`：对 superpowers `writing-skills` 的本地扩展
-- `project-extension-requesting-code-review`：对 superpowers `requesting-code-review` 的本地扩展
-- `mpy-cli-tool`：`mpy-cli` 工具入口
-- `git-workflow`：仓库 Git 流程规范入口
-- `using-git-worktrees`：禁止默认 worktree 并重定向到本仓库 Git 流程
+- `using-rules`：实现前与实现中的仓库规则、协议、硬件事实和知识入口
+- `project-extension-requesting-code-review`：任务收口、评审门禁与内存自检入口
+- `reference-sync`：参考文档导入、更新、来源追溯与维护清单入口
+- `project-extension-writing-skills`：Skill 新建、重构、迁移与写作规范入口
+- `mpy-cli-tool`：`mpy-cli` 工具使用、路径边界和排障入口
+- `git-workflow`：仓库 Git Flow 与 Angular Conventional Commit 规范入口
+- `using-git-worktrees`：worktree 触发场景的本地 Git 流程重定向入口

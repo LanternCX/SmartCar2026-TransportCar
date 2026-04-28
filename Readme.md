@@ -6,11 +6,12 @@
 
 ## 仓库定位
 
-本仓库用于维护搬运车模的控制代码，以及面向开发者的总体方案、电控设计、视觉设计和任务路线文档。
+本仓库用于维护搬运车模的控制代码，以及面向开发者的总体方案、电控设计、视觉设计、串口协议和状态机文档。
 
 ## 开发者文档
 
 - [总体方案](docs/developer/strategy.md)
 - [电控设计](docs/developer/control.md)
+- [串口协议](docs/developer/protocol.md)
+- [状态机定义](docs/developer/state.md)
 - [视觉设计](docs/developer/vision.md)
-- [任务路线](docs/developer/tasks.md)

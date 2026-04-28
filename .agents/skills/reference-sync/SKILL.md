@@ -7,8 +7,8 @@ description: Use when repository reference documents need to be imported, refres
 
 ## 概览
 
-这是当前仓库参考文档的维护入口。
-它不维护各 Skill 的正式正文，而是负责登记来源、正式落点和后续维护动作。
+这是仓库参考文档的维护入口。
+它负责登记来源、正式落点和维护动作，不复制各 Skill 或开发文档的正式正文。
 
 ## 适用场景
 
@@ -19,14 +19,15 @@ description: Use when repository reference documents need to be imported, refres
 
 ## 路由规则
 
-- 想确认同步步骤、清洗流程与维护边界 -> `references/sync-rules.md`
-- 想确认来源记录、追溯要求与质量检查 -> `references/source-and-quality.md`
-- 想查看文档来源、正式落点与触发条件 -> `references/source-registry.md`
-- 想查看持续维护对象与检查项 -> `references/maintenance-checklist.md`
+- 同步步骤、清洗流程与维护边界 -> `references/sync-rules.md`
+- 来源记录、追溯要求与质量检查 -> `references/source-and-quality.md`
+- 文档来源、正式落点与触发条件 -> `references/source-registry.md`
+- 持续维护对象与检查项 -> `references/maintenance-checklist.md`
+- `docs/superpowers/specs/` 与 `docs/superpowers/plans/` 归档整理 -> `references/superpowers-doc-archive.md`
 - 模板资产 -> `assets/import-template.md`, `assets/source-record-template.md`
 
 ## 仓库规则
 
-- 原 `remote-spec-to-markdown` 的远端规则抓取与清洗职责已并入这里
-- `reference-sync` 只维护来源登记与维护清单, 不复制或承接各 Skill 的正式正文
-- 更新正式正文时, 必须同步检查 `references/source-registry.md` 与 `references/maintenance-checklist.md`
+- `reference-sync` 只维护来源登记与维护清单，不复制或承接各 Skill 的正式正文
+- 更新正式正文时，必须同步检查 `references/source-registry.md` 与 `references/maintenance-checklist.md`
+- 外部资料可能变化时，先核对来源，再修改本地正式正文或路由页
