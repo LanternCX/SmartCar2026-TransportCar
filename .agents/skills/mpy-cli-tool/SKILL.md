@@ -6,38 +6,37 @@ description: Use when initializing, configuring, scanning ports, planning, deplo
 # mpy-cli 工具
 
 ## 概述
+
 这里是 `mpy-cli` 的统一入口。主 Skill 只保留命令索引、场景路由和高风险边界，完整命令手册与实际实现统一以 @../mpy-cli-dev 仓库为准。
 
 ## 适用场景
+
 - 首次在本仓库接入 `mpy-cli`
 - 不确定设备当前串口，需先发现可用 MicroPython 设备
 - 需要将本地 `src/` 代码同步到 MicroPython 设备
-
 - 需要执行 `upload/run/delete/tree` 等设备文件运维
 - 用户在问 `--base`、`--scan-mode`、路径映射和部署边界细节
 
 ## 命令索引
+
 - 初始化或重配：`init`, `config`
 - 发现设备：`list`
 - 部署主流程：`plan`, `deploy`
 - 单文件运维：`upload`, `run`, `delete`, `tree`
 
 ## 手册入口
-- 正式来源仓库：@../mpy-cli-dev
-- 需要查参数、无交互调用、安装方式、路径映射和常见问题时，优先查看该仓库中的 `README.md`
-- 需要确认真实行为时，再核对该仓库中的 `mpy_cli/` 与 `tests/`
 
-## 路由规则
-- 想先知道有哪些命令，或确认 `source_dir`、`device_upload_dir`、`.mpyignore` 边界 -> `references/command-and-path-boundaries.md`
-- 想排查端口、扫描、部署失败 -> `references/troubleshooting.md`
-- 需要完整正文时，以上入口页都应继续路由到 @../mpy-cli-dev
+- 正式来源仓库：@../mpy-cli-dev
+- 命令、路径边界、排障和真实行为核对 -> `references/mpy-cli-reference.md`
 
 ## 安全门禁
+
 - 串口未知时先 `mpy-cli list`
 - 部署前先 `mpy-cli plan`
 - `full` 模式前必须确认目标设备与上传目录边界
 
 ## 交付目标
+
 - 可复现的命令选择
 - 对应 reference 的查询路径
 - 明确的部署边界说明
