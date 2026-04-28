@@ -2,7 +2,7 @@
 
 执行状态：Archive  
 创建日期：2026-04-25  
-对应 Spec：`docs/superpowers/specs/2026-04-25-serial-protocol-doc-and-skill-sync-spec.md`
+对应 Spec：`docs/superpowers/specs/archive/PR#60/2026-04-25-serial-protocol-doc-and-skill-sync-spec.md`
 
 ## 目标
 
