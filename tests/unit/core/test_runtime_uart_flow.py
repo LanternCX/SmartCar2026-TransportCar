@@ -4,13 +4,9 @@ from tests.unit.core.runtime_support import CaptureUart, make_minimal_transport_
 
 
 class RouterSpy:
-    """记录查询路由的最小桩."""
+    """记录非查询路由不应被查询路径调用的最小桩."""
 
-    def __init__(self) -> None:
-        self.queries = []
-
-    def handle_query(self, token, car, source):
-        self.queries.append((token, car, source))
+    pass
 
 
 def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> None:
@@ -28,25 +24,26 @@ def test_transport_car_handle_uart3_line_does_not_echo_non_query_command() -> No
     assert car.uart3.messages == []
 
 
-def test_transport_car_handle_uart3_line_routes_query_to_router() -> None:
-    """查询行继续交给 query 路由处理."""
-    router = RouterSpy()
+def test_transport_car_handle_uart3_line_ignores_question_prefixed_input() -> None:
+    """问号开头输入不进入查询路由, 也不产生回写."""
     _transport_car, car = make_minimal_transport_car(
         uart3=CaptureUart(),
-        _router=router,
+        _router=RouterSpy(),
     )
+    calls = []
+    car.apply_command = lambda line: calls.append(line)
 
     car._handle_uart_line("?health", source="uart3")
 
-    assert router.queries == [("health", car, "uart3")]
+    assert calls == []
+    assert car.uart3.messages == []
 
 
 def test_transport_car_process_uart_splits_lines_keeps_residue_and_skips_empty_line() -> None:
     """多行输入按行处理, 空行忽略, 无换行残留保留在缓冲区."""
-    router = RouterSpy()
     _transport_car, car = make_minimal_transport_car(
         uart3=CaptureUart(incoming=b"?health\nrear=1\n\npartial"),
-        _router=router,
+        _router=RouterSpy(),
         rx_buf3="",
     )
     commands = []
@@ -54,11 +51,8 @@ def test_transport_car_process_uart_splits_lines_keeps_residue_and_skips_empty_l
 
     car._process_uart()
 
-    assert len(router.queries) == 1
-    assert router.queries[0][0] == "health"
-    assert router.queries[0][1] is car
-    assert router.queries[0][2] == "uart3"
     assert commands == ["rear=1"]
+    assert car.uart3.messages == []
     assert car.rx_buf3 == "partial"
 
 
@@ -95,3 +89,35 @@ def test_transport_car_process_uart_keeps_err_output() -> None:
     assert len(car.uart3.messages) == 1
     assert car.uart3.messages[0].startswith("ERR ")
     assert "boom" in car.uart3.messages[0]
+
+
+def test_transport_car_handle_uart3_line_accepts_v_short_packet() -> None:
+    """共享底盘串口入口接受速度短包并结构化写入速度."""
+    _transport_car, car = make_minimal_transport_car(
+        uart3=CaptureUart(),
+        _router=object(),
+        last_cmd={"vx": 0.0, "vy": 0.0, "omega": 0.0},
+    )
+    finalized = []
+    car._finalize_route = lambda dispatched: finalized.append(dispatched)
+
+    car._handle_uart_line("v,1.0,-2.5,0.5", source="uart3")
+
+    assert car.last_cmd == {"vx": 1.0, "vy": -2.5, "omega": 0.5}
+    assert finalized == [{"vx", "vy", "omega"}]
+
+
+def test_transport_car_handle_uart3_line_rejects_key_value_velocity_text() -> None:
+    """共享底盘串口入口不接受键值速度字段."""
+    _transport_car, car = make_minimal_transport_car(
+        uart3=CaptureUart(),
+        _router=object(),
+        last_cmd={"vx": 0.0, "vy": 0.0, "omega": 0.0},
+    )
+    calls = []
+    car.apply_command = lambda line: calls.append(line)
+
+    car._handle_uart_line("vx=1.0,vy=2.0,omega=0.5", source="uart3")
+
+    assert calls == []
+    assert car.last_cmd == {"vx": 0.0, "vy": 0.0, "omega": 0.0}

@@ -26,6 +26,7 @@ from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from command.router import router as _cmd_router
+from vision.serial_protocol import parse_short_packet
 from command.policy import (
     build_command_health_fields,
     finalize_command_route,
@@ -109,7 +110,7 @@ class _NullMotor:
         """
         @brief 设置电机占空比(模拟)
 
-        @details 仅记录占空比值到 last_duty 供查询, 不触发真实硬件输出
+        @details 仅记录占空比值到 last_duty 供诊断读取, 不触发真实硬件输出
 
         @param value 目标占空比值(-MAX_DUTY ~ +MAX_DUTY), 会被转换为整数存储
         """
@@ -156,7 +157,7 @@ class TransportCar:
     - 周期性控制循环(TICK_MS=5ms 周期)
     - 速度环闭环控制与逆运动学变换
     - 位置锁定与偏航角 PID 控制
-    - 串口命令解析、查询处理和执行
+    - 串口命令解析和执行
 
     使用示例:
     @code
@@ -482,12 +483,12 @@ class TransportCar:
 
     def _handle_uart_line(self, line, source):
         """
-        @brief 处理来自串口的单行输入, 分发到查询或命令处理器
+        @brief 处理来自串口的单行输入, 分发到命令处理器
 
         @details 处理逻辑
         - 空行忽略
-        - 以 "?" 开头的行作为查询指令, 移除前缀后转发到查询处理器
-        - 其他行作为控制指令(如 "vx=10, vy=5"), 转发到命令路由器
+        - 以 "?" 开头的行忽略
+        - 其他行作为非速度控制指令转发到命令路由器
 
         @param line 输入的命令行字符串, 可能为空或已去除首尾空格
         @param source 串口来源标识(如 "uart3"), 用于调试和日志
@@ -496,10 +497,41 @@ class TransportCar:
             return
 
         if line.startswith("?"):
-            self._router.handle_query(line[1: ], self, source=source)
+            return
+
+        packet = parse_short_packet(line)
+        if packet is not None and packet.get("type") == "v":
+            self.handle_velocity_packet(
+                float(packet["vx"]),
+                float(packet["vy"]),
+                float(packet.get("omega", 0.0)),
+                source=source,
+                has_omega=bool(packet.get("has_omega")),
+            )
+            return
+        if line.lower().startswith("v,") or self._has_key_value_velocity_field(line):
             return
 
         self.apply_command(line)
+
+
+    def handle_velocity_packet(self, vx, vy, omega=0.0, source="protocol", has_omega=True):
+        """接收结构化速度短包结果
+
+        @param vx 车体系 x 方向速度
+        @param vy 车体系 y 方向速度
+        @param omega 车体系角速度
+        @param source 输入来源标识
+        @param has_omega 本包是否显式携带角速度
+        """
+
+        self.last_cmd["vx"] = float(vx)
+        self.last_cmd["vy"] = float(vy)
+        dispatched = {"vx", "vy"}
+        if has_omega:
+            self.last_cmd["omega"] = float(omega)
+            dispatched.add("omega")
+        self._finalize_route(dispatched)
 
     def _get_active_position_targets(self):
         """
@@ -552,7 +584,7 @@ class TransportCar:
 
     def build_health_snapshot(self):
         """
-        @brief 构造系统健康状态快照, 用于查询和诊断
+        @brief 构造系统健康状态快照, 用于诊断
 
         @details 收集当前运行状态
         - alive: 系统在线标志(恒为 1)
@@ -568,17 +600,6 @@ class TransportCar:
         }
         snapshot.update(build_command_health_fields(self))
         return snapshot
-
-    def get_query_uart(self):
-        """
-        @brief 获取查询响应应写入的串口对象
-
-        @details 支持从多个串口来源接收查询, 但始终向指定串口发送响应
-                优先使用 _query_response_uart(如果被设置), 默认使用 uart3
-
-        @return 用于响应查询的 UART 对象
-        """
-        return getattr(self, "_query_response_uart", self.uart3)
 
     def build_tick_snapshot(self):
         """
@@ -854,7 +875,7 @@ class TransportCar:
            - 微分项直接使用滤波角速度, 增强稳定性
            - 输出限幅在 ±AUTO_OMEGA_MAX
 
-        2. 角速度模式(cmd_omega != None):
+        2. 角速度模式(omega != None):
            - 直接跟随指令的 omega 值
            - 当 |omega| < HOLD_SPEED_EPS 时自动切换到保持模式
            - 否则重置 PID, 记录当前航向作为保持目标
@@ -870,7 +891,7 @@ class TransportCar:
         @warning YAW_KD 配置应使用本地微分而不是 PID 的 D 项, 因为已有低通滤波
         """
         cmd_angle = self._get_active_angle_command()
-        cmd_omega = self.last_cmd.get("omega")
+        omega_value = self.last_cmd.get("omega")
 
         if cmd_angle is not None:
             self.heading_target = cmd_angle
@@ -878,8 +899,8 @@ class TransportCar:
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
 
-        elif cmd_omega is not None:
-            omega_cmd = cmd_omega
+        elif omega_value is not None:
+            omega_cmd = omega_value
             if abs(omega_cmd) < HOLD_SPEED_EPS:
                 omega_pid = self.yaw_pid.update(
                     self.heading_target, self.heading_est, dt_s
@@ -1075,14 +1096,14 @@ class TransportCar:
 
     def _process_uart(self):
         """
-        @brief 轮询 UART3 接收缓冲区, 处理查询和控制指令
+        @brief 轮询 UART3 接收缓冲区, 处理控制指令
 
         @details 处理流程
         1. 检查 UART3 缓冲区是否有待接收字节
         2. 解码接收数据追加到接收缓冲 rx_buf3
         3. 按行分割(以 \n 为界), 去除 \r 和首尾空格
         4. 对每行调用 _handle_uart_line 进行分发:
-           - 如果行以 "?" 开头, 则为查询指令, 转发到查询处理器
+           - 如果行以 "?" 开头, 则忽略
            - 否则作为控制指令分发到命令路由器
         5. 异常时向串口回写错误信息
 
@@ -1105,6 +1126,23 @@ class TransportCar:
 
     # Command handling (命令处理与路由)
 
+    @staticmethod
+    def _has_key_value_velocity_field(line):
+        """判断输入行是否包含键值速度字段
+
+        @param line 输入行
+        @return 是否包含键值速度字段
+        """
+
+        for fragment in line.split(","):
+            item = fragment.strip()
+            if not item or "=" not in item:
+                continue
+            key = item.split("=", 1)[0].strip().lower()
+            if key in ("vx", "vy", "omega", "w"):
+                return True
+        return False
+
     def apply_command(self, line):
         """
         @brief 接收原始命令行字符串, 分发到路由器进行处理
@@ -1116,10 +1154,8 @@ class TransportCar:
         4. 部分命令可能触发 command_lock 进行位置/角度锁定
 
         @param line 原始命令行字符串, 格式示例
-                   - "vx=10, vy=5" (速度模式)
                    - "x=1.0, y=2.0" (位置锁定)
                    - "angle=90" (角度锁定)
-                   - "omega=45" (角速度模式)
                    - "reset" (复位状态)
 
         @warning 命令在锁定模式(command_lock=True)下可能被忽略, reset 例外

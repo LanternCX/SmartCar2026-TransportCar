@@ -126,11 +126,12 @@ def test_rear_and_relative_move_share_same_lock_zero_packet() -> None:
     assert ctx.last_cmd["y"] == 2.03
 
 
-def test_velocity_packet_clears_position_targets_and_exits_command_mode() -> None:
+def test_structured_translation_velocity_clears_position_targets_and_exits_command_mode() -> None:
     ctx = _RouteContext()
 
     assert router.route("dx=0.10,dy=0.10,lock=0", ctx) is True
-    assert router.route("vy=12", ctx) is True
+    ctx.last_cmd["vy"] = 12.0
+    finalize_command_route(ctx, {"vy"}, now_ms=0)
 
     assert "x" not in ctx.last_cmd
     assert "y" not in ctx.last_cmd
@@ -162,11 +163,12 @@ def test_angle_packet_clears_omega_target() -> None:
     assert ctx.command_mode == "locked"
 
 
-def test_omega_packet_clears_angle_target_and_exits_command_mode() -> None:
+def test_structured_omega_clears_angle_target_and_exits_command_mode() -> None:
     ctx = _RouteContext()
 
     assert router.route("angle=45,lock=1", ctx) is True
-    assert router.route("omega=12", ctx) is True
+    ctx.last_cmd["omega"] = 12.0
+    finalize_command_route(ctx, {"omega"}, now_ms=0)
 
     assert "angle" not in ctx.last_cmd
     assert ctx.last_cmd["omega"] == 12.0
@@ -174,11 +176,12 @@ def test_omega_packet_clears_angle_target_and_exits_command_mode() -> None:
     assert ctx.command_lock is False
 
 
-def test_velocity_packet_keeps_angle_target_and_lock_mode() -> None:
+def test_structured_translation_velocity_keeps_angle_target_and_lock_mode() -> None:
     ctx = _RouteContext()
 
     assert router.route("angle=45,lock=1", ctx) is True
-    assert router.route("vx=12", ctx) is True
+    ctx.last_cmd["vx"] = 12.0
+    finalize_command_route(ctx, {"vx"}, now_ms=0)
 
     assert ctx.last_cmd["angle"] == 45.0
     assert ctx.last_cmd["vx"] == 12.0
@@ -186,11 +189,12 @@ def test_velocity_packet_keeps_angle_target_and_lock_mode() -> None:
     assert ctx.command_lock is True
 
 
-def test_omega_packet_keeps_xy_target_and_lock_mode() -> None:
+def test_structured_omega_keeps_xy_target_and_lock_mode() -> None:
     ctx = _RouteContext()
 
     assert router.route("x=1.5,lock=1", ctx) is True
-    assert router.route("omega=12", ctx) is True
+    ctx.last_cmd["omega"] = 12.0
+    finalize_command_route(ctx, {"omega"}, now_ms=0)
 
     assert ctx.last_cmd["x"] == 1.5
     assert ctx.last_cmd["omega"] == 12.0

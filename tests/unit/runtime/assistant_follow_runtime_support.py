@@ -96,6 +96,16 @@ def install_fake_transport_car(monkeypatch):
             events.append("transport_step")
             return False
 
+        def handle_velocity_packet(self, vx: float, vy: float, omega: float, source: str, has_omega=True) -> None:
+            events.append(("handle_velocity", source, vx, vy, omega))
+            self.last_cmd["vx"] = float(vx)
+            self.last_cmd["vy"] = float(vy)
+            dispatched = {"vx", "vy"}
+            if has_omega:
+                self.last_cmd["omega"] = float(omega)
+                dispatched.add("omega")
+            self._finalize_route(dispatched)
+
         def _handle_uart_line(self, line: str, source: str) -> None:
             events.append(("handle_uart_line", source, line))
             dispatched = set()
@@ -149,9 +159,6 @@ def install_fake_transport_car(monkeypatch):
 
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}
-
-        def get_query_uart(self):
-            return self.uart3
 
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)

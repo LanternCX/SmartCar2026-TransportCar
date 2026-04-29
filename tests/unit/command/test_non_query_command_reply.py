@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-import command.commands as _commands  # noqa: F401 触发命令与查询注册
+import command.commands as _commands  # noqa: F401 触发命令注册
 
 from command.router import router
 
@@ -23,7 +23,7 @@ class _CaptureUart:
         self.messages.append(text)
 
 
-class _QueryContext:
+class _CommandContext:
     def __init__(self) -> None:
         self.uart3 = _CaptureUart()
         self.uart8 = _CaptureUart()
@@ -34,18 +34,9 @@ class _QueryContext:
     def _finalize_route(self, _dispatched) -> None:
         return None
 
-    def get_query_uart(self):
-        return getattr(self, "_query_response_uart", self.uart3)
-
-    def build_health_snapshot(self):
-        return {
-            "alive": 1,
-            "last_err": "none",
-        }
-
 
 def test_rear_still_updates_state_without_uart3_prompt() -> None:
-    ctx = _QueryContext()
+    ctx = _CommandContext()
 
     assert router.route("rear=1", ctx) is True
 
@@ -54,7 +45,7 @@ def test_rear_still_updates_state_without_uart3_prompt() -> None:
 
 
 def test_print_routes_without_emitting_runtime_uart_text() -> None:
-    ctx = _QueryContext()
+    ctx = _CommandContext()
 
     assert router.route("print=hello world", ctx) is True
 
@@ -62,18 +53,16 @@ def test_print_routes_without_emitting_runtime_uart_text() -> None:
     assert ctx.uart6.messages == []
 
 
-def test_health_query_still_returns_health_reply() -> None:
-    ctx = _QueryContext()
-
-    assert router.handle_query("health", ctx, source="uart3") is True
-
-    assert len(ctx.uart3.messages) == 1
-    assert ctx.uart3.messages[0].startswith("?health=")
+def test_router_has_no_query_runtime_entrypoints() -> None:
+    assert not hasattr(router, "query")
+    assert not hasattr(router, "handle_query")
+    assert not hasattr(router, "_query_handlers")
 
 
-def test_missing_query_still_returns_unknown_reply() -> None:
-    ctx = _QueryContext()
+def test_question_prefixed_input_is_not_a_command_reply() -> None:
+    ctx = _CommandContext()
 
-    assert router.handle_query("missing", ctx, source="uart3") is False
+    assert router.route("?health", ctx) is False
+    assert router.route("?missing", ctx) is False
 
-    assert ctx.uart3.messages == ["?unknown=missing\r\n"]
+    assert ctx.uart3.messages == []

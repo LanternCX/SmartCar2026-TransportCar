@@ -1,6 +1,7 @@
 """`core.diagnostics` 测试."""
 
-from core.diagnostics import format_observe_line, format_query_response, format_snapshot_value
+import core.diagnostics as diagnostics
+from core.diagnostics import format_observe_line, format_snapshot_value
 
 
 def test_format_snapshot_value_formats_none_as_none_text() -> None:
@@ -15,12 +16,10 @@ def test_format_snapshot_value_sanitizes_regular_value() -> None:
     assert format_snapshot_value("x\n1,2") == "x 1;2"
 
 
-def test_format_query_response_formats_snapshot_as_query_line() -> None:
-    """查询回包继续使用 `?token=` 口径."""
+def test_diagnostics_has_no_query_response_formatter() -> None:
+    """诊断工具不暴露通用查询回包格式化入口."""
 
-    line = format_query_response("health", {"alive": 1, "last_err": "ok"})
-
-    assert line == "?health=alive:1,last_err:ok\r\n"
+    assert not hasattr(diagnostics, "format_query_response")
 
 
 def test_format_observe_line_formats_snapshot_as_observe_line() -> None:

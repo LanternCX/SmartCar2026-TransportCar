@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from vision.assistant.velocity_packet import (
+from vision.assistant.velocity_packet import (  # noqa: E402
     CONSUME_ACCEPTED,
     CONSUME_IGNORED,
     CONSUME_INVALID,
@@ -18,47 +18,41 @@ from vision.assistant.velocity_packet import (
 )
 
 
-def test_split_velocity_line_accepts_same_velocity_semantics() -> None:
-    consume_result, parsed, passthrough = split_velocity_line(
-        "vy=0.25, omega=-1.5, vx=-0.5"
-    )
+def test_split_velocity_line_accepts_velocity_short_packet_with_omega() -> None:
+    consume_result, parsed, passthrough = split_velocity_line("v,1.25,-0.5,0.75")
 
     assert consume_result == CONSUME_ACCEPTED
-    assert parsed == {"vx": -0.5, "vy": 0.25, "omega": -1.5}
-    assert passthrough is None
-
-    consume_result, parsed, passthrough = split_velocity_line("vx=1")
-
-    assert consume_result == CONSUME_ACCEPTED
-    assert parsed == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
+    assert parsed == {"vx": 1.25, "vy": -0.5, "omega": 0.75, "has_omega": True}
     assert passthrough is None
 
 
-def test_split_velocity_line_separates_passthrough_fragments() -> None:
-    consume_result, parsed, passthrough = split_velocity_line(
-        "vx=1.0,x=12.0,angle=45.0"
-    )
+def test_split_velocity_line_accepts_velocity_short_packet_without_omega() -> None:
+    consume_result, parsed, passthrough = split_velocity_line("v,1.25,-0.5")
 
     assert consume_result == CONSUME_ACCEPTED
-    assert parsed == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
-    assert passthrough == "x=12.0,angle=45.0"
+    assert parsed == {"vx": 1.25, "vy": -0.5, "omega": 0.0, "has_omega": False}
+    assert passthrough is None
 
-    consume_result, parsed, passthrough = split_velocity_line("?health")
+
+def test_split_velocity_line_rejects_key_value_velocity_text() -> None:
+    consume_result, parsed, passthrough = split_velocity_line("vx=1,vy=2")
 
     assert consume_result == CONSUME_IGNORED
     assert parsed is None
-    assert passthrough == "?health"
+    assert passthrough == "vx=1,vy=2"
 
 
-def test_split_velocity_line_rejects_duplicate_and_bad_values() -> None:
-    consume_result, parsed, passthrough = split_velocity_line("vx=1,vy=2,vx=3")
-
-    assert consume_result == CONSUME_INVALID
-    assert parsed is None
-    assert passthrough is None
-
-    consume_result, parsed, passthrough = split_velocity_line("vx=1,vy=bad")
+def test_split_velocity_line_rejects_invalid_velocity_short_packet() -> None:
+    consume_result, parsed, passthrough = split_velocity_line("v,1,bad")
 
     assert consume_result == CONSUME_INVALID
     assert parsed is None
     assert passthrough is None
+
+
+def test_split_velocity_line_ignores_non_velocity_short_packet() -> None:
+    consume_result, parsed, passthrough = split_velocity_line("s,12,3,1,0")
+
+    assert consume_result == CONSUME_IGNORED
+    assert parsed is None
+    assert passthrough == "s,12,3,1,0"

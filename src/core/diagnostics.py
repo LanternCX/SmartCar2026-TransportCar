@@ -1,7 +1,7 @@
 """
 @brief 运行时诊断输出辅助函数
 
-提供串口安全的诊断数据格式化功能, 支持查询响应和实时观测两种输出格式
+提供串口安全的诊断数据格式化功能, 支持实时观测输出格式
 """
 
 
@@ -28,19 +28,6 @@ def format_snapshot_value(value):
     if value is None:
         return "none"
     return _sanitize_text(value)
-
-
-def format_query_response(token, snapshot):
-    """
-    @brief 将快照字典编码为查询响应行
-    @param token 查询令牌, 用于标识此次查询请求
-    @param snapshot 诊断快照字典, 键为字段名, 值为字段值
-    @return 格式化的查询响应字符串, 格式为 "?token=key1:value1,key2:value2\r\n"
-    """
-    parts = []
-    for key, value in snapshot.items():
-        parts.append("%s:%s" % (key, format_snapshot_value(value)))
-    return "?%s=%s\r\n" % (token, ",".join(parts))
 
 
 def format_observe_line(token, snapshot):

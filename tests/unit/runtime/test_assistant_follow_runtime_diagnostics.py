@@ -17,8 +17,8 @@ def test_assistant_follow_runtime_exposes_follow_diagnostics_snapshot(
     """辅车角色运行时要暴露当前生效速度和两路速度来源状态。"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=2.0,omega=1.0\n"
-    uart6 = _FakeUart(["vx=-0.5,vy=0.25"])
+    uart8._buffer = b"v,2.0,0.0,1.0\n"
+    uart6 = _FakeUart(["v,-0.5,0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -44,7 +44,7 @@ def test_assistant_follow_runtime_keeps_feedforward_when_vision_is_missing(
     """只有一路速度输入时，也要直接形成最终速度。"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=2.0,vy=-1.0,omega=0.5\n"
+    uart8._buffer = b"v,2.0,-1.0,0.5\n"
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
@@ -70,7 +70,7 @@ def test_assistant_follow_runtime_uses_vision_only_when_feedforward_is_missing(
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b""
-    uart6 = _FakeUart(["vx=0.5,vy=-0.25"])
+    uart6 = _FakeUart(["v,0.5,-0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -81,7 +81,7 @@ def test_assistant_follow_runtime_uses_vision_only_when_feedforward_is_missing(
     runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
-    assert ("handle_uart_line", "assistant", "vx=0.5,vy=-0.25") in events
+    assert ("handle_velocity", "assistant", 0.5, -0.25, 0.0) in events
     assert runtime._transport_car.last_cmd == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
     assert snapshot["state"] == "active"
     assert snapshot["transport_command"] == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
@@ -95,7 +95,7 @@ def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforwar
     """只有 UART8 一路速度输入时，也要能直接形成速度写回。"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=-4.6,vy=0\n"
+    uart8._buffer = b"v,-4.6,0\n"
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
@@ -107,7 +107,7 @@ def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforwar
     runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
-    assert ("handle_uart_line", "assistant", "vx=-4.6,vy=0.0") in events
+    assert ("handle_velocity", "assistant", -4.6, 0.0, 0.0) in events
     assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["transport_command"] == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["uart6_input_status"] == "idle"
@@ -120,8 +120,8 @@ def test_assistant_follow_runtime_builds_diagnostics_snapshot_on_demand(
     """控制周期不应每拍构造完整诊断快照，只有查询时才组织字典。"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=2.0,omega=1.0\n"
-    uart6 = _FakeUart(["vx=-0.5,vy=0.25"])
+    uart8._buffer = b"v,2.0,0.0,1.0\n"
+    uart6 = _FakeUart(["v,-0.5,0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -157,8 +157,8 @@ def test_assistant_follow_runtime_snapshot_is_built_on_demand_only(
     """双路速度输入模式下，控制周期不应额外构造诊断快照。"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=1.0\n"
-    uart6 = _FakeUart(["vx=0.5,vy=0.25"])
+    uart8._buffer = b"v,1.0,0.0\n"
+    uart6 = _FakeUart(["v,0.5,0.25"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch

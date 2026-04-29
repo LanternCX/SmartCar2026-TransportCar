@@ -1,4 +1,4 @@
-"""主车角色运行时最小行为测试.
+"""主车角色运行时短包协议行为测试.
 
 @file tests/unit/runtime/test_master_forward_runtime.py
 """
@@ -18,11 +18,7 @@ def import_master_module(module_name: str, monkeypatch):
     """按正常包路径导入主车视觉运行模块."""
 
     monkeypatch.syspath_prepend(str(SRC_ROOT))
-    for loaded_name in (
-        "vision.master",
-        "vision.master.forward_runtime",
-        module_name,
-    ):
+    for loaded_name in ("vision.master", "vision.master.forward_runtime", module_name):
         sys.modules.pop(loaded_name, None)
     return import_module(module_name)
 
@@ -66,7 +62,7 @@ def install_fake_transport_car(monkeypatch):
             self.uart3 = uart3
             self.uart8 = uart8
             self.last_exception_text = "none"
-            self.heading_est = 0.0
+            self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
             self._process_uart = self._original_process_uart
 
         def _original_process_uart(self) -> None:
@@ -81,6 +77,10 @@ def install_fake_transport_car(monkeypatch):
         def step(self) -> bool:
             events.append("transport_step")
             return False
+
+        def handle_velocity_packet(self, vx: float, vy: float, omega: float, source: str, has_omega=True) -> None:
+            events.append(("handle_velocity", source, vx, vy, omega))
+            self.last_cmd = {"vx": vx, "vy": vy, "omega": omega}
 
         def _handle_uart_line(self, line: str, source: str) -> None:
             events.append(("handle_uart_line", source, line))
@@ -107,12 +107,10 @@ def install_fake_uart6_factory(monkeypatch, calls) -> None:
 
 
 def test_master_forward_runtime_keeps_remote_control_surface(monkeypatch) -> None:
-    """主车角色运行时要保留启动壳依赖的对外外观."""
+    """主车角色运行时保留启动壳依赖的对外外观."""
 
     events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
     ticker_obj = object()
@@ -127,15 +125,11 @@ def test_master_forward_runtime_keeps_remote_control_surface(monkeypatch) -> Non
     assert ("set_ticker", ticker_obj) in events
 
 
-def test_master_forward_runtime_step_runs_role_cycle_before_transport(
-    monkeypatch,
-) -> None:
-    """主车角色运行时的 step 要先进入角色层周期边界再驱动共享底盘."""
+def test_master_forward_runtime_step_runs_role_cycle_before_transport(monkeypatch) -> None:
+    """主车角色运行时先进入角色层周期边界再驱动共享底盘."""
 
     events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
     runtime = forward_runtime_module.MasterForwardRuntime()
     runtime._run_role_cycle = lambda: events.append("role_cycle")
 
@@ -146,7 +140,7 @@ def test_master_forward_runtime_step_runs_role_cycle_before_transport(
 
 
 def test_master_package_entry_builds_forward_runtime(monkeypatch) -> None:
-    """主车包入口要继续给启动壳创建主车角色运行时对象."""
+    """主车包入口给启动壳创建主车角色运行时对象."""
 
     install_fake_transport_car(monkeypatch)
     master_module = import_master_module("vision.master", monkeypatch)
@@ -157,221 +151,107 @@ def test_master_package_entry_builds_forward_runtime(monkeypatch) -> None:
     assert runtime.imu == "imu"
 
 
-def test_master_forward_runtime_forwards_velocity_and_keeps_raw_line_for_transport(
-    monkeypatch,
-) -> None:
-    """纯速度命令要上行转发给辅车，同时原始整行继续交给主车底盘。"""
+def test_master_forward_runtime_accepts_v_packet_and_forwards_same_packet(monkeypatch) -> None:
+    """UART3 收到速度短包后, 主车本地执行并向 UART8 转发同一短包."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0,vy=-2.5\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    uart3._buffer = b"v,1.0,-2.5,0.5\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
-
-    keep_running = runtime.step()
-
-    assert keep_running is False
-    assert uart8.messages == ["vx=1.0,vy=-2.5\r\n"]
-    assert ("handle_uart_line", "uart3", "vx=1.0,vy=-2.5") in events
-
-
-def test_master_forward_runtime_only_forwards_velocity_fields_from_mixed_command(
-    monkeypatch,
-) -> None:
-    """混合命令只转发速度字段，非速度内容仍只留给主车本地处理。"""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"rear=1,vx=1.0,angle=90,omega=-0.5\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-    runtime._transport_car.heading_est = 15.0
 
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,angle=15.0\r\n"]
-    assert ("handle_uart_line", "uart3", "rear=1,vx=1.0,angle=90,omega=-0.5") in events
+    assert uart8.messages == ["v,1.0,-2.5,0.5\r\n"]
+    assert ("handle_velocity", "uart3", 1.0, -2.5, 0.5) in events
+    assert ("handle_uart_line", "uart3", "v,1.0,-2.5,0.5") not in events
 
 
-def test_master_forward_runtime_folds_w_alias_and_keeps_last_angular_velocity(
-    monkeypatch,
-):
-    """同包同时出现 w 和 omega 时, 转发链要折叠成单个 angle 字段."""
+def test_master_forward_runtime_accepts_v_packet_without_omega(monkeypatch) -> None:
+    """无 omega 的速度短包本地角速度按零量执行."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0,w=-0.5,omega=2.0\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    uart3._buffer = b"v,1.0,-2.5\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
-    runtime._transport_car.heading_est = 30.0
 
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,angle=30.0\r\n"]
-    assert ("handle_uart_line", "uart3", "vx=1.0,w=-0.5,omega=2.0") in events
+    assert uart8.messages == ["v,1.0,-2.5\r\n"]
+    assert ("handle_velocity", "uart3", 1.0, -2.5, 0.0) in events
 
 
-def test_master_forward_runtime_replaces_omega_with_current_heading(
-    monkeypatch,
-) -> None:
-    """角速度字段要替换成当前绝对角度 heading_est 再转发给辅车。"""
+def test_master_forward_runtime_rejects_key_value_velocity_forward(monkeypatch) -> None:
+    """键值速度字段不能作为主车正式转发入口."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0,omega=0.5\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-    runtime._transport_car.heading_est = 45.0
-
-    runtime.step()
-
-    assert uart8.messages == ["vx=1.0,angle=45.0\r\n"]
-    assert ("handle_uart_line", "uart3", "vx=1.0,omega=0.5") in events
-
-
-def test_master_forward_runtime_does_not_forward_query_or_non_velocity_command(
-    monkeypatch,
-) -> None:
-    """查询和非速度命令不能进入辅车转发链。"""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"?health\nrear=1,angle=90\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    uart3._buffer = b"vx=1.0,vy=2.0\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
 
     runtime.step()
 
     assert uart8.messages == []
-    assert ("handle_uart_line", "uart3", "?health") in events
-    assert ("handle_uart_line", "uart3", "rear=1,angle=90") in events
+    assert ("handle_velocity", "uart3", 1.0, 2.0, 0.0) not in events
 
 
-def test_master_forward_runtime_skips_invalid_velocity_forward_but_records_error(
-    monkeypatch,
-) -> None:
-    """非法速度字段不转发，但主车本地处理和最小错误信息要保留。"""
+def test_master_forward_runtime_does_not_derive_angle_from_omega(monkeypatch) -> None:
+    """主车不会把角速度字段派生为 angle 转发."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=oops,rear=1\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    uart3._buffer = b"omega=0.5\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
 
     runtime.step()
 
     assert uart8.messages == []
-    assert ("handle_uart_line", "uart3", "vx=oops,rear=1") in events
-    assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=oops"
+    assert ("handle_uart_line", "uart3", "omega=0.5") in events
 
 
-def test_master_forward_runtime_keeps_running_when_forward_write_fails(
-    monkeypatch,
-) -> None:
-    """写出失败只能留下最小错误，不能阻断主车控制周期。"""
+def test_master_forward_runtime_repeats_state_sync_until_ack(monkeypatch) -> None:
+    """主车状态同步包在收到匹配 ACK 前会重复写出."""
 
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0\n"
-    uart8.write_error = OSError("uart8 boom")
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
-
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
     runtime = forward_runtime_module.MasterForwardRuntime()
 
-    keep_running = runtime.step()
-
-    assert keep_running is False
-    assert ("handle_uart_line", "uart3", "vx=1.0") in events
-    assert runtime._transport_car.last_exception_text == "uart8 forward write failed"
-
-
-def test_master_forward_runtime_keeps_later_lines_running_after_invalid_velocity(
-    monkeypatch,
-) -> None:
-    """同一批 UART3 输入里前一条非法速度失败后, 后续合法命令仍要继续转发."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=oops\nvx=1.0,omega=0.5\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-    runtime._transport_car.heading_est = 45.0
-
+    seq = runtime.request_state_sync(3, 1, 0)
+    runtime.step()
+    runtime.step()
+    uart8._buffer = ("a,%d\n" % seq).encode()
+    runtime.step()
     runtime.step()
 
-    assert uart8.messages == ["vx=1.0,angle=45.0\r\n"]
-    assert ("handle_uart_line", "uart3", "vx=oops") in events
-    assert ("handle_uart_line", "uart3", "vx=1.0,omega=0.5") in events
-    assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=oops"
+    assert uart8.messages[:2] == ["s,%d,3,1,0\r\n" % seq, "s,%d,3,1,0\r\n" % seq]
+    assert uart8.messages.count("s,%d,3,1,0\r\n" % seq) == 2
 
 
-def test_master_forward_runtime_rejects_non_finite_velocity_field(
-    monkeypatch,
-) -> None:
-    """nan 和 inf 这类伪数字不能被继续转发给辅车."""
+def test_master_forward_runtime_records_report_packet(monkeypatch) -> None:
+    """主车通过 UART8 记录事件回报短包."""
 
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=nan,rear=1\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"r,12,2,-1\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
 
     runtime.step()
 
-    assert uart8.messages == []
-    assert ("handle_uart_line", "uart3", "vx=nan,rear=1") in events
-    assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=nan"
+    assert runtime.last_report == {"type": "r", "seq": 12, "event": 2, "value": -1}
 
 
-def test_master_forward_runtime_rejects_out_of_range_velocity_field(
-    monkeypatch,
-) -> None:
-    """超过辅车入口幅值边界的速度字段不能继续转发."""
+def test_master_forward_runtime_does_not_assemble_visual_input_branch(monkeypatch) -> None:
+    """主车角色层不装配辅车视觉输入分支."""
 
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1001,rear=1\n"
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == []
-    assert ("handle_uart_line", "uart3", "vx=1001,rear=1") in events
-    assert runtime._transport_car.last_exception_text == "invalid velocity field: vx=1001"
-
-
-def test_master_forward_runtime_does_not_assemble_visual_input_branch(
-    monkeypatch,
-) -> None:
-    """主车角色层当前不接视觉输入, 控制周期里也不应装配视觉分支."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"?health\n"
+    events, uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    uart3._buffer = b"v,0,0,0\n"
     uart6_calls = []
     install_fake_uart6_factory(monkeypatch, uart6_calls)
-    forward_runtime_module = import_master_module(
-        "vision.master.forward_runtime", monkeypatch
-    )
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
     runtime = forward_runtime_module.MasterForwardRuntime()
 
@@ -379,4 +259,4 @@ def test_master_forward_runtime_does_not_assemble_visual_input_branch(
 
     assert keep_running is False
     assert uart6_calls == []
-    assert ("handle_uart_line", "uart3", "?health") in events
+    assert ("handle_velocity", "uart3", 0.0, 0.0, 0.0) in events

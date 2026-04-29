@@ -8,14 +8,14 @@ from tests.unit.core.runtime_support import (
 )
 
 
-def test_transport_car_default_query_uart_stays_on_uart3() -> None:
-    """默认查询回包继续走 `uart3`."""
+def test_transport_car_has_no_query_uart_public_api() -> None:
+    """运行时对象不暴露通用查询回包串口入口."""
     _transport_car, car = make_minimal_transport_car(
         uart3=CaptureUart(),
         uart8=CaptureUart(),
     )
 
-    assert car.get_query_uart() is car.uart3
+    assert not hasattr(car, "get_query_uart")
 
 
 def test_transport_car_stop_stops_ticker_zeroes_motors_and_writes_stop() -> None:
