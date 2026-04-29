@@ -27,13 +27,13 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
     )
 
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
-    initial_cmd = dict(runtime._transport_car.last_cmd)
+    initial_cmd = dict(runtime._transport_car.control_state)
 
     keep_running = runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
     assert keep_running is False
-    assert runtime._transport_car.last_cmd == initial_cmd
+    assert runtime._transport_car.control_state == initial_cmd
     assert snapshot["state"] == "idle"
     assert snapshot["uart6_input_status"] == "error"
     assert snapshot["uart8_input_status"] == "error"
@@ -59,7 +59,7 @@ def test_assistant_follow_runtime_keeps_uart8_effective_velocity_when_uart6_pack
     snapshot = runtime.build_follow_snapshot()
 
     assert keep_running is False
-    assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": 0.0, "omega": 0.25}
+    assert runtime._transport_car.control_state == {"vx": 1.5, "vy": 0.0, "omega": 0.25}
     assert ("handle_velocity", "assistant", 1.5, 0.0, 0.25) in events
     assert snapshot["uart6_input_status"] == "invalid"
     assert snapshot["uart8_input_status"] == "active"

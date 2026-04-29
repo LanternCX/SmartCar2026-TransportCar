@@ -73,7 +73,7 @@ def test_assistant_follow_runtime_allows_uart8_injection_before_control_cycle(
 
     runtime.step()
 
-    assert runtime._transport_car.last_cmd == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
+    assert runtime._transport_car.control_state == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
 
 
 def test_assistant_follow_runtime_initializes_uart8_before_control_cycle(

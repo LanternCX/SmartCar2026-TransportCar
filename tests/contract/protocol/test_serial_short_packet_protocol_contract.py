@@ -38,8 +38,15 @@ def test_formal_runtime_packets_use_short_text_format() -> None:
     assert format_event_packet(12, 2, -1) == "r,12,2,-1"
 
 
-def test_key_value_velocity_text_is_outside_short_packet_protocol() -> None:
-    """键值速度文本不属于正式短包协议."""
+def test_non_short_packet_velocity_text_is_outside_short_packet_protocol() -> None:
+    """非短包速度文本不属于正式短包协议."""
 
     assert parse_short_packet("vx=1,vy=2,omega=3") is None
     assert parse_short_packet("type=stream,state=12,vx=1.2,vy=0.3") is None
+
+
+def test_non_short_packet_text_is_outside_short_packet_protocol() -> None:
+    """非短包文本不属于正式短包协议."""
+
+    for line in ("rear=1", "reset", "?health", "diag=1"):
+        assert parse_short_packet(line) is None

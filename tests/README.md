@@ -6,7 +6,7 @@
 - `tests/unit/core/`：共享底盘与诊断层测试
 - `tests/unit/entry/`：入口、启动与角色分流测试
 - `tests/unit/runtime/`：角色运行时行为与装配测试
-- `tests/unit/command/`：命令路由与策略语义测试
+- `tests/unit/command/`：串口正式入口边界测试
 - `tests/unit/vision/`：车端视觉速度解析与辅助状态测试
 - `tests/contract/protocol/`：协议字段、报文格式与运行时协议契约测试
 

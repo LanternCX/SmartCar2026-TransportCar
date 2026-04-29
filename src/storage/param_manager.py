@@ -2,7 +2,7 @@
 @brief 辨识参数与陀螺仪零偏的加载工具
 
 此模块提供从文件系统加载电机辨识参数和IMU零偏的功能,
-支持新旧两种格式的零偏文件以兼容历史数据
+支持六轴零偏格式和单轴零偏格式
 """
 from control.pid_store import load_ident_params
 
@@ -27,11 +27,11 @@ def load_ident_lookup(path, logger=None):
 
 
 def load_gyro_offsets(path, logger=None):
-    """@brief 加载 IMU 六轴零偏或遗留的单轴陀螺仪零偏
+    """@brief 加载 IMU 六轴零偏或单轴陀螺仪零偏
 
-    支持两种格式以兼容历史数据:
-    - 新格式: 六个逗号分隔的浮点数(加速度X/Y/Z, 陀螺仪X/Y/Z)
-    - 遗留格式: 单个浮点数(仅陀螺仪Z轴偏移)
+    支持两种零偏格式:
+    - 六轴格式: 六个逗号分隔的浮点数(加速度X/Y/Z, 陀螺仪X/Y/Z)
+    - 单轴格式: 单个浮点数(仅陀螺仪Z轴偏移)
 
     @param path 零偏文件路径
     @param logger 日志回调函数(可选), 用于输出加载状态或异常信息
@@ -51,7 +51,7 @@ def load_gyro_offsets(path, logger=None):
             else:
                 offsets[5] = float(content)
                 if logger:
-                    logger("Loaded Legacy Gyro Offset: %.4f" % offsets[5])
+                    logger("Loaded Single Axis Gyro Offset: %.4f" % offsets[5])
     except (OSError, ValueError):
         if logger:
             logger("Gyro Offset file not found or invalid, using 0.0")

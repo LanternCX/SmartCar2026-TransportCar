@@ -32,26 +32,26 @@ def split_velocity_line(line: str):
     """解析速度短包行
 
     @param line 原始输入行
-    @return 消费结果状态、解析后的速度字典、透传命令行元组
+    @return 消费结果状态、解析后的速度字典
     """
 
     text = line.strip()
     if not text:
-        return CONSUME_IGNORED, None, text
+        return CONSUME_IGNORED, None
 
     packet = parse_short_packet(text)
     if packet is not None:
         if packet.get("type") != "v":
-            return CONSUME_IGNORED, None, text
+            return CONSUME_IGNORED, None
         parsed = {
             "vx": clamp_command_value(float(packet.get("vx", 0.0))),
             "vy": clamp_command_value(float(packet.get("vy", 0.0))),
             "omega": clamp_command_value(float(packet.get("omega", 0.0))),
             "has_omega": bool(packet.get("has_omega")),
         }
-        return CONSUME_ACCEPTED, parsed, None
+        return CONSUME_ACCEPTED, parsed
 
     if text.lower().startswith("v,"):
-        return CONSUME_INVALID, None, None
+        return CONSUME_INVALID, None
 
-    return CONSUME_IGNORED, None, text
+    return CONSUME_IGNORED, None

@@ -56,7 +56,7 @@ def test_assistant_follow_runtime_keeps_feedforward_when_vision_is_missing(
     runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
-    assert runtime._transport_car.last_cmd == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
+    assert runtime._transport_car.control_state == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
     assert snapshot["state"] == "active"
     assert snapshot["transport_command"] == {"vx": 2.0, "vy": -1.0, "omega": 0.5}
     assert snapshot["uart6_input_status"] == "idle"
@@ -82,14 +82,21 @@ def test_assistant_follow_runtime_uses_vision_only_when_feedforward_is_missing(
     snapshot = runtime.build_follow_snapshot()
 
     assert ("handle_velocity", "assistant", 0.5, -0.25, 0.0) in events
-    assert runtime._transport_car.last_cmd == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "assistant",
+        "vx": 0.5,
+        "vy": -0.25,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert runtime._transport_car.control_state == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
     assert snapshot["state"] == "active"
     assert snapshot["transport_command"] == {"vx": 0.5, "vy": -0.25, "omega": 0.0}
     assert snapshot["uart6_input_status"] == "active"
     assert snapshot["uart8_input_status"] == "idle"
 
 
-def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforward(
+def test_assistant_follow_runtime_uses_feedforward_only_when_vision_is_missing(
     monkeypatch,
 ) -> None:
     """只有 UART8 一路速度输入时，也要能直接形成速度写回。"""
@@ -108,7 +115,7 @@ def test_assistant_follow_runtime_accepts_vx_vy_vision_packet_without_feedforwar
     snapshot = runtime.build_follow_snapshot()
 
     assert ("handle_velocity", "assistant", -4.6, 0.0, 0.0) in events
-    assert runtime._transport_car.last_cmd == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
+    assert runtime._transport_car.control_state == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["transport_command"] == {"vx": -4.6, "vy": 0.0, "omega": 0.0}
     assert snapshot["uart6_input_status"] == "idle"
     assert snapshot["uart8_input_status"] == "active"

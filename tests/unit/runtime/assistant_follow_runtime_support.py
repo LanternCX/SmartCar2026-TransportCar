@@ -76,7 +76,14 @@ def install_fake_transport_car(monkeypatch):
             self.ticker = None
             self.uart3 = uart3
             self.uart8 = uart8
-            self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+            self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+            self.last_chassis_target = {
+                "source": None,
+                "vx": 0.0,
+                "vy": 0.0,
+                "omega": 0.0,
+                "has_omega": False,
+            }
             self.rear_only_mode = False
             self.command_lock = False
             self.command_mode = "none"
@@ -98,64 +105,22 @@ def install_fake_transport_car(monkeypatch):
 
         def handle_velocity_packet(self, vx: float, vy: float, omega: float, source: str, has_omega=True) -> None:
             events.append(("handle_velocity", source, vx, vy, omega))
-            self.last_cmd["vx"] = float(vx)
-            self.last_cmd["vy"] = float(vy)
-            dispatched = {"vx", "vy"}
+            self.last_chassis_target = {
+                "source": source,
+                "vx": float(vx),
+                "vy": float(vy),
+                "omega": float(omega),
+                "has_omega": bool(has_omega),
+            }
+            self.control_state["vx"] = float(vx)
+            self.control_state["vy"] = float(vy)
+            self.control_state.pop("x", None)
+            self.control_state.pop("y", None)
             if has_omega:
-                self.last_cmd["omega"] = float(omega)
-                dispatched.add("omega")
-            self._finalize_route(dispatched)
-
-        def _handle_uart_line(self, line: str, source: str) -> None:
-            events.append(("handle_uart_line", source, line))
-            dispatched = set()
-            for fragment in line.split(","):
-                item = fragment.strip()
-                if not item or "=" not in item:
-                    continue
-                key, value_text = item.split("=", 1)
-                key = key.strip()
-                value_text = value_text.strip()
-                if key in ("vx", "vy", "omega"):
-                    self.last_cmd[key] = float(value_text)
-                    dispatched.add(key)
-                if key in ("x", "y", "angle"):
-                    self.last_cmd[key] = float(value_text)
-                    dispatched.add(key)
-                if key in ("x", "y"):
-                    self.last_cmd.pop("vx", None)
-                    self.last_cmd.pop("vy", None)
-                if key == "angle":
-                    self.last_cmd.pop("omega", None)
-                if key == "rear":
-                    self.rear_only_mode = value_text == "1"
-                    self.command_lock = self.rear_only_mode
-                    self.command_mode = "locked" if self.rear_only_mode else "none"
-                    dispatched.add(key)
-            if dispatched:
-                self._finalize_route(dispatched)
-
-        def _finalize_route(self, dispatched) -> None:
-            events.append(("finalize_route", tuple(sorted(dispatched))))
-            if "vx" in dispatched or "vy" in dispatched:
-                self.last_cmd.pop("x", None)
-                self.last_cmd.pop("y", None)
-            if "omega" in dispatched:
-                self.last_cmd.pop("angle", None)
-
-            active_pose_target = self._has_active_pose_target()
-            if not active_pose_target:
-                self.command_lock = False
-                self.command_mode = "none"
-
-        def _has_active_translation_target(self) -> bool:
-            return self.last_cmd.get("x") is not None or self.last_cmd.get("y") is not None
-
-        def _has_active_rotation_target(self) -> bool:
-            return self.last_cmd.get("angle") is not None
-
-        def _has_active_pose_target(self) -> bool:
-            return self._has_active_translation_target() or self._has_active_rotation_target()
+                self.control_state["omega"] = float(omega)
+                self.control_state.pop("angle", None)
+            self.command_lock = False
+            self.command_mode = "none"
 
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}

@@ -3,7 +3,7 @@
 @file src/vision/master/forward_runtime.py
 """
 
-from vision.serial_protocol import format_velocity_packet, parse_short_packet
+from vision.serial_protocol import parse_short_packet
 
 
 class MasterForwardRuntime:
@@ -83,7 +83,7 @@ class MasterForwardRuntime:
         self._send_pending_sync()
 
     def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理完整命令"""
+        """接管 UART3 按行读取并处理短包输入"""
 
         self._read_uart_lines(self._transport_car.uart3, "_rx_buf3", self._handle_uart3_line)
 
@@ -114,7 +114,7 @@ class MasterForwardRuntime:
             handler(line)
 
     def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 原始输入行
+        """处理单条 UART3 短包输入行
 
         @param line 原始输入行
         """
@@ -124,16 +124,10 @@ class MasterForwardRuntime:
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
             self._apply_velocity_packet(packet, source="uart3")
-            self._write_forward_line(
-                format_velocity_packet(packet["vx"], packet["vy"], packet["omega"])
-                if packet.get("has_omega")
-                else format_velocity_packet(packet["vx"], packet["vy"])
-            )
+            self._write_forward_line(line)
             return
         if line.lower().startswith("v,"):
             self._record_error("invalid velocity packet")
-            return
-        self._transport_car._handle_uart_line(line, source="uart3")
 
     def _handle_uart8_line(self, line: str) -> None:
         """处理 UART8 回传短包
@@ -152,17 +146,14 @@ class MasterForwardRuntime:
             self.last_report = packet
 
     def _apply_velocity_packet(self, packet: dict, source: str) -> None:
-        handler = getattr(self._transport_car, "handle_velocity_packet", None)
         omega = float(packet.get("omega", 0.0))
-        if handler is not None:
-            handler(float(packet["vx"]), float(packet["vy"]), omega, source=source, has_omega=bool(packet.get("has_omega")))
-            return
-        self._transport_car.last_cmd["vx"] = float(packet["vx"])
-        self._transport_car.last_cmd["vy"] = float(packet["vy"])
-        self._transport_car.last_cmd["omega"] = omega
-        finalize = getattr(self._transport_car, "_finalize_route", None)
-        if finalize is not None:
-            finalize({"vx", "vy", "omega"} if packet.get("has_omega") else {"vx", "vy"})
+        self._transport_car.handle_velocity_packet(
+            float(packet["vx"]),
+            float(packet["vy"]),
+            omega,
+            source=source,
+            has_omega=bool(packet.get("has_omega")),
+        )
 
     def _send_pending_sync(self) -> None:
         pending = self._pending_sync

@@ -94,38 +94,6 @@ def test_resolve_existing_startup_script_prefers_compiled_file(monkeypatch) -> N
     )
 
 
-def test_command_autodiscover_accepts_mpy_suffix(tmp_path, monkeypatch) -> None:
-    """命令包在只存在 .mpy 文件时仍能自动发现."""
-
-    import importlib
-    import builtins
-
-    package_root = tmp_path / "command" / "commands"
-    package_root.mkdir(parents=True)
-    commands_init_path = PROJECT_ROOT / "src" / "command" / "commands" / "__init__.py"
-    init_source = commands_init_path.read_text(encoding="utf-8")
-    (tmp_path / "command" / "__init__.py").write_text("", encoding="utf-8")
-    (package_root / "__init__.py").write_text(init_source, encoding="utf-8")
-    (package_root / "cmd_demo.mpy").write_text("", encoding="utf-8")
-    imported = []
-    real_import = builtins.__import__
-
-    def recording_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "command.commands.cmd_demo":
-            imported.append(name)
-            return object()
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.setattr(builtins, "__import__", recording_import)
-    sys.modules.pop("command", None)
-    sys.modules.pop("command.commands", None)
-
-    importlib.import_module("command.commands")
-
-    assert "command.commands.cmd_demo" in imported
-
-
 def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
     """编译后的启动脚本必须通过模块导入执行."""
 

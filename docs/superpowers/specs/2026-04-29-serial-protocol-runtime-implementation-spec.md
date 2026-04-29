@@ -1,8 +1,9 @@
 # 串口协议运行时代码实现 Spec
 
-执行状态：Archive  
-创建日期：2026-04-29  
-来源协议：`docs/developer/protocol.md`  
+执行状态：Archive（已由 `2026-04-29-short-packet-runtime-architecture-spec.md` 覆盖）
+创建日期：2026-04-29
+来源协议：`docs/developer/protocol.md`
+归档说明：本 Spec 保留为早期实现需求记录，执行口径以 `docs/superpowers/specs/2026-04-29-short-packet-runtime-architecture-spec.md` 为准。
 关联归档：`docs/superpowers/specs/archive/PR#60/2026-04-25-serial-protocol-doc-and-skill-sync-spec.md`
 
 ## 1. 目标
