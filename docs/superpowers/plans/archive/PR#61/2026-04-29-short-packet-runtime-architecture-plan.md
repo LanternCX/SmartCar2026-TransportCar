@@ -2,7 +2,7 @@
 
 执行状态：Archive  
 创建日期：2026-04-29  
-对应 Spec：`docs/superpowers/specs/2026-04-29-short-packet-runtime-architecture-spec.md`  
+对应 Spec：`docs/superpowers/specs/archive/PR#61/2026-04-29-short-packet-runtime-architecture-spec.md`  
 前置提交：`a6bca53 refactor(protocol): migrate runtime to short packet protocol`
 
 ## 目标

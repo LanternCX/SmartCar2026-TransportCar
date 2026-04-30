@@ -2,8 +2,8 @@
 
 执行状态：Archive（已由 `2026-04-29-short-packet-runtime-architecture-plan.md` 覆盖）
 创建日期：2026-04-29
-对应 Spec：`docs/superpowers/specs/2026-04-29-serial-protocol-runtime-implementation-spec.md`
-归档说明：本 Plan 保留为早期实现计划记录，执行口径以 `docs/superpowers/plans/2026-04-29-short-packet-runtime-architecture-plan.md` 为准。下方未勾选项不作为当前执行状态。
+对应 Spec：`docs/superpowers/specs/archive/PR#61/2026-04-29-serial-protocol-runtime-implementation-spec.md`
+归档说明：本 Plan 保留为早期实现计划记录，执行口径以 `docs/superpowers/plans/archive/PR#61/2026-04-29-short-packet-runtime-architecture-plan.md` 为准。下方未勾选项不作为当前执行状态。
 
 ## 目标
 

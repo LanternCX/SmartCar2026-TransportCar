@@ -4,7 +4,7 @@
 
 - 状态: Archive
 - 创建日期: 2026-04-29
-- 规格来源: `docs/superpowers/specs/2026-04-29-vision-short-packet-protocol-spec.md`
+- 规格来源: `docs/superpowers/specs/archive/PR#61/2026-04-29-vision-short-packet-protocol-spec.md`
 - 执行目标仓库: `../SmartCar2026-Vision`
 - 执行方式: TDD + Subagent Driven Development
 - 执行结果: 已完成
@@ -26,8 +26,8 @@
 
 ### 当前仓库
 
-- 修改: `docs/superpowers/specs/2026-04-29-vision-short-packet-protocol-spec.md`
-- 修改: `docs/superpowers/plans/2026-04-29-vision-short-packet-protocol-plan.md`
+- 修改: `docs/superpowers/specs/archive/PR#61/2026-04-29-vision-short-packet-protocol-spec.md`
+- 修改: `docs/superpowers/plans/archive/PR#61/2026-04-29-vision-short-packet-protocol-plan.md`
 
 ### 视觉仓库
 
@@ -146,8 +146,8 @@
 
 **文件:**
 
-- 修改: `docs/superpowers/specs/2026-04-29-vision-short-packet-protocol-spec.md`
-- 修改: `docs/superpowers/plans/2026-04-29-vision-short-packet-protocol-plan.md`
+- 修改: `docs/superpowers/specs/archive/PR#61/2026-04-29-vision-short-packet-protocol-spec.md`
+- 修改: `docs/superpowers/plans/archive/PR#61/2026-04-29-vision-short-packet-protocol-plan.md`
 
 **步骤:**
 
