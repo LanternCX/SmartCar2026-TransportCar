@@ -61,7 +61,7 @@ def test_assistant_follow_runtime_allows_uart8_injection_before_control_cycle(
     """UART8 也要像 UART6 一样允许在构造阶段注入测试串口。"""
 
     install_fake_transport_car(monkeypatch)
-    injected_uart8 = _FakeUart(["vx=1.0"])
+    injected_uart8 = _FakeUart(["v,1.0,0.0"])
     install_fake_uart6_factory(monkeypatch, _FakeUart())
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -73,7 +73,7 @@ def test_assistant_follow_runtime_allows_uart8_injection_before_control_cycle(
 
     runtime.step()
 
-    assert runtime._transport_car.last_cmd == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
+    assert runtime._transport_car.control_state == {"vx": 1.0, "vy": 0.0, "omega": 0.0}
 
 
 def test_assistant_follow_runtime_initializes_uart8_before_control_cycle(

@@ -1,8 +1,8 @@
 """
 @file runtime.py
-@brief 搬运车控制单例封装, 拆出原 remote_control.py 的全部逻辑
+@brief 搬运车控制单例封装
 
-@details 提供搬运车的核心控制逻辑, 包括硬件初始化、运动学计算、PID 控制、命令处理等功能
+@details 提供搬运车的核心控制逻辑, 包括硬件初始化、运动学计算、PID 控制、短包输入处理等功能
 """
 
 import gc
@@ -25,12 +25,7 @@ from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from command.router import router as _cmd_router
-from command.policy import (
-    build_command_health_fields,
-    finalize_command_route,
-)
-import command.commands as _commands  # noqa: F401 自动发现, 所有 @router.command() 装饰器在此执行
+from vision.serial_protocol import parse_short_packet
 
 
 TICK_MS = getattr(_params, "TICK_MS")
@@ -109,7 +104,7 @@ class _NullMotor:
         """
         @brief 设置电机占空比(模拟)
 
-        @details 仅记录占空比值到 last_duty 供查询, 不触发真实硬件输出
+        @details 仅记录占空比值到 last_duty 供诊断读取, 不触发真实硬件输出
 
         @param value 目标占空比值(-MAX_DUTY ~ +MAX_DUTY), 会被转换为整数存储
         """
@@ -148,7 +143,7 @@ class TransportCar:
     """
     @brief 搬运车核心控制单例
 
-    @details 集成硬件管理、运动学计算、PID 控制、命令路由等功能于一体
+    @details 集成硬件管理、运动学计算、PID 控制和结构化控制入口
             负责协调电机、编码器、IMU 等硬件资源, 实现周期性控制循环
 
     @note 主要职责
@@ -156,7 +151,7 @@ class TransportCar:
     - 周期性控制循环(TICK_MS=5ms 周期)
     - 速度环闭环控制与逆运动学变换
     - 位置锁定与偏航角 PID 控制
-    - 串口命令解析、查询处理和执行
+    - 串口短包解析和结构化速度写入
 
     使用示例:
     @code
@@ -172,7 +167,7 @@ class TransportCar:
         """
         @brief 初始化搬运车所有组件
 
-        @details 完成硬件初始化、滤波器和状态变量的构造, 保持所有参数与旧版一致
+        @details 完成硬件初始化、滤波器和状态变量的构造
                 包括电机、编码器、IMU、运动学、PID 控制器、串口等
 
         @param diagnostic_mode 是否启用诊断模式.若为 True, 则跳过真实硬件初始化
@@ -186,7 +181,7 @@ class TransportCar:
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
 
-        # 串口通信接口: uart3 接收上位机控制指令, uart8 用于主辅设备间通信
+        # 串口通信接口: uart3 接收上位机速度短包, uart8 用于主辅设备间通信
         self.uart3 = create_uart3()
         self.uart8 = create_uart8()
         startup_log("transport_car", "uart ready")
@@ -228,7 +223,7 @@ class TransportCar:
         self.kinematics = OmniKinematics()
         self.odometry = Odometry()
 
-        # 航向角目标值(度), 由角度指令或当前航向初始化, 用于偏航 PID 反馈
+        # 航向角目标值(度), 由角度控制目标或当前航向初始化, 用于偏航 PID 反馈
         self.heading_target = 0.0
 
         # 电机和编码器: 三轮独立驱动与速度反馈
@@ -290,17 +285,17 @@ class TransportCar:
         # @details pit_flag: ticker 中断标志, 主循环检测该标志执行一次控制周期
         #          tick_count: 控制周期计数, 用于性能监控和调试
         #          target_speeds: 目标脉冲速度 {"m", "l", "r"}, 由逆运动学计算
-        #          last_cmd: 上一次接收的控制指令, 存储 vx/vy/omega/x/y/angle
+        #          control_state: 底盘控制目标, 存储 vx/vy/omega/x/y/angle
         #          command_lock: 位置锁定标志, True 时位置/角度目标有效
-        #          command_mode: 当前命令模式, 记录最后执行的命令类型
+        #          command_mode: 当前锁定诊断状态, 取值 locked/unlocked/none
         #          lock_start_time: 位置锁定开始时间(毫秒)
         #          rear_only_mode: 仅后轮模式标志, True 时只驱动中轮
         #          last_rear_mode: 上一周期后轮模式状态, 用于检测模式变化
-        #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整命令行
+        #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整短包行
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
-        self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
         self.command_mode = "none"
         self.lock_start_time = 0
@@ -334,9 +329,8 @@ class TransportCar:
         self._boot_step_logged = False
         self._boot_tick_logged = False
 
-        # 命令后处理暂存, 用于跨关键字的后处理逻辑
-        # @details 某些命令可能包含相对位移或角度, 需要在所有关键字处理完毕后
-        #          统一进行世界系到车体系的坐标变换
+        # 位置控制暂存, 用于控制周期内的坐标变换
+        # @details 相对位移或角度目标需要在写入后统一进行世界系到车体系的坐标变换
         self._pending_dx = None
         self._pending_dy = None
         self._pending_d_angle = None
@@ -346,8 +340,6 @@ class TransportCar:
         # 初始化速度环 PID 增益, 每轮独立配置
         self.init_pid()
 
-        # 命令路由器: 单例模式, 所有命令处理器通过 @router.command() 装饰器自动注册
-        self._router = _cmd_router
         startup_log("transport_car", "init complete")
 
     # Public API (公开接口)
@@ -426,7 +418,7 @@ class TransportCar:
         @details 主循环流程
         1. 首次执行时记录启动日志
         2. 检测 ticker 标志, 执行单次控制周期 (_handle_tick)
-        3. 处理 UART 接收的命令
+        3. 处理 UART 接收的短包
         4. 检测硬件紧急停止按钮 switch2, 触发时安全停止
         5. 执行垃圾回收, 释放内存
         6. 返回继续运行标志
@@ -475,31 +467,119 @@ class TransportCar:
         """
         if self.ticker:
             self.ticker.stop()
-        reset_pi_state(self.wheel_states)
-        for state in self.wheel_states:
-            state["motor"].duty(0)
+        self.zero_motors()
         self.uart3.write("stop\r\n")
 
     def _handle_uart_line(self, line, source):
         """
-        @brief 处理来自串口的单行输入, 分发到查询或命令处理器
+        @brief 处理来自串口的单行正式短包
 
         @details 处理逻辑
         - 空行忽略
-        - 以 "?" 开头的行作为查询指令, 移除前缀后转发到查询处理器
-        - 其他行作为控制指令(如 "vx=10, vy=5"), 转发到命令路由器
+        - 非短包或未消费短包忽略
+        - 速度短包写入结构化速度入口
 
-        @param line 输入的命令行字符串, 可能为空或已去除首尾空格
+        @param line 输入行字符串, 可能为空或已去除首尾空格
         @param source 串口来源标识(如 "uart3"), 用于调试和日志
         """
         if not line:
             return
 
-        if line.startswith("?"):
-            self._router.handle_query(line[1: ], self, source=source)
+        packet = parse_short_packet(line)
+        if packet is None:
             return
 
-        self.apply_command(line)
+        if packet.get("type") == "v":
+            self.handle_velocity_packet(
+                float(packet["vx"]),
+                float(packet["vy"]),
+                float(packet.get("omega", 0.0)),
+                source=source,
+                has_omega=bool(packet.get("has_omega")),
+            )
+
+    def set_velocity_target(self, vx, vy, omega=0.0, has_omega=True):
+        """写入结构化速度控制目标
+
+        @param vx 车体系 x 方向速度
+        @param vy 车体系 y 方向速度
+        @param omega 车体系角速度
+        @param has_omega 本次输入是否显式携带角速度
+        """
+
+        self.control_state["vx"] = float(vx)
+        self.control_state["vy"] = float(vy)
+        self._clear_translation_control_targets()
+
+        if has_omega:
+            self.control_state["omega"] = float(omega)
+            self._clear_rotation_control_targets()
+
+        self._pending_lock = None
+        self._refresh_control_mode()
+
+    def reset_control_state(self):
+        """复位底盘控制状态、姿态估计和控制器积分."""
+
+        self.odometry.reset()
+        self.heading_est = 0.0
+        self.heading_target = 0.0
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self.q_est.w, self.q_est.x, self.q_est.y, self.q_est.z = 1.0, 0.0, 0.0, 0.0
+        self.last_yaw_rad = 0.0
+        self.gyro_lpf.reset(0.0)
+        reset_pi_state(self.wheel_states)
+        self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        self.command_lock = False
+        self.command_mode = "none"
+        self._pending_lock = None
+        self._pending_dx = None
+        self._pending_dy = None
+        self._pending_d_angle = None
+
+    def zero_motors(self):
+        """清零速度环积分和三轮电机输出."""
+
+        reset_pi_state(self.wheel_states)
+        for state in self.wheel_states:
+            state["motor"].duty(0)
+            state["duty"] = 0.0
+
+    def _clear_translation_control_targets(self):
+        """清理平移位置目标."""
+
+        self.control_state.pop("x", None)
+        self.control_state.pop("y", None)
+        self._pending_dx = None
+        self._pending_dy = None
+
+    def _clear_rotation_control_targets(self):
+        """清理角度位置目标."""
+
+        self.control_state.pop("angle", None)
+        self._pending_d_angle = None
+
+    def _refresh_control_mode(self):
+        """根据当前结构化控制目标刷新锁定状态."""
+
+        if self._has_active_pose_target():
+            self.command_mode = "locked" if self.command_lock else "unlocked"
+        else:
+            self.command_lock = False
+            self.command_mode = "none"
+
+    def handle_velocity_packet(self, vx, vy, omega=0.0, source="protocol", has_omega=True):
+        """接收结构化速度短包结果
+
+        @param vx 车体系 x 方向速度
+        @param vy 车体系 y 方向速度
+        @param omega 车体系角速度
+        @param source 输入来源标识
+        @param has_omega 本包是否显式携带角速度
+        """
+
+        self.set_velocity_target(vx, vy, omega, has_omega=has_omega)
 
     def _get_active_position_targets(self):
         """
@@ -507,7 +587,7 @@ class TransportCar:
 
         @return 元组 (x, y), 表示目标位置坐标, 可能为 None
         """
-        return self.last_cmd.get("x"), self.last_cmd.get("y")
+        return self.control_state.get("x"), self.control_state.get("y")
 
     def _has_active_translation_target(self):
         """
@@ -524,7 +604,7 @@ class TransportCar:
 
         @return 目标角度值, 可能为 None
         """
-        return self.last_cmd.get("angle")
+        return self.control_state.get("angle")
 
     def _has_active_rotation_target(self):
         """
@@ -552,7 +632,7 @@ class TransportCar:
 
     def build_health_snapshot(self):
         """
-        @brief 构造系统健康状态快照, 用于查询和诊断
+        @brief 构造系统健康状态快照, 用于诊断
 
         @details 收集当前运行状态
         - alive: 系统在线标志(恒为 1)
@@ -566,19 +646,17 @@ class TransportCar:
             "uptime_ms": max(0, self._now_ms() - int(self.boot_time_ms)),
             "last_err": self.last_exception_text,
         }
-        snapshot.update(build_command_health_fields(self))
+        snapshot.update(self._build_control_health_fields())
         return snapshot
 
-    def get_query_uart(self):
-        """
-        @brief 获取查询响应应写入的串口对象
+    def _build_control_health_fields(self):
+        """构造底盘控制状态健康字段."""
 
-        @details 支持从多个串口来源接收查询, 但始终向指定串口发送响应
-                优先使用 _query_response_uart(如果被设置), 默认使用 uart3
-
-        @return 用于响应查询的 UART 对象
-        """
-        return getattr(self, "_query_response_uart", self.uart3)
+        return {
+            "lock": 1 if self.command_lock else 0,
+            "rear": 1 if self._get_active_rear_only_mode() else 0,
+            "command_mode": self.command_mode,
+        }
 
     def build_tick_snapshot(self):
         """
@@ -829,10 +907,10 @@ class TransportCar:
 
     def _run_control(self, dt_s):
         """
-        @brief 执行完整的控制堆栈, 从指令解析到电机驱动
+        @brief 执行完整的控制堆栈, 从控制目标到电机驱动
 
         @details 控制流程
-        1. _compute_omega_cmd: 根据 angle/omega 指令计算目标角速度
+        1. _compute_omega_cmd: 根据 angle/omega 控制目标计算目标角速度
         2. _compute_planar_targets: 根据 x/y 或 vx/vy 计算车体系目标速度
         3. _apply_target_speeds: 逆运动学、速度环 PID、电机驱动分配
         4. _check_unlock: 位置锁定模式下检查收敛, 达标时自动解锁
@@ -846,7 +924,7 @@ class TransportCar:
 
     def _compute_omega_cmd(self, dt_s):
         """
-        @brief 根据当前指令模式计算目标角速度, 支持三种模式
+        @brief 根据当前旋转控制目标计算目标角速度, 支持三种模式
 
         @details 三种模式优先级
         1. 角度模式(cmd_angle != None):
@@ -854,8 +932,8 @@ class TransportCar:
            - 微分项直接使用滤波角速度, 增强稳定性
            - 输出限幅在 ±AUTO_OMEGA_MAX
 
-        2. 角速度模式(cmd_omega != None):
-           - 直接跟随指令的 omega 值
+        2. 角速度模式(omega != None):
+           - 直接跟随控制目标中的 omega 值
            - 当 |omega| < HOLD_SPEED_EPS 时自动切换到保持模式
            - 否则重置 PID, 记录当前航向作为保持目标
 
@@ -870,7 +948,7 @@ class TransportCar:
         @warning YAW_KD 配置应使用本地微分而不是 PID 的 D 项, 因为已有低通滤波
         """
         cmd_angle = self._get_active_angle_command()
-        cmd_omega = self.last_cmd.get("omega")
+        omega_value = self.control_state.get("omega")
 
         if cmd_angle is not None:
             self.heading_target = cmd_angle
@@ -878,8 +956,8 @@ class TransportCar:
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
 
-        elif cmd_omega is not None:
-            omega_cmd = cmd_omega
+        elif omega_value is not None:
+            omega_cmd = omega_value
             if abs(omega_cmd) < HOLD_SPEED_EPS:
                 omega_pid = self.yaw_pid.update(
                     self.heading_target, self.heading_est, dt_s
@@ -913,7 +991,7 @@ class TransportCar:
            - 最后转换为脉冲/周期单位并扩展 3 倍(适配逆运动学)
 
         2. 速度模式(cmd_x/cmd_y 都为 None):
-           - 直接使用 vx/vy 指令(已为脉冲/周期单位)
+           - 直接使用 vx/vy 控制目标(已为脉冲/周期单位)
 
         @param dt_s 时间增量(秒), 此处未直接使用, 保留用于扩展
 
@@ -958,8 +1036,8 @@ class TransportCar:
             target_vy_cmd = vy_pulses * 3.0
 
         else:
-            target_vx_cmd = float(self.last_cmd.get("vx", 0.0))
-            target_vy_cmd = float(self.last_cmd.get("vy", 0.0))
+            target_vx_cmd = float(self.control_state.get("vx", 0.0))
+            target_vy_cmd = float(self.control_state.get("vy", 0.0))
 
         return target_vx_cmd, target_vy_cmd
 
@@ -968,7 +1046,7 @@ class TransportCar:
         @brief 执行逆运动学、限幅、速度环 PID 控制, 分配占空比到三轮
 
         @details 处理步骤
-        1. 逆运动学: 将车体系指令 (vx, vy, omega) 转换为三轮脉冲速度目标 (vm, vl, vr)
+        1. 逆运动学: 将车体系控制目标 (vx, vy, omega) 转换为三轮脉冲速度目标 (vm, vl, vr)
         2. 限幅: 所有轮速限制在 ±TARGET_SPEED_MAX 范围内
         3. 后轮模式处理: 若启用 rear_only_mode, 中轮 1/3 速度、左右轮停止
         4. 对每个活跃轮子运行速度环 PID:
@@ -1029,10 +1107,10 @@ class TransportCar:
         解锁后:
         - 若启用后轮模式(rear_only_mode=True), 则:
           a. 关闭后轮模式, 回归全向运动
-          b. 清空速度指令
+          b. 清空速度控制目标
           c. 重置所有 PID 积分
           d. 停止所有电机
-        - 其他模式: 仅置 command_lock=False 和 command_mode="none"
+        - 其他模式: 仅清除位置锁定状态
 
         @warning 此函数应在每个控制周期末尾调用, 以实时响应收敛事件
         """
@@ -1047,8 +1125,8 @@ class TransportCar:
 
         pos_ok = True
         if self._has_active_translation_target():
-            tx_chk = self.last_cmd.get("x")
-            ty_chk = self.last_cmd.get("y")
+            tx_chk = self.control_state.get("x")
+            ty_chk = self.control_state.get("y")
             tx_val = tx_chk if tx_chk is not None else 0.0
             ty_val = ty_chk if ty_chk is not None else 0.0
 
@@ -1064,7 +1142,7 @@ class TransportCar:
             self.command_mode = "none"
             if self.rear_only_mode:
                 self.rear_only_mode = False
-                self.last_cmd = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+                self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()
                 self.yaw_integral = 0.0
@@ -1075,15 +1153,13 @@ class TransportCar:
 
     def _process_uart(self):
         """
-        @brief 轮询 UART3 接收缓冲区, 处理查询和控制指令
+        @brief 轮询 UART3 接收缓冲区, 处理正式短包输入
 
         @details 处理流程
         1. 检查 UART3 缓冲区是否有待接收字节
         2. 解码接收数据追加到接收缓冲 rx_buf3
         3. 按行分割(以 \n 为界), 去除 \r 和首尾空格
-        4. 对每行调用 _handle_uart_line 进行分发:
-           - 如果行以 "?" 开头, 则为查询指令, 转发到查询处理器
-           - 否则作为控制指令分发到命令路由器
+        4. 对每行调用 _handle_uart_line 进行正式短包分发
         5. 异常时向串口回写错误信息
 
         @warning 此函数在主循环中非中断上下文调用, 可安全执行耗时操作
@@ -1102,42 +1178,3 @@ class TransportCar:
             except Exception as exc:
                 self.last_exception_text = str(exc)
                 self.uart3.write("ERR %s\r\n" % exc)
-
-    # Command handling (命令处理与路由)
-
-    def apply_command(self, line):
-        """
-        @brief 接收原始命令行字符串, 分发到路由器进行处理
-
-        @details 命令路由流程
-        1. 检查命令行是否为空, 空行直接返回
-        2. 使用 _router.route() 进行命令分发, 根据关键字映射到对应处理器
-        3. 处理器会更新 last_cmd 字典或修改运行状态
-        4. 部分命令可能触发 command_lock 进行位置/角度锁定
-
-        @param line 原始命令行字符串, 格式示例
-                   - "vx=10, vy=5" (速度模式)
-                   - "x=1.0, y=2.0" (位置锁定)
-                   - "angle=90" (角度锁定)
-                   - "omega=45" (角速度模式)
-                   - "reset" (复位状态)
-
-        @warning 命令在锁定模式(command_lock=True)下可能被忽略, reset 例外
-        """
-        if not line:
-            return
-        self._router.route(line, self)
-
-    def _finalize_route(self, dispatched):
-        """
-        @brief 在路由完成后执行跨关键字的后处理逻辑
-
-        @details 某些复杂命令可能跨越多个关键字, 需要统一的后处理
-        例如相对位移命令 (dx, dy) 需要在所有关键字处理完毕后,
-        统一进行世界系到车体系的坐标变换
-
-        @param dispatched 本次路由中被分发的命令关键字集合(如 {"vx", "vy"})
-
-        @note 此函数由命令路由器自动调用, 用户无需手动调用
-        """
-        finalize_command_route(self, dispatched, now_ms=self._now_ms())

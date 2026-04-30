@@ -27,13 +27,13 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
     )
 
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
-    initial_cmd = dict(runtime._transport_car.last_cmd)
+    initial_cmd = dict(runtime._transport_car.control_state)
 
     keep_running = runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
     assert keep_running is False
-    assert runtime._transport_car.last_cmd == initial_cmd
+    assert runtime._transport_car.control_state == initial_cmd
     assert snapshot["state"] == "idle"
     assert snapshot["uart6_input_status"] == "error"
     assert snapshot["uart8_input_status"] == "error"
@@ -46,8 +46,8 @@ def test_assistant_follow_runtime_keeps_uart8_effective_velocity_when_uart6_pack
     """UART6 当前包非法时, UART8 的有效速度仍要继续走完整角色链路."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"vx=1.5,omega=0.25\n"
-    uart6 = _FakeUart(["vx=0.5,vx=1.0"])
+    uart8._buffer = b"v,1.5,0.0,0.25\n"
+    uart6 = _FakeUart(["v,0.5,bad"])
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module(
         "vision.assistant.follow_runtime", monkeypatch
@@ -59,8 +59,8 @@ def test_assistant_follow_runtime_keeps_uart8_effective_velocity_when_uart6_pack
     snapshot = runtime.build_follow_snapshot()
 
     assert keep_running is False
-    assert runtime._transport_car.last_cmd == {"vx": 1.5, "vy": 0.0, "omega": 0.25}
-    assert ("handle_uart_line", "assistant", "vx=1.5,vy=0.0,omega=0.25") in events
+    assert runtime._transport_car.control_state == {"vx": 1.5, "vy": 0.0, "omega": 0.25}
+    assert ("handle_velocity", "assistant", 1.5, 0.0, 0.25) in events
     assert snapshot["uart6_input_status"] == "invalid"
     assert snapshot["uart8_input_status"] == "active"
 

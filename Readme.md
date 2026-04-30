@@ -8,6 +8,13 @@
 
 本仓库用于维护搬运车模的控制代码，以及面向开发者的总体方案、电控设计、视觉设计、串口协议和状态机文档。
 
+## 附属仓库
+
+- OpenART 视觉仓库位于 `../SmartCar2026-Vision`。
+- 视觉仓库只维护 OpenART 运行时代码、协议行为测试、回归测试和必要说明。
+- 项目规则、题面材料、协作文档和长期开发文档以本仓库为准。
+- 视觉仓库验证命令: `cd ../SmartCar2026-Vision && python3 -m pytest tests/unit tests/contract -q`。
+
 ## 开发者文档
 
 - [总体方案](docs/developer/strategy.md)

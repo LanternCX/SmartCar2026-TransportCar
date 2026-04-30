@@ -7,6 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-30-1 | 2026-04-30 | 完成 PR#61 短包通信协议与状态机前置边界收口 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-30-1.md` | 记录 PR#61 将短包通信协议、车端运行时入口、主辅车链路、视觉链路、Mono Repo 边界、测试和归档统一收口为状态机前置基线。 | PR61, protocol, short-packet, runtime, vision, mono-repo, state-machine, milestone |
 | 2026-04-16-2 | 2026-04-16 | 切换主辅正式通信链路到 UART8 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-16-2.md` | 把当前阶段主辅正式通信链路整体从 `UART3` 切到 `UART8`，同步收口运行时代码、测试、开发文档和规则入口。 | master, assistant, uart8, uart6, runtime, protocol, docs, milestone |
 | 2026-04-16-1 | 2026-04-16 | 完成主车与辅车双侧角色运行时开发闭环 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-16-1.md` | 记录辅车跟随运行时与主车 UART3 速度转发运行时先后落地后，主辅双侧角色运行时开发收口为统一里程碑。 | master, assistant, uart3, uart6, runtime, follow, forward, milestone |
 | 2026-04-14-1 | 2026-04-14 | 重写双车协同搬运路线的正式开发文档口径 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-14-1.md` | 重写 strategy、tasks、control 和 vision 四份正式开发文档，使其统一表达新的双车协同搬运路线、关键能力和演进顺序。 | docs, strategy, tasks, control, vision, dual-car, state-machine, feedforward, milestone |

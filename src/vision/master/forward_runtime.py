@@ -3,40 +3,13 @@
 @file src/vision/master/forward_runtime.py
 """
 
-import math
-
-from config import params as _params
-
-
-V_CMD_MAX = getattr(_params, "V_CMD_MAX")
-
-
-def _is_velocity_key(key: str) -> bool:
-    """判断字段名是否属于当前允许转发的速度字段
-
-    @param key 字段名称
-    @return 是否为速度字段
-    """
-
-    return key in ("vx", "vy", "omega", "w")
-
-
-def _canonical_velocity_key(key: str) -> str:
-    """把速度字段别名收口成辅车当前统一消费的字段名
-
-    @param key 原始字段名
-    @return 规范化后的字段名
-    """
-
-    if key == "w":
-        return "omega"
-    return key
+from vision.serial_protocol import parse_short_packet
 
 
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART3, 并把速度字段与由角速度派生的角度字段转发到 UART8
+    @brief 在共享底盘外层接管 UART3, 并把速度短包转发到 UART8
     """
 
     def __init__(self) -> None:
@@ -47,7 +20,11 @@ class MasterForwardRuntime:
         self.wheel_states = car.wheel_states
         self.imu = car.imu
         self._rx_buf3 = ""
+        self._rx_buf8 = ""
         self._last_error_text = "none"
+        self._sync_seq = 0
+        self._pending_sync = None
+        self.last_report = None
 
         if getattr(car, "_process_uart", None) is not None:
             car._process_uart = self._noop_transport_uart
@@ -80,100 +57,117 @@ class MasterForwardRuntime:
             self._record_error("master role cycle failed")
         return self._transport_car.step()
 
+    def request_state_sync(self, state: int, target: int, arg: int) -> int:
+        """创建一条待确认状态同步请求
+
+        @param state 状态编号
+        @param target 目标编号
+        @param arg 状态参数
+        @return 本次同步序号
+        """
+
+        self._sync_seq = (self._sync_seq + 1) % 256
+        self._pending_sync = {
+            "seq": self._sync_seq,
+            "state": int(state),
+            "target": int(target),
+            "arg": int(arg),
+        }
+        return self._sync_seq
+
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
 
         self._process_uart3()
+        self._process_uart8()
+        self._send_pending_sync()
 
     def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理完整命令"""
+        """接管 UART3 按行读取并处理短包输入"""
 
-        uart3 = self._transport_car.uart3
-        buf_len = uart3.any()
+        self._read_uart_lines(self._transport_car.uart3, "_rx_buf3", self._handle_uart3_line)
+
+    def _process_uart8(self) -> None:
+        """接管 UART8 按行读取确认与回报短包"""
+
+        uart8 = self._transport_car.uart8
+        if getattr(uart8, "any", None) is None:
+            return
+        self._read_uart_lines(uart8, "_rx_buf8", self._handle_uart8_line)
+
+    def _read_uart_lines(self, uart, buffer_name: str, handler) -> None:
+        buf_len = uart.any()
         if not buf_len:
             return
-
         try:
-            self._rx_buf3 += uart3.read(buf_len).decode()
+            setattr(self, buffer_name, getattr(self, buffer_name) + uart.read(buf_len).decode())
         except Exception:
-            self._record_error("uart3 read failed")
+            self._record_error("uart read failed")
             return
-
         while True:
-            idx = self._rx_buf3.find("\n")
+            buffer = getattr(self, buffer_name)
+            idx = buffer.find("\n")
             if idx == -1:
                 return
-            line = self._rx_buf3[: idx].rstrip("\r").strip()
-            self._rx_buf3 = self._rx_buf3[idx + 1 : ]
-            self._handle_uart3_line(line)
+            line = buffer[:idx].rstrip("\r").strip()
+            setattr(self, buffer_name, buffer[idx + 1 :])
+            handler(line)
 
     def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 原始命令行
+        """处理单条 UART3 短包输入行
 
-        @param line 原始命令行
+        @param line 原始输入行
         """
 
         if not line:
             return
+        packet = parse_short_packet(line)
+        if packet is not None and packet.get("type") == "v":
+            self._apply_velocity_packet(packet, source="uart3")
+            self._write_forward_line(line)
+            return
+        if line.lower().startswith("v,"):
+            self._record_error("invalid velocity packet")
 
-        forward_line = self._extract_forward_line(line)
-        if forward_line:
-            self._write_forward_line(forward_line)
-        self._transport_car._handle_uart_line(line, source="uart3")
+    def _handle_uart8_line(self, line: str) -> None:
+        """处理 UART8 回传短包
 
-    def _extract_forward_line(self, line: str) -> str:
-        """从原始命令中抽取可转发的速度字段文本
-
-        上游发来的是角速度(omega), 但转发给辅车时要替换为当前绝对角度(angle)
-
-        @param line 原始命令行
-        @return 可转发的速度字段文本
+        @param line 原始输入行
         """
 
-        text = line.strip()
-        if not text or text.startswith("?"):
-            return ""
+        packet = parse_short_packet(line)
+        if packet is None:
+            return
+        if packet.get("type") == "a":
+            pending = self._pending_sync
+            if pending is not None and int(packet["seq"]) == int(pending["seq"]):
+                self._pending_sync = None
+        elif packet.get("type") == "r":
+            self.last_report = packet
 
-        fields = {}
-        for fragment in text.split(","):
-            item = fragment.strip()
-            if not item or "=" not in item:
-                continue
-            key_text, value_text = item.split("=", 1)
-            key = key_text.strip().lower()
-            value = value_text.strip()
-            if not _is_velocity_key(key):
-                continue
-            try:
-                numeric_value = float(value)
-            except ValueError:
-                self._record_error("invalid velocity field: %s=%s" % (key, value))
-                return ""
-            if not math.isfinite(numeric_value):
-                self._record_error("invalid velocity field: %s=%s" % (key, value))
-                return ""
-            if numeric_value < -V_CMD_MAX or numeric_value > V_CMD_MAX:
-                self._record_error("invalid velocity field: %s=%s" % (key, value))
-                return ""
-            fields[_canonical_velocity_key(key)] = value
+    def _apply_velocity_packet(self, packet: dict, source: str) -> None:
+        omega = float(packet.get("omega", 0.0))
+        self._transport_car.handle_velocity_packet(
+            float(packet["vx"]),
+            float(packet["vy"]),
+            omega,
+            source=source,
+            has_omega=bool(packet.get("has_omega")),
+        )
 
-        if not fields:
-            return ""
-
-        ordered_fields = []
-        for key in ("vx", "vy"):
-            value = fields.get(key)
-            if value is not None:
-                ordered_fields.append("%s=%s" % (key, value))
-        if fields.get("omega") is not None:
-            heading = getattr(self._transport_car, "heading_est", 0.0)
-            ordered_fields.append("angle=%s" % heading)
-        return ",".join(ordered_fields)
+    def _send_pending_sync(self) -> None:
+        pending = self._pending_sync
+        if pending is None:
+            return
+        self._write_forward_line(
+            "s,%d,%d,%d,%d"
+            % (pending["seq"], pending["state"], pending["target"], pending["arg"])
+        )
 
     def _write_forward_line(self, line: str) -> None:
-        """把速度转发行写到 UART8 主辅通信链路
+        """把短包写到 UART8 主辅通信链路
 
-        @param line 要转发的速度字段文本
+        @param line 要转发的短包文本
         """
 
         try:

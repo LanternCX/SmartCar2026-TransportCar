@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-04-30-1 | 2026-04-30 | 用交叉编译避开 PR#56 注释引发的板端编译期内存峰值 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-30-1.md` | 记录 PR#56 / issue #57 中大量注释触发板端编译期内存峰值的问题，以及通过 mpy-cli-dev 交叉编译和 `.mpy` 优先部署完成闭环。 | PR56, issue57, mpy-cross, compile-time, memory-peak, comments, mpy-cli, debug |
 | 2026-04-20-1 | 2026-04-20 | 收敛辅车 UART6 视觉输入与 UART8 前馈输入的串口调试口径 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-20-1.md` | 把辅车角色层的双路串口输入重新收口为“UART6 视觉、UART8 前馈、vx/vy 裸相加、omega 只取 UART8、两路都保持上一包”，并用主机侧回归和文档修正完成闭环。 | assistant, uart6, uart8, visual-input, feedforward, debug, keep-last-packet, omega |
 | 2026-04-09-1 | 2026-04-09 | 主车高频控制诊断会放大串口热路径并触发 UART3 写超时 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-09-1.md` | 把主车控制周期诊断从热路径内的分段取时与逐拍输出收口为外层轻量汇总，避免调试本身持续放大 `UART3` 写超时与周期失真。 | master, uart, diagnostics, control-profile, etimedout, hot-path, debug |
 | 2026-04-08-2 | 2026-04-08 | 上调辅车位置式固定平移速度上限以扩大单窗口位移 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-08-2.md` | 把辅车位置式默认平移速度上限从 1.5 上调到 3.0，并用主机侧回归固定住“只改固定上限、不扩协议与模式语义”的边界。 | assistant, follow-position, speed-cap, motion-runtime, runtime-params, regression, debug |

@@ -4,13 +4,16 @@
 """
 
 from vision.assistant.diagnostics import build_follow_snapshot
-from vision.assistant.velocity_packet import CONSUME_ACCEPTED, split_velocity_line
+from vision.assistant.velocity_packet import (
+    CONSUME_ACCEPTED,
+    CONSUME_INVALID,
+    split_velocity_line,
+)
+from vision.serial_protocol import format_ack_packet, is_newer_seq, parse_short_packet
 
 
 def _default_now_ms() -> int:
     """读取毫秒时间
-
-    同时兼容板端 ticks_ms 和主机测试环境
 
     @return 当前毫秒时间戳
     """
@@ -21,40 +24,6 @@ def _default_now_ms() -> int:
     if ticks_ms is not None:
         return int(ticks_ms())
     return int(time.time() * 1000)
-
-
-def _has_translational_position_target_command(text: str) -> bool:
-    """检查文本中是否包含平移位置目标命令
-
-    @param text 待检查的命令文本
-    @return 是否包含平移位置目标命令
-    """
-
-    for fragment in text.split(","):
-        item = fragment.strip()
-        if not item or "=" not in item:
-            continue
-        key = item.split("=", 1)[0].strip().lower()
-        if key in ("x", "y", "dx", "dy"):
-            return True
-    return False
-
-
-def _has_angular_velocity_fragment(text: str) -> bool:
-    """检查文本中是否包含角速度字段
-
-    @param text 待检查的命令文本
-    @return 是否包含角速度字段
-    """
-
-    for fragment in text.split(","):
-        item = fragment.strip()
-        if not item or "=" not in item:
-            continue
-        key = item.split("=", 1)[0].strip().lower()
-        if key in ("omega", "w"):
-            return True
-    return False
 
 
 class AssistantFollowRuntime:
@@ -88,36 +57,23 @@ class AssistantFollowRuntime:
                 "factory": "create_uart8",
             },
         }
-        self._hold_passthrough_targets = False
+        self.sync_context = None
+        self._last_sync_seq = None
+        self._sync_apply_count = 0
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
-        """转发 ticker 中断标记
-
-        角色层不改时钟节拍, tick 入口仍由共享底盘处理
-
-        @param tick 节拍值
-        """
+        """转发 ticker 中断标记"""
 
         self._transport_car.mark_tick(tick)
 
     def set_ticker(self, ticker_obj: object) -> None:
-        """转发 ticker 对象
-
-        让共享底盘持有真实的控制周期驱动器
-
-        @param ticker_obj ticker 对象
-        """
+        """转发 ticker 对象"""
 
         self._transport_car.set_ticker(ticker_obj)
 
     def step(self) -> bool:
-        """执行一拍辅车角色运行时
-
-        先跑角色层输入接管与观测记录, 再进入共享底盘的执行周期
-
-        @return 是否继续运行
-        """
+        """执行一拍辅车角色运行时"""
 
         try:
             self._run_role_cycle()
@@ -126,26 +82,14 @@ class AssistantFollowRuntime:
         return self._transport_car.step()
 
     def _run_role_cycle(self) -> None:
-        """执行角色层单拍流程
+        """执行角色层单拍流程"""
 
-        这一拍先接管前馈和视觉输入, 再把融合后的速度通过共享底盘入口写回
-        """
-
-        uart6_has_velocity, uart6_has_translation_target = self._process_input("uart6")
-        uart8_has_velocity, uart8_has_translation_target = self._process_input("uart8")
-        if uart8_has_translation_target or uart6_has_translation_target:
-            self._hold_passthrough_targets = True
-        elif uart8_has_velocity or uart6_has_velocity:
-            self._hold_passthrough_targets = False
+        self._process_input("uart6")
+        self._process_input("uart8")
         self._write_effective_velocity()
 
     def build_follow_snapshot(self) -> dict:
-        """返回辅车角色层最小诊断快照
-
-        只有外部需要观察时才组织完整字典, 避免控制周期反复分配
-
-        @return 诊断快照字典
-        """
+        """返回辅车角色层最小诊断快照"""
 
         return build_follow_snapshot(
             self._build_transport_command_snapshot(),
@@ -179,70 +123,70 @@ class AssistantFollowRuntime:
                 return
 
     def _process_input(self, source: str):
-        """处理指定来源的输入数据
-
-        @param source 输入来源标识
-        @return 是否包含速度字段和是否包含平移位置目标的元组
-        """
+        """处理指定来源的输入数据"""
 
         state = self._inputs[source]
         uart = state["uart"]
         if uart is None:
             state["status"] = self._resolve_input_status(source)
-            return False, False
+            return False
 
         buf_len = uart.any()
         if not buf_len:
             state["status"] = self._resolve_input_status(source)
-            return False, False
+            return False
 
         has_velocity = False
-        has_translation_target_passthrough = False
 
         try:
             state["buffer"] += uart.read(buf_len).decode()
         except UnicodeDecodeError as exc:
             state["status"] = "error"
             self._record_error("%s decode failed" % source, exc)
-            return False, False
+            return False
         except Exception as exc:
             state["status"] = "error"
             self._record_error("%s read failed" % source, exc)
-            return False, False
+            return False
 
         while True:
             idx = state["buffer"].find("\n")
             if idx == -1:
                 state["status"] = self._resolve_input_status(source)
-                return has_velocity, has_translation_target_passthrough
-            line = state["buffer"][: idx].rstrip("\r").strip()
-            state["buffer"] = state["buffer"][idx + 1 : ]
-            has_omega_fragment = _has_angular_velocity_fragment(line)
-            consume_result, parsed, passthrough_line = split_velocity_line(line)
+                return has_velocity
+            line = state["buffer"][:idx].rstrip("\r").strip()
+            state["buffer"] = state["buffer"][idx + 1 :]
+            if source == "uart8" and self._handle_sync_packet(line, uart):
+                state["status"] = self._resolve_input_status(source)
+                continue
+            consume_result, parsed = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
-                state["velocity"] = self._normalize_input_velocity(
-                    source, parsed, has_omega_fragment
-                )
+                state["velocity"] = self._normalize_input_velocity(source, parsed)
                 state["status"] = "active"
                 has_velocity = True
-            elif consume_result == "invalid":
+            elif consume_result == CONSUME_INVALID:
                 state["status"] = "invalid"
             else:
                 state["status"] = self._resolve_input_status(source)
-            if passthrough_line:
-                if _has_translational_position_target_command(passthrough_line):
-                    has_translation_target_passthrough = True
-                    if consume_result != CONSUME_ACCEPTED:
-                        state["velocity"] = None
-                self._transport_car._handle_uart_line(passthrough_line, source=source)
+
+    def _handle_sync_packet(self, line: str, uart) -> bool:
+        packet = parse_short_packet(line)
+        if packet is None or packet.get("type") != "s":
+            return False
+        seq = int(packet["seq"])
+        if self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq):
+            self.sync_context = {
+                "seq": seq,
+                "state": int(packet["state"]),
+                "target": int(packet["target"]),
+                "arg": int(packet["arg"]),
+            }
+            self._last_sync_seq = seq
+            self._sync_apply_count += 1
+        uart.write("%s\r\n" % format_ack_packet(seq))
+        return True
 
     def _resolve_input_status(self, source: str) -> str:
-        """解析输入源的当前状态
-
-        @param source 输入来源标识
-        @return 输入源状态字符串
-        """
-
         state = self._inputs[source]
         if state["status"] == "error":
             return "error"
@@ -253,50 +197,39 @@ class AssistantFollowRuntime:
         return "idle"
 
     def _record_error(self, prefix: str, exc: Exception) -> None:
-        """记录错误信息
-
-        只保留最近一次错误文本, 方便现场联调判断先出问题的输入来源
-
-        @param prefix 错误前缀
-        @param exc 异常对象
-        """
-
         self._last_error_text = "%s: %s" % (prefix, exc)
         self._transport_car.last_exception_text = self._last_error_text
 
     def _write_effective_velocity(self) -> None:
         """将融合后的有效速度写入共享底盘"""
 
-        if self._should_skip_velocity_write():
-            return
         uart6_velocity = self._inputs["uart6"]["velocity"]
         uart8_velocity = self._inputs["uart8"]["velocity"]
         if uart6_velocity is None and uart8_velocity is None:
             return
         if uart6_velocity is None:
-            uart6_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+            uart6_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "has_omega": False}
         if uart8_velocity is None:
-            uart8_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+            uart8_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "has_omega": False}
 
         vx = float(uart6_velocity.get("vx", 0.0)) + float(uart8_velocity.get("vx", 0.0))
         vy = float(uart6_velocity.get("vy", 0.0)) + float(uart8_velocity.get("vy", 0.0))
-        omega = None
+        omega = 0.0
         if uart8_velocity.get("has_omega"):
             omega = float(uart8_velocity.get("omega", 0.0))
-        self._transport_car._handle_uart_line(
-            self._format_velocity_command(vx, vy, omega), source="assistant"
+        self._apply_effective_velocity(vx, vy, omega, bool(uart8_velocity.get("has_omega")))
+
+    def _apply_effective_velocity(self, vx: float, vy: float, omega: float, has_omega: bool) -> None:
+        self._transport_car.handle_velocity_packet(
+            vx,
+            vy,
+            omega,
+            source="assistant",
+            has_omega=has_omega,
         )
 
     @staticmethod
-    def _normalize_input_velocity(source: str, parsed: dict, has_omega_fragment: bool) -> dict:
-        """规范化输入速度数据
-
-        @param source 输入来源标识
-        @param parsed 解析后的速度字典
-        @param has_omega_fragment 是否包含角速度字段
-        @return 规范化后的速度字典
-        """
-
+    def _normalize_input_velocity(source: str, parsed: dict) -> dict:
         velocity = {
             "vx": float(parsed.get("vx", 0.0)),
             "vy": float(parsed.get("vy", 0.0)),
@@ -305,60 +238,13 @@ class AssistantFollowRuntime:
         }
         if source == "uart8":
             velocity["omega"] = float(parsed.get("omega", 0.0))
-            velocity["has_omega"] = bool(has_omega_fragment)
+            velocity["has_omega"] = bool(parsed.get("has_omega"))
         return velocity
 
-    def _should_skip_velocity_write(self) -> bool:
-        """判断是否应该跳过速度写入
-
-        @return 是否应该跳过
-        """
-
-        if not self._hold_passthrough_targets:
-            return False
-
-        active_getter = getattr(self._transport_car, "_has_active_translation_target", None)
-        if active_getter is not None:
-            active = bool(active_getter())
-        else:
-            last_cmd = self._transport_car.last_cmd
-            active = last_cmd.get("x") is not None or last_cmd.get("y") is not None
-        if not active:
-            self._hold_passthrough_targets = False
-            return False
-        return True
-
-    @staticmethod
-    def _format_velocity_command(vx: float, vy: float, omega) -> str:
-        """格式化速度命令
-
-        @param vx X 方向速度
-        @param vy Y 方向速度
-        @param omega 角速度
-        @return 格式化后的命令字符串
-        """
-
-        if omega is None:
-            return "vx=%s,vy=%s" % (vx, vy)
-        return "vx=%s,vy=%s,omega=%s" % (vx, vy, omega)
-
     def _build_transport_command_snapshot(self) -> dict:
-        """构建共享底盘命令快照
-
-        角色层只导出共享底盘当前真实生效的命令状态
-
-        @return 命令快照字典
-        """
-
-        return dict(self._transport_car.last_cmd)
+        return dict(self._transport_car.control_state)
 
     def _build_velocity_snapshot(self, source: str) -> dict:
-        """构建速度快照
-
-        @param source 输入来源标识
-        @return 速度快照字典
-        """
-
         velocity = self._inputs[source]["velocity"]
         if velocity is None:
             return {"vx": 0.0, "vy": 0.0, "omega": 0.0}
@@ -370,11 +256,6 @@ class AssistantFollowRuntime:
 
 
 def create_transport_car() -> AssistantFollowRuntime:
-    """创建辅车角色运行时对象
-
-    给角色分发入口返回会进入控制周期的辅车运行时
-
-    @return 辅车运行时实例
-    """
+    """创建辅车角色运行时对象"""
 
     return AssistantFollowRuntime()
