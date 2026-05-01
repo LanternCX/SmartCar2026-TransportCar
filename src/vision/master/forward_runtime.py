@@ -45,11 +45,8 @@ class MasterForwardRuntime:
         self._last_error_text = "none"
         self._now_ms = now_ms or protocol_link.default_now_ms
         self._uart3_velocity_this_cycle = False
-        self._search = MasterSearchStateMachine(
-            _params.MASTER_SEARCH_VX,
-            _params.MASTER_SEARCH_VY,
-            _params.MASTER_SEARCH_HOOK_CONFIG_ID,
-        )
+        self._search = MasterSearchStateMachine(_params.MASTER_SEARCH_HOOK_CONFIG_ID)
+        self._latest_search_velocity = None
         self._pending_vision_sync = None
         self._pending_vision_sync_last_sent_ms = None
         self._reliable_write_this_cycle = False
@@ -153,7 +150,7 @@ class MasterForwardRuntime:
 
     def _process_uart6(self) -> None:
         """
-        @brief 接管 UART6 按行读取视觉短包, 同拍观测只保留最新帧
+        @brief 接管 UART6 按行读取视觉短包
         """
 
         buf_len = self._uart6.any()
@@ -165,7 +162,6 @@ class MasterForwardRuntime:
             self._record_error("uart read failed")
             return
 
-        latest_observation = None
         while True:
             idx = self._rx_buf6.find("\n")
             if idx == -1:
@@ -175,13 +171,7 @@ class MasterForwardRuntime:
             packet = parse_short_packet(line)
             if packet is None:
                 continue
-            packet_type = packet.get("type")
-            if packet_type == "o":
-                latest_observation = packet
-            else:
-                self._handle_uart6_packet(packet)
-        if latest_observation is not None:
-            self._search.handle_observation(latest_observation)
+            self._handle_uart6_packet(packet)
 
     def _read_uart_lines(self, uart, buffer_name: str, handler) -> None:
         """
@@ -249,8 +239,11 @@ class MasterForwardRuntime:
         packet_type = packet.get("type")
         if packet_type == "a":
             self._handle_vision_ack_packet(packet)
-        elif packet_type == "o":
-            self._search.handle_observation(packet)
+        elif packet_type == "v":
+            if self._search.state == SEARCH_OBJECT:
+                self._latest_search_velocity = (float(packet["vx"]), float(packet["vy"]))
+            else:
+                self._latest_search_velocity = None
         elif packet_type == "r":
             self._handle_vision_event_packet(packet)
 
@@ -280,6 +273,7 @@ class MasterForwardRuntime:
             "uart6 reliable write failed",
         )
         if self._search.handle_event(packet):
+            self._latest_search_velocity = None
             self._pending_vision_sync = None
             self._pending_vision_sync_last_sent_ms = None
 
@@ -332,19 +326,24 @@ class MasterForwardRuntime:
 
     def _write_search_velocity(self) -> None:
         """
-        @brief 将当前搜索状态机速度写入共享底盘
+        @brief 将主车搜索速度写入共享底盘
         """
 
         if self._search.state == IDLE:
             return
         if self._uart3_velocity_this_cycle:
             return
-        vx, vy = self._search.build_velocity()
+        vx = 0.0
+        vy = 0.0
+        source = "master_search"
+        if self._latest_search_velocity is not None and self._search.state == SEARCH_OBJECT:
+            vx, vy = self._latest_search_velocity
+            source = "master_vision"
         self._transport_car.handle_velocity_packet(
             vx,
             vy,
             0.0,
-            source="master_search",
+            source=source,
             has_omega=False,
         )
 

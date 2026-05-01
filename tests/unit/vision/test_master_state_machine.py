@@ -20,11 +20,7 @@ from vision.master.state_machine import (  # noqa: E402
 
 
 def _build_machine():
-    return MasterSearchStateMachine(
-        search_vx=0.12,
-        search_vy=-0.03,
-        hook_config_id=5,
-    )
+    return MasterSearchStateMachine(hook_config_id=5)
 
 
 def test_enter_search_creates_hook_sync_context() -> None:
@@ -44,32 +40,21 @@ def test_enter_search_creates_hook_sync_context() -> None:
     }
 
 
-def test_search_and_found_velocity_outputs() -> None:
-    """! @brief 搜索态输出固定平移量, 找到后输出零速度"""
+def test_state_machine_does_not_generate_search_velocity() -> None:
+    """! @brief 状态机只维护搜索上下文和事件, 不提供速度生成入口"""
 
     machine = _build_machine()
-    machine.enter_search()
 
-    assert machine.build_velocity() == (0.12, -0.03)
-
-    machine.handle_event({"context_id": 1, "event": EVENT_TARGET_FOUND, "value": 99})
-
-    assert machine.state == OBJECT_FOUND
-    assert machine.build_velocity() == (0.0, 0.0)
+    assert not hasattr(machine, "build_velocity")
 
 
-def test_observation_only_records_matching_context_without_state_jump() -> None:
-    """! @brief 观测包只记录匹配上下文, 不在车端判断 hook 命中"""
+def test_state_machine_does_not_consume_observation_packets() -> None:
+    """! @brief 状态机只处理可靠事件, 不消费视觉观测包"""
 
     machine = _build_machine()
-    machine.enter_search()
 
-    assert machine.handle_observation({"context_id": 2, "x": 0.0, "y": 0.0, "value": 99.0}) is False
-    assert machine.last_observation is None
-
-    assert machine.handle_observation({"context_id": 1, "x": 0.0, "y": 0.0, "value": 99.0}) is False
-    assert machine.last_observation == {"context_id": 1, "x": 0.0, "y": 0.0, "value": 99.0}
-    assert machine.state == SEARCH_OBJECT
+    assert not hasattr(machine, "handle_observation")
+    assert not hasattr(machine, "last_observation")
 
 
 def test_target_found_event_requires_matching_context_and_is_idempotent() -> None:

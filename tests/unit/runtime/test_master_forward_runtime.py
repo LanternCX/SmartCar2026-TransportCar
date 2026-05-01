@@ -188,7 +188,7 @@ def test_master_forward_runtime_applies_remote_v_packet_to_local_chassis(monkeyp
 
 
 def test_master_forward_runtime_enters_search_on_role_cycle(monkeypatch) -> None:
-    """! @brief 主车角色周期主动进入搜索状态"""
+    """! @brief 主车角色周期主动进入搜索状态并下发 hook 同步"""
 
     events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
@@ -201,14 +201,136 @@ def test_master_forward_runtime_enters_search_on_role_cycle(monkeypatch) -> None
     assert runtime._uart6.messages == [
         "s,1,1,1,1,%d\r\n" % forward_runtime_module._params.MASTER_SEARCH_HOOK_CONFIG_ID
     ]
-    assert (
-        "handle_velocity",
-        "master_search",
-        forward_runtime_module._params.MASTER_SEARCH_VX,
-        forward_runtime_module._params.MASTER_SEARCH_VY,
-        0.0,
-    ) in events
+    assert ("handle_velocity", "master_search", 0.0, 0.0, 0.0) in events
 
+
+
+
+def test_master_forward_runtime_uses_uart6_vision_velocity_in_search(monkeypatch) -> None:
+    """! @brief SEARCH_OBJECT 中消费 UART6 视觉速度并写入本车底盘"""
+
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._uart6._buffer = b"v,0.2,-0.1\n"
+
+    runtime.step()
+
+    assert ("handle_velocity", "master_vision", 0.2, -0.1, 0.0) in events
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "master_vision",
+        "vx": 0.2,
+        "vy": -0.1,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_forward_runtime_does_not_forward_uart6_vision_velocity_to_uart8(monkeypatch) -> None:
+    """! @brief 主车视觉 v 包只服务本车搜索, 不转发 UART8"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._uart6._buffer = b"v,0.2,-0.1\n"
+
+    runtime.step()
+
+    assert uart8.messages == []
+
+
+def test_master_forward_runtime_prefers_uart3_velocity_over_uart6_vision_in_same_cycle(monkeypatch) -> None:
+    """! @brief 同拍存在 UART3 速度时优先使用 UART3 并继续转发 UART8"""
+
+    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart3._buffer = b"v,0.8,0.4,0.3\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime._uart6._buffer = b"v,0.2,-0.1\n"
+
+    runtime.step()
+
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "uart3",
+        "vx": 0.8,
+        "vy": 0.4,
+        "omega": 0.3,
+        "has_omega": True,
+    }
+    assert ("handle_velocity", "master_vision", 0.2, -0.1, 0.0) not in events
+    assert uart8.messages == ["v,0.8,0.4,0.3\r\n"]
+
+
+def test_master_forward_runtime_object_found_ignores_uart6_vision_velocity_and_outputs_zero(monkeypatch) -> None:
+    """! @brief OBJECT_FOUND 忽略主车视觉速度并输出零平移速度"""
+
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime()
+    runtime.start_search()
+    runtime._search.handle_event({
+        "context_id": runtime._search.context_id,
+        "event": 6,
+        "value": 99,
+    })
+    runtime._uart6._buffer = b"v,0.2,-0.1\n"
+
+    runtime.step()
+
+    assert runtime.search_state == forward_runtime_module.OBJECT_FOUND
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "master_search",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert ("handle_velocity", "master_vision", 0.2, -0.1, 0.0) not in events
+
+
+def test_master_forward_runtime_clears_vision_velocity_when_target_found_before_late_v(monkeypatch) -> None:
+    """! @brief TARGET_FOUND 后同批到达的视觉速度不会残留为搜索输入"""
+
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=lambda: 100)
+    runtime.start_search()
+    runtime.step()
+
+    runtime._uart6._buffer = b"r,7,1,6,90\nv,0.2,-0.1\n"
+    runtime.step()
+
+    assert runtime.search_state == forward_runtime_module.OBJECT_FOUND
+    assert runtime._latest_search_velocity is None
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "master_search",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert ("handle_velocity", "master_vision", 0.2, -0.1, 0.0) not in events
+
+
+def test_master_forward_runtime_search_without_uart6_vision_velocity_outputs_zero(monkeypatch) -> None:
+    """! @brief 搜索态没有视觉速度时输出零平移速度, 不再使用固定搜索速度"""
+
+    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+
+    assert runtime.search_state == forward_runtime_module.SEARCH_OBJECT
+    assert ("handle_velocity", "master_search", 0.0, 0.0, 0.0) in events
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "master_search",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 def test_master_forward_runtime_requires_structured_velocity_entry(monkeypatch) -> None:
     """! @brief 主车速度短包只调用共享底盘结构化速度入口"""
@@ -380,13 +502,7 @@ def test_master_forward_runtime_writes_search_velocity_without_uart3_input(monke
 
     runtime.step()
 
-    assert (
-        "handle_velocity",
-        "master_search",
-        forward_runtime_module._params.MASTER_SEARCH_VX,
-        forward_runtime_module._params.MASTER_SEARCH_VY,
-        0.0,
-    ) in events
+    assert ("handle_velocity", "master_search", 0.0, 0.0, 0.0) in events
     assert runtime._transport_car.last_chassis_target["source"] == "master_search"
 
 
@@ -449,7 +565,7 @@ def test_master_forward_runtime_acks_uart6_target_found_and_stops(monkeypatch) -
 
     assert runtime.search_state == forward_runtime_module.OBJECT_FOUND
     assert runtime._uart6.messages[-2:] == ["a,7\r\n", "a,7\r\n"]
-    assert events.count(("handle_velocity", "master_search", 0.0, 0.0, 0.0)) == 2
+    assert events.count(("handle_velocity", "master_search", 0.0, 0.0, 0.0)) == 3
     assert runtime._transport_car.last_chassis_target["has_omega"] is False
     assert runtime.search_transition_count == 1
 
@@ -489,8 +605,8 @@ def test_master_forward_runtime_ignores_nonmatching_target_found(monkeypatch) ->
     assert runtime._uart6.messages[-1] == "a,7\r\n"
 
 
-def test_master_forward_runtime_keeps_uart6_observation_local(monkeypatch) -> None:
-    """! @brief 主车视觉观测包只进入本地搜索逻辑, 不转发到 UART8"""
+def test_master_forward_runtime_ignores_uart6_observation(monkeypatch) -> None:
+    """! @brief 主车视觉观测包不进入主车搜索控制链路"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
@@ -502,33 +618,27 @@ def test_master_forward_runtime_keeps_uart6_observation_local(monkeypatch) -> No
     runtime._uart6._buffer = b"o,1,0.0,0.0,99.0\n"
     runtime.step()
 
-    assert runtime._search.last_observation == {
-        "type": "o",
-        "context_id": 1,
-        "x": 0.0,
-        "y": 0.0,
-        "value": 99.0,
-    }
+    assert not hasattr(runtime._search, "last_observation")
     assert uart8.messages == []
+    assert runtime._transport_car.last_exception_text == "none"
 
 
-def test_master_forward_runtime_keeps_latest_uart6_observation_only(monkeypatch) -> None:
-    """! @brief 同一控制拍内积压的 UART6 观测只处理最新帧"""
+def test_master_forward_runtime_does_not_call_state_machine_for_uart6_observation(monkeypatch) -> None:
+    """! @brief UART6 观测包不会进入状态机入口"""
 
     _events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
     runtime = forward_runtime_module.MasterForwardRuntime(now_ms=lambda: 100)
     runtime.start_search()
     runtime.step()
-    observed_packets = []
-    runtime._search.handle_observation = lambda packet: observed_packets.append(packet)
+    runtime._search.handle_observation = lambda _packet: (_ for _ in ()).throw(
+        AssertionError("observation must not reach state machine")
+    )
 
     runtime._uart6._buffer = b"o,1,1.0,0.0,10.0\no,1,2.0,0.0,20.0\no,1,3.0,0.0,30.0\n"
     runtime.step()
 
-    assert observed_packets == [
-        {"type": "o", "context_id": 1, "x": 3.0, "y": 0.0, "value": 30.0}
-    ]
+    assert runtime._transport_car.last_exception_text == "none"
 
 
 def test_master_forward_runtime_skips_sync_resend_after_event_ack_in_same_cycle(
@@ -553,7 +663,7 @@ def test_master_forward_runtime_skips_sync_resend_after_event_ack_in_same_cycle(
 
 
 def test_master_forward_runtime_does_not_reliable_write_for_uart6_observation(monkeypatch) -> None:
-    """! @brief UART6 观测包只走本地观测路径, 不触发可靠写出"""
+    """! @brief UART6 观测包不触发可靠写出"""
 
     _events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
@@ -572,11 +682,5 @@ def test_master_forward_runtime_does_not_reliable_write_for_uart6_observation(mo
     runtime._uart6._buffer = b"o,1,0.0,0.0,99.0\n"
     runtime.step()
 
-    assert runtime._search.last_observation == {
-        "type": "o",
-        "context_id": 1,
-        "x": 0.0,
-        "y": 0.0,
-        "value": 99.0,
-    }
+    assert not hasattr(runtime._search, "last_observation")
     assert reliable_writes == []

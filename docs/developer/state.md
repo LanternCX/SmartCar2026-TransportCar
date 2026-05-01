@@ -10,8 +10,8 @@
 
 - 全局状态机由主车维护。
 - 主车通过串口协议中的 `s` 包同步视觉 hook 上下文。
-- 主车视觉端接收上下文后执行本地识别任务。
-- 主车视觉端通过可靠 `r` 包回报事件或结果。
+- 主车视觉端接收上下文后执行本地识别任务并维护主车搜索 P 环。
+- 主车视觉端通过 `v,<vx>,<vy>` 输出主车搜索速度，通过可靠 `r` 包回报事件或结果。
 - `r` 包不直接改变全局状态，全局状态切换由主车状态机判断后执行。
 - 视觉事件只触发主车判断，不直接迁移全局状态。
 
@@ -55,9 +55,9 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 
 - 主车创建新的 `context_id`。
 - 主车通过本车 `UART6` 向主车 OpenART 发送 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>` 建立视觉 hook 上下文。
-- 主车只输出车体系 `vx / vy`。
+- 主车状态机不计算视觉 P 环。
+- 主车平移速度来源为 OpenART Vision master 通过本车 `UART6` 发送的 `v,<vx>,<vy>`。
 - 主车状态机不显式接管 `omega`。
-- 主车视觉通过 `o,<context_id>,<x>,<y>,<value>` 持续发送观测。
 - 主车视觉通过可靠 `r,<reliable_seq>,<context_id>,<event>,<value>` 回报 `TARGET_FOUND`。
 
 跳转条件：
@@ -76,7 +76,7 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 | `state` | 名称 | 含义 |
 | --- | --- | --- |
 | `0` | `IDLE` | 空闲，底盘不执行状态机任务 |
-| `1` | `SEARCH_OBJECT` | 主车使用固定车体系 `vx / vy` 搜索物体 |
+| `1` | `SEARCH_OBJECT` | 主车使用 OpenART Vision master 下发的 `v,<vx>,<vy>` 搜索物体 |
 | `2` | `OBJECT_FOUND` | 主车已找到物体，状态机输出零平移速度 |
 | `3` | `LOCK_OBJECT` | 锁定目标物体 |
 | `4` | `MASTER_ALIGN_OBJECT` | 主车调整到目标物体的合适角度 |
@@ -139,7 +139,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 ## 9. 状态跳转原则
 
 - 主车接收事件后判断是否切换全局状态。
-- 视觉端只提供观测和事件，不维护全局状态。
+- 视觉端只提供速度控制量和事件，不维护全局状态。
 - 辅车在本阶段接收 `UART8` 速度前馈和状态上下文同步，并融合本车视觉速度修正。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

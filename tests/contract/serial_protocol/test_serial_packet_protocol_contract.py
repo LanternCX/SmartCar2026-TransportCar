@@ -72,6 +72,55 @@ def test_reliable_sequence_is_separate_from_business_context() -> None:
     assert parse_short_packet("a,12") == {"type": "a", "reliable_seq": 12}
 
 
+def test_uart6_master_vision_velocity_packet_uses_generic_short_velocity_without_omega() -> None:
+    """! @brief UART6 主车视觉 v 搜索速度包复用通用速度短包解析"""
+
+    assert parse_short_packet("v,0.08,-0.04") == {
+        "type": "v",
+        "vx": 0.08,
+        "vy": -0.04,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_uart6_master_vision_reliable_hooks_and_velocity_stream_do_not_conflict() -> None:
+    """! @brief UART6 主车视觉可靠事件链路与 v 数据流解析语义互不冲突"""
+
+    packets = [
+        parse_short_packet("s,12,7,1,1,1"),
+        parse_short_packet("a,12"),
+        parse_short_packet("v,0.08,0"),
+        parse_short_packet("r,13,7,6,300"),
+    ]
+
+    assert packets == [
+        {
+            "type": "s",
+            "reliable_seq": 12,
+            "context_id": 7,
+            "state": 1,
+            "target": 1,
+            "arg": 1,
+        },
+        {"type": "a", "reliable_seq": 12},
+        {
+            "type": "v",
+            "vx": 0.08,
+            "vy": 0.0,
+            "omega": 0.0,
+            "has_omega": False,
+        },
+        {
+            "type": "r",
+            "reliable_seq": 13,
+            "context_id": 7,
+            "event": 6,
+            "value": 300,
+        },
+    ]
+
+
 def test_uart8_state_sync_packet_keeps_existing_state_fields() -> None:
     """! @brief UART8 状态同步短包使用状态字段"""
 

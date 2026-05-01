@@ -15,10 +15,6 @@ RELIABLE_PACKET_SEND_DELAY_MS = 1
 RELIABLE_RESEND_INTERVAL_MS = 20
 
 # ===== 主车搜索参数 =====
-# 主车搜索状态的车体系 x 轴速度
-MASTER_SEARCH_VX = 0.08
-# 主车搜索状态的车体系 y 轴速度
-MASTER_SEARCH_VY = 0.0
 # 主车搜索下发给视觉 hook 的配置编号
 MASTER_SEARCH_HOOK_CONFIG_ID = 1
 
