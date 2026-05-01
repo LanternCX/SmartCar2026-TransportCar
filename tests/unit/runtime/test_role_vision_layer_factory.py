@@ -119,6 +119,8 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     runtime_module = import_runtime_module("vision.master.runtime", monkeypatch)
     core_package = ModuleType("core")
     core_module = ModuleType("core.runtime")
+    hardware_package = ModuleType("hardware")
+    uart_bus_module = ModuleType("hardware.uart_bus")
 
     class _TransportCar:
         def __init__(self) -> None:
@@ -137,6 +139,9 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
     monkeypatch.setitem(sys.modules, "core.runtime", core_module)
+    setattr(uart_bus_module, "create_uart6", lambda: object())
+    monkeypatch.setitem(sys.modules, "hardware", hardware_package)
+    monkeypatch.setitem(sys.modules, "hardware.uart_bus", uart_bus_module)
 
     car = runtime_module.create_transport_car()
 

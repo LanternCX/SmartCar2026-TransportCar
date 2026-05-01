@@ -8,14 +8,14 @@
 - `tests/unit/runtime/`：角色运行时行为与装配测试
 - `tests/unit/command/`：串口正式入口边界测试
 - `tests/unit/vision/`：车端视觉速度解析与辅助状态测试
-- `tests/contract/protocol/`：协议字段、报文格式与运行时协议契约测试
+- `tests/contract/serial_protocol/`：协议字段、报文格式与运行时协议契约测试
 
 ## 本地命令
 
 ```bash
 python3 -m pytest tests/unit -q
-python3 -m pytest tests/contract/protocol -q
-python3 -m pytest tests/unit tests/contract/protocol -q
+python3 -m pytest tests/contract/serial_protocol -q
+python3 -m pytest tests/unit tests/contract/serial_protocol -q
 ```
 
 ## 板端确认

@@ -9,6 +9,18 @@
 # ===== 时序与周期 =====
 # 主控制循环周期, 单位毫秒
 TICK_MS = 5
+# 可靠短包发送前后的固定延时, 单位毫秒
+RELIABLE_PACKET_SEND_DELAY_MS = 1
+# 待确认可靠短包重发间隔, 单位毫秒
+RELIABLE_RESEND_INTERVAL_MS = 20
+
+# ===== 主车搜索参数 =====
+# 主车搜索状态的车体系 x 轴速度
+MASTER_SEARCH_VX = 0.08
+# 主车搜索状态的车体系 y 轴速度
+MASTER_SEARCH_VY = 0.0
+# 主车搜索下发给视觉 hook 的配置编号
+MASTER_SEARCH_HOOK_CONFIG_ID = 1
 
 # ===== 电机与 PWM =====
 # PWM 占空比上限, 范围 0 ~ 10000, 对应 0% ~ 100%
