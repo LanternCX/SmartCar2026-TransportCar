@@ -4,7 +4,7 @@
 """
 
 from hardware.uart_bus import create_uart6
-from vision.serial_protocol import parse_short_packet
+from vision.serial_protocol import format_velocity_packet, parse_short_packet
 
 
 _UART6_INPUT_LIMIT = 128
@@ -13,7 +13,7 @@ _UART6_INPUT_LIMIT = 128
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART3, 并把速度短包转发到 UART8
+    @brief 在共享底盘外层接管 UART3 与本车 UART6, 并把当前底盘速度转发到 UART8
     """
 
     def __init__(self) -> None:
@@ -91,6 +91,7 @@ class MasterForwardRuntime:
         self._process_uart6()
         if not self._uart3_velocity_received_this_tick:
             self._apply_latest_uart6_velocity()
+        self._forward_current_chassis_velocity()
         self._process_uart8()
         self._send_pending_sync()
 
@@ -181,7 +182,6 @@ class MasterForwardRuntime:
         if packet is not None and packet.get("type") == "v":
             self._apply_velocity_packet(packet, source="uart3")
             self._uart3_velocity_received_this_tick = True
-            self._write_forward_line(line)
             return
         if line.lower().startswith("v,"):
             self._record_error("invalid velocity packet")
@@ -221,6 +221,15 @@ class MasterForwardRuntime:
         packet = self._latest_uart6_velocity
         if packet is not None:
             self._apply_velocity_packet(packet, source="uart6", force_no_omega=True)
+
+    def _forward_current_chassis_velocity(self) -> None:
+        state = self._transport_car.control_state
+        omega = state.get("omega")
+        if omega is None:
+            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0))
+        else:
+            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0), omega)
+        self._write_forward_line(line)
 
     def _apply_velocity_packet(self, packet: dict, source: str, force_no_omega: bool = False) -> None:
         omega = 0.0 if force_no_omega else float(packet.get("omega", 0.0))
