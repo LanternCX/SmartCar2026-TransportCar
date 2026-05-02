@@ -17,6 +17,10 @@ RELIABLE_RESEND_INTERVAL_MS = 20
 # ===== 主车搜索参数 =====
 # 主车搜索下发给视觉 hook 的配置编号
 MASTER_SEARCH_HOOK_CONFIG_ID = 1
+# 主车绕行的绝对目标角度增量, 单位度
+MASTER_ORBIT_TARGET_DEG = 90
+# 单车调试阶段关闭主车对 UART8 的输出, 避免继续影响辅车
+MASTER_DISABLE_UART8_OUTPUT = True
 
 # ===== 电机与 PWM =====
 # PWM 占空比上限, 范围 0 ~ 10000, 对应 0% ~ 100%

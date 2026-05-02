@@ -38,17 +38,19 @@
 - 正式验证口径由本地自动测试和对话协作记录组成；板端联调、动作确认与现场复盘统一在协作过程中完成并记录。
 
 
-## 主车物体搜索控制边界
+## 主车物体搜索与绕行控制边界
 
-- 主车物体搜索状态流为 `IDLE -> SEARCH_OBJECT -> OBJECT_FOUND`。
+- 主车物体搜索状态流为 `IDLE -> SEARCH_OBJECT -> ORBITING -> IDLE`。
 - 主车搜索运行入口进入角色周期后主动进入 `SEARCH_OBJECT`。
 - `SEARCH_OBJECT` 中，主车平移速度来源为 OpenART Vision master 通过本车 `UART6` 发送的 `v,<vx>,<vy>`。
 - `SEARCH_OBJECT` 中，主车 RT1021 不根据 `o` 观测包计算搜索 P 控制量。
 - `SEARCH_OBJECT` 中，主车状态机不显式接管 `omega`。
 - 底盘本地方向保持继续用于抑制航向漂移。
 - 主车视觉事件只触发主车判断，不直接迁移全局状态。
-- 主车收到匹配 `context_id` 的 `TARGET_FOUND` 后，由主车状态机判断是否进入 `OBJECT_FOUND`。
-- `OBJECT_FOUND` 中，主车状态机输出零平移速度。
+- 主车收到匹配 `context_id` 的 `TARGET_FOUND` 后，由主车状态机判断是否进入 `ORBITING`。
+- `ORBITING` 中，主车使用共享底盘 rear only 模式绕到上电基准航向的绝对 `+90°`。
+- `ORBITING` 中，主车不使用主车视觉搜索速度和 `UART3` 上游速度覆盖绕行控制。
+- `ORBITING` 完成后主车回到 `IDLE`，rear only 模式关闭，底盘输出零。
 - 同一控制拍内存在合法 `UART3` 上游速度包和合法 `UART6` 视觉速度包时，角色层优先使用 `UART3` 输入作为最终底盘速度；同拍没有合法 `UART3` 上游速度包时，主车视觉 `v` 搜索速度生效。
 - 主车 `UART6` 视觉速度按最近一个合法 `v,<vx>,<vy>` 包保持；收到显式零包 `v,0,0` 后清空视觉速度。
 - 上下文不匹配的合法视觉事件需要确认，但不触发状态跳转。

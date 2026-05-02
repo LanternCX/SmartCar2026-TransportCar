@@ -3,11 +3,25 @@
 @file src/vision/master/forward_runtime.py
 """
 
+from config import params as _params
 from hardware.uart_bus import create_uart6
-from vision.serial_protocol import format_velocity_packet, parse_short_packet
+from protocol.link import default_now_ms, should_resend, write_reliable_line
+from protocol.packet import (
+    format_ack_packet,
+    format_state_sync_packet,
+    format_velocity_packet,
+    parse_short_packet,
+)
+from protocol.state import STATE_IDLE, STATE_ORBITING, STATE_SEARCH_OBJECT
+from vision.master.state_machine import MasterStateMachine
+from vision.serial_protocol import parse_short_packet as parse_uart8_short_packet
 
 
 _UART6_INPUT_LIMIT = 128
+MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
+MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
+RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
+MASTER_DISABLE_UART8_OUTPUT = bool(getattr(_params, "MASTER_DISABLE_UART8_OUTPUT"))
 
 
 class MasterForwardRuntime:
@@ -16,13 +30,15 @@ class MasterForwardRuntime:
     @brief 在共享底盘外层接管 UART3 与本车 UART6, 并把当前底盘速度转发到 UART8
     """
 
-    def __init__(self) -> None:
+    def __init__(self, now_ms=None) -> None:
         from core.runtime import TransportCar
 
         car = TransportCar()
+        seed_value = int((now_ms or default_now_ms)()) % 256
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu
+        self._now_ms = now_ms or default_now_ms
         self._uart6 = create_uart6()
         self._rx_buf3 = ""
         self._rx_buf6 = ""
@@ -30,12 +46,34 @@ class MasterForwardRuntime:
         self._latest_uart6_velocity = None
         self._uart3_velocity_received_this_tick = False
         self._last_error_text = "none"
+        self._hook_seq = seed_value
+        self._active_hook_context_id = None
+        self._pending_hook = None
+        self._pending_hook_event = None
         self._sync_seq = 0
         self._pending_sync = None
+        self._orbit_command_active = False
+        self._disable_uart8_output = MASTER_DISABLE_UART8_OUTPUT
+        self._state_machine = MasterStateMachine(
+            hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
+            boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
+            orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
+            initial_context_id=seed_value,
+        )
         self.last_report = None
 
         if getattr(car, "_process_uart", None) is not None:
             car._process_uart = self._noop_transport_uart
+        self._write_uart3_boot_start()
+
+
+    def _write_uart3_boot_start(self) -> None:
+        """向 UART3 输出启动标记"""
+
+        try:
+            self._transport_car.uart3.write("start\r\n")
+        except Exception:
+            self._record_error("uart3 start write failed")
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -80,20 +118,67 @@ class MasterForwardRuntime:
             "state": int(state),
             "target": int(target),
             "arg": int(arg),
+            "last_sent_ms": None,
         }
         return self._sync_seq
 
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
 
+        self._advance_state_machine()
+        self._drain_state_machine_outputs()
         self._uart3_velocity_received_this_tick = False
         self._process_uart3()
         self._process_uart6()
-        if not self._uart3_velocity_received_this_tick:
+        self._drain_state_machine_outputs()
+        if not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
         self._forward_current_chassis_velocity()
         self._process_uart8()
+        self._send_pending_hook()
         self._send_pending_sync()
+        self._write_uart3_debug_state()
+
+
+    def _write_uart3_debug_state(self) -> None:
+        """向 UART3 输出主车状态诊断行"""
+
+        state = self._state_machine.state
+        if state == STATE_IDLE:
+            state_text = "IDLE"
+        elif state == STATE_SEARCH_OBJECT:
+            state_text = "SEARCH_OBJECT"
+        elif state == STATE_ORBITING:
+            state_text = "ORBITING"
+        else:
+            state_text = str(state)
+        pending_hook = 1 if self._pending_hook is not None else 0
+        pending_event = 1 if self._pending_hook_event is not None else 0
+        orbit = 1 if self._orbit_command_active else 0
+        active_ctx = self._active_hook_context_id
+        if active_ctx is None:
+            active_ctx = -1
+        context_id = -1
+        if self._pending_hook is not None:
+            context_id = int(self._pending_hook["context_id"])
+        elif self._active_hook_context_id is not None:
+            context_id = int(self._active_hook_context_id)
+        line = (
+            "dbg,state=%s,ctx=%d,active_ctx=%d,pending_hook=%d,pending_event=%d,orbit=%d,err=%s"
+            % (
+                state_text,
+                int(context_id),
+                int(active_ctx),
+                pending_hook,
+                pending_event,
+                orbit,
+                self._last_error_text,
+            )
+        )
+        try:
+            self._transport_car.uart3.write("%s\r\n" % line)
+        except Exception:
+            self._record_error("uart3 debug write failed")
 
     def _process_uart3(self) -> None:
         """接管 UART3 按行读取并处理短包输入"""
@@ -178,6 +263,8 @@ class MasterForwardRuntime:
 
         if not line:
             return
+        if self._state_machine.state == STATE_ORBITING:
+            return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
             self._apply_velocity_packet(packet, source="uart3")
@@ -196,7 +283,38 @@ class MasterForwardRuntime:
             return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
-            self._latest_uart6_velocity = packet
+            if self._state_machine.allows_search_velocity():
+                self._latest_uart6_velocity = packet
+            return
+        if packet is not None and packet.get("type") == "a":
+            pending = self._pending_hook
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and int(packet["reliable_seq"]) == int(pending["reliable_seq"])
+            ):
+                self._active_hook_context_id = int(pending["context_id"])
+                self._pending_hook = None
+                self._drain_pending_hook_event()
+            return
+        if packet is not None and packet.get("type") == "r":
+            self._write_uart6_reliable_line(format_ack_packet(packet["reliable_seq"]))
+            if self._active_hook_context_id == int(packet["context_id"]):
+                self._state_machine.handle_event(
+                    context_id=packet["context_id"],
+                    event=packet["event"],
+                    value=packet["value"],
+                )
+            elif (
+                self._pending_hook is not None
+                and self._pending_hook.get("sent_once")
+                and int(packet["context_id"]) == int(self._pending_hook["context_id"])
+            ):
+                self._pending_hook_event = {
+                    "context_id": int(packet["context_id"]),
+                    "event": int(packet["event"]),
+                    "value": int(packet["value"]),
+                }
             return
         if line.lower().startswith("v,"):
             self._record_error("invalid uart6 velocity packet")
@@ -207,7 +325,7 @@ class MasterForwardRuntime:
         @param line 原始输入行
         """
 
-        packet = parse_short_packet(line)
+        packet = parse_uart8_short_packet(line)
         if packet is None:
             return
         if packet.get("type") == "a":
@@ -242,13 +360,20 @@ class MasterForwardRuntime:
         )
 
     def _send_pending_sync(self) -> None:
+        if self._disable_uart8_output:
+            return
         pending = self._pending_sync
         if pending is None:
             return
-        self._write_forward_line(
+        now_ms = self._now_ms()
+        if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
+            return
+        wrote_all = self._write_forward_reliable_line(
             "s,%d,%d,%d,%d"
             % (pending["seq"], pending["state"], pending["target"], pending["arg"])
         )
+        if wrote_all:
+            pending["last_sent_ms"] = now_ms
 
     def _write_forward_line(self, line: str) -> None:
         """把短包写到 UART8 主辅通信链路
@@ -256,10 +381,117 @@ class MasterForwardRuntime:
         @param line 要转发的短包文本
         """
 
+        if self._disable_uart8_output:
+            return
         try:
             self._transport_car.uart8.write("%s\r\n" % line)
         except Exception:
             self._record_error("uart8 forward write failed")
+
+    def _write_forward_reliable_line(self, line: str) -> bool:
+        """把可靠短包写到 UART8 主辅通信链路"""
+
+        if self._disable_uart8_output:
+            return False
+        try:
+            return bool(write_reliable_line(self._transport_car.uart8, line))
+        except Exception:
+            self._record_error("uart8 forward write failed")
+            return False
+
+    def _write_uart6_data_line(self, line: str) -> None:
+        """把短包写到本车 UART6 视觉链路
+
+        @param line 要写出的短包文本
+        """
+
+        try:
+            self._uart6.write("%s\r\n" % line)
+        except Exception:
+            self._record_error("uart6 write failed")
+
+    def _write_uart6_reliable_line(self, line: str) -> bool:
+        """把可靠短包写到本车 UART6 视觉链路"""
+
+        try:
+            return bool(write_reliable_line(self._uart6, line))
+        except Exception:
+            self._record_error("uart6 write failed")
+            return False
+
+    def _advance_state_machine(self) -> None:
+        """按当前底盘执行状态推进主车状态机"""
+
+        orbit_finished = False
+        if self._orbit_command_active:
+            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False)) and not bool(
+                getattr(self._transport_car, "rear_only_mode", False)
+            )
+        self._state_machine.step(orbit_finished=orbit_finished)
+        if self._state_machine.state != STATE_ORBITING:
+            self._orbit_command_active = False
+
+    def _drain_state_machine_outputs(self) -> None:
+        """消费主车状态机的一次性输出"""
+
+        hook_request = self._state_machine.poll_hook_request()
+        if hook_request is not None:
+            self._hook_seq = (self._hook_seq + 1) % 256
+            self._active_hook_context_id = None
+            self._latest_uart6_velocity = None
+            self._pending_hook_event = None
+            self._rx_buf6 = ""
+            self._pending_hook = {
+                "reliable_seq": self._hook_seq,
+                "context_id": int(hook_request["context_id"]),
+                "state": int(hook_request["state"]),
+                "target": int(hook_request["target"]),
+                "arg": int(hook_request["arg"]),
+                "last_sent_ms": None,
+                "sent_once": False,
+            }
+
+        orbit_command = self._state_machine.poll_orbit_command()
+        if orbit_command is not None:
+            self._transport_car.set_rear_only_angle_target(
+                float(orbit_command["target_heading_deg"])
+            )
+            self._orbit_command_active = True
+
+    def _send_pending_hook(self) -> None:
+        """重复发送待确认的视觉 hook 同步包"""
+
+        pending = self._pending_hook
+        if pending is None:
+            return
+        now_ms = self._now_ms()
+        if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
+            return
+        wrote_all = self._write_uart6_reliable_line(
+            format_state_sync_packet(
+                pending["reliable_seq"],
+                pending["context_id"],
+                pending["state"],
+                pending["target"],
+                pending["arg"],
+            )
+        )
+        if wrote_all:
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
+
+    def _drain_pending_hook_event(self) -> None:
+        """在 hook 建立后补发此前暂存的命中事件"""
+
+        pending_event = self._pending_hook_event
+        if pending_event is None:
+            return
+        self._pending_hook_event = None
+        self._state_machine.handle_event(
+            context_id=pending_event["context_id"],
+            event=pending_event["event"],
+            value=pending_event["value"],
+        )
 
     def _record_error(self, text: str) -> None:
         """记录最小错误文本供联调使用

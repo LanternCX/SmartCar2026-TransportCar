@@ -20,7 +20,7 @@
 - OpenART Vision master 是 Vision 仓库主车视觉入口，运行在主车 OpenART，负责红色沙包识别、搜索速度计算和主车物体搜索视觉 hook。
 - OpenART Vision master 通过本车 `UART6` 接收主车 RT1021 下发的 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>`，建立本次 hook 上下文。
 - OpenART Vision master 收到有效 `s` 包后发送 `a,<reliable_seq>`，重复 `s` 包按幂等规则处理并重新确认。
-- OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点 `x/y` 误差生成 `v,<vx>,<vy>` 搜索速度。
+- OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点横向误差和归一化底边纵向误差生成 `v,<vx>,<vy>` 搜索速度。
 - OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 可靠回报 `TARGET_FOUND`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成。
@@ -43,33 +43,36 @@ OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文�
 - 检测任务识别搜索目标色块。
 - 色块检测使用固定颜色阈值, 并要求候选区域满足像素数和面积下限。
 - 每个候选目标使用 `blob.rect()` 得到识别框, 再统一转换为 `left / top / right / bottom` 边界。
-- 搜索误差来自识别框中心点 `x/y` 相对画面目标点的偏差。
+- 纵向边界按图像高度归一化为主车搜索底边量，搜索目标为图像底边。
+- 搜索误差来自识别框中心点横向偏差和归一化底边纵向偏差。
 - 主车搜索 P 环不使用最小外接旋转矩形边长。
 - 调试画面绘制选中目标的识别框和中心点。
 
 ### 候选目标选择
 
 - 每帧会先收集所有颜色候选目标, 再选择单个目标进入搜索速度计算。
-- 候选目标优先靠近画面目标点, 同时满足目标强度要求。
+- 候选目标优先靠近画面横向中线和图像底边目标, 同时满足目标强度要求。
 - `value` 表示目标强度, 本阶段使用候选目标面积。
 
 ### 误差定义
 
 - 横向误差来自识别框中心点 x 坐标相对画面目标点的像素偏差。
-- 纵向误差来自识别框中心点 y 坐标相对画面目标点的像素偏差。
-- 主车搜索 P 环使用中心点 `x/y` 误差生成 `vx / vy` 搜索速度。
+- 纵向误差来自归一化底边相对图像底边的像素偏差。
+- 主车搜索 P 环使用中心点 `x` 误差和归一化底边 `y` 误差生成 `vx / vy` 搜索速度。
+- 归一化底边量按 `image_height - rect_top` 计算，目标底边量为 `image_height`。
 - 误差死区、比例系数和速度限幅由 OpenART Vision master 的搜索配置定义。
 
 ### 搜索速度输出
 
-OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 环。控制输入来自识别框中心点 `x/y` 相对画面目标点的误差，输出为 `v,<vx>,<vy>` 搜索速度短包。
+OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 环。控制输入来自识别框中心点横向误差和归一化底边纵向误差，输出为 `v,<vx>,<vy>` 搜索速度短包。
 
 算法含义:
 
 - `x` 表示识别框中心点横向误差。
-- `y` 表示识别框中心点纵向误差。
+- `y` 表示归一化底边纵向误差。
 - `vx` 与 `vy` 是主车车体系平移速度。
 - 无有效目标或误差位于死区内时，对应速度轴输出 `0`。
+- 纵向速度按图像高度缩放后限幅，目标越接近图像底边，`vy` 绝对值越小。
 - `TARGET_FOUND` 的判断使用目标强度和误差稳定条件。
 
 ### 主车输出规则

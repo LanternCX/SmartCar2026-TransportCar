@@ -518,6 +518,25 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_rear_only_angle_target(self, angle_deg):
+        """写入仅后轮绝对角度目标
+
+        @param angle_deg 绝对目标航向角, 单位度
+        """
+
+        self._clear_translation_control_targets()
+        self.control_state["vx"] = 0.0
+        self.control_state["vy"] = 0.0
+        self.control_state["omega"] = 0.0
+        self.control_state["angle"] = float(angle_deg)
+        self.command_lock = True
+        self.rear_only_mode = True
+        self.heading_target = float(angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""
 

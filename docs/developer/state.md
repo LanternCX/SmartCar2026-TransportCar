@@ -40,7 +40,7 @@ s,<reliable_seq>,<context_id>,<state>,<target>,<arg>
 主车物体搜索闭环的状态流为：
 
 ```text
-IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
+IDLE -> SEARCH_OBJECT -> ORBITING -> IDLE
 ```
 
 ### `IDLE`
@@ -63,13 +63,13 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 跳转条件：
 
 - 主车收到匹配 `context_id` 下的 `TARGET_FOUND`。
-- 主车确认该事件后，由主车状态机判断并进入 `OBJECT_FOUND`。
+- 主车确认该事件后，由主车状态机判断并进入 `ORBITING`。
 - 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
 - 重复 `r` 包幂等处理，不重复迁移状态。
 
-### `OBJECT_FOUND`
+### `ORBITING`
 
-主车已经找到物体。状态机输出零平移速度；同一控制拍内存在合法 `UART3` 上游速度包时，角色层以 `UART3` 输入作为最终底盘速度。
+主车使用共享底盘 rear only 模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；绕行完成后回到 `IDLE`。
 
 ## 5. 全局状态编号
 
@@ -77,13 +77,8 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 | --- | --- | --- |
 | `0` | `IDLE` | 空闲，底盘不执行状态机任务 |
 | `1` | `SEARCH_OBJECT` | 主车使用 OpenART Vision master 下发的 `v,<vx>,<vy>` 搜索物体 |
-| `2` | `OBJECT_FOUND` | 主车已找到物体，状态机输出零平移速度 |
-| `3` | `LOCK_OBJECT` | 锁定目标物体 |
-| `4` | `MASTER_ALIGN_OBJECT` | 主车调整到目标物体的合适角度 |
-| `5` | `ASSISTANT_ALIGN_OBJECT` | 辅车跟进并调整到目标物体的合适角度 |
-| `6` | `TRACK_OBJECT` | 两车各自跟随目标物体并维持速度前馈 |
-| `7` | `WAIT_PEER` | 等待对端到位或等待对端事件 |
-| `8` | `STOP` | 停止状态机任务并输出停止量 |
+| `2` | `ORBITING` | 主车使用 rear only 模式绕到上电基准航向 `+90°` |
+| `3` | `STOP` | 停止状态机任务并输出停止量 |
 
 ## 6. 目标编号
 
@@ -104,12 +99,7 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 | --- | --- |
 | `IDLE` | 固定为 `0` |
 | `SEARCH_OBJECT` | hook 配置编号 |
-| `OBJECT_FOUND` | 固定为 `0` |
-| `LOCK_OBJECT` | 目标筛选参数 |
-| `MASTER_ALIGN_OBJECT` | 目标角度或角度档位 |
-| `ASSISTANT_ALIGN_OBJECT` | 目标角度或角度档位 |
-| `TRACK_OBJECT` | 速度前馈档位 |
-| `WAIT_PEER` | 等待条件编号 |
+| `ORBITING` | 固定为 `0` |
 | `STOP` | 固定为 `0` |
 
 ## 8. 事件编号
