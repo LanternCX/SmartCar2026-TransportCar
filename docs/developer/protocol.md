@@ -79,7 +79,8 @@ v,<vx>,<vy>[,<omega>]
 - `UART3` 使用 `v` 包承载上位机给主车的速度控制。
 - `UART8` 使用 `v` 包承载主车给辅车的速度前馈。
 - `UART8` 的状态同步短包不承载本阶段主车视觉搜索事件。
-- 主车 `UART6` 使用 `v` 包承载 OpenART Vision master 给主车 RT1021 的搜索速度，格式为 `v,<vx>,<vy>`。
+- 主车 `UART6` 接收 OpenART Vision master 给主车 RT1021 的车端速度输入，格式为 `v,<vx>,<vy>`。
+- 主车视觉速度只在 `UART6` 消费，不经 `UART8` 转发。
 - OpenART Vision master 在 `SEARCH_OBJECT` 中维护主车搜索 P 环，并通过 `v,<vx>,<vy>` 控制主车搜索速度。
 - 主车搜索控制不依赖 `o` 观测包；主车视觉搜索主线不周期发送 `o` 包。
 - 辅车 `UART6` 使用 `v` 包承载辅车 OpenART 给辅车 RT1021 的视觉速度修正。

@@ -13,10 +13,11 @@
 - 代理规则、题面材料、协作规格、协作计划和长期开发文档以本仓库为准。
 - 视觉仓库测试只覆盖运行时行为与协议回归，不约束文档结构、规则入口或治理文件存在性。
 - 文档、注释和规则入口通过 review 检查，不写硬约束测试。
+- 本仓库只消费视觉速度输入，不在本仓库内实现红色沙包识别和速度计算。
 
 ## Vision 端角色职责
 
-- OpenART Vision master 是 Vision 仓库主车视觉入口，运行在主车 OpenART，负责主车物体搜索视觉 hook。
+- OpenART Vision master 是 Vision 仓库主车视觉入口，运行在主车 OpenART，负责红色沙包识别、搜索速度计算和主车物体搜索视觉 hook。
 - OpenART Vision master 通过本车 `UART6` 接收主车 RT1021 下发的 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>`，建立本次 hook 上下文。
 - OpenART Vision master 收到有效 `s` 包后发送 `a,<reliable_seq>`，重复 `s` 包按幂等规则处理并重新确认。
 - OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点 `x/y` 误差生成 `v,<vx>,<vy>` 搜索速度。
