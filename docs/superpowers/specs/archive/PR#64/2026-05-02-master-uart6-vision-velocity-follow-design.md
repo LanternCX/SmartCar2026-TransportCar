@@ -1,7 +1,7 @@
 # 主车 UART6 视觉速度跟随设计
 
 > 执行状态: Archive
-> 关联计划: `docs/superpowers/plans/2026-05-02-master-uart6-vision-velocity-follow-plan.md`
+> 关联计划: `docs/superpowers/plans/archive/PR#64/2026-05-02-master-uart6-vision-velocity-follow-plan.md`
 > 适用范围: 当前车端仓库的主车 RT1021 角色运行入口、本车 `UART6` 视觉速度输入、本车底盘速度写入
 
 ## 1. 目标

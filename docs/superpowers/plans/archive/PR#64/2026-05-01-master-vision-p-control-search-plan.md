@@ -2,7 +2,7 @@
 
 > 执行状态: Archive
 > 面向执行者: 使用 `superpowers:subagent-driven-development` 按任务执行。本计划只做编排, 不包含代码。
-> 设计依据: `docs/superpowers/specs/2026-05-01-master-vision-p-control-search-design.md`
+> 设计依据: `docs/superpowers/specs/archive/PR#64/2026-05-01-master-vision-p-control-search-design.md`
 
 **目标:** 让 OpenART Vision master 在视觉端完成主车搜索 P 环, 通过 `v,<vx>,<vy>` 下发搜索速度, 主车 RT1021 只负责状态、可靠事件和速度入口优先级。
 

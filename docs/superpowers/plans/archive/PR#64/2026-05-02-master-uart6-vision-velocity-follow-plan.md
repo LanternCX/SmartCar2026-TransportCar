@@ -2,7 +2,7 @@
 
 > 执行状态: Archive
 > 面向执行者: 使用 `superpowers:subagent-driven-development` 按任务执行; 每个任务完成后由编排者 review。Plan 只做编排, 不包含实现代码。
-> 设计依据: `docs/superpowers/specs/2026-05-02-master-uart6-vision-velocity-follow-design.md`
+> 设计依据: `docs/superpowers/specs/archive/PR#64/2026-05-02-master-uart6-vision-velocity-follow-design.md`
 
 **目标:** 让当前车端仓库的主车运行入口接收本车 `UART6` 视觉速度, 并在没有同拍 `UART3` 输入时驱动主车本地底盘跟随红色沙包。
 

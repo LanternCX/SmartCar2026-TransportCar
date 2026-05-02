@@ -1,7 +1,7 @@
 # 主车视觉端 P 环搜索控制设计
 
 > 执行状态: Archive
-> 关联计划: `docs/superpowers/plans/2026-05-01-master-vision-p-control-search-plan.md`
+> 关联计划: `docs/superpowers/plans/archive/PR#64/2026-05-01-master-vision-p-control-search-plan.md`
 > 适用范围: 主车 RT1021 搜索状态、主车 OpenART Vision master、主车本地 `UART6` 视觉链路
 
 ## 1. 目标

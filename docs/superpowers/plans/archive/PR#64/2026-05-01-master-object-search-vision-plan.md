@@ -2,7 +2,7 @@
 
 > 状态: Archive
 > 面向执行者: 使用 `superpowers:subagent-driven-development` 逐任务执行。本计划只作为编排入口, 不包含实现代码。
-> 设计依据: `docs/superpowers/specs/2026-05-01-master-object-search-vision-design.md`
+> 设计依据: `docs/superpowers/specs/archive/PR#64/2026-05-01-master-object-search-vision-design.md`
 
 **目标:** 实现主车固定 `vx / vy` 搜索物体, 通过视觉 hook 确认物体稳定进入画面目标窗口后输出零平移速度。
 
