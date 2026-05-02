@@ -1,6 +1,6 @@
 """UART 总线初始化封装
 
-提供三条 UART 总线的工厂函数, 分别服务于控制命令、主辅车通信和视觉输入
+提供三条 UART 总线的工厂函数, 分别服务于控制命令、主辅车通信和本车本地视觉链路
 """
 
 from machine import UART
@@ -33,7 +33,7 @@ def create_uart8():
 def create_uart6():
     """@brief 创建并初始化 UART6
 
-    UART6 负责辅车本地视觉输入的数据接收, 固定波特率 115200
+    UART6 是本车本地视觉链路, 固定波特率 115200
 
     @return 已初始化至 115200 bps 的 UART(5) 对象
     """

@@ -3,13 +3,17 @@
 @file src/vision/master/forward_runtime.py
 """
 
-from vision.serial_protocol import parse_short_packet
+from hardware.uart_bus import create_uart6
+from vision.serial_protocol import format_velocity_packet, parse_short_packet
+
+
+_UART6_INPUT_LIMIT = 128
 
 
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART3, 并把速度短包转发到 UART8
+    @brief 在共享底盘外层接管 UART3 与本车 UART6, 并把当前底盘速度转发到 UART8
     """
 
     def __init__(self) -> None:
@@ -19,8 +23,12 @@ class MasterForwardRuntime:
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu
+        self._uart6 = create_uart6()
         self._rx_buf3 = ""
+        self._rx_buf6 = ""
         self._rx_buf8 = ""
+        self._latest_uart6_velocity = None
+        self._uart3_velocity_received_this_tick = False
         self._last_error_text = "none"
         self._sync_seq = 0
         self._pending_sync = None
@@ -78,7 +86,12 @@ class MasterForwardRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
 
+        self._uart3_velocity_received_this_tick = False
         self._process_uart3()
+        self._process_uart6()
+        if not self._uart3_velocity_received_this_tick:
+            self._apply_latest_uart6_velocity()
+        self._forward_current_chassis_velocity()
         self._process_uart8()
         self._send_pending_sync()
 
@@ -86,6 +99,18 @@ class MasterForwardRuntime:
         """接管 UART3 按行读取并处理短包输入"""
 
         self._read_uart_lines(self._transport_car.uart3, "_rx_buf3", self._handle_uart3_line)
+
+    def _process_uart6(self) -> None:
+        """接管 UART6 按行读取本车视觉速度输入"""
+
+        self._read_uart_lines(
+            self._uart6,
+            "_rx_buf6",
+            self._handle_uart6_line,
+            read_error_text="uart6 read failed",
+            overflow_error_text="invalid uart6 input",
+            input_limit=_UART6_INPUT_LIMIT,
+        )
 
     def _process_uart8(self) -> None:
         """接管 UART8 按行读取确认与回报短包"""
@@ -95,20 +120,52 @@ class MasterForwardRuntime:
             return
         self._read_uart_lines(uart8, "_rx_buf8", self._handle_uart8_line)
 
-    def _read_uart_lines(self, uart, buffer_name: str, handler) -> None:
-        buf_len = uart.any()
-        if not buf_len:
-            return
-        try:
-            setattr(self, buffer_name, getattr(self, buffer_name) + uart.read(buf_len).decode())
-        except Exception:
-            self._record_error("uart read failed")
-            return
+    def _read_uart_lines(
+        self,
+        uart,
+        buffer_name: str,
+        handler,
+        read_error_text: str = "uart read failed",
+        overflow_error_text=None,
+        input_limit=None,
+    ) -> None:
+        while True:
+            buf_len = uart.any()
+            if not buf_len:
+                return
+            input_overflow = input_limit is not None and buf_len > input_limit
+            if input_overflow:
+                buf_len = input_limit
+            try:
+                chunk = uart.read(buf_len).decode()
+            except Exception:
+                self._record_error(read_error_text)
+                return
+            setattr(self, buffer_name, getattr(self, buffer_name) + chunk)
+            if input_overflow:
+                setattr(self, buffer_name, "")
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                return
+            if self._drain_uart_lines(buffer_name, handler, overflow_error_text, input_limit):
+                return
+
+    def _drain_uart_lines(self, buffer_name: str, handler, overflow_error_text, input_limit) -> bool:
         while True:
             buffer = getattr(self, buffer_name)
+            if input_limit is not None and len(buffer) > input_limit:
+                setattr(self, buffer_name, "")
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                return True
             idx = buffer.find("\n")
             if idx == -1:
-                return
+                return False
+            if input_limit is not None and idx > input_limit:
+                setattr(self, buffer_name, buffer[idx + 1 :])
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                continue
             line = buffer[:idx].rstrip("\r").strip()
             setattr(self, buffer_name, buffer[idx + 1 :])
             handler(line)
@@ -124,10 +181,25 @@ class MasterForwardRuntime:
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
             self._apply_velocity_packet(packet, source="uart3")
-            self._write_forward_line(line)
+            self._uart3_velocity_received_this_tick = True
             return
         if line.lower().startswith("v,"):
             self._record_error("invalid velocity packet")
+
+    def _handle_uart6_line(self, line: str) -> None:
+        """处理单条 UART6 视觉速度输入行
+
+        @param line 原始输入行
+        """
+
+        if not line:
+            return
+        packet = parse_short_packet(line)
+        if packet is not None and packet.get("type") == "v":
+            self._latest_uart6_velocity = packet
+            return
+        if line.lower().startswith("v,"):
+            self._record_error("invalid uart6 velocity packet")
 
     def _handle_uart8_line(self, line: str) -> None:
         """处理 UART8 回传短包
@@ -145,14 +217,28 @@ class MasterForwardRuntime:
         elif packet.get("type") == "r":
             self.last_report = packet
 
-    def _apply_velocity_packet(self, packet: dict, source: str) -> None:
-        omega = float(packet.get("omega", 0.0))
+    def _apply_latest_uart6_velocity(self) -> None:
+        packet = self._latest_uart6_velocity
+        if packet is not None:
+            self._apply_velocity_packet(packet, source="uart6", force_no_omega=True)
+
+    def _forward_current_chassis_velocity(self) -> None:
+        state = self._transport_car.control_state
+        omega = state.get("omega")
+        if omega is None:
+            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0))
+        else:
+            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0), omega)
+        self._write_forward_line(line)
+
+    def _apply_velocity_packet(self, packet: dict, source: str, force_no_omega: bool = False) -> None:
+        omega = 0.0 if force_no_omega else float(packet.get("omega", 0.0))
         self._transport_car.handle_velocity_packet(
             float(packet["vx"]),
             float(packet["vy"]),
             omega,
             source=source,
-            has_omega=bool(packet.get("has_omega")),
+            has_omega=False if force_no_omega else bool(packet.get("has_omega")),
         )
 
     def _send_pending_sync(self) -> None:

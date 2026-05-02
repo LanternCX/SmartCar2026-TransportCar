@@ -4,7 +4,7 @@
 """
 
 from config import params as _params
-from vision.serial_protocol import parse_short_packet
+from protocol.packet import parse_short_packet
 
 
 CONSUME_IGNORED = "ignored"

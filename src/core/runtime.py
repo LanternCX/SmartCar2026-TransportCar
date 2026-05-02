@@ -25,7 +25,7 @@ from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from vision.serial_protocol import parse_short_packet
+from protocol.packet import parse_short_packet
 
 
 TICK_MS = getattr(_params, "TICK_MS")

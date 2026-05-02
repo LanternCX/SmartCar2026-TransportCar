@@ -1,4 +1,4 @@
-"""辅车速度协议契约测试."""
+"""! @brief 辅车速度协议契约测试"""
 
 import sys
 from pathlib import Path
@@ -14,7 +14,7 @@ from vision.assistant.velocity_packet import split_velocity_line  # noqa: E402
 
 
 def test_assistant_velocity_protocol_accepts_v_short_packet() -> None:
-    """车端正式速度协议面识别 v 短包."""
+    """! @brief 车端正式速度协议面识别 v 短包"""
     consume_result, parsed = split_velocity_line("v,0,0,0")
 
     assert consume_result == "accepted"
@@ -22,7 +22,7 @@ def test_assistant_velocity_protocol_accepts_v_short_packet() -> None:
 
 
 def test_assistant_velocity_protocol_rejects_non_short_packet_velocity_text() -> None:
-    """非短包速度文本不属于正式速度协议面."""
+    """! @brief 非短包速度文本不属于正式速度协议面"""
     consume_result, parsed = split_velocity_line("vx=0,vy=0")
 
     assert consume_result == "ignored"

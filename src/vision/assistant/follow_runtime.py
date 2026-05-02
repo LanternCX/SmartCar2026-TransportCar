@@ -9,7 +9,7 @@ from vision.assistant.velocity_packet import (
     CONSUME_INVALID,
     split_velocity_line,
 )
-from vision.serial_protocol import format_ack_packet, is_newer_seq, parse_short_packet
+from protocol.packet import format_ack_packet, is_newer_seq, parse_short_packet
 
 
 def _default_now_ms() -> int:
@@ -172,6 +172,8 @@ class AssistantFollowRuntime:
     def _handle_sync_packet(self, line: str, uart) -> bool:
         packet = parse_short_packet(line)
         if packet is None or packet.get("type") != "s":
+            return False
+        if "seq" not in packet:
             return False
         seq = int(packet["seq"])
         if self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq):
