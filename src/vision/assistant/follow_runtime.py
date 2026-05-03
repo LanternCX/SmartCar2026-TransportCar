@@ -3,13 +3,33 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
+from config import params as _params
+from protocol.link import should_resend, write_reliable_line
+from vision.assistant.state_machine import (
+    ASSISTANT_STATE_APPROACH_OBJECT,
+    AssistantStateMachine,
+)
 from vision.assistant.diagnostics import build_follow_snapshot
+from vision.assistant.uart8_packet import (
+    format_ack_packet,
+    format_event_packet,
+    format_state_sync_packet,
+    is_newer_seq,
+    parse_short_packet,
+)
 from vision.assistant.velocity_packet import (
     CONSUME_ACCEPTED,
     CONSUME_INVALID,
     split_velocity_line,
 )
-from protocol.packet import format_ack_packet, is_newer_seq, parse_short_packet
+
+
+_INPUT_LIMIT = 128
+_TARGET_FOUND_EVENT = 6
+_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
+    _params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
+)
+_MASTER_REPORT_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 
 
 def _default_now_ms() -> int:
@@ -41,6 +61,7 @@ class AssistantFollowRuntime:
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
         self._last_error_text = "none"
+        self._state_machine = AssistantStateMachine()
         self._inputs = {
             "uart6": {
                 "uart": uart6,
@@ -60,6 +81,11 @@ class AssistantFollowRuntime:
         self.sync_context = None
         self._last_sync_seq = None
         self._sync_apply_count = 0
+        seed_value = int(self._now_ms()) % 256
+        self._local_vision_sync_seq = seed_value
+        self._pending_local_vision_sync = None
+        self._pending_target_found_report = None
+        self._approach_target_found_done = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -86,17 +112,23 @@ class AssistantFollowRuntime:
 
         self._process_input("uart6")
         self._process_input("uart8")
+        self._send_pending_local_vision_sync()
+        self._send_pending_target_found_report()
         self._write_effective_velocity()
 
     def build_follow_snapshot(self) -> dict:
         """返回辅车角色层最小诊断快照"""
 
         return build_follow_snapshot(
+            self._state_machine.state,
+            self._state_machine.target,
             self._build_transport_command_snapshot(),
             self._inputs["uart6"]["status"],
             self._inputs["uart8"]["status"],
             self._build_velocity_snapshot("uart6"),
             self._build_velocity_snapshot("uart8"),
+            self._pending_local_vision_sync is not None,
+            self._approach_target_found_done,
             self._last_error_text,
         )
 
@@ -120,7 +152,6 @@ class AssistantFollowRuntime:
             except Exception as exc:
                 state["status"] = "error"
                 self._record_error("%s init failed" % source, exc)
-                return
 
     def _process_input(self, source: str):
         """处理指定来源的输入数据"""
@@ -148,26 +179,64 @@ class AssistantFollowRuntime:
             state["status"] = "error"
             self._record_error("%s read failed" % source, exc)
             return False
+        if len(state["buffer"]) > _INPUT_LIMIT:
+            state["buffer"] = ""
+            state["status"] = "invalid"
+            self._record_error_text("invalid %s input" % source)
+            return False
 
         while True:
             idx = state["buffer"].find("\n")
             if idx == -1:
                 state["status"] = self._resolve_input_status(source)
                 return has_velocity
+            if idx > _INPUT_LIMIT:
+                state["buffer"] = state["buffer"][idx + 1 :]
+                state["status"] = "invalid"
+                self._record_error_text("invalid %s input" % source)
+                continue
             line = state["buffer"][:idx].rstrip("\r").strip()
             state["buffer"] = state["buffer"][idx + 1 :]
-            if source == "uart8" and self._handle_sync_packet(line, uart):
+            if source == "uart8" and self._handle_uart8_control_packet(line, uart):
+                state["status"] = self._resolve_input_status(source)
+                continue
+            if source == "uart6" and self._handle_uart6_control_packet(line):
+                state["status"] = self._resolve_input_status(source)
+                continue
+            if self._state_machine.is_idle():
                 state["status"] = self._resolve_input_status(source)
                 continue
             consume_result, parsed = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
-                state["velocity"] = self._normalize_input_velocity(source, parsed)
-                state["status"] = "active"
-                has_velocity = True
+                if self._should_store_velocity(source):
+                    state["velocity"] = self._normalize_input_velocity(source, parsed)
+                    state["status"] = "active"
+                    has_velocity = True
+                else:
+                    state["status"] = self._resolve_input_status(source)
             elif consume_result == CONSUME_INVALID:
                 state["status"] = "invalid"
             else:
                 state["status"] = self._resolve_input_status(source)
+
+    def _handle_uart8_control_packet(self, line: str, uart) -> bool:
+        if self._handle_sync_packet(line, uart):
+            return True
+        packet = parse_short_packet(line)
+        if packet is None:
+            return False
+        if packet.get("type") == "a":
+            pending = self._pending_target_found_report
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and int(packet["seq"]) == int(pending["seq"])
+            ):
+                self._pending_target_found_report = None
+            return True
+        if packet.get("type") == "r":
+            return True
+        return False
 
     def _handle_sync_packet(self, line: str, uart) -> bool:
         packet = parse_short_packet(line)
@@ -176,7 +245,14 @@ class AssistantFollowRuntime:
         if "seq" not in packet:
             return False
         seq = int(packet["seq"])
-        if self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq):
+        is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
+        if not is_new_sync and seq != self._last_sync_seq:
+            uart.write("%s\r\n" % format_ack_packet(seq))
+            return True
+        accepted = self._apply_sync_context(packet)
+        if not accepted:
+            return True
+        if is_new_sync:
             self.sync_context = {
                 "seq": seq,
                 "state": int(packet["state"]),
@@ -187,6 +263,61 @@ class AssistantFollowRuntime:
             self._sync_apply_count += 1
         uart.write("%s\r\n" % format_ack_packet(seq))
         return True
+
+    def _apply_sync_context(self, packet: dict) -> bool:
+        """应用新的 UART8 同步上下文"""
+
+        accepted = self._state_machine.apply_master_state(
+            packet["state"], packet["target"], packet["arg"]
+        )
+        if not accepted:
+            self._record_error_text(
+                "unknown assistant sync state: %s" % int(packet["state"])
+            )
+            return False
+        if self._state_machine.is_idle():
+            self._inputs["uart6"]["velocity"] = None
+            self._inputs["uart8"]["velocity"] = None
+            self._pending_local_vision_sync = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                0.0,
+                0.0,
+                source="assistant_idle",
+                has_omega=True,
+            )
+        elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            self._enter_approach_object_state(packet)
+        return True
+
+    def _handle_uart6_control_packet(self, line: str) -> bool:
+        packet = parse_short_packet(line)
+        if packet is None:
+            return False
+        packet_type = packet.get("type")
+        if packet_type == "a":
+            pending = self._pending_local_vision_sync
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and int(packet["seq"]) == int(pending["seq"])
+            ):
+                self._pending_local_vision_sync = None
+            return True
+        if packet_type == "r":
+            self._write_uart6_reliable_line(format_ack_packet(packet["seq"]))
+            if (
+                self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
+                and int(packet["event"]) == _TARGET_FOUND_EVENT
+                and not self._approach_target_found_done
+            ):
+                self._handle_local_target_found(packet["seq"], packet["value"])
+            return True
+        if packet_type == "s":
+            return True
+        return False
 
     def _resolve_input_status(self, source: str) -> str:
         state = self._inputs[source]
@@ -202,8 +333,16 @@ class AssistantFollowRuntime:
         self._last_error_text = "%s: %s" % (prefix, exc)
         self._transport_car.last_exception_text = self._last_error_text
 
+    def _record_error_text(self, text: str) -> None:
+        self._last_error_text = text
+        self._transport_car.last_exception_text = text
+
     def _write_effective_velocity(self) -> None:
         """将融合后的有效速度写入共享底盘"""
+
+        if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            self._write_approach_object_velocity()
+            return
 
         uart6_velocity = self._inputs["uart6"]["velocity"]
         uart8_velocity = self._inputs["uart8"]["velocity"]
@@ -220,6 +359,21 @@ class AssistantFollowRuntime:
         if uart8_velocity.get("has_omega"):
             omega = float(uart8_velocity.get("omega", 0.0))
         self._apply_effective_velocity(vx, vy, omega, bool(uart8_velocity.get("has_omega")))
+
+    def _write_approach_object_velocity(self) -> None:
+        """在找物体阶段只使用本地视觉平移速度"""
+
+        if self._pending_local_vision_sync is not None or self._approach_target_found_done:
+            return
+        uart6_velocity = self._inputs["uart6"]["velocity"]
+        if uart6_velocity is None:
+            return
+        self._apply_effective_velocity(
+            float(uart6_velocity.get("vx", 0.0)),
+            float(uart6_velocity.get("vy", 0.0)),
+            0.0,
+            False,
+        )
 
     def _apply_effective_velocity(self, vx: float, vy: float, omega: float, has_omega: bool) -> None:
         self._transport_car.handle_velocity_packet(
@@ -242,6 +396,127 @@ class AssistantFollowRuntime:
             velocity["omega"] = float(parsed.get("omega", 0.0))
             velocity["has_omega"] = bool(parsed.get("has_omega"))
         return velocity
+
+    def _should_store_velocity(self, source: str) -> bool:
+        if self._state_machine.state != ASSISTANT_STATE_APPROACH_OBJECT:
+            return True
+        if source == "uart8":
+            return False
+        if self._pending_local_vision_sync is not None:
+            return False
+        if self._approach_target_found_done:
+            return False
+        return True
+
+    def _clear_input_cache(self, source: str) -> None:
+        state = self._inputs[source]
+        state["buffer"] = ""
+        state["velocity"] = None
+        if state.get("status") != "error":
+            state["status"] = "idle"
+
+    def _clear_motion_inputs(self) -> None:
+        self._clear_input_cache("uart6")
+        self._clear_input_cache("uart8")
+
+    def _write_zero_velocity(self, source: str) -> None:
+        self._transport_car.handle_velocity_packet(
+            0.0,
+            0.0,
+            0.0,
+            source=source,
+            has_omega=True,
+        )
+
+    def _enter_approach_object_state(self, packet: dict) -> None:
+        self._approach_target_found_done = False
+        self._pending_target_found_report = None
+        self._clear_motion_inputs()
+        self._write_zero_velocity("assistant_approach_object")
+        self._pending_local_vision_sync = {
+            "seq": self._local_vision_sync_seq,
+            "state": int(packet["state"]),
+            "target": int(packet["target"]),
+            "arg": int(packet["arg"]),
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+        self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
+
+    def _handle_local_target_found(self, seq: int, value: int) -> None:
+        self._approach_target_found_done = True
+        self._inputs["uart6"]["velocity"] = None
+        self._write_zero_velocity("assistant_target_found")
+        self._pending_target_found_report = {
+            "seq": int(seq),
+            "event": _TARGET_FOUND_EVENT,
+            "value": int(value),
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+
+    def _send_pending_local_vision_sync(self) -> None:
+        pending = self._pending_local_vision_sync
+        if pending is None:
+            return
+        now_ms = self._now_ms()
+        if not should_resend(
+            now_ms,
+            pending.get("last_sent_ms"),
+            _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS,
+        ):
+            return
+        if self._write_uart6_reliable_line(
+            format_state_sync_packet(
+                pending["seq"],
+                pending["state"],
+                pending["target"],
+                pending["arg"],
+            )
+        ):
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
+
+    def _send_pending_target_found_report(self) -> None:
+        pending = self._pending_target_found_report
+        if pending is None:
+            return
+        now_ms = self._now_ms()
+        if not should_resend(
+            now_ms,
+            pending.get("last_sent_ms"),
+            _MASTER_REPORT_RESEND_INTERVAL_MS,
+        ):
+            return
+        if self._write_forward_reliable_line(
+            format_event_packet(
+                pending["seq"],
+                pending["event"],
+                pending["value"],
+            )
+        ):
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
+
+    def _write_forward_reliable_line(self, line: str) -> bool:
+        uart = self._inputs["uart8"]["uart"]
+        if uart is None:
+            return False
+        try:
+            return bool(write_reliable_line(uart, line))
+        except Exception as exc:
+            self._record_error("uart8 write failed", exc)
+            return False
+
+    def _write_uart6_reliable_line(self, line: str) -> bool:
+        uart = self._inputs["uart6"]["uart"]
+        if uart is None:
+            return False
+        try:
+            return bool(write_reliable_line(uart, line))
+        except Exception as exc:
+            self._record_error("uart6 write failed", exc)
+            return False
 
     def _build_transport_command_snapshot(self) -> dict:
         return dict(self._transport_car.control_state)

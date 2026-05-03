@@ -44,6 +44,7 @@ class _FakeUart:
     def __init__(self, incoming_lines=()) -> None:
         self._buffer = "".join("%s\n" % line for line in incoming_lines).encode()
         self.messages = []
+        self.read_sizes = []
         self.read_error: Optional[BaseException] = None
 
     def any(self) -> int:
@@ -52,6 +53,7 @@ class _FakeUart:
     def read(self, size: int) -> bytes:
         if self.read_error is not None:
             raise self.read_error
+        self.read_sizes.append(size)
         chunk = self._buffer[:size]
         self._buffer = self._buffer[size:]
         return chunk

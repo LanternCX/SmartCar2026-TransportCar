@@ -2,22 +2,26 @@
 
 ## 1. 定位
 
-本文件定义全局状态机在串口协议中的编号、事件和同步语义。
+本文件定义主车全局状态、辅车子状态、目标、事件和同步语义。
 
-串口报文格式见 [串口通信协议](protocol.md)。协议只负责传输 `state`、`target`、`arg`、`event` 等字段，本文件负责说明这些字段的状态机含义。
+串口报文格式见 [串口通信协议](protocol.md)。协议只负责传输 `state`、`target`、`arg`、`event` 等字段, 不拥有业务状态机或业务常量。本文件负责说明这些字段在主车和辅车语境中的状态机含义。
 
 ## 2. 状态所有权
 
-- 全局状态机由主车维护。
-- 主车通过串口协议中的 `s` 包同步视觉 hook 上下文。
+- 主车全局状态机由 `vision/master/` 维护。
+- 辅车子状态机由 `vision/assistant/` 维护。
+- 协议层只解析和格式化短包字段, 不维护状态机对象或业务常量。
+- 主车通过本车 `UART6` 的 `s` 包同步视觉 hook 上下文。
+- 主车通过 `UART8` 的 `s` 包同步辅车子状态。
 - 主车视觉端接收上下文后执行本地识别任务并维护主车搜索 P 环。
 - 主车视觉端通过 `v,<vx>,<vy>` 输出主车搜索速度，通过可靠 `r` 包回报事件或结果。
 - `r` 包不直接改变全局状态，全局状态切换由主车状态机判断后执行。
 - 视觉事件只触发主车判断，不直接迁移全局状态。
+- 辅车子状态只由主车 `UART8` 同步包驱动, 不由辅车本地视觉包、速度包或底盘状态自行切换。
 
-## 3. 状态同步字段
+## 3. 主车视觉 hook 同步字段
 
-状态同步包格式：
+主车视觉 hook 同步包格式：
 
 ```text
 s,<reliable_seq>,<context_id>,<state>,<target>,<arg>
@@ -29,18 +33,37 @@ s,<reliable_seq>,<context_id>,<state>,<target>,<arg>
 | --- | --- |
 | `reliable_seq` | 可靠包序号，用于确认、重发和去重 |
 | `context_id` | 业务上下文编号，用于 `s/o/r` 匹配 |
-| `state` | 全局状态编号 |
-| `target` | 状态使用的目标编号 |
-| `arg` | 状态短参数 |
+| `state` | 主车全局状态编号 |
+| `target` | 主车状态使用的目标编号 |
+| `arg` | 主车状态短参数 |
 
 确认包 `a,<reliable_seq>` 只确认可靠包，不表达业务上下文。
 
-## 4. 主车物体搜索状态流
+## 4. 辅车子状态同步字段
+
+辅车子状态同步包格式：
+
+```text
+s,<seq>,<state>,<target>,<arg>
+```
+
+字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `seq` | 状态同步序号, 用于确认、重发和去重 |
+| `state` | 辅车子状态编号 |
+| `target` | 辅车子状态目标编号 |
+| `arg` | 辅车子状态短参数 |
+
+确认包 `a,<seq>` 只确认对应同步包已被辅车处理。该确认不携带主车视觉 `context_id`, 也不表示辅车主动回报业务状态。
+
+## 5. 主车物体搜索状态流
 
 主车物体搜索闭环的状态流为：
 
 ```text
-IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
+IDLE -> SEARCH_OBJECT -> ORBITING -> IDLE
 ```
 
 ### `IDLE`
@@ -63,29 +86,26 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 跳转条件：
 
 - 主车收到匹配 `context_id` 下的 `TARGET_FOUND`。
-- 主车确认该事件后，由主车状态机判断并进入 `OBJECT_FOUND`。
+- 主车确认该事件后, 由主车状态机判断是否发起辅车 idle 同步。
+- 主车等待辅车 idle ACK 期间保持 `SEARCH_OBJECT` 正式状态, 本车停止搜索运动。
+- 辅车 idle ACK 到达后, 主车进入 `ORBITING`。
 - 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
 - 重复 `r` 包幂等处理，不重复迁移状态。
 
-### `OBJECT_FOUND`
+### `ORBITING`
 
-主车已经找到物体。状态机输出零平移速度；同一控制拍内存在合法 `UART3` 上游速度包时，角色层以 `UART3` 输入作为最终底盘速度。
+主车使用共享底盘 rear only 模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；主车只有在辅车 idle 同步被确认后进入该状态。绕行完成后回到 `IDLE`，并向辅车同步找物体子状态。
 
-## 5. 全局状态编号
+## 6. 主车全局状态编号
 
 | `state` | 名称 | 含义 |
 | --- | --- | --- |
 | `0` | `IDLE` | 空闲，底盘不执行状态机任务 |
 | `1` | `SEARCH_OBJECT` | 主车使用 OpenART Vision master 下发的 `v,<vx>,<vy>` 搜索物体 |
-| `2` | `OBJECT_FOUND` | 主车已找到物体，状态机输出零平移速度 |
-| `3` | `LOCK_OBJECT` | 锁定目标物体 |
-| `4` | `MASTER_ALIGN_OBJECT` | 主车调整到目标物体的合适角度 |
-| `5` | `ASSISTANT_ALIGN_OBJECT` | 辅车跟进并调整到目标物体的合适角度 |
-| `6` | `TRACK_OBJECT` | 两车各自跟随目标物体并维持速度前馈 |
-| `7` | `WAIT_PEER` | 等待对端到位或等待对端事件 |
-| `8` | `STOP` | 停止状态机任务并输出停止量 |
+| `2` | `ORBITING` | 主车使用 rear only 模式绕到上电基准航向 `+90°` |
+| `3` | `STOP` | 停止状态机任务并输出停止量 |
 
-## 6. 目标编号
+## 7. 主车目标编号
 
 | `target` | 名称 | 含义 |
 | --- | --- | --- |
@@ -96,7 +116,7 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 
 具体颜色、类别或视觉识别方式由视觉端按状态解释，不写入串口协议字段名。
 
-## 7. 状态参数 `arg`
+## 8. 主车状态参数 `arg`
 
 `arg` 是状态相关短参数，固定为 `i16`。
 
@@ -104,15 +124,10 @@ IDLE -> SEARCH_OBJECT -> OBJECT_FOUND
 | --- | --- |
 | `IDLE` | 固定为 `0` |
 | `SEARCH_OBJECT` | hook 配置编号 |
-| `OBJECT_FOUND` | 固定为 `0` |
-| `LOCK_OBJECT` | 目标筛选参数 |
-| `MASTER_ALIGN_OBJECT` | 目标角度或角度档位 |
-| `ASSISTANT_ALIGN_OBJECT` | 目标角度或角度档位 |
-| `TRACK_OBJECT` | 速度前馈档位 |
-| `WAIT_PEER` | 等待条件编号 |
+| `ORBITING` | 固定为 `0` |
 | `STOP` | 固定为 `0` |
 
-## 8. 事件编号
+## 9. 主车事件编号
 
 事件回报包格式：
 
@@ -136,10 +151,33 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
 
-## 9. 状态跳转原则
+
+## 10. 辅车子状态编号
+
+| `state` | 名称 | 含义 |
+| --- | --- | --- |
+| `0` | `ASSISTANT_IDLE` | 辅车停止线速度, 忽略速度输入, 保持已有朝向控制语义 |
+| `1` | `ASSISTANT_FOLLOW` | 辅车融合 `UART8` 前馈与 `UART6` 视觉修正 |
+| `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
+
+辅车子状态目标编号：
+
+| `target` | 名称 | 含义 |
+| --- | --- | --- |
+| `0` | `ASSISTANT_TARGET_NONE` | 无辅车子目标 |
+| `1` | `ASSISTANT_TARGET_OBJECT` | 搬运目标物体 |
+
+`ASSISTANT_IDLE` 使用 `ASSISTANT_TARGET_NONE` 和参数 `0`。辅车进入 idle 后清空 `UART8` 前馈速度缓存和 `UART6` 视觉速度缓存, 写入零速度目标, 不写入角度目标。
+
+`ASSISTANT_APPROACH_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和找物体配置编号。辅车进入该状态后清空两路运动输入，向辅车 OpenART 同步找物体任务；本地视觉确认同步后，辅车只使用本地 `UART6` 视觉速度向目标物体靠近，不叠加 `UART8` 速度前馈。辅车本地视觉回报 `TARGET_FOUND` 后，辅车写入零速度并通过 `UART8` 向主车可靠回报结果。
+
+## 11. 状态跳转原则
 
 - 主车接收事件后判断是否切换全局状态。
 - 视觉端只提供速度控制量和事件，不维护全局状态。
-- 辅车在本阶段接收 `UART8` 速度前馈和状态上下文同步，并融合本车视觉速度修正。
+- 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
+- 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
+- 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
+- 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

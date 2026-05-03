@@ -279,6 +279,37 @@ def test_transport_car_explicit_omega_clears_angle_target() -> None:
     assert car.command_mode == "none"
 
 
+def test_transport_car_set_rear_only_angle_target_enters_locked_rear_mode() -> None:
+    """rear only 绝对角度入口启用现有后轮模式并进入角度锁定."""
+    _transport_car, car = _make_control_car()
+
+    car.set_rear_only_angle_target(90.0)
+
+    assert car.rear_only_mode is True
+    assert car.command_lock is True
+    assert car.command_mode == "locked"
+    assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+
+
+def test_transport_car_set_rear_only_angle_target_unlock_clears_mode_and_output() -> None:
+    """rear only 绝对角度目标收敛后回退到零输出."""
+    _transport_car, car = _make_control_car(heading_est=0.0, heading_target=0.0)
+
+    car.set_rear_only_angle_target(90.0)
+    car.heading_target = 90.0
+    car.heading_est = 90.0
+
+    car._check_unlock()
+
+    assert car.rear_only_mode is False
+    assert car.command_lock is False
+    assert car.command_mode == "none"
+    assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    for state in car.wheel_states:
+        assert state["duty"] == 0.0
+        assert state["motor"].duties == [0]
+
+
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:
     """结构化复位入口清空运动状态、姿态状态和锁定状态."""
     _transport_car, car = _make_control_car(

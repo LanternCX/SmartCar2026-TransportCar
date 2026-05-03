@@ -143,8 +143,6 @@ def _parse_state_sync(fields):
     @return 状态同步短包字典, 输入无效时返回 None
     """
 
-    if len(fields) == 5:
-        return _parse_uart8_state_sync(fields)
     if len(fields) != 6:
         return None
     reliable_seq = _parse_u8(fields[1])
@@ -164,29 +162,6 @@ def _parse_state_sync(fields):
         "type": "s",
         "reliable_seq": reliable_seq,
         "context_id": context_id,
-        "state": state,
-        "target": target,
-        "arg": arg,
-    }
-
-
-def _parse_uart8_state_sync(fields):
-    """
-    @brief 解析 UART8 辅车状态同步短包字段
-
-    @param fields 已拆分字段列表
-    @return 辅车状态同步短包字典, 输入无效时返回 None
-    """
-
-    seq = _parse_u8(fields[1])
-    state = _parse_u8(fields[2])
-    target = _parse_u8(fields[3])
-    arg = _parse_int(fields[4])
-    if seq is None or state is None or target is None or arg is None:
-        return None
-    return {
-        "type": "s",
-        "seq": seq,
         "state": state,
         "target": target,
         "arg": arg,

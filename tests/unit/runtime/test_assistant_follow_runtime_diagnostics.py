@@ -193,3 +193,60 @@ def test_assistant_follow_runtime_snapshot_is_built_on_demand_only(
 
     assert len(build_calls) == baseline_calls + 1
     assert snapshot["transport_command"] == {"vx": 1.5, "vy": 0.25, "omega": 0.0}
+
+
+def test_assistant_follow_runtime_snapshot_exposes_idle_substate(monkeypatch) -> None:
+    """idle 诊断要暴露当前子状态和清空后的速度缓存。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,0,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["state"] == "idle"
+    assert snapshot["assistant_state"] == 0
+    assert snapshot["transport_command"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert snapshot["uart6_velocity"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert snapshot["uart8_velocity"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+
+def test_assistant_follow_runtime_snapshot_exposes_approach_target_and_progress(
+    monkeypatch,
+) -> None:
+    """找物体诊断要暴露当前目标、本地视觉同步状态和完成标记。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["assistant_state"] == 2
+    assert snapshot["assistant_target"] == 1
+    assert snapshot["local_vision_sync_pending"] is True
+    assert snapshot["approach_target_found_completed"] is False
+
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nr,7,6,300\n" % local_sync_seq).encode()
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["assistant_target"] == 1
+    assert snapshot["local_vision_sync_pending"] is False
+    assert snapshot["approach_target_found_completed"] is True
+    assert snapshot["transport_command"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
