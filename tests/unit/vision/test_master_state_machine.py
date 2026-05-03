@@ -151,6 +151,41 @@ def test_master_state_machine_returns_to_idle_when_orbit_finishes() -> None:
     assert machine.state == MasterStateMachine.STATE_IDLE
 
 
+def test_master_state_machine_emits_assistant_object_request_once_after_orbit_finishes() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        hook_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+    )
+    machine.step(orbit_finished=False)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=300
+    )
+    machine.poll_assistant_request()
+    machine.mark_assistant_idle_acknowledged()
+    machine.poll_orbit_command()
+
+    machine.step(orbit_finished=False)
+
+    assert machine.state == MasterStateMachine.STATE_ORBITING
+    assert machine.poll_assistant_request() is None
+
+    machine.step(orbit_finished=True)
+    assistant_request = machine.poll_assistant_request()
+
+    assert machine.state == MasterStateMachine.STATE_IDLE
+    assert assistant_request == {
+        "state": 2,
+        "target": 1,
+        "arg": 1,
+    }
+
+    machine.step(orbit_finished=False)
+
+    assert machine.poll_assistant_request() is None
+
+
 def test_master_state_machine_exposes_search_velocity_gate() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(

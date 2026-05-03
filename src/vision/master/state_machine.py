@@ -5,6 +5,8 @@
 
 ASSISTANT_IDLE_SYNC_STATE = 0
 ASSISTANT_IDLE_SYNC_TARGET = 0
+ASSISTANT_OBJECT_SYNC_STATE = 2
+ASSISTANT_OBJECT_SYNC_TARGET = 1
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -23,17 +25,26 @@ EVENT_TARGET_FOUND = 6
 class MasterStateMachine:
     """维护主车单车寻找与绕行状态"""
 
-    def __init__(self, hook_arg, boot_heading_deg, orbit_delta_deg, initial_context_id=0):
+    def __init__(
+        self,
+        hook_arg,
+        boot_heading_deg,
+        orbit_delta_deg,
+        assistant_object_arg=1,
+        initial_context_id=0,
+    ):
         self.state = STATE_IDLE
         self._hook_arg = int(hook_arg)
         self._boot_heading_deg = float(boot_heading_deg)
         self._orbit_delta_deg = float(orbit_delta_deg)
+        self._assistant_object_arg = int(assistant_object_arg)
         self._current_context_id = int(initial_context_id) % 256
         self._pending_hook_request = None
         self._pending_assistant_request = None
         self._pending_orbit_command = None
         self._search_started = False
         self._waiting_assistant_idle_ack = False
+        self._assistant_object_request_emitted = False
 
     def step(self, orbit_finished):
         """推进单拍状态机"""
@@ -52,6 +63,13 @@ class MasterStateMachine:
 
         if self.state == STATE_ORBITING and orbit_finished:
             self.state = STATE_IDLE
+            if not self._assistant_object_request_emitted:
+                self._assistant_object_request_emitted = True
+                self._pending_assistant_request = {
+                    "state": ASSISTANT_OBJECT_SYNC_STATE,
+                    "target": ASSISTANT_OBJECT_SYNC_TARGET,
+                    "arg": self._assistant_object_arg,
+                }
 
     def handle_event(self, context_id, event, value):
         """消费视觉事件"""

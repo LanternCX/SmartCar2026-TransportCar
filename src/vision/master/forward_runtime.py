@@ -12,8 +12,9 @@ from protocol.packet import (
     format_velocity_packet,
     parse_short_packet,
 )
-from protocol.uart8_packet import parse_short_packet as parse_uart8_short_packet
+from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
+from vision.master.state_machine import EVENT_TARGET_FOUND
 from vision.master.state_machine import STATE_IDLE, STATE_ORBITING, STATE_SEARCH_OBJECT
 
 
@@ -21,6 +22,7 @@ _UART6_INPUT_LIMIT = 128
 _UART3_INPUT_LIMIT = 128
 _UART8_INPUT_LIMIT = 128
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
+ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 
@@ -57,11 +59,13 @@ class MasterForwardRuntime:
             self._assistant_sync_seq = (self._assistant_sync_seq + 1) & 0xFF
         self._pending_sync = None
         self._pending_assistant_sync = None
+        self._assistant_target_found_report = None
         self._orbit_command_active = False
         self._state_machine = MasterStateMachine(
             hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
+            assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             initial_context_id=seed_value,
         )
         self.last_report = None
@@ -371,7 +375,10 @@ class MasterForwardRuntime:
             ):
                 self._pending_sync = None
         elif packet.get("type") == "r":
+            self._write_forward_reliable_line(format_ack_packet(packet["seq"]))
             self.last_report = packet
+            if int(packet["event"]) == EVENT_TARGET_FOUND:
+                self._assistant_target_found_report = dict(packet)
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity

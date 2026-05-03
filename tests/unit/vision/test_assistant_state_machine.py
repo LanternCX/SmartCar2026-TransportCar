@@ -29,7 +29,9 @@ def test_assistant_state_constants_are_owned_by_vision_layer() -> None:
 
     assert module.ASSISTANT_STATE_IDLE == 0
     assert module.ASSISTANT_STATE_FOLLOW == 1
+    assert module.ASSISTANT_STATE_APPROACH_OBJECT == 2
     assert module.ASSISTANT_TARGET_NONE == 0
+    assert module.ASSISTANT_TARGET_OBJECT == 1
 
 
 def test_assistant_state_machine_defaults_to_follow() -> None:
@@ -54,6 +56,38 @@ def test_assistant_state_machine_accepts_idle_command() -> None:
     assert applied is True
     assert machine.state == module.ASSISTANT_STATE_IDLE
     assert machine.is_idle() is True
+
+
+def test_assistant_state_machine_accepts_approach_object_command() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_APPROACH_OBJECT,
+        module.ASSISTANT_TARGET_OBJECT,
+        7,
+    )
+
+    assert applied is True
+    assert machine.state == module.ASSISTANT_STATE_APPROACH_OBJECT
+    assert machine.target == module.ASSISTANT_TARGET_OBJECT
+    assert machine.arg == 7
+
+
+def test_assistant_state_machine_rejects_approach_object_with_non_object_target() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_APPROACH_OBJECT,
+        module.ASSISTANT_TARGET_NONE,
+        7,
+    )
+
+    assert applied is False
+    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.target == module.ASSISTANT_TARGET_NONE
+    assert machine.arg == 0
 
 
 def test_assistant_state_machine_ignores_unknown_state() -> None:

@@ -1,5 +1,6 @@
 """! @brief 串口短包正式协议契约测试"""
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -18,6 +19,26 @@ from protocol.packet import (  # noqa: E402
     format_velocity_packet,
     parse_short_packet,
 )
+
+
+def _load_module(module_name: str, relative_path: str):
+    module_path = SRC / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load module: %s" % module_name)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_assistant_uart8_module = _load_module(
+    "test_assistant_uart8_packet_module", "vision/assistant/uart8_packet.py"
+)
+_master_uart8_module = _load_module(
+    "test_master_uart8_packet_module", "vision/master/uart8_packet.py"
+)
+parse_assistant_uart8_short_packet = _assistant_uart8_module.parse_short_packet
+parse_master_uart8_short_packet = _master_uart8_module.parse_short_packet
 
 def test_formal_short_packet_types_are_parseable() -> None:
     """! @brief 正式短包类型 v/s/a/o/r 都有协议解析边界"""
@@ -120,17 +141,30 @@ def test_uart6_master_vision_reliable_hooks_and_velocity_stream_do_not_conflict(
     ]
 
 
-def test_uart8_state_sync_packet_keeps_existing_state_fields() -> None:
-    """! @brief UART8 状态同步短包使用状态字段"""
+def test_shared_short_packet_protocol_excludes_assistant_uart8_state_sync() -> None:
+    """! @brief 共享短包协议不再承载辅车 UART8 状态同步职责"""
 
-    assert parse_short_packet("s,12,3,1,0") == {
+    assert parse_short_packet("s,12,3,1,0") is None
+    assert parse_assistant_uart8_short_packet("s,12,3,1,0") == {
         "type": "s",
         "seq": 12,
         "state": 3,
         "target": 1,
         "arg": 0,
     }
+
+
+def test_master_uart8_packet_has_dedicated_ack_and_event_parser() -> None:
+    """! @brief 主车 UART8 短包由独立入口解析确认与回报"""
+
     assert parse_short_packet("r,12,2,-1") is None
+    assert parse_master_uart8_short_packet("a,12") == {"type": "a", "seq": 12}
+    assert parse_master_uart8_short_packet("r,12,2,-1") == {
+        "type": "r",
+        "seq": 12,
+        "event": 2,
+        "value": -1,
+    }
 
 
 def test_non_short_packet_velocity_text_is_outside_short_packet_protocol() -> None:

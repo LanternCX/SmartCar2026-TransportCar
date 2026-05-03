@@ -6,9 +6,11 @@
 # 辅车子状态编号
 ASSISTANT_STATE_IDLE = 0
 ASSISTANT_STATE_FOLLOW = 1
+ASSISTANT_STATE_APPROACH_OBJECT = 2
 
 # 辅车目标编号
 ASSISTANT_TARGET_NONE = 0
+ASSISTANT_TARGET_OBJECT = 1
 
 
 class AssistantStateMachine:
@@ -29,10 +31,20 @@ class AssistantStateMachine:
         """
 
         state = int(state)
-        if state != ASSISTANT_STATE_IDLE and state != ASSISTANT_STATE_FOLLOW:
+        target = int(target)
+        if (
+            state != ASSISTANT_STATE_IDLE
+            and state != ASSISTANT_STATE_FOLLOW
+            and state != ASSISTANT_STATE_APPROACH_OBJECT
+        ):
+            return False
+        if (
+            state == ASSISTANT_STATE_APPROACH_OBJECT
+            and target != ASSISTANT_TARGET_OBJECT
+        ):
             return False
         self.state = state
-        self.target = int(target)
+        self.target = target
         self.arg = int(arg)
         return True
 

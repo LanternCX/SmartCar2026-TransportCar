@@ -888,6 +888,70 @@ def test_master_forward_runtime_returns_idle_after_orbit_finishes(monkeypatch) -
     assert runtime._state_machine.state == STATE_IDLE
 
 
+def test_master_forward_runtime_requests_assistant_object_after_orbit_finish_until_ack(
+    monkeypatch,
+) -> None:
+    """绕行完成后, 主车只发一次辅车找物体同步, 并在 ACK 前按原机制重发."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60, 80))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    uart8.messages = []
+
+    runtime.step()
+
+    assert _reliable_messages(uart8) == []
+
+    runtime._transport_car.command_lock = False
+    runtime._transport_car.rear_only_mode = False
+    runtime.step()
+    runtime.step()
+
+    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n", "s,3,2,1,1\r\n"]
+
+    uart8._buffer = b"a,3\n"
+    runtime.step()
+
+    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n", "s,3,2,1,1\r\n"]
+    assert runtime.last_report is None
+
+
+def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_records_result(
+    monkeypatch,
+) -> None:
+    """主车收到辅车 TARGET_FOUND 回报后回复 ACK, 并记录结果而不推进新主状态."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime._transport_car.rear_only_mode = False
+    runtime.step()
+    uart8._buffer = b"a,3\nr,11,6,300\n"
+    uart8.messages = []
+
+    runtime.step()
+
+    assert "a,11\r\n" in _reliable_messages(uart8)
+    assert runtime.last_report == {"type": "r", "seq": 11, "event": 6, "value": 300}
+    assert runtime._state_machine.state == STATE_IDLE
+    assert events.count(("set_rear_only_angle_target", 90.0)) == 1
+
+
 def test_master_forward_runtime_applies_uart6_vision_velocity_to_local_chassis(monkeypatch) -> None:
     """UART6 收到视觉速度后, 主车本地底盘按零角速度执行."""
 
