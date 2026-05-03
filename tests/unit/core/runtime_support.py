@@ -279,7 +279,6 @@ def install_transport_car_stubs() -> None:
         "RELIABLE_RESEND_INTERVAL_MS": 20,
         "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
         "MASTER_ORBIT_TARGET_DEG": 90,
-        "MASTER_DISABLE_UART8_OUTPUT": True,
         "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,

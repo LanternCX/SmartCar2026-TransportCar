@@ -1,0 +1,42 @@
+"""辅车子状态机
+
+@file src/vision/assistant/state_machine.py
+"""
+
+# 辅车子状态编号
+ASSISTANT_STATE_IDLE = 0
+ASSISTANT_STATE_FOLLOW = 1
+
+# 辅车目标编号
+ASSISTANT_TARGET_NONE = 0
+
+
+class AssistantStateMachine:
+    """维护辅车由主车驱动的子状态"""
+
+    def __init__(self):
+        self.state = ASSISTANT_STATE_FOLLOW
+        self.target = ASSISTANT_TARGET_NONE
+        self.arg = 0
+
+    def apply_master_state(self, state, target, arg):
+        """应用主车下发的辅车子状态
+
+        @param state 辅车子状态编号
+        @param target 辅车目标编号
+        @param arg 辅车状态短参数
+        @return 状态是否被接受
+        """
+
+        state = int(state)
+        if state != ASSISTANT_STATE_IDLE and state != ASSISTANT_STATE_FOLLOW:
+            return False
+        self.state = state
+        self.target = int(target)
+        self.arg = int(arg)
+        return True
+
+    def is_idle(self):
+        """判断辅车是否处于 idle 子状态"""
+
+        return self.state == ASSISTANT_STATE_IDLE

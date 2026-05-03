@@ -193,3 +193,26 @@ def test_assistant_follow_runtime_snapshot_is_built_on_demand_only(
 
     assert len(build_calls) == baseline_calls + 1
     assert snapshot["transport_command"] == {"vx": 1.5, "vy": 0.25, "omega": 0.0}
+
+
+def test_assistant_follow_runtime_snapshot_exposes_idle_substate(monkeypatch) -> None:
+    """idle 诊断要暴露当前子状态和清空后的速度缓存。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,0,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["state"] == "idle"
+    assert snapshot["assistant_state"] == 0
+    assert snapshot["transport_command"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert snapshot["uart6_velocity"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    assert snapshot["uart8_velocity"] == {"vx": 0.0, "vy": 0.0, "omega": 0.0}

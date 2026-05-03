@@ -88,3 +88,74 @@ def test_assistant_follow_runtime_records_uart8_decode_errors_symmetrically(
     assert snapshot["last_error_text"] == (
         "uart8 decode failed: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
     )
+
+
+def test_assistant_follow_runtime_rejects_unknown_sync_state_without_ack(
+    monkeypatch,
+) -> None:
+    """未知辅车子状态不能被当成已处理同步。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,99,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert runtime.sync_context is None
+    assert runtime._sync_apply_count == 0
+    assert uart8.messages == []
+    assert snapshot["last_error_text"] == "unknown assistant sync state: 99"
+
+
+def test_assistant_follow_runtime_bounds_oversized_uart8_input(
+    monkeypatch,
+) -> None:
+    """UART8 超长输入不能无限积压缓冲。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"x" * 300
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert runtime._inputs["uart8"]["buffer"] == ""
+    assert snapshot["uart8_input_status"] == "invalid"
+    assert snapshot["last_error_text"] == "invalid uart8 input"
+
+
+def test_assistant_follow_runtime_bounds_oversized_uart6_input(
+    monkeypatch,
+) -> None:
+    """UART6 超长输入不能无限积压缓冲。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b""
+    uart6 = _FakeUart()
+    uart6._buffer = b"x" * 300
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert runtime._inputs["uart6"]["buffer"] == ""
+    assert snapshot["uart6_input_status"] == "invalid"
+    assert snapshot["last_error_text"] == "invalid uart6 input"

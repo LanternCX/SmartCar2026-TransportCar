@@ -12,16 +12,17 @@ from protocol.packet import (
     format_velocity_packet,
     parse_short_packet,
 )
-from protocol.state import STATE_IDLE, STATE_ORBITING, STATE_SEARCH_OBJECT
+from protocol.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
-from vision.serial_protocol import parse_short_packet as parse_uart8_short_packet
+from vision.master.state_machine import STATE_IDLE, STATE_ORBITING, STATE_SEARCH_OBJECT
 
 
 _UART6_INPUT_LIMIT = 128
+_UART3_INPUT_LIMIT = 128
+_UART8_INPUT_LIMIT = 128
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
-MASTER_DISABLE_UART8_OUTPUT = bool(getattr(_params, "MASTER_DISABLE_UART8_OUTPUT"))
 
 
 class MasterForwardRuntime:
@@ -50,10 +51,13 @@ class MasterForwardRuntime:
         self._active_hook_context_id = None
         self._pending_hook = None
         self._pending_hook_event = None
-        self._sync_seq = 0
+        self._generic_sync_seq = seed_value & 0xFE
+        self._assistant_sync_seq = (seed_value + 1) & 0xFF
+        if (self._assistant_sync_seq % 2) == 0:
+            self._assistant_sync_seq = (self._assistant_sync_seq + 1) & 0xFF
         self._pending_sync = None
+        self._pending_assistant_sync = None
         self._orbit_command_active = False
-        self._disable_uart8_output = MASTER_DISABLE_UART8_OUTPUT
         self._state_machine = MasterStateMachine(
             hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
@@ -112,15 +116,18 @@ class MasterForwardRuntime:
         @return 本次同步序号
         """
 
-        self._sync_seq = (self._sync_seq + 1) % 256
+        seq = self._generic_sync_seq
         self._pending_sync = {
-            "seq": self._sync_seq,
+            "kind": "generic",
+            "seq": seq,
             "state": int(state),
             "target": int(target),
             "arg": int(arg),
             "last_sent_ms": None,
+            "sent_once": False,
         }
-        return self._sync_seq
+        self._generic_sync_seq = (self._generic_sync_seq + 2) % 256
+        return seq
 
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
@@ -135,6 +142,7 @@ class MasterForwardRuntime:
             self._apply_latest_uart6_velocity()
         self._forward_current_chassis_velocity()
         self._process_uart8()
+        self._drain_state_machine_outputs()
         self._send_pending_hook()
         self._send_pending_sync()
         self._write_uart3_debug_state()
@@ -154,6 +162,7 @@ class MasterForwardRuntime:
             state_text = str(state)
         pending_hook = 1 if self._pending_hook is not None else 0
         pending_event = 1 if self._pending_hook_event is not None else 0
+        waiting_assistant = 1 if self._state_machine.is_waiting_assistant_idle_ack() else 0
         orbit = 1 if self._orbit_command_active else 0
         active_ctx = self._active_hook_context_id
         if active_ctx is None:
@@ -164,13 +173,14 @@ class MasterForwardRuntime:
         elif self._active_hook_context_id is not None:
             context_id = int(self._active_hook_context_id)
         line = (
-            "dbg,state=%s,ctx=%d,active_ctx=%d,pending_hook=%d,pending_event=%d,orbit=%d,err=%s"
+            "dbg,state=%s,ctx=%d,active_ctx=%d,pending_hook=%d,pending_event=%d,wait_assistant=%d,orbit=%d,err=%s"
             % (
                 state_text,
                 int(context_id),
                 int(active_ctx),
                 pending_hook,
                 pending_event,
+                waiting_assistant,
                 orbit,
                 self._last_error_text,
             )
@@ -183,7 +193,13 @@ class MasterForwardRuntime:
     def _process_uart3(self) -> None:
         """接管 UART3 按行读取并处理短包输入"""
 
-        self._read_uart_lines(self._transport_car.uart3, "_rx_buf3", self._handle_uart3_line)
+        self._read_uart_lines(
+            self._transport_car.uart3,
+            "_rx_buf3",
+            self._handle_uart3_line,
+            overflow_error_text="invalid uart3 input",
+            input_limit=_UART3_INPUT_LIMIT,
+        )
 
     def _process_uart6(self) -> None:
         """接管 UART6 按行读取本车视觉速度输入"""
@@ -203,7 +219,13 @@ class MasterForwardRuntime:
         uart8 = self._transport_car.uart8
         if getattr(uart8, "any", None) is None:
             return
-        self._read_uart_lines(uart8, "_rx_buf8", self._handle_uart8_line)
+        self._read_uart_lines(
+            uart8,
+            "_rx_buf8",
+            self._handle_uart8_line,
+            overflow_error_text="invalid uart8 input",
+            input_limit=_UART8_INPUT_LIMIT,
+        )
 
     def _read_uart_lines(
         self,
@@ -264,6 +286,8 @@ class MasterForwardRuntime:
         if not line:
             return
         if self._state_machine.state == STATE_ORBITING:
+            return
+        if self._state_machine.is_waiting_assistant_idle_ack():
             return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
@@ -329,8 +353,22 @@ class MasterForwardRuntime:
         if packet is None:
             return
         if packet.get("type") == "a":
+            seq = int(packet["seq"])
+            pending = self._pending_assistant_sync
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and seq == int(pending["seq"])
+            ):
+                self._state_machine.mark_assistant_idle_acknowledged()
+                self._pending_assistant_sync = None
+                return
             pending = self._pending_sync
-            if pending is not None and int(packet["seq"]) == int(pending["seq"]):
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and seq == int(pending["seq"])
+            ):
                 self._pending_sync = None
         elif packet.get("type") == "r":
             self.last_report = packet
@@ -360,9 +398,7 @@ class MasterForwardRuntime:
         )
 
     def _send_pending_sync(self) -> None:
-        if self._disable_uart8_output:
-            return
-        pending = self._pending_sync
+        pending = self._select_active_pending_sync()
         if pending is None:
             return
         now_ms = self._now_ms()
@@ -374,6 +410,16 @@ class MasterForwardRuntime:
         )
         if wrote_all:
             pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
+
+    def _select_active_pending_sync(self):
+        """选择当前应该发送或重发的 UART8 可靠同步请求"""
+
+        if self._pending_assistant_sync is not None:
+            return self._pending_assistant_sync
+        if self._pending_sync is not None:
+            return self._pending_sync
+        return self._pending_sync
 
     def _write_forward_line(self, line: str) -> None:
         """把短包写到 UART8 主辅通信链路
@@ -381,8 +427,6 @@ class MasterForwardRuntime:
         @param line 要转发的短包文本
         """
 
-        if self._disable_uart8_output:
-            return
         try:
             self._transport_car.uart8.write("%s\r\n" % line)
         except Exception:
@@ -391,8 +435,6 @@ class MasterForwardRuntime:
     def _write_forward_reliable_line(self, line: str) -> bool:
         """把可靠短包写到 UART8 主辅通信链路"""
 
-        if self._disable_uart8_output:
-            return False
         try:
             return bool(write_reliable_line(self._transport_car.uart8, line))
         except Exception:
@@ -450,6 +492,28 @@ class MasterForwardRuntime:
                 "last_sent_ms": None,
                 "sent_once": False,
             }
+
+        assistant_request = self._state_machine.poll_assistant_request()
+        if assistant_request is not None:
+            self._latest_uart6_velocity = None
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                0.0,
+                0.0,
+                source="master_wait_assistant_idle",
+                has_omega=True,
+            )
+            seq = self._assistant_sync_seq
+            self._pending_assistant_sync = {
+                "kind": "assistant_idle",
+                "seq": seq,
+                "state": int(assistant_request["state"]),
+                "target": int(assistant_request["target"]),
+                "arg": int(assistant_request["arg"]),
+                "last_sent_ms": None,
+                "sent_once": False,
+            }
+            self._assistant_sync_seq = (self._assistant_sync_seq + 2) % 256
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:

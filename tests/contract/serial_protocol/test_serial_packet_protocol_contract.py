@@ -18,33 +18,6 @@ from protocol.packet import (  # noqa: E402
     format_velocity_packet,
     parse_short_packet,
 )
-from protocol.state import (  # noqa: E402
-    EVENT_TARGET_FOUND,
-    STATE_IDLE,
-    STATE_ORBITING,
-    STATE_SEARCH_OBJECT,
-    STATE_STOP,
-    TARGET_NONE,
-    TARGET_OBJECT,
-)
-
-
-def test_single_car_state_constants_match_current_contract() -> None:
-    """! @brief 单车状态机正式编号与当前契约保持一致"""
-
-    assert STATE_IDLE == 0
-    assert STATE_SEARCH_OBJECT == 1
-    assert STATE_ORBITING == 2
-    assert STATE_STOP == 3
-
-
-def test_single_car_target_and_event_constants_match_current_contract() -> None:
-    """! @brief 目标与 hook 命中事件编号保持一致"""
-
-    assert TARGET_NONE == 0
-    assert TARGET_OBJECT == 1
-    assert EVENT_TARGET_FOUND == 6
-
 
 def test_formal_short_packet_types_are_parseable() -> None:
     """! @brief 正式短包类型 v/s/a/o/r 都有协议解析边界"""

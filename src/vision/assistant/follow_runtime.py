@@ -3,6 +3,7 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
+from vision.assistant.state_machine import AssistantStateMachine
 from vision.assistant.diagnostics import build_follow_snapshot
 from vision.assistant.velocity_packet import (
     CONSUME_ACCEPTED,
@@ -10,6 +11,9 @@ from vision.assistant.velocity_packet import (
     split_velocity_line,
 )
 from protocol.packet import format_ack_packet, is_newer_seq, parse_short_packet
+
+
+_INPUT_LIMIT = 128
 
 
 def _default_now_ms() -> int:
@@ -41,6 +45,7 @@ class AssistantFollowRuntime:
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
         self._last_error_text = "none"
+        self._state_machine = AssistantStateMachine()
         self._inputs = {
             "uart6": {
                 "uart": uart6,
@@ -92,6 +97,7 @@ class AssistantFollowRuntime:
         """返回辅车角色层最小诊断快照"""
 
         return build_follow_snapshot(
+            self._state_machine.state,
             self._build_transport_command_snapshot(),
             self._inputs["uart6"]["status"],
             self._inputs["uart8"]["status"],
@@ -120,7 +126,6 @@ class AssistantFollowRuntime:
             except Exception as exc:
                 state["status"] = "error"
                 self._record_error("%s init failed" % source, exc)
-                return
 
     def _process_input(self, source: str):
         """处理指定来源的输入数据"""
@@ -148,15 +153,28 @@ class AssistantFollowRuntime:
             state["status"] = "error"
             self._record_error("%s read failed" % source, exc)
             return False
+        if len(state["buffer"]) > _INPUT_LIMIT:
+            state["buffer"] = ""
+            state["status"] = "invalid"
+            self._record_error_text("invalid %s input" % source)
+            return False
 
         while True:
             idx = state["buffer"].find("\n")
             if idx == -1:
                 state["status"] = self._resolve_input_status(source)
                 return has_velocity
+            if idx > _INPUT_LIMIT:
+                state["buffer"] = state["buffer"][idx + 1 :]
+                state["status"] = "invalid"
+                self._record_error_text("invalid %s input" % source)
+                continue
             line = state["buffer"][:idx].rstrip("\r").strip()
             state["buffer"] = state["buffer"][idx + 1 :]
             if source == "uart8" and self._handle_sync_packet(line, uart):
+                state["status"] = self._resolve_input_status(source)
+                continue
+            if self._state_machine.is_idle():
                 state["status"] = self._resolve_input_status(source)
                 continue
             consume_result, parsed = split_velocity_line(line)
@@ -176,7 +194,14 @@ class AssistantFollowRuntime:
         if "seq" not in packet:
             return False
         seq = int(packet["seq"])
-        if self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq):
+        is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
+        if not is_new_sync and seq != self._last_sync_seq:
+            uart.write("%s\r\n" % format_ack_packet(seq))
+            return True
+        accepted = self._apply_sync_context(packet)
+        if not accepted:
+            return True
+        if is_new_sync:
             self.sync_context = {
                 "seq": seq,
                 "state": int(packet["state"]),
@@ -186,6 +211,29 @@ class AssistantFollowRuntime:
             self._last_sync_seq = seq
             self._sync_apply_count += 1
         uart.write("%s\r\n" % format_ack_packet(seq))
+        return True
+
+    def _apply_sync_context(self, packet: dict) -> bool:
+        """应用新的 UART8 同步上下文"""
+
+        accepted = self._state_machine.apply_master_state(
+            packet["state"], packet["target"], packet["arg"]
+        )
+        if not accepted:
+            self._record_error_text(
+                "unknown assistant sync state: %s" % int(packet["state"])
+            )
+            return False
+        if self._state_machine.is_idle():
+            self._inputs["uart6"]["velocity"] = None
+            self._inputs["uart8"]["velocity"] = None
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                0.0,
+                0.0,
+                source="assistant_idle",
+                has_omega=True,
+            )
         return True
 
     def _resolve_input_status(self, source: str) -> str:
@@ -201,6 +249,10 @@ class AssistantFollowRuntime:
     def _record_error(self, prefix: str, exc: Exception) -> None:
         self._last_error_text = "%s: %s" % (prefix, exc)
         self._transport_car.last_exception_text = self._last_error_text
+
+    def _record_error_text(self, text: str) -> None:
+        self._last_error_text = text
+        self._transport_car.last_exception_text = text
 
     def _write_effective_velocity(self) -> None:
         """将融合后的有效速度写入共享底盘"""

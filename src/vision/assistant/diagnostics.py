@@ -5,6 +5,7 @@
 
 
 def build_follow_snapshot(
+    assistant_state: int,
     transport_command: dict,
     uart6_status: str,
     uart8_status: str,
@@ -16,6 +17,7 @@ def build_follow_snapshot(
 
     只导出当前共享底盘控制状态和两路速度输入状态
 
+    @param assistant_state 辅车当前子状态
     @param transport_command 共享底盘控制状态
     @param uart6_status UART6 输入状态
     @param uart8_status UART8 输入状态
@@ -31,6 +33,7 @@ def build_follow_snapshot(
 
     return {
         "state": state,
+        "assistant_state": int(assistant_state),
         "transport_command": transport_command,
         "uart6_input_status": uart6_status,
         "uart8_input_status": uart8_status,

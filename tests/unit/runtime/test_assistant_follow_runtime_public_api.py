@@ -3,6 +3,8 @@
 @file tests/unit/runtime/test_assistant_follow_runtime_public_api.py
 """
 
+import sys
+
 from .assistant_follow_runtime_support import (
     _FakeUart,
     import_assistant_module,
@@ -140,3 +142,31 @@ def test_assistant_package_entry_builds_follow_runtime(monkeypatch) -> None:
 
     assert hasattr(runtime, "step")
     assert runtime.imu == "imu"
+
+
+def test_assistant_follow_runtime_keeps_other_uart_available_when_one_factory_fails(
+    monkeypatch,
+) -> None:
+    """一路 UART 初始化失败时，另一路仍应继续准备。"""
+
+    install_fake_transport_car(monkeypatch)
+    good_uart8 = _FakeUart()
+    hardware_module = sys.modules["hardware.uart_bus"]
+
+    def create_uart6():
+        raise RuntimeError("uart6 init failed")
+
+    def create_uart8():
+        return good_uart8
+
+    monkeypatch.setattr(hardware_module, "create_uart6", create_uart6)
+    monkeypatch.setattr(hardware_module, "create_uart8", create_uart8)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    assert runtime._inputs["uart6"]["uart"] is None
+    assert runtime._inputs["uart6"]["status"] == "error"
+    assert runtime._inputs["uart8"]["uart"] is good_uart8
