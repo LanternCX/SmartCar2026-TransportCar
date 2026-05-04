@@ -177,5 +177,5 @@ def test_non_short_packet_velocity_text_is_outside_short_packet_protocol() -> No
 def test_non_short_packet_text_is_outside_short_packet_protocol() -> None:
     """! @brief 非短包文本不属于正式短包协议"""
 
-    for line in ("rear=1", "reset", "?health", "diag=1"):
+    for line in ("mode=1", "reset", "?health", "diag=1"):
         assert parse_short_packet(line) is None

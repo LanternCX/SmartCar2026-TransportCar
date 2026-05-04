@@ -1,7 +1,10 @@
 """`TransportCar` 对外行为测试."""
 
+import inspect
+
 import pytest
 
+from config import params as real_params
 from tests.unit.core.runtime_support import (
     CaptureUart,
     DummyMotor,
@@ -53,13 +56,12 @@ def _make_control_car(**attrs):
         "command_lock": False,
         "command_mode": "none",
         "lock_start_time": 0,
-        "rear_only_mode": False,
-        "last_rear_mode": False,
+        "orbit_mode": False,
+        "orbit_radius_scale": 1.0,
         "_pending_dx": None,
         "_pending_dy": None,
         "_pending_d_angle": None,
         "_pending_lock": None,
-        "_rear_mode_changed": False,
         "heading_est": 0.0,
         "heading_target": 0.0,
         "_yaw_rate": 0.0,
@@ -96,6 +98,41 @@ def _make_control_car(**attrs):
     }
     defaults.update(attrs)
     return make_minimal_transport_car(**defaults)
+
+
+@pytest.mark.parametrize(
+    "param_name",
+    ("MASTER_ORBIT_RADIUS_SCALE", "ASSISTANT_ORBIT_RADIUS_SCALE"),
+)
+def test_orbit_radius_scale_params_exist_and_are_positive(param_name: str) -> None:
+    """主辅车绕行半径倍率参数存在且保持正数语义."""
+    value = float(getattr(real_params, param_name))
+
+    assert value > 0.0
+
+
+def test_runtime_config_params_stay_in_explicit_ranges() -> None:
+    """运行时配置中能从代码直接确定范围的参数保持在合法区间."""
+
+    assert int(real_params.TICK_MS) > 0
+    assert int(real_params.RELIABLE_PACKET_SEND_DELAY_MS) >= 0
+    assert int(real_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
+    assert 0 <= int(real_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
+    assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert 0 < float(real_params.MAX_DUTY) <= 10000.0
+    assert float(real_params.V_CMD_MAX) > 0.0
+    assert float(real_params.TARGET_SPEED_MAX) > 0.0
+    assert float(real_params.POS_MAX_SPEED) > 0.0
+    assert float(real_params.POS_TOLERANCE) >= 0.0
+    assert float(real_params.ANGLE_TOLERANCE) >= 0.0
+    assert set(real_params.ACTIVE_WHEELS).issubset({"m", "l", "r"})
+    assert 0.0 <= float(real_params.GYRO_LPF_ALPHA) <= 1.0
+    assert float(real_params.GYRO_SCALE) > 0.0
+    assert 0 <= int(real_params.GYRO_AXIS_Z) <= 5
+    assert float(real_params.YAW_I_MAX) >= 0.0
+    assert float(real_params.AUTO_OMEGA_MAX) >= 0.0
+    assert float(real_params.HOLD_SPEED_EPS) >= 0.0
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:
@@ -135,7 +172,6 @@ def test_transport_car_builds_health_snapshot() -> None:
         boot_time_ms=200,
         last_exception_text="boom",
         command_lock=True,
-        rear_only_mode=True,
         command_mode="locked",
     )
     car._now_ms = lambda: 650
@@ -145,7 +181,6 @@ def test_transport_car_builds_health_snapshot() -> None:
         "uptime_ms": 450,
         "last_err": "boom",
         "lock": 1,
-        "rear": 1,
         "command_mode": "locked",
     }
 
@@ -204,14 +239,13 @@ def test_transport_car_builds_encoder_snapshot() -> None:
 
 
 def test_transport_car_builds_motor_snapshot() -> None:
-    """电机快照继续暴露目标、占空比与后轮模式状态."""
+    """电机快照继续暴露目标与占空比."""
     _transport_car, car = make_minimal_transport_car(
         wheel_states=[
             {"name": "m", "duty": 11.0},
             {"name": "l", "duty": 12.0},
         ],
         target_speeds={"m": 5.0, "l": 6.0},
-        rear_only_mode=True,
     )
 
     assert car.build_motor_snapshot() == {
@@ -219,7 +253,6 @@ def test_transport_car_builds_motor_snapshot() -> None:
         "m_duty": 11.0,
         "l_target": 6.0,
         "l_duty": 12.0,
-        "rear": 1,
     }
 
 
@@ -279,35 +312,113 @@ def test_transport_car_explicit_omega_clears_angle_target() -> None:
     assert car.command_mode == "none"
 
 
-def test_transport_car_set_rear_only_angle_target_enters_locked_rear_mode() -> None:
-    """rear only 绝对角度入口启用现有后轮模式并进入角度锁定."""
+def test_transport_car_exposes_shared_orbit_entry_without_assistant_naming() -> None:
+    """共享底盘公开统一绕行入口, 不暴露 assistant 专属命名."""
+    transport_car, car = _make_control_car()
+    signature = inspect.signature(transport_car.TransportCar.set_orbit_target)
+
+    assert hasattr(car, "set_orbit_target")
+    assert not hasattr(car, "set_assistant_orbit_target")
+    assert tuple(signature.parameters) == ("self", "target_angle_deg", "radius_scale")
+
+
+@pytest.mark.parametrize("radius_scale", (0.0, -1.0))
+def test_transport_car_orbit_entry_rejects_non_positive_radius_scale(
+    radius_scale: float,
+) -> None:
+    """统一绕行入口只接受正数半径倍率."""
     _transport_car, car = _make_control_car()
 
-    car.set_rear_only_angle_target(90.0)
+    with pytest.raises(ValueError):
+        car.set_orbit_target(90.0, radius_scale)
 
-    assert car.rear_only_mode is True
+
+def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> None:
+    """统一绕行入口只接收目标角度和半径倍率, 不暴露专用 x/y/omega 调参."""
+    _transport_car, car = _make_control_car(
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0, "x": 1.0, "y": 2.0}
+    )
+
+    car.set_orbit_target(90.0, 1.5)
+
+    assert car.orbit_mode is True
+    assert car.orbit_radius_scale == pytest.approx(1.5)
     assert car.command_lock is True
     assert car.command_mode == "locked"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
 
 
-def test_transport_car_set_rear_only_angle_target_unlock_clears_mode_and_output() -> None:
-    """rear only 绝对角度目标收敛后回退到零输出."""
+def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius() -> None:
+    """统一绕行保持旧角速度目标行为, 线速度只按半径倍率解算."""
+    _transport_car, car = _make_control_car(
+        heading_est=10.0,
+        yaw_pid=RecordingController(return_value=4.0),
+    )
+    applied = []
+
+    def _capture(vx_cmd, vy_cmd, omega_cmd, dt_s):
+        applied.append((vx_cmd, vy_cmd, omega_cmd, dt_s))
+
+    car._apply_target_speeds = _capture
+
+    car.set_orbit_target(40.0, 0.5)
+    car._run_control(0.005)
+    first_call = applied[-1]
+
+    car.set_orbit_target(40.0, 2.0)
+    car._run_control(0.005)
+    second_call = applied[-1]
+
+    assert first_call[2] == pytest.approx(4.0)
+    assert second_call[2] == pytest.approx(4.0)
+    assert first_call[1] == pytest.approx(0.0)
+    assert second_call[1] == pytest.approx(0.0)
+    assert first_call[0] == pytest.approx(-2.0)
+    assert second_call[0] == pytest.approx(-8.0)
+    assert abs(second_call[0]) > abs(first_call[0])
+
+
+def test_transport_car_orbit_target_runs_through_existing_inverse_kinematics_chain() -> None:
+    """统一绕行最终仍走现有底盘控制链和三轮逆运动学."""
+    _transport_car, car = _make_control_car(
+        heading_est=10.0,
+        yaw_pid=RecordingController(return_value=3.0),
+    )
+
+    car.set_orbit_target(40.0, 2.0)
+    car._run_control(0.005)
+
+    assert car.target_speeds == pytest.approx({"m": 5.0, "l": -1.0, "r": -1.0})
+    for state, target in zip(car.wheel_states, (5.0, -1.0, -1.0)):
+        assert state["controller"].update_calls == [(target, 0.0, 0.005)]
+
+
+def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
+    """统一绕行目标收敛后关闭锁定、清零输出并停止电机."""
     _transport_car, car = _make_control_car(heading_est=0.0, heading_target=0.0)
 
-    car.set_rear_only_angle_target(90.0)
+    car.set_orbit_target(90.0, 1.0)
     car.heading_target = 90.0
     car.heading_est = 90.0
 
     car._check_unlock()
 
-    assert car.rear_only_mode is False
+    assert car.orbit_mode is False
     assert car.command_lock is False
     assert car.command_mode == "none"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     for state in car.wheel_states:
         assert state["duty"] == 0.0
         assert state["motor"].duties == [0]
+
+
+def test_transport_car_has_no_legacy_mode_entry() -> None:
+    """共享底盘不再暴露旧模式入口."""
+    _transport_car, car = _make_control_car()
+
+    assert sorted(
+        name for name in dir(car) if name.startswith("set_") and name.endswith("target")
+    ) == ["set_orbit_target", "set_velocity_target"]
 
 
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:

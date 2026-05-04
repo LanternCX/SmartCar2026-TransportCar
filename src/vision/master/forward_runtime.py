@@ -24,6 +24,7 @@ _UART8_INPUT_LIMIT = 128
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
+MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 
 
@@ -364,7 +365,8 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and seq == int(pending["seq"])
             ):
-                self._state_machine.mark_assistant_idle_acknowledged()
+                if pending.get("kind") == "assistant_idle":
+                    self._state_machine.mark_assistant_idle_acknowledged()
                 self._pending_assistant_sync = None
                 return
             pending = self._pending_sync
@@ -379,6 +381,7 @@ class MasterForwardRuntime:
             self.last_report = packet
             if int(packet["event"]) == EVENT_TARGET_FOUND:
                 self._assistant_target_found_report = dict(packet)
+                self._state_machine.handle_assistant_target_found(packet["value"])
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -473,9 +476,7 @@ class MasterForwardRuntime:
 
         orbit_finished = False
         if self._orbit_command_active:
-            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False)) and not bool(
-                getattr(self._transport_car, "rear_only_mode", False)
-            )
+            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False))
         self._state_machine.step(orbit_finished=orbit_finished)
         if self._state_machine.state != STATE_ORBITING:
             self._orbit_command_active = False
@@ -502,17 +503,19 @@ class MasterForwardRuntime:
 
         assistant_request = self._state_machine.poll_assistant_request()
         if assistant_request is not None:
-            self._latest_uart6_velocity = None
-            self._transport_car.handle_velocity_packet(
-                0.0,
-                0.0,
-                0.0,
-                source="master_wait_assistant_idle",
-                has_omega=True,
-            )
+            request_kind = assistant_request.get("kind")
+            if request_kind == "assistant_idle":
+                self._latest_uart6_velocity = None
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    source="master_wait_assistant_idle",
+                    has_omega=True,
+                )
             seq = self._assistant_sync_seq
             self._pending_assistant_sync = {
-                "kind": "assistant_idle",
+                "kind": request_kind,
                 "seq": seq,
                 "state": int(assistant_request["state"]),
                 "target": int(assistant_request["target"]),
@@ -524,8 +527,9 @@ class MasterForwardRuntime:
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:
-            self._transport_car.set_rear_only_angle_target(
-                float(orbit_command["target_heading_deg"])
+            self._transport_car.set_orbit_target(
+                float(orbit_command["target_heading_deg"]),
+                float(MASTER_ORBIT_RADIUS_SCALE),
             )
             self._orbit_command_active = True
 

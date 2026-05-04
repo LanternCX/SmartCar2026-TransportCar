@@ -279,6 +279,8 @@ def install_transport_car_stubs() -> None:
         "RELIABLE_RESEND_INTERVAL_MS": 20,
         "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
         "MASTER_ORBIT_TARGET_DEG": 90,
+        "MASTER_ORBIT_RADIUS_SCALE": 1.0,
+        "ASSISTANT_ORBIT_RADIUS_SCALE": 1.0,
         "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
@@ -333,6 +335,11 @@ def make_minimal_transport_car(**attrs):
     """构造未走初始化流程的最小 `TransportCar` 测试对象."""
     transport_car = import_transport_car_module()
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
-    for key, value in attrs.items():
+    defaults = {
+        "orbit_mode": False,
+        "orbit_radius_scale": 1.0,
+    }
+    defaults.update(attrs)
+    for key, value in defaults.items():
         setattr(car, key, value)
     return transport_car, car

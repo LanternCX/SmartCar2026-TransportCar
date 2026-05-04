@@ -254,6 +254,128 @@ def test_assistant_follow_runtime_records_sync_context_and_replies_ack(monkeypat
     assert runtime._sync_apply_count == 1
 
 
+def test_assistant_state_machine_accepts_orbit_command(monkeypatch) -> None:
+    """! @brief 辅车子状态机接受 orbit 子状态并记录固定上下文"""
+
+    module = import_assistant_module("vision.assistant.state_machine", monkeypatch)
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(3, 1, 0)
+
+    assert applied is True
+    assert machine.state == 3
+    assert machine.target == 1
+    assert machine.arg == 0
+
+
+def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车收到 orbit 同步后只走统一绕行入口并清空本地残留"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,3,1,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module._ASSISTANT_ORBIT_TARGET_DEG = -90.0
+    follow_runtime_module._ASSISTANT_ORBIT_RADIUS_SCALE = 1.5
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    runtime._inputs["uart6"]["velocity"] = {
+        "vx": 0.25,
+        "vy": -0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    runtime._inputs["uart8"]["velocity"] = {
+        "vx": 1.0,
+        "vy": 2.0,
+        "omega": 0.5,
+        "has_omega": True,
+    }
+    runtime._pending_local_vision_sync = {"seq": 3}
+    runtime._pending_target_found_report = {"seq": 7}
+    runtime._approach_target_found_done = True
+
+    runtime.step()
+
+    assert runtime.sync_context == {"seq": 12, "state": 3, "target": 1, "arg": 0}
+    assert uart8.messages == ["a,12\r\n"]
+    assert runtime._inputs["uart6"]["velocity"] is None
+    assert runtime._inputs["uart8"]["velocity"] is None
+    assert runtime._pending_local_vision_sync is None
+    assert runtime._pending_target_found_report is None
+    assert runtime._approach_target_found_done is False
+    assert ("set_orbit_target", -90.0, 1.5) in events
+    assert not any(event[0] == "handle_velocity" for event in events)
+    assert runtime._transport_car.control_state == {
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "angle": -90.0,
+    }
+    assert runtime._transport_car.command_lock is True
+    assert runtime._transport_car.orbit_mode is True
+
+
+def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车绕行期间屏蔽速度输入, 到位后重新对正且不回报完成"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,10,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nv,0.5,-0.25\nr,7,6,300\n" % local_sync_seq).encode()
+    runtime.step()
+    uart8._buffer = b"s,12,3,1,0\n"
+
+    runtime.step()
+
+    event_count = len(events)
+    uart8._buffer = b"v,1.0,2.0,0.5\n"
+    uart6._buffer = b"v,-0.25,0.5\n"
+    runtime.step()
+
+    assert not any(event[0] == "handle_velocity" for event in events[event_count:])
+    assert runtime._inputs["uart6"]["velocity"] is None
+    assert runtime._inputs["uart8"]["velocity"] is None
+    assert runtime._pending_local_vision_sync is None
+    assert runtime._pending_target_found_report is None
+    assert runtime._transport_car.command_lock is True
+    assert runtime._transport_car.orbit_mode is True
+    assert uart8.messages == ["a,10\r\n", "r,7,6,300\r\n", "a,12\r\n"]
+
+    runtime._transport_car.complete_orbit_on_next_step = True
+    runtime.step()
+
+    assert runtime._state_machine.state == 2
+    assert runtime._pending_local_vision_sync is not None
+    rearm_sync_seq = runtime._pending_local_vision_sync["seq"]
+    assert uart6.messages[-1] == "s,%d,2,1,1\r\n" % rearm_sync_seq
+    assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+    uart6._buffer = ("a,%d\nv,-0.5,0.25\nr,9,6,300\n" % rearm_sync_seq).encode()
+    runtime.step()
+
+    assert ("handle_velocity", "assistant", -0.5, 0.25, 0.0) in events
+    assert runtime._transport_car.control_state == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
+    assert runtime._transport_car.command_lock is False
+    assert runtime._transport_car.orbit_mode is False
+    assert runtime._state_machine.state == 2
+    assert runtime._pending_target_found_report is None
+    assert uart6.messages[-1] == "a,9\r\n"
+    assert uart8.messages == ["a,10\r\n", "r,7,6,300\r\n", "a,12\r\n"]
+
+
 def test_assistant_follow_runtime_enters_idle_and_clears_velocity_inputs(monkeypatch) -> None:
     """! @brief 辅车收到 idle 同步后清空两路速度并停止线速度"""
 
