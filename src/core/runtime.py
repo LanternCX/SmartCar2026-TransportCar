@@ -44,6 +44,7 @@ YAW_KD = getattr(_params, "YAW_KD")
 YAW_I_MAX = getattr(_params, "YAW_I_MAX")
 AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
 HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
+MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
 GYRO_OFFSET_FILE = getattr(_params, "GYRO_OFFSET_FILE")
 PID_MAP = getattr(_params, "PID_MAP")
@@ -289,6 +290,8 @@ class TransportCar:
         #          command_lock: 位置锁定标志, True 时位置/角度目标有效
         #          command_mode: 当前锁定诊断状态, 取值 locked/unlocked/none
         #          lock_start_time: 位置锁定开始时间(毫秒)
+        #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
+        #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
         #          rear_only_mode: 仅后轮模式标志, True 时只驱动中轮
         #          last_rear_mode: 上一周期后轮模式状态, 用于检测模式变化
         #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整短包行
@@ -299,6 +302,8 @@ class TransportCar:
         self.command_lock = False
         self.command_mode = "none"
         self.lock_start_time = 0
+        self.orbit_mode = False
+        self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self.rear_only_mode = False
         self.last_rear_mode = False
         self.rx_buf3 = ""
@@ -507,6 +512,7 @@ class TransportCar:
         @param has_omega 本次输入是否显式携带角速度
         """
 
+        self._clear_orbit_mode()
         self.control_state["vx"] = float(vx)
         self.control_state["vy"] = float(vy)
         self._clear_translation_control_targets()
@@ -518,12 +524,39 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_orbit_target(self, target_angle_deg, radius_scale):
+        """写入统一绕行目标
+
+        @param target_angle_deg 绝对目标航向角, 单位度
+        @param radius_scale 绕行半径倍率, 只允许正数
+        """
+
+        radius_scale = float(radius_scale)
+        if radius_scale <= 0.0:
+            raise ValueError("radius_scale must be positive")
+
+        self._clear_translation_control_targets()
+        self.control_state["vx"] = 0.0
+        self.control_state["vy"] = 0.0
+        self.control_state["omega"] = 0.0
+        self.control_state["angle"] = float(target_angle_deg)
+        self.command_lock = True
+        self.orbit_mode = True
+        self.orbit_radius_scale = radius_scale
+        self.rear_only_mode = False
+        self.heading_target = float(target_angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def set_rear_only_angle_target(self, angle_deg):
         """写入仅后轮绝对角度目标
 
         @param angle_deg 绝对目标航向角, 单位度
         """
 
+        self._clear_orbit_mode()
         self._clear_translation_control_targets()
         self.control_state["vx"] = 0.0
         self.control_state["vy"] = 0.0
@@ -552,6 +585,9 @@ class TransportCar:
         self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
         self.command_mode = "none"
+        self.orbit_mode = False
+        self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self.rear_only_mode = False
         self._pending_lock = None
         self._pending_dx = None
         self._pending_dy = None
@@ -578,6 +614,12 @@ class TransportCar:
 
         self.control_state.pop("angle", None)
         self._pending_d_angle = None
+
+    def _clear_orbit_mode(self):
+        """清理统一绕行模式状态."""
+
+        self.orbit_mode = False
+        self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
 
     def _refresh_control_mode(self):
         """根据当前结构化控制目标刷新锁定状态."""
@@ -937,7 +979,7 @@ class TransportCar:
         @param dt_s 时间增量(秒), 用于 PID 积分
         """
         omega_cmd = self._compute_omega_cmd(dt_s)
-        target_vx_cmd, target_vy_cmd = self._compute_planar_targets(dt_s)
+        target_vx_cmd, target_vy_cmd = self._compute_planar_targets(dt_s, omega_cmd)
         self._apply_target_speeds(target_vx_cmd, target_vy_cmd, omega_cmd, dt_s)
         self._check_unlock()
 
@@ -997,7 +1039,7 @@ class TransportCar:
 
         return omega_cmd
 
-    def _compute_planar_targets(self, dt_s):
+    def _compute_planar_targets(self, dt_s, omega_cmd):
         """
         @brief 计算车体系平面运动目标速度, 支持位置锁定和速度两种模式
 
@@ -1022,6 +1064,12 @@ class TransportCar:
         """
         target_vx_cmd = 0.0
         target_vy_cmd = 0.0
+
+        if self.orbit_mode:
+            return (
+                -float(omega_cmd) * float(self.orbit_radius_scale),
+                0.0,
+            )
 
         cmd_x, cmd_y = self._get_active_position_targets()
 
@@ -1159,8 +1207,10 @@ class TransportCar:
         if angle_ok and pos_ok:
             self.command_lock = False
             self.command_mode = "none"
-            if self.rear_only_mode:
+            if self.rear_only_mode or self.orbit_mode:
                 self.rear_only_mode = False
+                self.orbit_mode = False
+                self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
                 self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()

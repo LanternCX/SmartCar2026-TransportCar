@@ -20,6 +20,12 @@ MASTER_SEARCH_HOOK_CONFIG_ID = 1
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = 1
 # 主车绕行的绝对目标角度增量, 单位度
 MASTER_ORBIT_TARGET_DEG = 90
+# 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
+MASTER_ORBIT_RADIUS_SCALE = 1.0
+# 辅车绕行的绝对目标角度, 单位度
+ASSISTANT_ORBIT_TARGET_DEG = -90
+# 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
+ASSISTANT_ORBIT_RADIUS_SCALE = 1.25
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒
 ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = 20
 # ===== 电机与 PWM =====
