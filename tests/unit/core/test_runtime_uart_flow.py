@@ -11,7 +11,7 @@ def test_transport_car_handle_uart3_line_rejects_non_short_packet_text() -> None
         uart3=CaptureUart(),
         control_state={"vx": 0.0, "vy": 0.0, "omega": 0.0},
     )
-    car._handle_uart_line("rear=1", source="uart3")
+    car._handle_uart_line("mode=1", source="uart3")
 
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     assert car.uart3.messages == []
@@ -30,7 +30,7 @@ def test_transport_car_handle_uart3_line_ignores_question_prefixed_input() -> No
 def test_transport_car_process_uart_splits_lines_keeps_residue_and_skips_empty_line() -> None:
     """多行输入按行处理, 空行忽略, 无换行残留保留在缓冲区."""
     _transport_car, car = make_minimal_transport_car(
-        uart3=CaptureUart(incoming=b"?health\nv,1.0,2.0,0.5\nrear=1\n\npartial"),
+        uart3=CaptureUart(incoming=b"?health\nv,1.0,2.0,0.5\nmode=1\n\npartial"),
         rx_buf3="",
         control_state={"vx": 0.0, "vy": 0.0, "omega": 0.0},
         command_lock=False,

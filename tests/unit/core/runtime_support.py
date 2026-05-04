@@ -338,7 +338,6 @@ def make_minimal_transport_car(**attrs):
     defaults = {
         "orbit_mode": False,
         "orbit_radius_scale": 1.0,
-        "rear_only_mode": False,
     }
     defaults.update(attrs)
     for key, value in defaults.items():

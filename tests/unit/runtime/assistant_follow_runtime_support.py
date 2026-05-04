@@ -86,7 +86,6 @@ def install_fake_transport_car(monkeypatch):
                 "omega": 0.0,
                 "has_omega": False,
             }
-            self.rear_only_mode = False
             self.orbit_mode = False
             self.orbit_radius_scale = 1.0
             self.command_lock = False
@@ -143,7 +142,6 @@ def install_fake_transport_car(monkeypatch):
             }
             self.command_lock = True
             self.command_mode = "locked"
-            self.rear_only_mode = False
             self.orbit_mode = True
             self.orbit_radius_scale = float(radius_scale)
 

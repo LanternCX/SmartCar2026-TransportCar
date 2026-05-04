@@ -58,13 +58,10 @@ def _make_control_car(**attrs):
         "lock_start_time": 0,
         "orbit_mode": False,
         "orbit_radius_scale": 1.0,
-        "rear_only_mode": False,
-        "last_rear_mode": False,
         "_pending_dx": None,
         "_pending_dy": None,
         "_pending_d_angle": None,
         "_pending_lock": None,
-        "_rear_mode_changed": False,
         "heading_est": 0.0,
         "heading_target": 0.0,
         "_yaw_rate": 0.0,
@@ -151,7 +148,6 @@ def test_transport_car_builds_health_snapshot() -> None:
         boot_time_ms=200,
         last_exception_text="boom",
         command_lock=True,
-        rear_only_mode=True,
         command_mode="locked",
     )
     car._now_ms = lambda: 650
@@ -161,7 +157,6 @@ def test_transport_car_builds_health_snapshot() -> None:
         "uptime_ms": 450,
         "last_err": "boom",
         "lock": 1,
-        "rear": 1,
         "command_mode": "locked",
     }
 
@@ -220,14 +215,13 @@ def test_transport_car_builds_encoder_snapshot() -> None:
 
 
 def test_transport_car_builds_motor_snapshot() -> None:
-    """电机快照继续暴露目标、占空比与后轮模式状态."""
+    """电机快照继续暴露目标与占空比."""
     _transport_car, car = make_minimal_transport_car(
         wheel_states=[
             {"name": "m", "duty": 11.0},
             {"name": "l", "duty": 12.0},
         ],
         target_speeds={"m": 5.0, "l": 6.0},
-        rear_only_mode=True,
     )
 
     assert car.build_motor_snapshot() == {
@@ -235,7 +229,6 @@ def test_transport_car_builds_motor_snapshot() -> None:
         "m_duty": 11.0,
         "l_target": 6.0,
         "l_duty": 12.0,
-        "rear": 1,
     }
 
 
@@ -326,7 +319,6 @@ def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> Non
 
     assert car.orbit_mode is True
     assert car.orbit_radius_scale == pytest.approx(1.5)
-    assert car.rear_only_mode is False
     assert car.command_lock is True
     assert car.command_mode == "locked"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
@@ -388,7 +380,6 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
     car._check_unlock()
 
     assert car.orbit_mode is False
-    assert car.rear_only_mode is False
     assert car.command_lock is False
     assert car.command_mode == "none"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
@@ -397,14 +388,13 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
         assert state["motor"].duties == [0]
 
 
-def test_transport_car_legacy_rear_only_entry_remains_baseline_only() -> None:
-    """旧 rear only 入口仍可保留, 但统一绕行模式由共享入口承接."""
+def test_transport_car_has_no_legacy_mode_entry() -> None:
+    """共享底盘不再暴露旧模式入口."""
     _transport_car, car = _make_control_car()
 
-    car.set_rear_only_angle_target(90.0)
-
-    assert car.rear_only_mode is True
-    assert car.orbit_mode is False
+    assert sorted(
+        name for name in dir(car) if name.startswith("set_") and name.endswith("target")
+    ) == ["set_orbit_target", "set_velocity_target"]
 
 
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:

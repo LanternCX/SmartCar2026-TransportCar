@@ -292,8 +292,6 @@ class TransportCar:
         #          lock_start_time: 位置锁定开始时间(毫秒)
         #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
         #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
-        #          rear_only_mode: 仅后轮模式标志, True 时只驱动中轮
-        #          last_rear_mode: 上一周期后轮模式状态, 用于检测模式变化
         #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整短包行
         self.pit_flag = False
         self.tick_count = 0
@@ -304,8 +302,6 @@ class TransportCar:
         self.lock_start_time = 0
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
-        self.rear_only_mode = False
-        self.last_rear_mode = False
         self.rx_buf3 = ""
 
         # 时间与性能监控
@@ -340,7 +336,6 @@ class TransportCar:
         self._pending_dy = None
         self._pending_d_angle = None
         self._pending_lock = None
-        self._rear_mode_changed = False
 
         # 初始化速度环 PID 增益, 每轮独立配置
         self.init_pid()
@@ -543,28 +538,7 @@ class TransportCar:
         self.command_lock = True
         self.orbit_mode = True
         self.orbit_radius_scale = radius_scale
-        self.rear_only_mode = False
         self.heading_target = float(target_angle_deg)
-        self.yaw_pid.reset()
-        self.yaw_integral = 0.0
-        self._pending_lock = None
-        self._refresh_control_mode()
-
-    def set_rear_only_angle_target(self, angle_deg):
-        """写入仅后轮绝对角度目标
-
-        @param angle_deg 绝对目标航向角, 单位度
-        """
-
-        self._clear_orbit_mode()
-        self._clear_translation_control_targets()
-        self.control_state["vx"] = 0.0
-        self.control_state["vy"] = 0.0
-        self.control_state["omega"] = 0.0
-        self.control_state["angle"] = float(angle_deg)
-        self.command_lock = True
-        self.rear_only_mode = True
-        self.heading_target = float(angle_deg)
         self.yaw_pid.reset()
         self.yaw_integral = 0.0
         self._pending_lock = None
@@ -587,7 +561,6 @@ class TransportCar:
         self.command_mode = "none"
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
-        self.rear_only_mode = False
         self._pending_lock = None
         self._pending_dx = None
         self._pending_dy = None
@@ -683,14 +656,6 @@ class TransportCar:
         """
         return self._has_active_translation_target() or self._has_active_rotation_target()
 
-    def _get_active_rear_only_mode(self):
-        """
-        @brief 获取当前后轮模式状态
-
-        @return True 如果启用仅后轮模式, 否则 False
-        """
-        return self.rear_only_mode
-
     def build_health_snapshot(self):
         """
         @brief 构造系统健康状态快照, 用于诊断
@@ -715,7 +680,6 @@ class TransportCar:
 
         return {
             "lock": 1 if self.command_lock else 0,
-            "rear": 1 if self._get_active_rear_only_mode() else 0,
             "command_mode": self.command_mode,
         }
 
@@ -786,7 +750,6 @@ class TransportCar:
         @details 为三轮提供目标速度和实际占空比
         - {m, l, r}_target: 速度环目标速度(脉冲/周期)
         - {m, l, r}_duty: 电机实际输出占空比(-MAX_DUTY ~ +MAX_DUTY)
-        - rear: 后轮模式状态(1=仅后轮, 0=全向)
 
         @return 包含各轮目标与实际的字典
         """
@@ -795,7 +758,6 @@ class TransportCar:
             name = state["name"]
             snapshot["%s_target" % name] = float(self.target_speeds.get(name, 0.0))
             snapshot["%s_duty" % name] = float(state.get("duty", 0.0))
-        snapshot["rear"] = 1 if self._get_active_rear_only_mode() else 0
         return snapshot
 
     # Internal helpers and control loop (内部助手方法与控制循环)
@@ -1115,12 +1077,11 @@ class TransportCar:
         @details 处理步骤
         1. 逆运动学: 将车体系控制目标 (vx, vy, omega) 转换为三轮脉冲速度目标 (vm, vl, vr)
         2. 限幅: 所有轮速限制在 ±TARGET_SPEED_MAX 范围内
-        3. 后轮模式处理: 若启用 rear_only_mode, 中轮 1/3 速度、左右轮停止
-        4. 对每个活跃轮子运行速度环 PID:
+        3. 对每个活跃轮子运行速度环 PID:
            - 比较目标速度与滤波反馈速度
            - 输出电机占空比(限幅 ±MAX_DUTY)
            - 直接驱动电机
-        5. 非活跃轮子重置 PID 并停止
+        4. 非活跃轮子重置 PID 并停止
 
         @param target_vx_cmd 目标纵向速度(脉冲/周期)
         @param target_vy_cmd 目标横向速度(脉冲/周期)
@@ -1135,14 +1096,9 @@ class TransportCar:
             float(omega_cmd),
         )
 
-        if self._get_active_rear_only_mode():
-            self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX) / 3
-            self.target_speeds["l"] = 0.0
-            self.target_speeds["r"] = 0.0
-        else:
-            self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-            self.target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-            self.target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
 
         for state in self.wheel_states:
             if state["name"] in ACTIVE_WHEELS:
@@ -1172,8 +1128,8 @@ class TransportCar:
            - 当前位置与目标位置欧氏距离 < POS_TOLERANCE(米)
 
         解锁后:
-        - 若启用后轮模式(rear_only_mode=True), 则:
-          a. 关闭后轮模式, 回归全向运动
+        - 若当前处于统一绕行模式(orbit_mode=True), 则:
+          a. 关闭统一绕行模式
           b. 清空速度控制目标
           c. 重置所有 PID 积分
           d. 停止所有电机
@@ -1207,8 +1163,7 @@ class TransportCar:
         if angle_ok and pos_ok:
             self.command_lock = False
             self.command_mode = "none"
-            if self.rear_only_mode or self.orbit_mode:
-                self.rear_only_mode = False
+            if self.orbit_mode:
                 self.orbit_mode = False
                 self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
                 self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}

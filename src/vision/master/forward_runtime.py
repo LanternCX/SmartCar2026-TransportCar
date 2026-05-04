@@ -476,9 +476,7 @@ class MasterForwardRuntime:
 
         orbit_finished = False
         if self._orbit_command_active:
-            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False)) and not bool(
-                getattr(self._transport_car, "rear_only_mode", False)
-            )
+            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False))
         self._state_machine.step(orbit_finished=orbit_finished)
         if self._state_machine.state != STATE_ORBITING:
             self._orbit_command_active = False

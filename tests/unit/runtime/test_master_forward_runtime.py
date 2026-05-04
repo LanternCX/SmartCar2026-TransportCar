@@ -99,7 +99,6 @@ def install_fake_transport_car(monkeypatch):
             self.heading_est = 0.0
             self.command_lock = False
             self.orbit_mode = False
-            self.rear_only_mode = False
             self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
             self.last_chassis_target = {
                 "source": None,
@@ -134,17 +133,10 @@ def install_fake_transport_car(monkeypatch):
                 "has_omega": bool(has_omega),
             }
 
-        def set_rear_only_angle_target(self, angle_deg: float) -> None:
-            events.append(("set_rear_only_angle_target", float(angle_deg)))
-            self.command_lock = True
-            self.rear_only_mode = True
-            self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": float(angle_deg)}
-
         def set_orbit_target(self, angle_deg: float, radius_scale: float) -> None:
             events.append(("set_orbit_target", float(angle_deg), float(radius_scale)))
             self.command_lock = True
             self.orbit_mode = True
-            self.rear_only_mode = False
             self.control_state = {
                 "vx": 0.0,
                 "vy": 0.0,
@@ -659,11 +651,9 @@ def test_master_forward_runtime_matching_uart6_target_found_acknowledges_and_sta
     assert "a,7\r\n" in uart6.messages
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
     assert ("set_orbit_target", 90.0, 1.0) not in events
-    assert ("set_rear_only_angle_target", 90.0) not in events
     uart8._buffer = b"a,1\n"
     runtime.step()
     assert ("set_orbit_target", 90.0, 1.0) in events
-    assert ("set_rear_only_angle_target", 90.0) not in events
 
 
 def test_master_forward_runtime_target_found_before_hook_ack_starts_orbit_after_ack(monkeypatch) -> None:
@@ -688,13 +678,11 @@ def test_master_forward_runtime_target_found_before_hook_ack_starts_orbit_after_
 
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
     assert ("set_orbit_target", 90.0, 1.0) not in events
-    assert ("set_rear_only_angle_target", 90.0) not in events
 
     uart8._buffer = b"a,1\n"
     runtime.step()
 
     assert ("set_orbit_target", 90.0, 1.0) in events
-    assert ("set_rear_only_angle_target", 90.0) not in events
 
 
 def test_master_forward_runtime_mismatched_uart6_target_found_only_acknowledges(monkeypatch) -> None:
@@ -849,7 +837,6 @@ def test_master_forward_runtime_assistant_object_sync_does_not_stop_assistant(mo
     }
     event_count = len(events)
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
 
     runtime.step()
 
@@ -890,7 +877,6 @@ def test_master_forward_runtime_assistant_orbit_sync_does_not_stop_assistant(mon
     uart8._buffer = b"a,1\n"
     runtime.step()
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
     runtime.step()
     runtime._transport_car.last_chassis_target = {
         "source": "probe",
@@ -981,7 +967,6 @@ def test_master_forward_runtime_ignores_uart3_velocity_during_orbiting(monkeypat
     assert ("handle_velocity", "uart3", 3.0, 4.0, 0.7) not in events[event_count:]
     assert runtime._transport_car.command_lock is True
     assert runtime._transport_car.orbit_mode is True
-    assert runtime._transport_car.rear_only_mode is False
 
 
 def test_master_forward_runtime_returns_idle_after_orbit_finishes(monkeypatch) -> None:
@@ -998,11 +983,34 @@ def test_master_forward_runtime_returns_idle_after_orbit_finishes(monkeypatch) -
     uart8._buffer = b"a,1\n"
     runtime.step()
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
 
     runtime.step()
 
     assert runtime._state_machine.state == STATE_IDLE
+
+
+def test_master_forward_runtime_orbit_finish_only_depends_on_unlock(
+    monkeypatch,
+) -> None:
+    """绕行结束只看当前统一绕行是否解锁."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    uart8.messages = []
+    runtime._transport_car.command_lock = False
+
+    runtime.step()
+
+    assert runtime._state_machine.state == STATE_IDLE
+    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n"]
 
 
 def test_master_forward_runtime_requests_assistant_object_after_orbit_finish_until_ack(
@@ -1027,7 +1035,6 @@ def test_master_forward_runtime_requests_assistant_object_after_orbit_finish_unt
     assert _reliable_messages(uart8) == []
 
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
     runtime.step()
     runtime.step()
 
@@ -1056,7 +1063,6 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     uart8._buffer = b"a,1\n"
     runtime.step()
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     uart8.messages = []
@@ -1110,7 +1116,6 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
 
     runtime._transport_car.command_lock = False
-    runtime._transport_car.rear_only_mode = False
     runtime.step()
 
     assert runtime._state_machine.state == STATE_IDLE
@@ -1137,7 +1142,6 @@ def test_master_forward_runtime_orbit_uses_unified_entry_with_target_and_radius(
     runtime.step()
 
     assert ("set_orbit_target", 145.0, 1.25) in events
-    assert ("set_rear_only_angle_target", 145.0) not in events
 
 
 def test_master_forward_runtime_applies_uart6_vision_velocity_to_local_chassis(monkeypatch) -> None:
