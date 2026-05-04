@@ -1,6 +1,6 @@
 # 主辅统一绕行模式实施计划
 
-> 执行状态: Draft  
+> 执行状态: Archive  
 > **给执行 Agent:** 必须使用 `superpowers:subagent-driven-development` 按任务执行。步骤使用 checkbox 追踪。中间 Task 不做单独 Review, 所有 Task 完成后只做一次总 Review。
 
 **目标:** 在共享底盘中新增一套统一绕行运动解算模式, 让主车和辅车都通过“目标角度 + 半径倍率”完成绕行, 保留旧 `rear only` 的角速度目标行为, 用半径倍率解出线速度, 并用这套模式替代旧 `rear only` 绕行用途, 同时保持主车流程前后行为不变。
@@ -13,7 +13,7 @@
 
 ## 关联 Spec
 
-- `docs/superpowers/specs/2026-05-04-unified-orbit-mode-spec.md`
+- `docs/superpowers/specs/archive/PR#70/2026-05-04-unified-orbit-mode-spec.md`
 
 ## 前置状态
 
