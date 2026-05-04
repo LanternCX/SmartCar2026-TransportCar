@@ -80,6 +80,32 @@ def _reliable_messages(uart):
 def _velocity_messages(uart):
     return [message for message in uart.messages if message.startswith("v,")]
 
+
+def _hook_sync_message(module, seq=1, context_id=1):
+    return "s,%d,%d,%d,1,%d\r\n" % (
+        int(seq),
+        int(context_id),
+        int(module.STATE_SEARCH_OBJECT),
+        int(module.MASTER_SEARCH_HOOK_CONFIG_ID),
+    )
+
+
+def _assistant_sync_message(seq, state, target, arg):
+    return "s,%d,%d,%d,%d\r\n" % (
+        int(seq),
+        int(state),
+        int(target),
+        int(arg),
+    )
+
+
+def _default_orbit_target_event(module):
+    return (
+        "set_orbit_target",
+        float(module.MASTER_ORBIT_TARGET_DEG),
+        float(module.MASTER_ORBIT_RADIUS_SCALE),
+    )
+
 def install_fake_transport_car(monkeypatch):
     """注入共享底盘最小桩对象."""
 
@@ -584,7 +610,7 @@ def test_master_forward_runtime_sends_uart6_hook_when_search_starts(monkeypatch)
 
     runtime.step()
 
-    assert uart6.messages == ["s,1,1,1,1,1\r\n"]
+    assert uart6.messages == [_hook_sync_message(forward_runtime_module)]
 
 
 def test_master_forward_runtime_stops_resending_uart6_hook_after_ack(monkeypatch) -> None:
@@ -602,7 +628,8 @@ def test_master_forward_runtime_stops_resending_uart6_hook_after_ack(monkeypatch
     runtime.step()
     runtime.step()
 
-    assert uart6.messages == ["s,1,1,1,1,1\r\n", "s,1,1,1,1,1\r\n"]
+    expected_message = _hook_sync_message(forward_runtime_module)
+    assert uart6.messages == [expected_message, expected_message]
 
 
 def test_master_forward_runtime_old_uart6_ack_does_not_cancel_unsent_new_hook(monkeypatch) -> None:
@@ -617,7 +644,7 @@ def test_master_forward_runtime_old_uart6_ack_does_not_cancel_unsent_new_hook(mo
 
     runtime.step()
 
-    assert uart6.messages == ["s,1,1,1,1,1\r\n"]
+    assert uart6.messages == [_hook_sync_message(forward_runtime_module)]
 
 
 def test_master_forward_runtime_old_uart6_event_before_hook_ack_does_not_start_orbit(monkeypatch) -> None:
@@ -632,7 +659,7 @@ def test_master_forward_runtime_old_uart6_event_before_hook_ack_does_not_start_o
 
     runtime.step()
 
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
 
 def test_master_forward_runtime_matching_uart6_target_found_acknowledges_and_starts_orbit(monkeypatch) -> None:
@@ -650,10 +677,10 @@ def test_master_forward_runtime_matching_uart6_target_found_acknowledges_and_sta
 
     assert "a,7\r\n" in uart6.messages
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
     uart8._buffer = b"a,1\n"
     runtime.step()
-    assert ("set_orbit_target", 90.0, 1.0) in events
+    assert _default_orbit_target_event(forward_runtime_module) in events
 
 
 def test_master_forward_runtime_target_found_before_hook_ack_starts_orbit_after_ack(monkeypatch) -> None:
@@ -671,18 +698,18 @@ def test_master_forward_runtime_target_found_before_hook_ack_starts_orbit_after_
 
     assert "a,7\r\n" in uart6.messages
     assert _reliable_messages(uart8) == []
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
     uart6._buffer = b"a,1\n"
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
     uart8._buffer = b"a,1\n"
     runtime.step()
 
-    assert ("set_orbit_target", 90.0, 1.0) in events
+    assert _default_orbit_target_event(forward_runtime_module) in events
 
 
 def test_master_forward_runtime_mismatched_uart6_target_found_only_acknowledges(monkeypatch) -> None:
@@ -700,7 +727,7 @@ def test_master_forward_runtime_mismatched_uart6_target_found_only_acknowledges(
 
     assert "a,7\r\n" in uart6.messages
     assert _reliable_messages(uart8) == []
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
 
 def test_master_forward_runtime_assistant_idle_sync_preempts_pending_generic_sync(monkeypatch) -> None:
@@ -718,7 +745,7 @@ def test_master_forward_runtime_assistant_idle_sync_preempts_pending_generic_syn
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,0,3,1,0\r\n", "s,1,0,0,0\r\n"]
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
 
 def test_master_forward_runtime_old_uart8_ack_does_not_cancel_unsent_assistant_idle_sync(monkeypatch) -> None:
@@ -736,7 +763,7 @@ def test_master_forward_runtime_old_uart8_ack_does_not_cancel_unsent_assistant_i
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
 
 def test_master_forward_runtime_assistant_sync_sequence_is_not_fixed_startup_constant(
@@ -845,7 +872,7 @@ def test_master_forward_runtime_assistant_object_sync_does_not_stop_assistant(mo
         "seq": 3,
         "state": 2,
         "target": 1,
-        "arg": 1,
+        "arg": forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
         "last_sent_ms": 60,
         "sent_once": True,
     }
@@ -1010,7 +1037,14 @@ def test_master_forward_runtime_orbit_finish_only_depends_on_unlock(
     runtime.step()
 
     assert runtime._state_machine.state == STATE_IDLE
-    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n"]
+    assert _reliable_messages(uart8) == [
+        _assistant_sync_message(
+            3,
+            2,
+            1,
+            forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+        )
+    ]
 
 
 def test_master_forward_runtime_requests_assistant_object_after_orbit_finish_until_ack(
@@ -1038,12 +1072,18 @@ def test_master_forward_runtime_requests_assistant_object_after_orbit_finish_unt
     runtime.step()
     runtime.step()
 
-    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n", "s,3,2,1,1\r\n"]
+    expected_message = _assistant_sync_message(
+        3,
+        2,
+        1,
+        forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+    )
+    assert _reliable_messages(uart8) == [expected_message, expected_message]
 
     uart8._buffer = b"a,3\n"
     runtime.step()
 
-    assert _reliable_messages(uart8) == ["s,3,2,1,1\r\n", "s,3,2,1,1\r\n"]
+    assert _reliable_messages(uart8) == [expected_message, expected_message]
     assert runtime.last_report is None
 
 
@@ -1073,7 +1113,7 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     assert "s,5,3,1,0\r\n" in _reliable_messages(uart8)
     assert runtime.last_report == {"type": "r", "seq": 11, "event": 6, "value": 300}
     assert runtime._state_machine.state == STATE_IDLE
-    assert events.count(("set_orbit_target", 90.0, 1.0)) == 1
+    assert events.count(_default_orbit_target_event(forward_runtime_module)) == 1
 
     runtime.step()
 
@@ -1103,13 +1143,13 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
-    assert ("set_orbit_target", 90.0, 1.0) not in events
+    assert _default_orbit_target_event(forward_runtime_module) not in events
 
     uart8._buffer = b"a,1\n"
     runtime.step()
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_ORBITING
-    assert ("set_orbit_target", 90.0, 1.0) in events
+    assert _default_orbit_target_event(forward_runtime_module) in events
 
     runtime.step()
 
@@ -1119,7 +1159,15 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
     runtime.step()
 
     assert runtime._state_machine.state == STATE_IDLE
-    assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n", "s,3,2,1,1\r\n"]
+    assert _reliable_messages(uart8) == [
+        "s,1,0,0,0\r\n",
+        _assistant_sync_message(
+            3,
+            2,
+            1,
+            forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+        ),
+    ]
 
 
 def test_master_forward_runtime_orbit_uses_unified_entry_with_target_and_radius(monkeypatch) -> None:

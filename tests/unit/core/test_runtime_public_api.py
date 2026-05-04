@@ -111,6 +111,30 @@ def test_orbit_radius_scale_params_exist_and_are_positive(param_name: str) -> No
     assert value > 0.0
 
 
+def test_runtime_config_params_stay_in_explicit_ranges() -> None:
+    """运行时配置中能从代码直接确定范围的参数保持在合法区间."""
+
+    assert int(real_params.TICK_MS) > 0
+    assert int(real_params.RELIABLE_PACKET_SEND_DELAY_MS) >= 0
+    assert int(real_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
+    assert 0 <= int(real_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
+    assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert 0 < float(real_params.MAX_DUTY) <= 10000.0
+    assert float(real_params.V_CMD_MAX) > 0.0
+    assert float(real_params.TARGET_SPEED_MAX) > 0.0
+    assert float(real_params.POS_MAX_SPEED) > 0.0
+    assert float(real_params.POS_TOLERANCE) >= 0.0
+    assert float(real_params.ANGLE_TOLERANCE) >= 0.0
+    assert set(real_params.ACTIVE_WHEELS).issubset({"m", "l", "r"})
+    assert 0.0 <= float(real_params.GYRO_LPF_ALPHA) <= 1.0
+    assert float(real_params.GYRO_SCALE) > 0.0
+    assert 0 <= int(real_params.GYRO_AXIS_Z) <= 5
+    assert float(real_params.YAW_I_MAX) >= 0.0
+    assert float(real_params.AUTO_OMEGA_MAX) >= 0.0
+    assert float(real_params.HOLD_SPEED_EPS) >= 0.0
+
+
 def test_transport_car_has_no_query_uart_public_api() -> None:
     """运行时对象不暴露通用查询回包串口入口."""
     _transport_car, car = make_minimal_transport_car(
