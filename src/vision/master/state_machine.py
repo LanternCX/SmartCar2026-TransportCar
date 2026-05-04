@@ -7,6 +7,8 @@ ASSISTANT_IDLE_SYNC_STATE = 0
 ASSISTANT_IDLE_SYNC_TARGET = 0
 ASSISTANT_OBJECT_SYNC_STATE = 2
 ASSISTANT_OBJECT_SYNC_TARGET = 1
+ASSISTANT_ORBIT_SYNC_STATE = 3
+ASSISTANT_ORBIT_SYNC_TARGET = 1
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -45,6 +47,7 @@ class MasterStateMachine:
         self._search_started = False
         self._waiting_assistant_idle_ack = False
         self._assistant_object_request_emitted = False
+        self._assistant_orbit_request_emitted = False
 
     def step(self, orbit_finished):
         """推进单拍状态机"""
@@ -66,6 +69,7 @@ class MasterStateMachine:
             if not self._assistant_object_request_emitted:
                 self._assistant_object_request_emitted = True
                 self._pending_assistant_request = {
+                    "kind": "assistant_object",
                     "state": ASSISTANT_OBJECT_SYNC_STATE,
                     "target": ASSISTANT_OBJECT_SYNC_TARGET,
                     "arg": self._assistant_object_arg,
@@ -85,6 +89,7 @@ class MasterStateMachine:
             return
         self._waiting_assistant_idle_ack = True
         self._pending_assistant_request = {
+            "kind": "assistant_idle",
             "state": ASSISTANT_IDLE_SYNC_STATE,
             "target": ASSISTANT_IDLE_SYNC_TARGET,
             "arg": 0,
@@ -99,6 +104,24 @@ class MasterStateMachine:
         self.state = STATE_ORBITING
         self._pending_orbit_command = {
             "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
+        }
+
+    def handle_assistant_target_found(self, value):
+        """消费辅车目标命中回报"""
+
+        _ = value
+        if self.state != STATE_IDLE:
+            return
+        if not self._assistant_object_request_emitted:
+            return
+        if self._assistant_orbit_request_emitted:
+            return
+        self._assistant_orbit_request_emitted = True
+        self._pending_assistant_request = {
+            "kind": "assistant_orbit",
+            "state": ASSISTANT_ORBIT_SYNC_STATE,
+            "target": ASSISTANT_ORBIT_SYNC_TARGET,
+            "arg": 0,
         }
 
     def poll_hook_request(self):

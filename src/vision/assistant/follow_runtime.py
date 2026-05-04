@@ -7,6 +7,7 @@ from config import params as _params
 from protocol.link import should_resend, write_reliable_line
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
+    ASSISTANT_STATE_ORBIT,
     AssistantStateMachine,
 )
 from vision.assistant.diagnostics import build_follow_snapshot
@@ -30,6 +31,8 @@ _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
     _params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
 )
 _MASTER_REPORT_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
+_ASSISTANT_ORBIT_TARGET_DEG = getattr(_params, "ASSISTANT_ORBIT_TARGET_DEG")
+_ASSISTANT_ORBIT_RADIUS_SCALE = getattr(_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 
 
 def _default_now_ms() -> int:
@@ -290,6 +293,8 @@ class AssistantFollowRuntime:
             )
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._enter_approach_object_state(packet)
+        elif self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            self._enter_orbit_state()
         return True
 
     def _handle_uart6_control_packet(self, line: str) -> bool:
@@ -342,6 +347,8 @@ class AssistantFollowRuntime:
 
         if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._write_approach_object_velocity()
+            return
+        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
             return
 
         uart6_velocity = self._inputs["uart6"]["velocity"]
@@ -398,6 +405,8 @@ class AssistantFollowRuntime:
         return velocity
 
     def _should_store_velocity(self, source: str) -> bool:
+        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            return False
         if self._state_machine.state != ASSISTANT_STATE_APPROACH_OBJECT:
             return True
         if source == "uart8":
@@ -442,6 +451,16 @@ class AssistantFollowRuntime:
             "sent_once": False,
         }
         self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
+
+    def _enter_orbit_state(self) -> None:
+        self._approach_target_found_done = False
+        self._pending_local_vision_sync = None
+        self._pending_target_found_report = None
+        self._clear_motion_inputs()
+        self._transport_car.set_orbit_target(
+            float(_ASSISTANT_ORBIT_TARGET_DEG),
+            float(_ASSISTANT_ORBIT_RADIUS_SCALE),
+        )
 
     def _handle_local_target_found(self, seq: int, value: int) -> None:
         self._approach_target_found_done = True

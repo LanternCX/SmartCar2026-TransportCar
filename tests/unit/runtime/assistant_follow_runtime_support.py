@@ -87,7 +87,10 @@ def install_fake_transport_car(monkeypatch):
                 "has_omega": False,
             }
             self.rear_only_mode = False
+            self.orbit_mode = False
+            self.orbit_radius_scale = 1.0
             self.command_lock = False
+            self.complete_orbit_on_next_step = False
             self.command_mode = "none"
             self._process_uart = self._original_process_uart
 
@@ -102,6 +105,12 @@ def install_fake_transport_car(monkeypatch):
             events.append(("set_ticker", ticker_obj))
 
         def step(self) -> bool:
+            if self.complete_orbit_on_next_step:
+                self.complete_orbit_on_next_step = False
+                self.command_lock = False
+                self.orbit_mode = False
+                self.command_mode = "none"
+                self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
             events.append("transport_step")
             return False
 
@@ -123,6 +132,20 @@ def install_fake_transport_car(monkeypatch):
                 self.control_state.pop("angle", None)
             self.command_lock = False
             self.command_mode = "none"
+
+        def set_orbit_target(self, target_angle_deg: float, radius_scale: float) -> None:
+            events.append(("set_orbit_target", float(target_angle_deg), float(radius_scale)))
+            self.control_state = {
+                "vx": 0.0,
+                "vy": 0.0,
+                "omega": 0.0,
+                "angle": float(target_angle_deg),
+            }
+            self.command_lock = True
+            self.command_mode = "locked"
+            self.rear_only_mode = False
+            self.orbit_mode = True
+            self.orbit_radius_scale = float(radius_scale)
 
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}
