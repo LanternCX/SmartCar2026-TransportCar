@@ -45,6 +45,7 @@ class MasterStateMachine:
         self._pending_assistant_request = None
         self._pending_orbit_command = None
         self._search_started = False
+        self._orbit_completed = False
         self._waiting_assistant_idle_ack = False
         self._assistant_object_request_emitted = False
         self._assistant_orbit_request_emitted = False
@@ -65,7 +66,8 @@ class MasterStateMachine:
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
-            self.state = STATE_IDLE
+            self.state = STATE_SEARCH_OBJECT
+            self._orbit_completed = True
             if not self._assistant_object_request_emitted:
                 self._assistant_object_request_emitted = True
                 self._pending_assistant_request = {
@@ -86,6 +88,8 @@ class MasterStateMachine:
         if int(context_id) != self._current_context_id:
             return
         if int(event) != EVENT_TARGET_FOUND:
+            return
+        if self._orbit_completed:
             return
         self._waiting_assistant_idle_ack = True
         self._pending_assistant_request = {
@@ -110,7 +114,7 @@ class MasterStateMachine:
         """消费辅车目标命中回报"""
 
         _ = value
-        if self.state != STATE_IDLE:
+        if self.state != STATE_SEARCH_OBJECT:
             return
         if not self._assistant_object_request_emitted:
             return

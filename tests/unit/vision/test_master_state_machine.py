@@ -132,6 +132,7 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
 
     machine.handle_assistant_target_found(value=300)
 
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert machine.poll_assistant_request() == {
         "kind": "assistant_orbit",
         "state": 3,
@@ -206,7 +207,7 @@ def test_master_state_machine_does_not_repeat_orbit_enter_action() -> None:
     assert machine.poll_orbit_command() is None
 
 
-def test_master_state_machine_returns_to_idle_when_orbit_finishes() -> None:
+def test_master_state_machine_returns_to_search_when_orbit_finishes() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         hook_arg=1,
@@ -223,7 +224,7 @@ def test_master_state_machine_returns_to_idle_when_orbit_finishes() -> None:
 
     machine.step(orbit_finished=True)
 
-    assert machine.state == MasterStateMachine.STATE_IDLE
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
 
 
 def test_master_state_machine_emits_assistant_object_request_once_after_orbit_finishes() -> None:
@@ -249,7 +250,7 @@ def test_master_state_machine_emits_assistant_object_request_once_after_orbit_fi
     machine.step(orbit_finished=True)
     assistant_request = machine.poll_assistant_request()
 
-    assert machine.state == MasterStateMachine.STATE_IDLE
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert assistant_request == {
         "kind": "assistant_object",
         "state": 2,
@@ -299,14 +300,13 @@ def test_master_state_machine_keeps_search_stop_orbit_and_assistant_object_order
     assert machine.poll_assistant_request() is None
 
     machine.step(orbit_finished=True)
-    assert machine.state == MasterStateMachine.STATE_IDLE
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert machine.poll_assistant_request() == {
         "kind": "assistant_object",
         "state": 2,
         "target": 1,
         "arg": 1,
     }
-
 
 def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once() -> None:
     MasterStateMachine = _load_master_state_machine()
@@ -327,18 +327,18 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
 
     machine.handle_assistant_target_found(value=300)
 
-    assert machine.state == MasterStateMachine.STATE_IDLE
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert machine.poll_assistant_request() == {
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
         "arg": 0,
     }
+    assert machine.poll_orbit_command() is None
 
     machine.handle_assistant_target_found(value=300)
 
     assert machine.poll_assistant_request() is None
-
 
 def test_master_state_machine_exposes_search_velocity_gate() -> None:
     MasterStateMachine = _load_master_state_machine()
@@ -355,6 +355,12 @@ def test_master_state_machine_exposes_search_velocity_gate() -> None:
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=300
     )
     assert machine.allows_search_velocity() is False
+    machine.poll_assistant_request()
+    machine.mark_assistant_idle_acknowledged()
+    machine.poll_orbit_command()
+    machine.step(orbit_finished=True)
+    machine.poll_assistant_request()
+    assert machine.allows_search_velocity() is True
 
 
 def test_master_state_machine_does_not_enter_orbiting_before_assistant_ack() -> None:

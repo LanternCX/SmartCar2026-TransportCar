@@ -63,7 +63,7 @@ s,<seq>,<state>,<target>,<arg>
 主车物体搜索闭环的状态流为：
 
 ```text
-IDLE -> SEARCH_OBJECT -> ORBITING -> IDLE
+IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
 ```
 
 ### `IDLE`
@@ -89,12 +89,14 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> IDLE
 - 主车确认该事件后, 由主车状态机判断是否发起辅车 idle 同步。
 - 主车等待辅车 idle ACK 期间保持 `SEARCH_OBJECT` 正式状态, 本车停止搜索运动。
 - 辅车 idle ACK 到达后, 主车进入 `ORBITING`。
+- 绕行完成后, 主车回到 `SEARCH_OBJECT` 持续对正目标。
+- 绕行后的 `SEARCH_OBJECT` 继续使用视觉速度, 不再发起新的绕行。
 - 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
 - 重复 `r` 包幂等处理，不重复迁移状态。
 
 ### `ORBITING`
 
-主车使用共享底盘统一绕行模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；主车只有在辅车 idle 同步被确认后进入该状态。绕行完成后回到 `IDLE`，并向辅车同步找物体子状态。
+主车使用共享底盘统一绕行模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；主车只有在辅车 idle 同步被确认后进入该状态。绕行完成后回到 `SEARCH_OBJECT`，并向辅车同步找物体子状态。
 
 ## 6. 主车全局状态编号
 
@@ -159,6 +161,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `0` | `ASSISTANT_IDLE` | 辅车停止线速度, 忽略速度输入, 保持已有朝向控制语义 |
 | `1` | `ASSISTANT_FOLLOW` | 辅车融合 `UART8` 前馈与 `UART6` 视觉修正 |
 | `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
+| `3` | `ASSISTANT_ORBIT` | 辅车使用统一绕行模式绕行后再继续本地对正 |
 
 辅车子状态目标编号：
 
@@ -171,6 +174,8 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `ASSISTANT_APPROACH_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和找物体配置编号。辅车进入该状态后清空两路运动输入，向辅车 OpenART 同步找物体任务；本地视觉确认同步后，辅车只使用本地 `UART6` 视觉速度向目标物体靠近，不叠加 `UART8` 速度前馈。辅车本地视觉回报 `TARGET_FOUND` 后，辅车写入零速度并通过 `UART8` 向主车可靠回报结果。
 
+`ASSISTANT_ORBIT` 使用 `ASSISTANT_TARGET_OBJECT` 和参数 `0`。辅车进入该状态后清空两路运动输入，并使用统一绕行模式执行一次绕行。绕行完成后，辅车本地恢复 `ASSISTANT_APPROACH_OBJECT` 的视觉对正语义，继续只使用本地 `UART6` 视觉速度对正目标，不再因为后续 `TARGET_FOUND` 再次上报或再次发起绕行。
+
 ## 11. 状态跳转原则
 
 - 主车接收事件后判断是否切换全局状态。
@@ -179,5 +184,6 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
+- 辅车在 `ASSISTANT_ORBIT` 中忽略速度短包；绕行完成后，本地回到持续对正目标的语义。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

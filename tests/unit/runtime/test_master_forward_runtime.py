@@ -937,6 +937,7 @@ def test_master_forward_runtime_assistant_orbit_sync_does_not_stop_assistant(mon
         "omega": 3.0,
         "has_omega": True,
     }
+    assert runtime.last_report == {"type": "r", "seq": 9, "event": 6, "value": 300}
 
 def test_master_forward_runtime_ignores_uart6_search_velocity_after_orbiting(monkeypatch) -> None:
     """进入绕行态后, 主车不再应用 UART6 搜索速度."""
@@ -996,8 +997,8 @@ def test_master_forward_runtime_ignores_uart3_velocity_during_orbiting(monkeypat
     assert runtime._transport_car.orbit_mode is True
 
 
-def test_master_forward_runtime_returns_idle_after_orbit_finishes(monkeypatch) -> None:
-    """绕行完成后, 主车状态机回到 IDLE."""
+def test_master_forward_runtime_returns_search_after_orbit_finishes(monkeypatch) -> None:
+    """绕行完成后, 主车重新进入对正态."""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1013,7 +1014,7 @@ def test_master_forward_runtime_returns_idle_after_orbit_finishes(monkeypatch) -
 
     runtime.step()
 
-    assert runtime._state_machine.state == STATE_IDLE
+    assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
 
 
 def test_master_forward_runtime_orbit_finish_only_depends_on_unlock(
@@ -1036,7 +1037,7 @@ def test_master_forward_runtime_orbit_finish_only_depends_on_unlock(
 
     runtime.step()
 
-    assert runtime._state_machine.state == STATE_IDLE
+    assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
     assert _reliable_messages(uart8) == [
         _assistant_sync_message(
             3,
@@ -1112,7 +1113,7 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     assert "a,11\r\n" in _reliable_messages(uart8)
     assert "s,5,3,1,0\r\n" in _reliable_messages(uart8)
     assert runtime.last_report == {"type": "r", "seq": 11, "event": 6, "value": 300}
-    assert runtime._state_machine.state == STATE_IDLE
+    assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
     assert events.count(_default_orbit_target_event(forward_runtime_module)) == 1
 
     runtime.step()
@@ -1158,7 +1159,7 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
     runtime._transport_car.command_lock = False
     runtime.step()
 
-    assert runtime._state_machine.state == STATE_IDLE
+    assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
     assert _reliable_messages(uart8) == [
         "s,1,0,0,0\r\n",
         _assistant_sync_message(
@@ -1168,6 +1169,37 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
             forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
         ),
     ]
+
+
+def test_master_forward_runtime_reapplies_uart6_search_velocity_after_orbit_finishes(
+    monkeypatch,
+) -> None:
+    """绕行完成后, 主车重新接受本车视觉对正速度."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    uart6._buffer = b"v,3.0,4.0\n"
+
+    runtime.step()
+
+    assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "uart6",
+        "vx": 3.0,
+        "vy": 4.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert ("handle_velocity", "uart6", 3.0, 4.0, 0.0) in events
 
 
 def test_master_forward_runtime_orbit_uses_unified_entry_with_target_and_radius(monkeypatch) -> None:

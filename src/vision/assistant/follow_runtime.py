@@ -8,6 +8,7 @@ from protocol.link import should_resend, write_reliable_line
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_ORBIT,
+    ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
 from vision.assistant.diagnostics import build_follow_snapshot
@@ -89,6 +90,8 @@ class AssistantFollowRuntime:
         self._pending_local_vision_sync = None
         self._pending_target_found_report = None
         self._approach_target_found_done = False
+        self._last_approach_arg = 0
+        self._post_orbit_realign_active = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -108,7 +111,12 @@ class AssistantFollowRuntime:
             self._run_role_cycle()
         except Exception as exc:
             self._record_error("role_cycle failed", exc)
-        return self._transport_car.step()
+        keep_running = self._transport_car.step()
+        try:
+            self._resume_approach_after_orbit()
+        except Exception as exc:
+            self._record_error("post_orbit failed", exc)
+        return keep_running
 
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
@@ -284,6 +292,7 @@ class AssistantFollowRuntime:
             self._pending_local_vision_sync = None
             self._pending_target_found_report = None
             self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
             self._transport_car.handle_velocity_packet(
                 0.0,
                 0.0,
@@ -292,8 +301,10 @@ class AssistantFollowRuntime:
                 has_omega=True,
             )
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            self._post_orbit_realign_active = False
             self._enter_approach_object_state(packet)
         elif self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            self._post_orbit_realign_active = False
             self._enter_orbit_state()
         return True
 
@@ -317,6 +328,7 @@ class AssistantFollowRuntime:
                 self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
                 and int(packet["event"]) == _TARGET_FOUND_EVENT
                 and not self._approach_target_found_done
+                and not self._post_orbit_realign_active
             ):
                 self._handle_local_target_found(packet["seq"], packet["value"])
             return True
@@ -438,6 +450,7 @@ class AssistantFollowRuntime:
         )
 
     def _enter_approach_object_state(self, packet: dict) -> None:
+        self._last_approach_arg = int(packet["arg"])
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._clear_motion_inputs()
@@ -473,6 +486,30 @@ class AssistantFollowRuntime:
             "last_sent_ms": None,
             "sent_once": False,
         }
+
+    def _resume_approach_after_orbit(self) -> None:
+        if self._state_machine.state != ASSISTANT_STATE_ORBIT:
+            return
+        if bool(getattr(self._transport_car, "command_lock", False)):
+            return
+        if self._post_orbit_realign_active:
+            return
+        if self._last_approach_arg <= 0:
+            return
+        self._state_machine.apply_master_state(
+            ASSISTANT_STATE_APPROACH_OBJECT,
+            ASSISTANT_TARGET_OBJECT,
+            self._last_approach_arg,
+        )
+        self._enter_approach_object_state(
+            {
+                "state": ASSISTANT_STATE_APPROACH_OBJECT,
+                "target": ASSISTANT_TARGET_OBJECT,
+                "arg": self._last_approach_arg,
+            }
+        )
+        self._post_orbit_realign_active = True
+        self._send_pending_local_vision_sync()
 
     def _send_pending_local_vision_sync(self) -> None:
         pending = self._pending_local_vision_sync

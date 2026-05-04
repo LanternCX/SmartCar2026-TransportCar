@@ -319,13 +319,13 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     assert runtime._transport_car.orbit_mode is True
 
 
-def test_assistant_follow_runtime_ignores_velocity_packets_while_orbiting_without_completion_report(
+def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report(
     monkeypatch,
 ) -> None:
-    """! @brief 辅车绕行期间屏蔽速度输入, 到位后本地停止且不回报完成"""
+    """! @brief 辅车绕行期间屏蔽速度输入, 到位后重新对正且不回报完成"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart8._buffer = b"s,12,3,1,0\n"
+    uart8._buffer = b"s,10,2,1,1\n"
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
@@ -333,32 +333,47 @@ def test_assistant_follow_runtime_ignores_velocity_packets_while_orbiting_withou
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
 
     runtime.step()
-    event_count = len(events)
-    uart8._buffer = b"v,1.0,2.0,0.5\n"
-    uart6._buffer = b"v,-0.25,0.5\n"
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nv,0.5,-0.25\nr,7,6,300\n" % local_sync_seq).encode()
+    runtime.step()
+    uart8._buffer = b"s,12,3,1,0\n"
 
     runtime.step()
 
-    assert not any(
-        event[0] == "handle_velocity" for event in events[event_count:]
-    )
+    event_count = len(events)
+    uart8._buffer = b"v,1.0,2.0,0.5\n"
+    uart6._buffer = b"v,-0.25,0.5\n"
+    runtime.step()
+
+    assert not any(event[0] == "handle_velocity" for event in events[event_count:])
     assert runtime._inputs["uart6"]["velocity"] is None
     assert runtime._inputs["uart8"]["velocity"] is None
     assert runtime._pending_local_vision_sync is None
     assert runtime._pending_target_found_report is None
     assert runtime._transport_car.command_lock is True
     assert runtime._transport_car.orbit_mode is True
-    assert uart8.messages == ["a,12\r\n"]
+    assert uart8.messages == ["a,10\r\n", "r,7,6,300\r\n", "a,12\r\n"]
 
     runtime._transport_car.complete_orbit_on_next_step = True
     runtime.step()
 
+    assert runtime._state_machine.state == 2
+    assert runtime._pending_local_vision_sync is not None
+    rearm_sync_seq = runtime._pending_local_vision_sync["seq"]
+    assert uart6.messages[-1] == "s,%d,2,1,1\r\n" % rearm_sync_seq
     assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+    uart6._buffer = ("a,%d\nv,-0.5,0.25\nr,9,6,300\n" % rearm_sync_seq).encode()
+    runtime.step()
+
+    assert ("handle_velocity", "assistant", -0.5, 0.25, 0.0) in events
+    assert runtime._transport_car.control_state == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
     assert runtime._transport_car.command_lock is False
     assert runtime._transport_car.orbit_mode is False
-    assert runtime._state_machine.state == 3
+    assert runtime._state_machine.state == 2
     assert runtime._pending_target_found_report is None
-    assert uart8.messages == ["a,12\r\n"]
+    assert uart6.messages[-1] == "a,9\r\n"
+    assert uart8.messages == ["a,10\r\n", "r,7,6,300\r\n", "a,12\r\n"]
 
 
 def test_assistant_follow_runtime_enters_idle_and_clears_velocity_inputs(monkeypatch) -> None:

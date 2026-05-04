@@ -73,7 +73,7 @@ OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 
 - `vx` 与 `vy` 是主车车体系平移速度。
 - 无有效目标或误差位于死区内时，对应速度轴输出 `0`。
 - 纵向速度按图像高度缩放后限幅，目标越接近图像底边，`vy` 绝对值越小。
-- `TARGET_FOUND` 的判断使用目标强度和误差稳定条件。
+- `TARGET_FOUND` 的判断使用目标强度和误差稳定条件，其中横向、纵向命中窗口与搜索速度停下时使用的死区保持一致。
 
 ### 主车输出规则
 
@@ -188,7 +188,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 
 ### 事件回报
 
-- 目标面积满足下限且横向、纵向误差连续稳定进入容差窗口后，OpenART 生成 `TARGET_FOUND` 事件。
+- 目标面积满足下限且横向、纵向误差连续稳定进入死区窗口后，OpenART 生成 `TARGET_FOUND` 事件。
 - 事件帧格式为 `r,<seq>,6,<value>`。
 - 未收到 `a,<seq>` 前，OpenART 按可靠重发间隔重复发送同一事件。
 
