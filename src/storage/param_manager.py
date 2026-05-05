@@ -4,6 +4,8 @@
 此模块提供从文件系统加载电机辨识参数和IMU零偏的功能,
 支持六轴零偏格式和单轴零偏格式
 """
+import io
+
 from control.pid_store import load_ident_params
 
 
@@ -41,7 +43,7 @@ def load_gyro_offsets(path, logger=None):
     """
     offsets = [0.0] * 6
     try:
-        with open(path, "r") as f:
+        with io.open(path, "r") as f:
             content = f.read().strip()
             parts = content.split(",")
             if len(parts) == 6:
@@ -56,3 +58,16 @@ def load_gyro_offsets(path, logger=None):
         if logger:
             logger("Gyro Offset file not found or invalid, using 0.0")
     return offsets
+
+
+def save_gyro_offsets(path, offsets):
+    """@brief 保存 IMU 六轴零偏
+
+    @param path 零偏文件路径
+    @param offsets 长度为 6 的零偏列表, 顺序为 [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
+    """
+    f = io.open(path, "w")
+    try:
+        f.write(",".join(["%.4f" % float(value) for value in offsets]))
+    finally:
+        f.close()
