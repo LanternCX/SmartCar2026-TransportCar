@@ -19,7 +19,6 @@ from vision.master.state_machine import (
     ASSISTANT_TRANSPORT_SYNC_TARGET,
     EVENT_ALIGNED,
     EVENT_TARGET_FOUND,
-    STATE_IDLE,
     STATE_ORBITING,
     STATE_SEARCH_OBJECT,
     STATE_TRANSPORT_OBJECT,
@@ -179,52 +178,6 @@ class MasterForwardRuntime:
             self._forward_current_chassis_velocity()
         self._send_pending_hook()
         self._send_pending_sync()
-        self._write_uart3_debug_state()
-
-
-    def _write_uart3_debug_state(self) -> None:
-        """向 UART3 输出主车状态诊断行"""
-
-        state = self._state_machine.state
-        if state == STATE_IDLE:
-            state_text = "IDLE"
-        elif state == STATE_SEARCH_OBJECT:
-            state_text = "SEARCH_OBJECT"
-        elif state == STATE_ORBITING:
-            state_text = "ORBITING"
-        elif state == STATE_TRANSPORT_OBJECT:
-            state_text = "TRANSPORT_OBJECT"
-        else:
-            state_text = str(state)
-        pending_hook = 1 if self._pending_hook is not None else 0
-        pending_event = 1 if self._pending_hook_event is not None else 0
-        waiting_assistant = 1 if self._state_machine.is_waiting_assistant_idle_ack() else 0
-        orbit = 1 if self._orbit_command_active else 0
-        active_ctx = self._active_hook_context_id
-        if active_ctx is None:
-            active_ctx = -1
-        context_id = -1
-        if self._pending_hook is not None:
-            context_id = int(self._pending_hook["context_id"])
-        elif self._active_hook_context_id is not None:
-            context_id = int(self._active_hook_context_id)
-        line = (
-            "dbg,state=%s,ctx=%d,active_ctx=%d,pending_hook=%d,pending_event=%d,wait_assistant=%d,orbit=%d,err=%s"
-            % (
-                state_text,
-                int(context_id),
-                int(active_ctx),
-                pending_hook,
-                pending_event,
-                waiting_assistant,
-                orbit,
-                self._last_error_text,
-            )
-        )
-        try:
-            self._transport_car.uart3.write("%s\r\n" % line)
-        except Exception:
-            self._record_error("uart3 debug write failed")
 
     def _process_uart3(self) -> None:
         """接管 UART3 按行读取并处理短包输入"""

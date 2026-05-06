@@ -43,6 +43,7 @@ YAW_KI = getattr(_params, "YAW_KI")
 YAW_KD = getattr(_params, "YAW_KD")
 YAW_I_MAX = getattr(_params, "YAW_I_MAX")
 AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
+ORBIT_AUTO_OMEGA_MAX = getattr(_params, "ORBIT_AUTO_OMEGA_MAX")
 HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
@@ -993,7 +994,10 @@ class TransportCar:
             self.heading_target = cmd_angle
             omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
-            omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
+            omega_limit = AUTO_OMEGA_MAX
+            if self.orbit_mode:
+                omega_limit = ORBIT_AUTO_OMEGA_MAX
+            omega_cmd = clamp(omega_auto, -omega_limit, omega_limit)
 
         elif omega_value is not None:
             omega_cmd = omega_value
