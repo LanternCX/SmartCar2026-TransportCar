@@ -162,6 +162,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `1` | `ASSISTANT_FOLLOW` | 辅车融合 `UART8` 前馈与 `UART6` 视觉修正 |
 | `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
 | `3` | `ASSISTANT_ORBIT` | 辅车使用统一绕行模式绕行后再继续本地对正 |
+| `4` | `ASSISTANT_TRANSPORT_OBJECT` | 辅车在搬运态融合缩放后的 `UART8` 前馈与本地视觉修正 |
 
 辅车子状态目标编号：
 
@@ -176,6 +177,8 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `ASSISTANT_ORBIT` 使用 `ASSISTANT_TARGET_OBJECT` 和参数 `0`。辅车进入该状态后清空两路运动输入，并使用统一绕行模式执行一次绕行。绕行完成后，辅车本地恢复 `ASSISTANT_APPROACH_OBJECT` 的视觉对正语义，继续只使用本地 `UART6` 视觉速度对正目标，不再因为后续 `TARGET_FOUND` 再次上报或再次发起绕行。
 
+`ASSISTANT_TRANSPORT_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和搬运配置编号。辅车进入该状态后清空上一阶段遗留的运动目标；搬运期间把 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 然后与本地 `UART6` 视觉修正叠加后写入共享底盘；`UART8` 的 `omega` 不作为搬运态旋转输入。
+
 ## 11. 状态跳转原则
 
 - 主车接收事件后判断是否切换全局状态。
@@ -185,5 +188,6 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
 - 辅车在 `ASSISTANT_ORBIT` 中忽略速度短包；绕行完成后，本地回到持续对正目标的语义。
+- 辅车在 `ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 搬运前馈先做头对头换向和系数缩放, 再叠加本地视觉修正。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

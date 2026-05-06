@@ -39,6 +39,9 @@ _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
     _params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
 )
+_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
+    _params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
+)
 
 
 def _default_now_ms() -> int:
@@ -423,8 +426,9 @@ class AssistantFollowRuntime:
         vx = 0.0
         vy = 0.0
         if uart8_velocity is not None:
-            vx += -float(uart8_velocity.get("vx", 0.0))
-            vy += -float(uart8_velocity.get("vy", 0.0))
+            scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+            vx += -float(uart8_velocity.get("vx", 0.0)) * scale
+            vy += -float(uart8_velocity.get("vy", 0.0)) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity.get("vx", 0.0))
             vy += float(uart6_velocity.get("vy", 0.0))

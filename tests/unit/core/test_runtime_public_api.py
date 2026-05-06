@@ -119,6 +119,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(real_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
     assert 0 <= int(real_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
+    assert 0.0 <= float(real_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
     assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
     assert 0 < float(real_params.MAX_DUTY) <= 10000.0
     assert float(real_params.V_CMD_MAX) > 0.0

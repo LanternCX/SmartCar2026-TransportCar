@@ -143,7 +143,7 @@
 - 负责按车号切换主车或辅车使用的视觉运行入口
 - `vehicle_role.py` 负责车号识别
 - `master/` 负责主车 `UART3` 上游控制接入、`UART8` 当前底盘速度转发、本车 `UART6` 主车视觉 hook 通信、主车视觉 `v` 搜索速度接入和主车搜索状态机调度
-- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止
+- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止；`ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE` 后与本车视觉修正叠加
 
 ## 核心控制流程
 

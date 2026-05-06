@@ -236,6 +236,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 - 辅车角色层在 `ASSISTANT_FOLLOW` 中对两路输入按统一速度向量理解：`UART8` 输入包形成前馈向量，`UART6` 输入包形成视觉向量；未出现的速度轴按 `0` 处理；两路都按最近一包持续生效；最终输出对 `vx / vy` 取两路逐轴裸相加结果，对 `omega` 只取 `UART8` 输入值。
 - 辅车角色层在 `ASSISTANT_IDLE` 中继续读取串口, 但速度短包不更新角色层速度缓存, 也不写入非零底盘速度。
 - 辅车角色层在 `ASSISTANT_APPROACH_OBJECT` 中向本地视觉同步找物体任务, 本地视觉确认后只使用 `UART6` 找物体速度。
+- 辅车角色层在 `ASSISTANT_TRANSPORT_OBJECT` 中把 `UART8` 视为搬运前馈来源, 先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 最后与 `UART6` 本地视觉修正叠加。
 - `UART8` 与 `UART6` 的速度短包解析复用同一份共享边界，空白、缺省轴和非法输入判定保持一致；具体字段归属以 [串口通信协议](protocol.md) 为准。
 - 视觉职责文档描述“看什么、如何形成控制输入、服务谁、用于什么切换”，不承载逐行实现细节。
 - 增加更多视觉设备、更多观测字段或更丰富的环境感知能力时，应在单独设计中明确职责分工与协议字段，再同步更新开发文档。

@@ -801,6 +801,35 @@ def test_assistant_follow_runtime_transport_sync_uses_mirrored_feedforward_with_
     }
 
 
+def test_assistant_follow_runtime_transport_sync_scales_uart8_feedforward(
+    monkeypatch,
+) -> None:
+    """! @brief 搬运态可按参数缩放 UART8 前馈后再叠加本车视觉修正"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,4,1,2\n"
+    uart6 = _FakeUart(["v,0.5,-0.25"])
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = 0.5
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    runtime.step()
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart8._buffer = b"v,2.0,3.0,0.7\n"
+    uart6._buffer = ("a,%d\nv,0.5,-0.25\n" % local_sync_seq).encode()
+    runtime.step()
+
+    assert ("handle_velocity", "assistant", -0.5, -1.75, 0.0) in events
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "assistant",
+        "vx": -0.5,
+        "vy": -1.75,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_assistant_follow_runtime_transport_sync_responds_with_only_uart8_feedforward(
     monkeypatch,
 ) -> None:
