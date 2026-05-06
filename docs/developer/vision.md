@@ -21,15 +21,15 @@
 - OpenART Vision master 通过本车 `UART6` 接收主车 RT1021 下发的 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>`，建立本次 hook 上下文。
 - OpenART Vision master 收到有效 `s` 包后发送 `a,<reliable_seq>`，重复 `s` 包按幂等规则处理并重新确认。
 - OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点横向误差和归一化底边纵向误差生成 `v,<vx>,<vy>` 搜索速度。
-- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 可靠回报 `TARGET_FOUND`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
+- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成，也负责辅车找目标物体阶段的红色目标识别、速度输出和可靠事件回报。
-- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 回报 `TARGET_FOUND`。
+- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。
 - `v/o` 数据流包不做发送前后延时，`s/a/r` 可靠包发送前后各使用固定 1 ms 短延时。
 
 ## OpenART 主车搜索算法
 
-OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文、搜索速度输出和 `TARGET_FOUND` 事件回报。主车搜索速度通过主车 `UART6` 发送给主车 RT1021，格式为 `v,<vx>,<vy>`。
+OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文、搜索速度输出和可靠事件回报。主车搜索速度通过主车 `UART6` 发送给主车 RT1021，格式为 `v,<vx>,<vy>`。
 
 ### 采集与预处理
 
@@ -74,6 +74,7 @@ OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 
 - 无有效目标或误差位于死区内时，对应速度轴输出 `0`。
 - 纵向速度按图像高度缩放后限幅，目标越接近图像底边，`vy` 绝对值越小。
 - `TARGET_FOUND` 的判断使用目标强度和误差稳定条件，其中横向、纵向命中窗口与搜索速度停下时使用的死区保持一致。
+- `arg=1` 对应寻找阶段, 稳定满足条件后回报 `TARGET_FOUND`; `arg=2` 对应搬运入口对正阶段, 稳定满足条件后回报 `ALIGNED`。
 
 ### 主车输出规则
 
@@ -188,8 +189,9 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 
 ### 事件回报
 
-- 目标面积满足下限且横向、纵向误差连续稳定进入死区窗口后，OpenART 生成 `TARGET_FOUND` 事件。
-- 事件帧格式为 `r,<seq>,6,<value>`。
+- 目标面积满足下限且横向、纵向误差连续稳定进入死区窗口后，OpenART 按配置生成可靠事件。
+- `arg=1` 对应寻找阶段, 事件帧格式为 `r,<seq>,6,<value>`。
+- `arg=2` 对应搬运入口对正阶段, 事件帧格式为 `r,<seq>,7,<value>`。
 - 未收到 `a,<seq>` 前，OpenART 按可靠重发间隔重复发送同一事件。
 
 ## 角色链路

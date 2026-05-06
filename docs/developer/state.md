@@ -58,12 +58,12 @@ s,<seq>,<state>,<target>,<arg>
 
 确认包 `a,<seq>` 只确认对应同步包已被辅车处理。该确认不携带主车视觉 `context_id`, 也不表示辅车主动回报业务状态。
 
-## 5. 主车物体搜索状态流
+## 5. 主车物体搜索与搬运入口状态流
 
-主车物体搜索闭环的状态流为：
+主车物体搜索与搬运入口闭环的状态流为：
 
 ```text
-IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
+IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT
 ```
 
 ### `IDLE`
@@ -81,7 +81,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
 - 主车状态机不计算视觉 P 环。
 - 主车平移速度来源为 OpenART Vision master 通过本车 `UART6` 发送的 `v,<vx>,<vy>`。
 - 主车状态机不显式接管 `omega`。
-- 主车视觉通过可靠 `r,<reliable_seq>,<context_id>,<event>,<value>` 回报 `TARGET_FOUND`。
+- 主车视觉通过可靠 `r,<reliable_seq>,<context_id>,<event>,<value>` 回报 `TARGET_FOUND` 或 `ALIGNED`。
 
 跳转条件：
 
@@ -89,14 +89,19 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
 - 主车确认该事件后, 由主车状态机判断是否发起辅车 idle 同步。
 - 主车等待辅车 idle ACK 期间保持 `SEARCH_OBJECT` 正式状态, 本车停止搜索运动。
 - 辅车 idle ACK 到达后, 主车进入 `ORBITING`。
-- 绕行完成后, 主车回到 `SEARCH_OBJECT` 持续对正目标。
-- 绕行后的 `SEARCH_OBJECT` 继续使用视觉速度, 不再发起新的绕行。
+- 绕行完成后, 主车回到 `SEARCH_OBJECT` 持续对正目标, 并向主车 OpenART 下发搬运入口 hook 配置。
+- 绕行后的 `SEARCH_OBJECT` 继续使用视觉速度, 不再发起新的绕行；主车收到本车 `ALIGNED` 且收到辅车 `ALIGNED` 后同步辅车搬运子状态。
+- 主车和辅车搬运入口同步都确认后, 主车进入 `TRANSPORT_OBJECT`。
 - 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
 - 重复 `r` 包幂等处理，不重复迁移状态。
 
 ### `ORBITING`
 
 主车使用共享底盘统一绕行模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；主车只有在辅车 idle 同步被确认后进入该状态。绕行完成后回到 `SEARCH_OBJECT`，并向辅车同步找物体子状态。
+
+### `TRANSPORT_OBJECT`
+
+主车执行最小直行搬运。主车在基础推进速度上叠加本车 `UART6` 视觉修正, 写入共享底盘并通过 `UART8` 转发给辅车作为搬运前馈；搬运态不使用视觉 `omega` 作为旋转输入。
 
 ## 6. 主车全局状态编号
 
@@ -106,6 +111,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
 | `1` | `SEARCH_OBJECT` | 主车使用 OpenART Vision master 下发的 `v,<vx>,<vy>` 搜索物体 |
 | `2` | `ORBITING` | 主车使用统一绕行模式绕到上电基准航向 `+90°` |
 | `3` | `STOP` | 停止状态机任务并输出停止量 |
+| `4` | `TRANSPORT_OBJECT` | 主车融合基础推进速度与本车视觉修正执行搬运 |
 
 ## 7. 主车目标编号
 
@@ -128,6 +134,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT
 | `SEARCH_OBJECT` | hook 配置编号 |
 | `ORBITING` | 固定为 `0` |
 | `STOP` | 固定为 `0` |
+| `TRANSPORT_OBJECT` | 固定为 `0` |
 
 ## 9. 主车事件编号
 
@@ -151,7 +158,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `7` | `ALIGNED` | 角度或位置调整完成 |
 | `8` | `ARRIVED` | 到位 |
 
-`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
+`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
 
 
 ## 10. 辅车子状态编号
@@ -184,6 +191,8 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 主车接收事件后判断是否切换全局状态。
 - 视觉端只提供速度控制量和事件，不维护全局状态。
 - 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
+- 主车在绕行后的 `SEARCH_OBJECT` 中等待本车和辅车都回报 `ALIGNED`, 双方搬运入口同步确认后进入 `TRANSPORT_OBJECT`。
+- 主车在 `TRANSPORT_OBJECT` 中融合基础推进速度与本车视觉修正, 并通过 `UART8` 向辅车转发当前底盘速度作为搬运前馈。
 - 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。

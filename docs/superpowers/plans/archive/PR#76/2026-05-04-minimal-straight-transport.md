@@ -1,6 +1,6 @@
 # 最小直行搬运态实施计划
 
-> 执行状态: Review
+> 执行状态: Archive
 >
 > 归档条件: 对应实现完成并通过验证后, 将本文件标记为 Archive。
 >
@@ -200,7 +200,7 @@
 - [ ] 检查新增搬运态只挂在既有状态机末端, 不改变前半段运行顺序。
 - [ ] 运行视觉仓库相关单元测试。
 - [ ] 检查视觉仓库没有重写图像识别算法。
-- [ ] 整理需要板端联调确认的观察点: 主车 `vy = 3`、辅车 `vy = -3`、两车视觉修正叠加、方向保持。
+- [ ] 整理需要板端联调确认的观察点: 主车 `TRANSPORT_FORWARD_SPEED`、辅车头对头换向与缩放、两车视觉修正叠加、方向保持。
 - [ ] 向用户汇报功能验证结果和板端待确认项。
 
 验证命令: `python3 -m pytest tests/unit tests/contract -q && cd ../SmartCar2026-Vision && python3 -m pytest tests/unit/test_master_hook_protocol.py tests/unit/test_assistant_object_approach.py -q`
