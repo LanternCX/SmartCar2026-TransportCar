@@ -59,7 +59,7 @@ OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文�
 - 横向误差来自识别框中心点 x 坐标相对画面目标点的像素偏差。
 - 纵向误差来自归一化底边相对画面目标点的像素偏差。
 - 主车搜索 P 环使用中心点 `x` 误差和归一化底边 `y` 误差生成 `vx / vy` 搜索速度。
-- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点由 `MASTER_SEARCH_TARGET_X_PX` 与 `MASTER_SEARCH_TARGET_Y_PX` 配置，默认按 QVGA `320x240` 使用 `x=160` 与 `y=240`。
+- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点按 hook 配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`。
 - 误差死区、比例系数和速度限幅由 OpenART Vision master 的搜索配置定义。
 
 ### 搜索速度输出
@@ -181,7 +181,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 
 - 横向误差来自目标中心点相对画面目标点的像素偏差。
 - 纵向误差来自目标底边相对画面目标点的像素偏差。
-- 找物体目标点由 `OBJECT_APPROACH_TARGET_X_PX` 与 `OBJECT_APPROACH_TARGET_Y_PX` 配置，默认按 QVGA `320x240` 使用 `x=160` 与 `y=240`。
+- 找物体目标点按同步配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`。
 - 无有效目标时输出配置的搜索速度。
 - 误差进入死区时对应速度轴输出 `0`。
 - 输出固定为 `v,<vx>,<vy>`，不输出 `omega`。
