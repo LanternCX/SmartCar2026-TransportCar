@@ -22,10 +22,12 @@ STATE_TRANSPORT_OBJECT = 4
 # 主车目标编号
 TARGET_NONE = 0
 TARGET_OBJECT = 1
+TARGET_EDGE_LINE = 3
 
 # 主车视觉事件编号
 EVENT_TARGET_FOUND = 6
 EVENT_ALIGNED = 7
+EVENT_ARRIVED = 8
 
 
 class MasterStateMachine:
@@ -39,6 +41,7 @@ class MasterStateMachine:
         assistant_object_arg=1,
         assistant_transport_arg=1,
         transport_hook_arg=2,
+        finish_hook_arg=3,
         initial_context_id=0,
     ):
         self.state = STATE_IDLE
@@ -48,6 +51,7 @@ class MasterStateMachine:
         self._assistant_object_arg = int(assistant_object_arg)
         self._assistant_transport_arg = int(assistant_transport_arg)
         self._transport_hook_arg = int(transport_hook_arg)
+        self._finish_hook_arg = int(finish_hook_arg)
         self._current_context_id = int(initial_context_id) % 256
         self._pending_hook_request = None
         self._pending_assistant_request = None
@@ -102,29 +106,39 @@ class MasterStateMachine:
         """消费视觉事件"""
 
         _ = value
-        if self.state != STATE_SEARCH_OBJECT:
-            return
-        if self._waiting_assistant_idle_ack:
-            return
         if int(context_id) != self._current_context_id:
             return
         event = int(event)
-        if event == EVENT_TARGET_FOUND:
-            if self._orbit_completed:
+        if self.state == STATE_SEARCH_OBJECT:
+            if self._waiting_assistant_idle_ack:
                 return
-            self._waiting_assistant_idle_ack = True
+            if event == EVENT_TARGET_FOUND:
+                if self._orbit_completed:
+                    return
+                self._waiting_assistant_idle_ack = True
+                self._pending_assistant_request = {
+                    "kind": "assistant_idle",
+                    "state": ASSISTANT_IDLE_SYNC_STATE,
+                    "target": ASSISTANT_IDLE_SYNC_TARGET,
+                    "arg": 0,
+                }
+                return
+            if event == EVENT_ALIGNED:
+                if not self._orbit_completed:
+                    return
+                self._master_aligned = True
+                self._try_enter_transport()
+            return
+        if self.state == STATE_TRANSPORT_OBJECT:
+            if event != EVENT_ARRIVED:
+                return
+            self.state = STATE_STOP
             self._pending_assistant_request = {
                 "kind": "assistant_idle",
                 "state": ASSISTANT_IDLE_SYNC_STATE,
                 "target": ASSISTANT_IDLE_SYNC_TARGET,
                 "arg": 0,
             }
-            return
-        if event == EVENT_ALIGNED:
-            if not self._orbit_completed:
-                return
-            self._master_aligned = True
-            self._try_enter_transport()
 
     def mark_assistant_idle_acknowledged(self):
         """标记辅车 idle 同步已确认"""
@@ -198,6 +212,14 @@ class MasterStateMachine:
             return
         self._transport_ready = True
         self.state = STATE_TRANSPORT_OBJECT
+        self._current_context_id = (self._current_context_id + 1) % 256
+        self._pending_hook_request = {
+            "kind": "finish_hook",
+            "context_id": self._current_context_id,
+            "state": STATE_TRANSPORT_OBJECT,
+            "target": TARGET_EDGE_LINE,
+            "arg": self._finish_hook_arg,
+        }
 
     def poll_hook_request(self):
         """取出一次性 hook 请求"""

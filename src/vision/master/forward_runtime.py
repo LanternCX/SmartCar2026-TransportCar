@@ -15,13 +15,18 @@ from protocol.packet import (
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
+    ASSISTANT_IDLE_SYNC_STATE,
+    ASSISTANT_IDLE_SYNC_TARGET,
     ASSISTANT_TRANSPORT_SYNC_STATE,
     ASSISTANT_TRANSPORT_SYNC_TARGET,
     EVENT_ALIGNED,
+    EVENT_ARRIVED,
     EVENT_TARGET_FOUND,
     STATE_ORBITING,
     STATE_SEARCH_OBJECT,
+    STATE_STOP,
     STATE_TRANSPORT_OBJECT,
+    TARGET_EDGE_LINE,
 )
 
 
@@ -32,6 +37,7 @@ MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
 ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID")
 MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
+MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
@@ -80,6 +86,8 @@ class MasterForwardRuntime:
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+            transport_hook_arg=MASTER_TRANSPORT_HOOK_CONFIG_ID,
+            finish_hook_arg=MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID,
             initial_context_id=seed_value,
         )
         self.last_report = None
@@ -277,6 +285,8 @@ class MasterForwardRuntime:
         if self._state_machine.state == STATE_ORBITING:
             return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            return
+        if self._state_machine.state == STATE_STOP:
             return
         if self._state_machine.is_waiting_assistant_idle_ack():
             return
@@ -519,6 +529,7 @@ class MasterForwardRuntime:
             self._rx_buf6 = ""
             self._transport_hook_acknowledged = False
             self._pending_hook = {
+                "kind": hook_request.get("kind"),
                 "reliable_seq": self._hook_seq,
                 "context_id": int(hook_request["context_id"]),
                 "state": int(hook_request["state"]),
@@ -532,12 +543,15 @@ class MasterForwardRuntime:
         if assistant_request is not None:
             request_kind = assistant_request.get("kind")
             if request_kind == "assistant_idle":
+                stop_source = "master_wait_assistant_idle"
+                if self._state_machine.state == STATE_STOP:
+                    stop_source = "master_transport_finish_stop"
                 self._latest_uart6_velocity = None
                 self._transport_car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
-                    source="master_wait_assistant_idle",
+                    source=stop_source,
                     has_omega=True,
                 )
             elif request_kind == "assistant_transport":
