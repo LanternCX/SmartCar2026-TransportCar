@@ -74,6 +74,22 @@ def test_assistant_state_machine_accepts_approach_object_command() -> None:
     assert machine.arg == 7
 
 
+def test_assistant_state_machine_accepts_transport_object_command() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+        module.ASSISTANT_TARGET_OBJECT,
+        9,
+    )
+
+    assert applied is True
+    assert machine.state == module.ASSISTANT_STATE_TRANSPORT_OBJECT
+    assert machine.target == module.ASSISTANT_TARGET_OBJECT
+    assert machine.arg == 9
+
+
 def test_assistant_state_machine_rejects_approach_object_with_non_object_target() -> None:
     module = _load_assistant_state_machine()
     machine = module.AssistantStateMachine()
@@ -82,6 +98,22 @@ def test_assistant_state_machine_rejects_approach_object_with_non_object_target(
         module.ASSISTANT_STATE_APPROACH_OBJECT,
         module.ASSISTANT_TARGET_NONE,
         7,
+    )
+
+    assert applied is False
+    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.target == module.ASSISTANT_TARGET_NONE
+    assert machine.arg == 0
+
+
+def test_assistant_state_machine_rejects_transport_object_with_non_object_target() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+        module.ASSISTANT_TARGET_NONE,
+        9,
     )
 
     assert applied is False

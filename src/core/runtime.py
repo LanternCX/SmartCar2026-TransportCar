@@ -43,6 +43,7 @@ YAW_KI = getattr(_params, "YAW_KI")
 YAW_KD = getattr(_params, "YAW_KD")
 YAW_I_MAX = getattr(_params, "YAW_I_MAX")
 AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
+ORBIT_AUTO_OMEGA_MAX = getattr(_params, "ORBIT_AUTO_OMEGA_MAX")
 HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
@@ -544,6 +545,22 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_heading_target(self, target_angle_deg):
+        """写入非绕行角度保持目标
+
+        @param target_angle_deg 绝对目标航向角, 单位度
+        """
+
+        self._clear_orbit_mode()
+        self.control_state["angle"] = float(target_angle_deg)
+        self.control_state["omega"] = 0.0
+        self.command_lock = True
+        self.heading_target = float(target_angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""
 
@@ -977,7 +994,10 @@ class TransportCar:
             self.heading_target = cmd_angle
             omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
-            omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
+            omega_limit = AUTO_OMEGA_MAX
+            if self.orbit_mode:
+                omega_limit = ORBIT_AUTO_OMEGA_MAX
+            omega_cmd = clamp(omega_auto, -omega_limit, omega_limit)
 
         elif omega_value is not None:
             omega_cmd = omega_value

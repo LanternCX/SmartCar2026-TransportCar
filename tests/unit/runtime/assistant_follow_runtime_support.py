@@ -145,6 +145,14 @@ def install_fake_transport_car(monkeypatch):
             self.orbit_mode = True
             self.orbit_radius_scale = float(radius_scale)
 
+        def set_heading_target(self, target_angle_deg: float) -> None:
+            events.append(("set_heading_target", float(target_angle_deg)))
+            self.control_state["omega"] = 0.0
+            self.control_state["angle"] = float(target_angle_deg)
+            self.command_lock = True
+            self.command_mode = "locked"
+            self.orbit_mode = False
+
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}
 

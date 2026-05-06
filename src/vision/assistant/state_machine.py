@@ -8,6 +8,7 @@ ASSISTANT_STATE_IDLE = 0
 ASSISTANT_STATE_FOLLOW = 1
 ASSISTANT_STATE_APPROACH_OBJECT = 2
 ASSISTANT_STATE_ORBIT = 3
+ASSISTANT_STATE_TRANSPORT_OBJECT = 4
 
 # 辅车目标编号
 ASSISTANT_TARGET_NONE = 0
@@ -38,10 +39,15 @@ class AssistantStateMachine:
             and state != ASSISTANT_STATE_FOLLOW
             and state != ASSISTANT_STATE_APPROACH_OBJECT
             and state != ASSISTANT_STATE_ORBIT
+            and state != ASSISTANT_STATE_TRANSPORT_OBJECT
         ):
             return False
         if (
-            (state == ASSISTANT_STATE_APPROACH_OBJECT or state == ASSISTANT_STATE_ORBIT)
+            (
+                state == ASSISTANT_STATE_APPROACH_OBJECT
+                or state == ASSISTANT_STATE_ORBIT
+                or state == ASSISTANT_STATE_TRANSPORT_OBJECT
+            )
             and target != ASSISTANT_TARGET_OBJECT
         ):
             return False

@@ -21,15 +21,15 @@
 - OpenART Vision master 通过本车 `UART6` 接收主车 RT1021 下发的 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>`，建立本次 hook 上下文。
 - OpenART Vision master 收到有效 `s` 包后发送 `a,<reliable_seq>`，重复 `s` 包按幂等规则处理并重新确认。
 - OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点横向误差和归一化底边纵向误差生成 `v,<vx>,<vy>` 搜索速度。
-- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 可靠回报 `TARGET_FOUND`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
+- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成，也负责辅车找目标物体阶段的红色目标识别、速度输出和可靠事件回报。
-- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 回报 `TARGET_FOUND`。
+- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。
 - `v/o` 数据流包不做发送前后延时，`s/a/r` 可靠包发送前后各使用固定 1 ms 短延时。
 
 ## OpenART 主车搜索算法
 
-OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文、搜索速度输出和 `TARGET_FOUND` 事件回报。主车搜索速度通过主车 `UART6` 发送给主车 RT1021，格式为 `v,<vx>,<vy>`。
+OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文、搜索速度输出和可靠事件回报。主车搜索速度通过主车 `UART6` 发送给主车 RT1021，格式为 `v,<vx>,<vy>`。
 
 ### 采集与预处理
 
@@ -59,7 +59,7 @@ OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文�
 - 横向误差来自识别框中心点 x 坐标相对画面目标点的像素偏差。
 - 纵向误差来自归一化底边相对画面目标点的像素偏差。
 - 主车搜索 P 环使用中心点 `x` 误差和归一化底边 `y` 误差生成 `vx / vy` 搜索速度。
-- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点由 `MASTER_SEARCH_TARGET_X_PX` 与 `MASTER_SEARCH_TARGET_Y_PX` 配置，默认按 QVGA `320x240` 使用 `x=160` 与 `y=240`。
+- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点按 hook 配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`。
 - 误差死区、比例系数和速度限幅由 OpenART Vision master 的搜索配置定义。
 
 ### 搜索速度输出
@@ -74,6 +74,7 @@ OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 
 - 无有效目标或误差位于死区内时，对应速度轴输出 `0`。
 - 纵向速度按图像高度缩放后限幅，目标越接近图像底边，`vy` 绝对值越小。
 - `TARGET_FOUND` 的判断使用目标强度和误差稳定条件，其中横向、纵向命中窗口与搜索速度停下时使用的死区保持一致。
+- `arg=1` 对应寻找阶段, 稳定满足条件后回报 `TARGET_FOUND`; `arg=2` 对应搬运入口对正阶段, 稳定满足条件后回报 `ALIGNED`。
 
 ### 主车输出规则
 
@@ -181,15 +182,16 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 
 - 横向误差来自目标中心点相对画面目标点的像素偏差。
 - 纵向误差来自目标底边相对画面目标点的像素偏差。
-- 找物体目标点由 `OBJECT_APPROACH_TARGET_X_PX` 与 `OBJECT_APPROACH_TARGET_Y_PX` 配置，默认按 QVGA `320x240` 使用 `x=160` 与 `y=240`。
+- 找物体目标点按同步配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`。
 - 无有效目标时输出配置的搜索速度。
 - 误差进入死区时对应速度轴输出 `0`。
 - 输出固定为 `v,<vx>,<vy>`，不输出 `omega`。
 
 ### 事件回报
 
-- 目标面积满足下限且横向、纵向误差连续稳定进入死区窗口后，OpenART 生成 `TARGET_FOUND` 事件。
-- 事件帧格式为 `r,<seq>,6,<value>`。
+- 目标面积满足下限且横向、纵向误差连续稳定进入死区窗口后，OpenART 按配置生成可靠事件。
+- `arg=1` 对应寻找阶段, 事件帧格式为 `r,<seq>,6,<value>`。
+- `arg=2` 对应搬运入口对正阶段, 事件帧格式为 `r,<seq>,7,<value>`。
 - 未收到 `a,<seq>` 前，OpenART 按可靠重发间隔重复发送同一事件。
 
 ## 角色链路
@@ -236,6 +238,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 - 辅车角色层在 `ASSISTANT_FOLLOW` 中对两路输入按统一速度向量理解：`UART8` 输入包形成前馈向量，`UART6` 输入包形成视觉向量；未出现的速度轴按 `0` 处理；两路都按最近一包持续生效；最终输出对 `vx / vy` 取两路逐轴裸相加结果，对 `omega` 只取 `UART8` 输入值。
 - 辅车角色层在 `ASSISTANT_IDLE` 中继续读取串口, 但速度短包不更新角色层速度缓存, 也不写入非零底盘速度。
 - 辅车角色层在 `ASSISTANT_APPROACH_OBJECT` 中向本地视觉同步找物体任务, 本地视觉确认后只使用 `UART6` 找物体速度。
+- 辅车角色层在 `ASSISTANT_TRANSPORT_OBJECT` 中把 `UART8` 视为搬运前馈来源, 先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 最后与 `UART6` 本地视觉修正叠加。
 - `UART8` 与 `UART6` 的速度短包解析复用同一份共享边界，空白、缺省轴和非法输入判定保持一致；具体字段归属以 [串口通信协议](protocol.md) 为准。
 - 视觉职责文档描述“看什么、如何形成控制输入、服务谁、用于什么切换”，不承载逐行实现细节。
 - 增加更多视觉设备、更多观测字段或更丰富的环境感知能力时，应在单独设计中明确职责分工与协议字段，再同步更新开发文档。

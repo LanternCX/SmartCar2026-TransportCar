@@ -18,14 +18,22 @@ RELIABLE_RESEND_INTERVAL_MS = 20
 MASTER_SEARCH_HOOK_CONFIG_ID = 1
 # 辅车找物体阶段使用的视觉配置编号
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = 1
+# 主车搬运阶段使用的视觉配置编号
+MASTER_TRANSPORT_HOOK_CONFIG_ID = 2
+# 辅车搬运阶段使用的视觉配置编号
+ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = 2
+# 辅车搬运态对主车 UART8 前馈的缩放系数, 范围 0.0 ~ 1.0
+ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = 0.8
+# 最小直行搬运基础速度
+TRANSPORT_FORWARD_SPEED = 5.0
 # 主车绕行的绝对目标角度增量, 单位度
 MASTER_ORBIT_TARGET_DEG = 90
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-MASTER_ORBIT_RADIUS_SCALE = 1.0
+MASTER_ORBIT_RADIUS_SCALE = 1.50
 # 辅车绕行的绝对目标角度, 单位度
 ASSISTANT_ORBIT_TARGET_DEG = -90
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-ASSISTANT_ORBIT_RADIUS_SCALE = 1.2
+ASSISTANT_ORBIT_RADIUS_SCALE = 1.80
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒
 ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = 20
 # ===== 电机与 PWM =====
@@ -72,6 +80,8 @@ YAW_KD = 0.008
 YAW_I_MAX = 100.0
 # 自动回正最大角速度, 对应轮速分量, 决定回正时的最大回转速度
 AUTO_OMEGA_MAX = 15.0
+# 绕行阶段最大角速度, 对应轮速分量, 只限制绕行时的回转速度
+ORBIT_AUTO_OMEGA_MAX = 1.5
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
 
