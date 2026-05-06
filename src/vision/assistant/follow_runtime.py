@@ -438,6 +438,11 @@ class AssistantFollowRuntime:
             source="assistant",
             has_omega=has_omega,
         )
+        if (
+            self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
+            and self._post_orbit_realign_active
+        ):
+            self._transport_car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
 
     @staticmethod
     def _normalize_input_velocity(source: str, parsed: dict) -> dict:

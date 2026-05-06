@@ -544,6 +544,22 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_heading_target(self, target_angle_deg):
+        """写入非绕行角度保持目标
+
+        @param target_angle_deg 绝对目标航向角, 单位度
+        """
+
+        self._clear_orbit_mode()
+        self.control_state["angle"] = float(target_angle_deg)
+        self.control_state["omega"] = 0.0
+        self.command_lock = True
+        self.heading_target = float(target_angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""
 

@@ -430,6 +430,14 @@ class MasterForwardRuntime:
         packet = self._latest_uart6_velocity
         if packet is not None:
             self._apply_velocity_packet(packet, source="uart6", force_no_omega=True)
+            if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
+                self._state_machine, "_orbit_completed", False
+            ):
+                target_heading_deg = (
+                    float(self._state_machine._boot_heading_deg)
+                    + float(MASTER_ORBIT_TARGET_DEG)
+                )
+                self._transport_car.set_heading_target(target_heading_deg)
 
     def _apply_transport_velocity(self) -> None:
         packet = self._latest_uart6_velocity
