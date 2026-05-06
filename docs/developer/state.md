@@ -60,10 +60,10 @@ s,<seq>,<state>,<target>,<arg>
 
 ## 5. 主车物体搜索与搬运入口状态流
 
-主车物体搜索与搬运入口闭环的状态流为：
+主车物体搜索与搬运闭环的状态流为：
 
 ```text
-IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT
+IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT -> CLEAR_OBJECT -> STOP
 ```
 
 ### `IDLE`
@@ -103,6 +103,10 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT
 
 主车执行最小直行搬运。主车在基础推进速度上叠加本车 `UART6` 视觉修正, 写入共享底盘并通过 `UART8` 转发给辅车作为搬运前馈；搬运态不使用视觉 `omega` 作为旋转输入。
 
+### `CLEAR_OBJECT`
+
+主车在搬运结束后执行侧向脱离。主车先同步辅车进入脱离子状态，等待辅车确认后，按自身车体系 `X` 正方向执行固定步长平移；辅车按自身车体系 `X` 负方向执行同一固定步长平移。主车等待本车和辅车都完成脱离后，再同步辅车 idle 并进入 `STOP`。
+
 ## 6. 主车全局状态编号
 
 | `state` | 名称 | 含义 |
@@ -112,6 +116,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT
 | `2` | `ORBITING` | 主车使用统一绕行模式绕到上电基准航向 `+90°` |
 | `3` | `STOP` | 停止状态机任务并输出停止量 |
 | `4` | `TRANSPORT_OBJECT` | 主车融合基础推进速度与本车视觉修正执行搬运 |
+| `5` | `CLEAR_OBJECT` | 主车在搬运结束后执行侧向脱离并等待辅车完成 |
 
 ## 7. 主车目标编号
 
@@ -135,6 +140,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT
 | `ORBITING` | 固定为 `0` |
 | `STOP` | 固定为 `0` |
 | `TRANSPORT_OBJECT` | 固定为 `0` |
+| `CLEAR_OBJECT` | 固定为 `0` |
 
 ## 9. 主车事件编号
 
@@ -157,8 +163,9 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `6` | `TARGET_FOUND` | 目标发现 |
 | `7` | `ALIGNED` | 角度或位置调整完成 |
 | `8` | `ARRIVED` | 到位 |
+| `9` | `CLEARED` | 搬运结束后的侧向脱离完成 |
 
-`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
+`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`ARRIVED` 表示主车搬运结束判据满足。`CLEARED` 表示搬运结束后的侧向脱离完成。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
 
 
 ## 10. 辅车子状态编号
@@ -170,6 +177,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
 | `3` | `ASSISTANT_ORBIT` | 辅车使用统一绕行模式绕行后再继续本地对正 |
 | `4` | `ASSISTANT_TRANSPORT_OBJECT` | 辅车在搬运态融合缩放后的 `UART8` 前馈与本地视觉修正 |
+| `5` | `ASSISTANT_CLEAR_OBJECT` | 辅车在搬运结束后按自身车体系 `X` 负方向执行固定步长平移 |
 
 辅车子状态目标编号：
 
@@ -186,6 +194,8 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `ASSISTANT_TRANSPORT_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和搬运配置编号。辅车进入该状态后清空上一阶段遗留的运动目标；搬运期间把 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 然后与本地 `UART6` 视觉修正叠加后写入共享底盘；`UART8` 的 `omega` 不作为搬运态旋转输入。
 
+`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和参数 `0`。辅车进入该状态后清空两路运动输入，并按自身车体系 `X` 负方向执行固定步长平移；平移完成后，通过 `UART8` 可靠回报 `CLEARED`。
+
 ## 11. 状态跳转原则
 
 - 主车接收事件后判断是否切换全局状态。
@@ -193,10 +203,12 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
 - 主车在绕行后的 `SEARCH_OBJECT` 中等待本车和辅车都回报 `ALIGNED`, 双方搬运入口同步确认后进入 `TRANSPORT_OBJECT`。
 - 主车在 `TRANSPORT_OBJECT` 中融合基础推进速度与本车视觉修正, 并通过 `UART8` 向辅车转发当前底盘速度作为搬运前馈。
+- 主车在 `CLEAR_OBJECT` 中等待本车与辅车都完成侧向脱离, 然后同步辅车 idle 并进入 `STOP`。
 - 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
 - 辅车在 `ASSISTANT_ORBIT` 中忽略速度短包；绕行完成后，本地回到持续对正目标的语义。
 - 辅车在 `ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 搬运前馈先做头对头换向和系数缩放, 再叠加本地视觉修正。
+- 辅车在 `ASSISTANT_CLEAR_OBJECT` 中忽略速度短包, 只执行固定步长的侧向脱离并回报 `CLEARED`。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

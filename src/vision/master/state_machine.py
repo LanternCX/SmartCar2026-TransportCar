@@ -11,6 +11,8 @@ ASSISTANT_ORBIT_SYNC_STATE = 3
 ASSISTANT_ORBIT_SYNC_TARGET = 1
 ASSISTANT_TRANSPORT_SYNC_STATE = 4
 ASSISTANT_TRANSPORT_SYNC_TARGET = 1
+ASSISTANT_CLEAR_SYNC_STATE = 5
+ASSISTANT_CLEAR_SYNC_TARGET = 1
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -18,6 +20,7 @@ STATE_SEARCH_OBJECT = 1
 STATE_ORBITING = 2
 STATE_STOP = 3
 STATE_TRANSPORT_OBJECT = 4
+STATE_CLEAR_OBJECT = 5
 
 # 主车目标编号
 TARGET_NONE = 0
@@ -28,6 +31,7 @@ TARGET_EDGE_LINE = 3
 EVENT_TARGET_FOUND = 6
 EVENT_ALIGNED = 7
 EVENT_ARRIVED = 8
+EVENT_CLEARED = 9
 
 
 class MasterStateMachine:
@@ -65,6 +69,8 @@ class MasterStateMachine:
         self._master_aligned = False
         self._assistant_aligned = False
         self._transport_ready = False
+        self._master_cleared = False
+        self._assistant_cleared = False
 
     def step(self, orbit_finished):
         """推进单拍状态机"""
@@ -132,13 +138,18 @@ class MasterStateMachine:
         if self.state == STATE_TRANSPORT_OBJECT:
             if event != EVENT_ARRIVED:
                 return
-            self.state = STATE_STOP
+            self.state = STATE_CLEAR_OBJECT
+            self._master_cleared = False
+            self._assistant_cleared = False
             self._pending_assistant_request = {
-                "kind": "assistant_idle",
-                "state": ASSISTANT_IDLE_SYNC_STATE,
-                "target": ASSISTANT_IDLE_SYNC_TARGET,
+                "kind": "assistant_clear",
+                "state": ASSISTANT_CLEAR_SYNC_STATE,
+                "target": ASSISTANT_CLEAR_SYNC_TARGET,
                 "arg": 0,
             }
+            return
+        if self.state == STATE_CLEAR_OBJECT:
+            return
 
     def mark_assistant_idle_acknowledged(self):
         """标记辅车 idle 同步已确认"""
@@ -219,6 +230,38 @@ class MasterStateMachine:
             "state": STATE_TRANSPORT_OBJECT,
             "target": TARGET_EDGE_LINE,
             "arg": self._finish_hook_arg,
+        }
+
+    def mark_master_cleared(self):
+        """标记主车已完成搬运后的侧向脱离"""
+
+        if self.state != STATE_CLEAR_OBJECT:
+            return
+        self._master_cleared = True
+        self._try_finish_clear()
+
+    def handle_assistant_cleared(self, value):
+        """消费辅车搬运后脱离完成回报"""
+
+        _ = value
+        if self.state != STATE_CLEAR_OBJECT:
+            return
+        self._assistant_cleared = True
+        self._try_finish_clear()
+
+    def _try_finish_clear(self):
+        """在主辅都完成侧向脱离后进入停止态"""
+
+        if self.state != STATE_CLEAR_OBJECT:
+            return
+        if not self._master_cleared or not self._assistant_cleared:
+            return
+        self.state = STATE_STOP
+        self._pending_assistant_request = {
+            "kind": "assistant_idle",
+            "state": ASSISTANT_IDLE_SYNC_STATE,
+            "target": ASSISTANT_IDLE_SYNC_TARGET,
+            "arg": 0,
         }
 
     def poll_hook_request(self):

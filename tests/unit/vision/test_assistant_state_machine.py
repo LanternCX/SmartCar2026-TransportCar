@@ -30,6 +30,7 @@ def test_assistant_state_constants_are_owned_by_vision_layer() -> None:
     assert module.ASSISTANT_STATE_IDLE == 0
     assert module.ASSISTANT_STATE_FOLLOW == 1
     assert module.ASSISTANT_STATE_APPROACH_OBJECT == 2
+    assert module.ASSISTANT_STATE_CLEAR_OBJECT == 5
     assert module.ASSISTANT_TARGET_NONE == 0
     assert module.ASSISTANT_TARGET_OBJECT == 1
 
@@ -88,6 +89,22 @@ def test_assistant_state_machine_accepts_transport_object_command() -> None:
     assert machine.state == module.ASSISTANT_STATE_TRANSPORT_OBJECT
     assert machine.target == module.ASSISTANT_TARGET_OBJECT
     assert machine.arg == 9
+
+
+def test_assistant_state_machine_accepts_clear_object_command() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_CLEAR_OBJECT,
+        module.ASSISTANT_TARGET_OBJECT,
+        0,
+    )
+
+    assert applied is True
+    assert machine.state == module.ASSISTANT_STATE_CLEAR_OBJECT
+    assert machine.target == module.ASSISTANT_TARGET_OBJECT
+    assert machine.arg == 0
 
 
 def test_assistant_state_machine_rejects_approach_object_with_non_object_target() -> None:

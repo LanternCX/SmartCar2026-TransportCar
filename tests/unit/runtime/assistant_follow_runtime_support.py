@@ -153,6 +153,20 @@ def install_fake_transport_car(monkeypatch):
             self.command_mode = "locked"
             self.orbit_mode = False
 
+        def set_relative_translation_target(self, dx: float, dy: float) -> None:
+            events.append(("set_relative_translation_target", float(dx), float(dy)))
+            self.control_state = {
+                "vx": 0.0,
+                "vy": 0.0,
+                "omega": 0.0,
+                "angle": 0.0,
+                "x": float(dx),
+                "y": float(dy),
+            }
+            self.command_lock = True
+            self.command_mode = "locked"
+            self.orbit_mode = False
+
         def build_health_snapshot(self) -> dict:
             return {"alive": 1, "last_err": "none"}
 

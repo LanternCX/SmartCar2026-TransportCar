@@ -791,7 +791,14 @@ def test_assistant_follow_runtime_transport_sync_uses_mirrored_feedforward_with_
     uart6._buffer = ("a,%d\nv,0.5,-0.25\n" % local_sync_seq).encode()
     runtime.step()
 
-    assert ("handle_velocity", "assistant", -1.5, -3.25, 0.0) in events
+    scale = float(follow_runtime_module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+    assert (
+        "handle_velocity",
+        "assistant",
+        0.5 - 2.0 * scale,
+        -0.25 - 3.0 * scale,
+        0.0,
+    ) in events
     assert runtime._transport_car.last_chassis_target == {
         "source": "assistant",
         "vx": -1.5,
@@ -846,8 +853,13 @@ def test_assistant_follow_runtime_transport_sync_responds_with_only_uart8_feedfo
     uart8._buffer = b"v,2.0,3.0,0.7\n"
     runtime.step()
 
-    assert ("handle_velocity", "assistant", -2.0, -3.0, 0.0) in events
-    assert runtime._transport_car.control_state == {"vx": -2.0, "vy": -3.0, "omega": 0.0}
+    scale = float(follow_runtime_module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+    assert ("handle_velocity", "assistant", -2.0 * scale, -3.0 * scale, 0.0) in events
+    assert runtime._transport_car.control_state == {
+        "vx": -2.0 * scale,
+        "vy": -3.0 * scale,
+        "omega": 0.0,
+    }
 
 
 def test_assistant_follow_runtime_transport_sync_responds_with_only_uart6_vision(
@@ -921,6 +933,50 @@ def test_assistant_follow_runtime_transport_sync_clears_previous_motion_immediat
     assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
 
 
+def test_assistant_follow_runtime_clear_sync_starts_outward_side_step(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车收到脱离同步后按自身 X 负方向横移一步"""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,5,1,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    runtime.step()
+
+    assert runtime._state_machine.state == follow_runtime_module.ASSISTANT_STATE_CLEAR_OBJECT
+    assert (
+        "set_relative_translation_target",
+        -float(follow_runtime_module._TRANSPORT_CLEAR_STEP_DISTANCE_M),
+        0.0,
+    ) in events
+    assert "a,12\r\n" in uart8.messages
+
+
+def test_assistant_follow_runtime_clear_completion_reports_cleared(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车横移完成后向主车可靠回报脱离完成"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    clock = FakeClock(100)
+    uart8._buffer = b"s,12,5,1,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=clock)
+    runtime.step()
+    runtime._transport_car.command_lock = False
+
+    runtime.step()
+
+    assert uart8.messages[-1] == "r,100,9,0\r\n"
+
+
 def test_assistant_follow_runtime_transport_sync_ignores_uart8_omega(
     monkeypatch,
 ) -> None:
@@ -937,7 +993,8 @@ def test_assistant_follow_runtime_transport_sync_ignores_uart8_omega(
     uart8._buffer = b"v,2.0,3.0,0.7\n"
     runtime.step()
 
-    assert ("handle_velocity", "assistant", -2.0, -3.0, 0.0) in events
+    scale = float(follow_runtime_module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+    assert ("handle_velocity", "assistant", -2.0 * scale, -3.0 * scale, 0.0) in events
     assert runtime._transport_car.last_chassis_target == {
         "source": "assistant",
         "vx": -2.0,

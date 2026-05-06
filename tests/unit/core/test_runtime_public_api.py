@@ -121,6 +121,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0.0 <= float(real_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
     assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert float(real_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) > 0.0
     assert 0 < float(real_params.MAX_DUTY) <= 10000.0
     assert float(real_params.V_CMD_MAX) > 0.0
     assert float(real_params.TARGET_SPEED_MAX) > 0.0
@@ -366,6 +367,28 @@ def test_transport_car_set_heading_target_keeps_translation_and_leaves_orbit_mod
     assert car.control_state == {"vx": 8.0, "vy": -3.0, "omega": 0.0, "angle": 90.0}
 
 
+def test_transport_car_set_relative_translation_target_builds_world_target_and_heading_hold() -> None:
+    """相对平移入口把车体系位移写成世界系目标并保持当前朝向."""
+    _transport_car, car = _make_control_car(
+        heading_est=90.0,
+        heading_target=12.0,
+        odometry=_Odom(x=1.0, y=2.0),
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
+    )
+
+    car.set_relative_translation_target(0.2, -0.1)
+
+    assert car.command_lock is True
+    assert car.command_mode == "locked"
+    assert car.control_state["vx"] == pytest.approx(0.0)
+    assert car.control_state["vy"] == pytest.approx(0.0)
+    assert car.control_state["omega"] == pytest.approx(0.0)
+    assert car.control_state["angle"] == pytest.approx(90.0)
+    assert car.control_state["x"] == pytest.approx(1.1)
+    assert car.control_state["y"] == pytest.approx(2.2)
+    assert car.heading_target == pytest.approx(90.0)
+
+
 def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:
     """运行时配置为绕行保留独立角速度限幅参数."""
 
@@ -476,13 +499,34 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
         assert state["motor"].duties == [0]
 
 
+def test_transport_car_translation_target_unlock_clears_pose_targets_and_output() -> None:
+    """相对平移目标收敛后清理位置锁定字段并停住."""
+    _transport_car, car = _make_control_car(
+        heading_est=30.0,
+        heading_target=30.0,
+        odometry=_Odom(x=1.0, y=2.0),
+    )
+
+    car.set_relative_translation_target(0.0, 0.0)
+    car._check_unlock()
+
+    assert car.command_lock is False
+    assert car.command_mode == "none"
+    assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+
 def test_transport_car_has_no_legacy_mode_entry() -> None:
     """共享底盘不再暴露旧模式入口."""
     _transport_car, car = _make_control_car()
 
     assert sorted(
         name for name in dir(car) if name.startswith("set_") and name.endswith("target")
-    ) == ["set_heading_target", "set_orbit_target", "set_velocity_target"]
+    ) == [
+        "set_heading_target",
+        "set_orbit_target",
+        "set_relative_translation_target",
+        "set_velocity_target",
+    ]
 
 
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:

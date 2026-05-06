@@ -587,7 +587,7 @@ def test_master_state_machine_transport_ready_emits_finish_hook() -> None:
     }
 
 
-def test_master_state_machine_finish_event_enters_stop_and_requests_assistant_idle() -> None:
+def test_master_state_machine_finish_event_enters_clear_and_requests_assistant_clear() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
 
@@ -602,6 +602,38 @@ def test_master_state_machine_finish_event_enters_stop_and_requests_assistant_id
     machine.handle_event(
         context_id=3, event=MasterStateMachine.EVENT_ARRIVED, value=0
     )
+
+    assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_clear",
+        "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
+        "arg": 0,
+    }
+
+
+def test_master_state_machine_clear_phase_waits_for_both_cars_before_stop() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
+
+    machine.handle_event(
+        context_id=2, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+    machine.poll_assistant_request()
+    machine.mark_transport_ready()
+    machine.poll_hook_request()
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ARRIVED, value=0
+    )
+    machine.poll_assistant_request()
+
+    machine.mark_master_cleared()
+
+    assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
+    assert machine.poll_assistant_request() is None
+
+    machine.handle_assistant_cleared(value=0)
 
     assert machine.state == MasterStateMachine.STATE_STOP
     assert machine.poll_assistant_request() == {

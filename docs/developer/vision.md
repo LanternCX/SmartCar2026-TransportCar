@@ -24,7 +24,7 @@
 - OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成，也负责辅车找目标物体阶段的红色目标识别、速度输出和可靠事件回报。
-- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。
+- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。搬运结束后的侧向脱离完成回报 `CLEARED` 由辅车 RT1021 本地生成，不依赖 OpenART Vision assistant。
 - `v/o` 数据流包不做发送前后延时，`s/a/r` 可靠包发送前后各使用固定 1 ms 短延时。
 
 ## OpenART 主车搜索算法

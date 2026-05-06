@@ -42,7 +42,7 @@
 
 ## 主车物体搜索与绕行控制边界
 
-- 主车物体搜索状态流为 `IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT`。
+- 主车物体搜索与搬运状态流为 `IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT -> CLEAR_OBJECT -> STOP`。
 - 主车搜索运行入口进入角色周期后主动进入 `SEARCH_OBJECT`。
 - `SEARCH_OBJECT` 中，主车平移速度来源为 OpenART Vision master 通过本车 `UART6` 发送的 `v,<vx>,<vy>`。
 - `SEARCH_OBJECT` 中，主车 RT1021 不根据 `o` 观测包计算搜索 P 控制量。
@@ -57,6 +57,10 @@
 - `ORBITING` 完成后主车回到 `SEARCH_OBJECT`，继续使用视觉速度对正目标，并向辅车同步找物体子状态。
 - 辅车找到目标并回报后，主车只发起一次辅车绕行同步。
 - 辅车绕行完成后回到本地持续对正目标，不再因为后续对正再次发起绕行。
+- 主车收到搬运结束 `ARRIVED` 后，先同步辅车进入侧向脱离阶段。
+- 主车在辅车脱离同步确认后，按自身车体系 `X` 正方向执行固定步长平移。
+- 辅车在脱离阶段按自身车体系 `X` 负方向执行同一固定步长平移。
+- 主辅都完成侧向脱离后，主车再同步辅车 idle 并进入 `STOP`。
 - 同一控制拍内存在合法 `UART3` 上游速度包和合法 `UART6` 视觉速度包时，角色层优先使用 `UART3` 输入作为最终底盘速度；同拍没有合法 `UART3` 上游速度包时，主车视觉 `v` 搜索速度生效。
 - 主车 `UART6` 视觉速度按最近一个合法 `v,<vx>,<vy>` 包保持；收到显式零包 `v,0,0` 后清空视觉速度。
 - 上下文不匹配的合法视觉事件需要确认，但不触发状态跳转。
@@ -142,8 +146,8 @@
 #### [src/vision/](../../src/vision/) - 角色运行入口
 - 负责按车号切换主车或辅车使用的视觉运行入口
 - `vehicle_role.py` 负责车号识别
-- `master/` 负责主车 `UART3` 上游控制接入、`UART8` 当前底盘速度转发、本车 `UART6` 主车视觉 hook 通信、主车视觉 `v` 搜索速度接入和主车搜索状态机调度
-- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止；`ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE` 后与本车视觉修正叠加
+- `master/` 负责主车 `UART3` 上游控制接入、`UART8` 当前底盘速度转发、本车 `UART6` 主车视觉 hook 通信、主车视觉 `v` 搜索速度接入、主车搜索状态机调度和搬运结束后的主车侧向脱离
+- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止；`ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE` 后与本车视觉修正叠加；`ASSISTANT_CLEAR_OBJECT` 中按自身车体系 `X` 负方向执行固定步长平移并向主车回报完成
 
 ## 核心控制流程
 

@@ -6,6 +6,7 @@
 from config import params as _params
 from protocol.link import should_resend, write_reliable_line
 from vision.assistant.state_machine import (
+    ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_ORBIT,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
@@ -30,6 +31,7 @@ from vision.assistant.velocity_packet import (
 _INPUT_LIMIT = 128
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
+_CLEARED_EVENT = 9
 _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
     _params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
 )
@@ -42,6 +44,7 @@ _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     _params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
+_TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
 
 
 def _default_now_ms() -> int:
@@ -100,6 +103,7 @@ class AssistantFollowRuntime:
         self._approach_target_found_done = False
         self._last_approach_arg = 0
         self._post_orbit_realign_active = False
+        self._clear_completed = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -120,6 +124,11 @@ class AssistantFollowRuntime:
         except Exception as exc:
             self._record_error("role_cycle failed", exc)
         keep_running = self._transport_car.step()
+        try:
+            self._finish_clear_if_needed()
+            self._send_pending_target_found_report()
+        except Exception as exc:
+            self._record_error("clear_finish failed", exc)
         try:
             self._resume_approach_after_orbit()
         except Exception as exc:
@@ -301,6 +310,7 @@ class AssistantFollowRuntime:
             self._pending_target_found_report = None
             self._approach_target_found_done = False
             self._post_orbit_realign_active = False
+            self._clear_completed = False
             self._transport_car.handle_velocity_packet(
                 0.0,
                 0.0,
@@ -310,13 +320,19 @@ class AssistantFollowRuntime:
             )
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._post_orbit_realign_active = False
+            self._clear_completed = False
             self._enter_approach_object_state(packet)
         elif self._state_machine.state == ASSISTANT_STATE_ORBIT:
             self._post_orbit_realign_active = False
+            self._clear_completed = False
             self._enter_orbit_state()
         elif self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._post_orbit_realign_active = False
+            self._clear_completed = False
             self._enter_transport_state(packet)
+        elif self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
+            self._post_orbit_realign_active = False
+            self._enter_clear_object_state()
         return True
 
     def _handle_uart6_control_packet(self, line: str) -> bool:
@@ -379,6 +395,8 @@ class AssistantFollowRuntime:
             self._write_approach_object_velocity()
             return
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            return
+        if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
@@ -463,6 +481,8 @@ class AssistantFollowRuntime:
 
     def _should_store_velocity(self, source: str) -> bool:
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            return False
+        if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             return True
@@ -550,6 +570,7 @@ class AssistantFollowRuntime:
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._post_orbit_realign_active = False
+        self._clear_completed = False
         self._clear_motion_inputs()
         self._write_zero_velocity("assistant_transport")
         self._pending_local_vision_sync = {
@@ -561,6 +582,18 @@ class AssistantFollowRuntime:
             "sent_once": False,
         }
         self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
+
+    def _enter_clear_object_state(self) -> None:
+        self._approach_target_found_done = False
+        self._pending_local_vision_sync = None
+        self._pending_target_found_report = None
+        self._post_orbit_realign_active = False
+        self._clear_completed = False
+        self._clear_motion_inputs()
+        self._transport_car.set_relative_translation_target(
+            -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
+            0.0,
+        )
 
     def _resume_approach_after_orbit(self) -> None:
         if self._state_machine.state != ASSISTANT_STATE_ORBIT:
@@ -585,6 +618,23 @@ class AssistantFollowRuntime:
         )
         self._post_orbit_realign_active = True
         self._send_pending_local_vision_sync()
+
+    def _finish_clear_if_needed(self) -> None:
+        if self._state_machine.state != ASSISTANT_STATE_CLEAR_OBJECT:
+            return
+        if self._clear_completed:
+            return
+        if bool(getattr(self._transport_car, "command_lock", False)):
+            return
+        self._clear_completed = True
+        self._write_zero_velocity("assistant_clear_complete")
+        self._pending_target_found_report = {
+            "seq": int(self._now_ms()) % 256,
+            "event": _CLEARED_EVENT,
+            "value": 0,
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
 
     def _send_pending_local_vision_sync(self) -> None:
         pending = self._pending_local_vision_sync

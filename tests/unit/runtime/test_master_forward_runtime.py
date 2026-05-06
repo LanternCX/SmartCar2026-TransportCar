@@ -19,6 +19,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 EVENT_TARGET_FOUND = 6
 EVENT_ALIGNED = 7
+EVENT_CLEARED = 9
 STATE_IDLE = 0
 
 
@@ -187,6 +188,19 @@ def install_fake_transport_car(monkeypatch):
             self.orbit_mode = False
             self.control_state["omega"] = 0.0
             self.control_state["angle"] = float(angle_deg)
+
+        def set_relative_translation_target(self, dx: float, dy: float) -> None:
+            events.append(("set_relative_translation_target", float(dx), float(dy)))
+            self.command_lock = True
+            self.orbit_mode = False
+            self.control_state = {
+                "vx": 0.0,
+                "vy": 0.0,
+                "omega": 0.0,
+                "angle": float(self.heading_est),
+                "x": float(dx),
+                "y": float(dy),
+            }
 
         def _handle_uart_line(self, line: str, source: str) -> None:
             events.append(("handle_uart_line", source, line))
@@ -1847,10 +1861,10 @@ def test_master_forward_runtime_transport_ready_sends_finish_hook(
     assert uart6.messages[-1] == _finish_hook_sync_message(forward_runtime_module)
 
 
-def test_master_forward_runtime_arrived_event_stops_and_syncs_assistant_idle_immediately(
+def test_master_forward_runtime_arrived_event_enters_clear_phase_and_syncs_assistant_clear(
     monkeypatch,
 ) -> None:
-    """主车收到搬运结束事件后立刻停车并同步辅车 idle."""
+    """主车收到搬运结束事件后先进入脱离阶段并同步辅车横移."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1879,10 +1893,10 @@ def test_master_forward_runtime_arrived_event_stops_and_syncs_assistant_idle_imm
 
     runtime.step()
 
-    assert runtime._state_machine.state == forward_runtime_module.STATE_STOP
-    assert ("handle_velocity", "master_transport_finish_stop", 0.0, 0.0, 0.0) in events
+    assert runtime._state_machine.state == forward_runtime_module.STATE_CLEAR_OBJECT
+    assert ("handle_velocity", "master_wait_clear_ready", 0.0, 0.0, 0.0) in events
     assert runtime._transport_car.last_chassis_target == {
-        "source": "master_transport_finish_stop",
+        "source": "master_wait_clear_ready",
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -1892,7 +1906,142 @@ def test_master_forward_runtime_arrived_event_stops_and_syncs_assistant_idle_imm
     assert (
         "s,9,%d,%d,0\r\n"
         % (
+            forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
+            forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
+        )
+    ) in _reliable_messages(uart8)
+
+
+def test_master_forward_runtime_clear_sync_ack_starts_master_side_step(
+    monkeypatch,
+) -> None:
+    """主车在辅车脱离同步确认后开始本车横移一步."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(
+        now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120, 140, 160)
+    )
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime.step()
+    uart8._buffer = b"a,3\nr,11,6,300\n"
+    runtime.step()
+    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
+    uart8._buffer = b"a,7\n"
+    uart6._buffer = b"a,3\n"
+    runtime.step()
+    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    runtime.step()
+    uart8._buffer = b"a,9\n"
+
+    runtime.step()
+
+    assert runtime._state_machine.state == forward_runtime_module.STATE_CLEAR_OBJECT
+    assert (
+        "set_relative_translation_target",
+        float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
+        0.0,
+    ) in events
+
+
+def test_master_forward_runtime_clear_completion_waits_assistant_cleared_before_stop(
+    monkeypatch,
+) -> None:
+    """主车本车横移完成后仍等待辅车完成回报."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(
+        now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120, 140, 160, 180)
+    )
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime.step()
+    uart8._buffer = b"a,3\nr,11,6,300\n"
+    runtime.step()
+    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
+    uart8._buffer = b"a,7\n"
+    uart6._buffer = b"a,3\n"
+    runtime.step()
+    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    runtime.step()
+    uart8._buffer = b"a,9\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+
+    runtime.step()
+
+    assert runtime._state_machine.state == forward_runtime_module.STATE_CLEAR_OBJECT
+    assert not any(
+        message.startswith("s,11,%d,%d,0" % (
+            forward_runtime_module.ASSISTANT_IDLE_SYNC_STATE,
+            forward_runtime_module.ASSISTANT_IDLE_SYNC_TARGET,
+        ))
+        for message in _reliable_messages(uart8)
+    )
+    assert ("handle_velocity", "master_transport_finish_stop", 0.0, 0.0, 0.0) not in events
+
+
+def test_master_forward_runtime_clear_completion_stops_after_assistant_cleared(
+    monkeypatch,
+) -> None:
+    """主辅都完成横移后主车停车并同步辅车 idle."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(
+        now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200)
+    )
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime.step()
+    uart8._buffer = b"a,3\nr,11,6,300\n"
+    runtime.step()
+    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
+    uart8._buffer = b"a,7\n"
+    uart6._buffer = b"a,3\n"
+    runtime.step()
+    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    runtime.step()
+    uart8._buffer = b"a,9\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    uart8._buffer = ("r,19,%d,0\n" % EVENT_CLEARED).encode()
+
+    runtime.step()
+
+    assert runtime._state_machine.state == forward_runtime_module.STATE_STOP
+    assert ("handle_velocity", "master_transport_finish_stop", 0.0, 0.0, 0.0) in events
+    assert (
+        "s,11,%d,%d,0\r\n"
+        % (
             forward_runtime_module.ASSISTANT_IDLE_SYNC_STATE,
             forward_runtime_module.ASSISTANT_IDLE_SYNC_TARGET,
         )
     ) in _reliable_messages(uart8)
+    assert "a,19\r\n" in _reliable_messages(uart8)

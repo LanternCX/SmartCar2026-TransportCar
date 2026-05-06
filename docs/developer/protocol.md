@@ -248,7 +248,8 @@ r,<seq>,<event>,<value>
 - 初次找物体配置回报 `TARGET_FOUND`; 搬运入口配置回报 `ALIGNED`。
 - 辅车 RT1021 收到本地 `TARGET_FOUND` 后写入零速度，并通过 `UART8` 使用同格式向主车 RT1021 可靠回报结果。
 - 辅车 RT1021 收到本地 `ALIGNED` 后通过 `UART8` 使用同格式向主车 RT1021 可靠回报搬运入口对正结果。
-- 主车 RT1021 收到辅车 `TARGET_FOUND` 或 `ALIGNED` 回报后发送 `a,<seq>`。
+- 辅车 RT1021 在搬运结束后的侧向脱离完成后，通过 `UART8` 使用同格式回报 `CLEARED`。
+- 主车 RT1021 收到辅车 `TARGET_FOUND`、`ALIGNED` 或 `CLEARED` 回报后发送 `a,<seq>`。
 - 辅车找物体事件不携带主车视觉 `context_id`。
 
 ## 8. 主车本地视觉可靠通信

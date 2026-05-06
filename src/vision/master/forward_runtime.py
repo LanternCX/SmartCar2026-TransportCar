@@ -15,13 +15,17 @@ from protocol.packet import (
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
+    ASSISTANT_CLEAR_SYNC_STATE,
+    ASSISTANT_CLEAR_SYNC_TARGET,
     ASSISTANT_IDLE_SYNC_STATE,
     ASSISTANT_IDLE_SYNC_TARGET,
     ASSISTANT_TRANSPORT_SYNC_STATE,
     ASSISTANT_TRANSPORT_SYNC_TARGET,
     EVENT_ALIGNED,
     EVENT_ARRIVED,
+    EVENT_CLEARED,
     EVENT_TARGET_FOUND,
+    STATE_CLEAR_OBJECT,
     STATE_ORBITING,
     STATE_SEARCH_OBJECT,
     STATE_STOP,
@@ -42,6 +46,7 @@ MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 TRANSPORT_FORWARD_SPEED = getattr(_params, "TRANSPORT_FORWARD_SPEED")
+TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
 
 
 class MasterForwardRuntime:
@@ -80,6 +85,8 @@ class MasterForwardRuntime:
         self._orbit_command_active = False
         self._transport_sync_acknowledged = False
         self._transport_hook_acknowledged = False
+        self._transport_clear_sync_acknowledged = False
+        self._transport_clear_started = False
         self._state_machine = MasterStateMachine(
             hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
@@ -180,6 +187,8 @@ class MasterForwardRuntime:
             self._apply_latest_uart6_velocity()
         self._forward_current_chassis_velocity()
         self._process_uart8()
+        self._drain_state_machine_outputs()
+        self._run_clear_phase()
         self._drain_state_machine_outputs()
         if self._state_machine.state == STATE_TRANSPORT_OBJECT and not transport_applied_this_tick:
             self._apply_transport_velocity()
@@ -286,6 +295,8 @@ class MasterForwardRuntime:
             return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             return
+        if self._state_machine.state == STATE_CLEAR_OBJECT:
+            return
         if self._state_machine.state == STATE_STOP:
             return
         if self._state_machine.is_waiting_assistant_idle_ack():
@@ -371,6 +382,8 @@ class MasterForwardRuntime:
                     self._transport_sync_acknowledged = True
                     if self._transport_hook_acknowledged:
                         self._state_machine.mark_transport_ready()
+                elif pending.get("kind") == "assistant_clear":
+                    self._transport_clear_sync_acknowledged = True
                 self._pending_assistant_sync = None
                 return
             pending = self._pending_sync
@@ -388,6 +401,8 @@ class MasterForwardRuntime:
                 self._state_machine.handle_assistant_target_found(packet["value"])
             elif int(packet["event"]) == EVENT_ALIGNED:
                 self._state_machine.handle_assistant_aligned(packet["value"])
+            elif int(packet["event"]) == EVENT_CLEARED:
+                self._state_machine.handle_assistant_cleared(packet["value"])
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -418,6 +433,8 @@ class MasterForwardRuntime:
         )
 
     def _forward_current_chassis_velocity(self) -> None:
+        if self._state_machine.state == STATE_CLEAR_OBJECT:
+            return
         if self._state_machine.state == STATE_SEARCH_OBJECT:
             pending_sync = self._pending_assistant_sync
             pending_hook = self._pending_hook
@@ -579,6 +596,17 @@ class MasterForwardRuntime:
                     "last_sent_ms": None,
                     "sent_once": False,
                 }
+            elif request_kind == "assistant_clear":
+                self._latest_uart6_velocity = None
+                self._transport_clear_sync_acknowledged = False
+                self._transport_clear_started = False
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    source="master_wait_clear_ready",
+                    has_omega=True,
+                )
             seq = self._assistant_sync_seq
             self._pending_assistant_sync = {
                 "kind": request_kind,
@@ -598,6 +626,25 @@ class MasterForwardRuntime:
                 float(MASTER_ORBIT_RADIUS_SCALE),
             )
             self._orbit_command_active = True
+
+    def _run_clear_phase(self) -> None:
+        """在搬运结束后驱动主车侧向脱离并等待辅车完成"""
+
+        if self._state_machine.state != STATE_CLEAR_OBJECT:
+            self._transport_clear_started = False
+            return
+        if self._transport_clear_started:
+            if not bool(getattr(self._transport_car, "command_lock", False)):
+                self._transport_clear_started = False
+                self._state_machine.mark_master_cleared()
+            return
+        if not self._transport_clear_sync_acknowledged:
+            return
+        self._transport_car.set_relative_translation_target(
+            float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
+            0.0,
+        )
+        self._transport_clear_started = True
 
     def _send_pending_hook(self) -> None:
         """重复发送待确认的视觉 hook 同步包"""

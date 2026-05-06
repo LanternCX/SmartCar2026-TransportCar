@@ -561,6 +561,36 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_relative_translation_target(self, dx, dy):
+        """写入车体系相对平移目标并保持当前朝向
+
+        @param dx 车体系 x 方向相对位移, 单位米
+        @param dy 车体系 y 方向相对位移, 单位米
+        """
+
+        dx = float(dx)
+        dy = float(dy)
+        heading_deg = float(self.heading_est)
+        heading_rad = math.radians(heading_deg)
+        cos_t = math.cos(heading_rad)
+        sin_t = math.sin(heading_rad)
+        world_dx = dx * cos_t - dy * sin_t
+        world_dy = dx * sin_t + dy * cos_t
+
+        self._clear_orbit_mode()
+        self.control_state["vx"] = 0.0
+        self.control_state["vy"] = 0.0
+        self.control_state["omega"] = 0.0
+        self.control_state["x"] = float(self.odometry.x) + world_dx
+        self.control_state["y"] = float(self.odometry.y) + world_dy
+        self.control_state["angle"] = heading_deg
+        self.command_lock = True
+        self.heading_target = heading_deg
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""
 
@@ -1181,6 +1211,8 @@ class TransportCar:
                 pos_ok = False
 
         if angle_ok and pos_ok:
+            had_translation_target = self._has_active_translation_target()
+            had_rotation_target = self._has_active_rotation_target()
             self.command_lock = False
             self.command_mode = "none"
             if self.orbit_mode:
@@ -1194,6 +1226,15 @@ class TransportCar:
                 for state in self.wheel_states:
                     state["motor"].duty(0)
                     state["duty"] = 0.0
+                return
+            if had_translation_target:
+                self._clear_translation_control_targets()
+                self.control_state["vx"] = 0.0
+                self.control_state["vy"] = 0.0
+            if had_rotation_target:
+                self._clear_rotation_control_targets()
+                self.control_state["omega"] = 0.0
+                self.heading_target = self.heading_est
 
     def _process_uart(self):
         """
