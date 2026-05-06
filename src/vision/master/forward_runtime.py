@@ -14,8 +14,16 @@ from protocol.packet import (
 )
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
-from vision.master.state_machine import EVENT_TARGET_FOUND
-from vision.master.state_machine import STATE_IDLE, STATE_ORBITING, STATE_SEARCH_OBJECT
+from vision.master.state_machine import (
+    ASSISTANT_TRANSPORT_SYNC_STATE,
+    ASSISTANT_TRANSPORT_SYNC_TARGET,
+    EVENT_ALIGNED,
+    EVENT_TARGET_FOUND,
+    STATE_IDLE,
+    STATE_ORBITING,
+    STATE_SEARCH_OBJECT,
+    STATE_TRANSPORT_OBJECT,
+)
 
 
 _UART6_INPUT_LIMIT = 128
@@ -23,9 +31,12 @@ _UART3_INPUT_LIMIT = 128
 _UART8_INPUT_LIMIT = 128
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
+ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID")
+MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
+TRANSPORT_FORWARD_SPEED = getattr(_params, "TRANSPORT_FORWARD_SPEED")
 
 
 class MasterForwardRuntime:
@@ -62,11 +73,14 @@ class MasterForwardRuntime:
         self._pending_assistant_sync = None
         self._assistant_target_found_report = None
         self._orbit_command_active = False
+        self._transport_sync_acknowledged = False
+        self._transport_hook_acknowledged = False
         self._state_machine = MasterStateMachine(
             hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+            assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             initial_context_id=seed_value,
         )
         self.last_report = None
@@ -143,11 +157,26 @@ class MasterForwardRuntime:
         self._process_uart3()
         self._process_uart6()
         self._drain_state_machine_outputs()
-        if not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
+        transport_applied_this_tick = False
+        if self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            self._apply_transport_velocity()
+            transport_applied_this_tick = True
+        elif self._state_machine.state == STATE_SEARCH_OBJECT and getattr(self._state_machine, "_master_aligned", False):
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                0.0,
+                0.0,
+                source="master_aligned_hold",
+                has_omega=True,
+            )
+        elif not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
         self._forward_current_chassis_velocity()
         self._process_uart8()
         self._drain_state_machine_outputs()
+        if self._state_machine.state == STATE_TRANSPORT_OBJECT and not transport_applied_this_tick:
+            self._apply_transport_velocity()
+            self._forward_current_chassis_velocity()
         self._send_pending_hook()
         self._send_pending_sync()
         self._write_uart3_debug_state()
@@ -163,6 +192,8 @@ class MasterForwardRuntime:
             state_text = "SEARCH_OBJECT"
         elif state == STATE_ORBITING:
             state_text = "ORBITING"
+        elif state == STATE_TRANSPORT_OBJECT:
+            state_text = "TRANSPORT_OBJECT"
         else:
             state_text = str(state)
         pending_hook = 1 if self._pending_hook is not None else 0
@@ -292,6 +323,8 @@ class MasterForwardRuntime:
             return
         if self._state_machine.state == STATE_ORBITING:
             return
+        if self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            return
         if self._state_machine.is_waiting_assistant_idle_ack():
             return
         packet = parse_short_packet(line)
@@ -312,7 +345,7 @@ class MasterForwardRuntime:
             return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
-            if self._state_machine.allows_search_velocity():
+            if self._state_machine.allows_search_velocity() or self._state_machine.state == STATE_TRANSPORT_OBJECT:
                 self._latest_uart6_velocity = packet
             return
         if packet is not None and packet.get("type") == "a":
@@ -323,6 +356,10 @@ class MasterForwardRuntime:
                 and int(packet["reliable_seq"]) == int(pending["reliable_seq"])
             ):
                 self._active_hook_context_id = int(pending["context_id"])
+                if pending.get("kind") == "transport_hook":
+                    self._transport_hook_acknowledged = True
+                    if self._transport_sync_acknowledged:
+                        self._state_machine.mark_transport_ready()
                 self._pending_hook = None
                 self._drain_pending_hook_event()
             return
@@ -367,6 +404,10 @@ class MasterForwardRuntime:
             ):
                 if pending.get("kind") == "assistant_idle":
                     self._state_machine.mark_assistant_idle_acknowledged()
+                elif pending.get("kind") == "assistant_transport":
+                    self._transport_sync_acknowledged = True
+                    if self._transport_hook_acknowledged:
+                        self._state_machine.mark_transport_ready()
                 self._pending_assistant_sync = None
                 return
             pending = self._pending_sync
@@ -382,13 +423,37 @@ class MasterForwardRuntime:
             if int(packet["event"]) == EVENT_TARGET_FOUND:
                 self._assistant_target_found_report = dict(packet)
                 self._state_machine.handle_assistant_target_found(packet["value"])
+            elif int(packet["event"]) == EVENT_ALIGNED:
+                self._state_machine.handle_assistant_aligned(packet["value"])
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity
         if packet is not None:
             self._apply_velocity_packet(packet, source="uart6", force_no_omega=True)
 
+    def _apply_transport_velocity(self) -> None:
+        packet = self._latest_uart6_velocity
+        vx = 0.0
+        vy = float(TRANSPORT_FORWARD_SPEED)
+        if packet is not None:
+            vx += float(packet.get("vx", 0.0))
+            vy += float(packet.get("vy", 0.0))
+        self._transport_car.handle_velocity_packet(
+            vx,
+            vy,
+            0.0,
+            source="master_transport",
+            has_omega=False,
+        )
+
     def _forward_current_chassis_velocity(self) -> None:
+        if self._state_machine.state == STATE_SEARCH_OBJECT:
+            pending_sync = self._pending_assistant_sync
+            pending_hook = self._pending_hook
+            if pending_sync is not None and pending_sync.get("kind") == "assistant_transport":
+                return
+            if pending_hook is not None and pending_hook.get("kind") == "transport_hook":
+                return
         state = self._transport_car.control_state
         omega = state.get("omega")
         if omega is None:
@@ -491,6 +556,7 @@ class MasterForwardRuntime:
             self._latest_uart6_velocity = None
             self._pending_hook_event = None
             self._rx_buf6 = ""
+            self._transport_hook_acknowledged = False
             self._pending_hook = {
                 "reliable_seq": self._hook_seq,
                 "context_id": int(hook_request["context_id"]),
@@ -513,6 +579,31 @@ class MasterForwardRuntime:
                     source="master_wait_assistant_idle",
                     has_omega=True,
                 )
+            elif request_kind == "assistant_transport":
+                self._hook_seq = (self._hook_seq + 1) % 256
+                self._active_hook_context_id = None
+                self._latest_uart6_velocity = None
+                self._pending_hook_event = None
+                self._rx_buf6 = ""
+                self._transport_sync_acknowledged = False
+                self._transport_hook_acknowledged = False
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    source="master_wait_transport_ready",
+                    has_omega=True,
+                )
+                self._pending_hook = {
+                    "kind": "transport_hook",
+                    "reliable_seq": self._hook_seq,
+                    "context_id": int(self._state_machine._current_context_id),
+                    "state": STATE_SEARCH_OBJECT,
+                    "target": int(assistant_request["target"]),
+                    "arg": int(MASTER_TRANSPORT_HOOK_CONFIG_ID),
+                    "last_sent_ms": None,
+                    "sent_once": False,
+                }
             seq = self._assistant_sync_seq
             self._pending_assistant_sync = {
                 "kind": request_kind,

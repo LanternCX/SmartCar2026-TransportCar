@@ -8,6 +8,7 @@ from protocol.link import should_resend, write_reliable_line
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_ORBIT,
+    ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
@@ -28,12 +29,16 @@ from vision.assistant.velocity_packet import (
 
 _INPUT_LIMIT = 128
 _TARGET_FOUND_EVENT = 6
+_ALIGNED_EVENT = 7
 _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
     _params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
 )
 _MASTER_REPORT_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 _ASSISTANT_ORBIT_TARGET_DEG = getattr(_params, "ASSISTANT_ORBIT_TARGET_DEG")
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
+_ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
+    _params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
+)
 
 
 def _default_now_ms() -> int:
@@ -306,6 +311,9 @@ class AssistantFollowRuntime:
         elif self._state_machine.state == ASSISTANT_STATE_ORBIT:
             self._post_orbit_realign_active = False
             self._enter_orbit_state()
+        elif self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+            self._post_orbit_realign_active = False
+            self._enter_transport_state(packet)
         return True
 
     def _handle_uart6_control_packet(self, line: str) -> bool:
@@ -331,6 +339,13 @@ class AssistantFollowRuntime:
                 and not self._post_orbit_realign_active
             ):
                 self._handle_local_target_found(packet["seq"], packet["value"])
+            elif (
+                self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
+                and int(packet["event"]) == _ALIGNED_EVENT
+                and self._post_orbit_realign_active
+                and not self._approach_target_found_done
+            ):
+                self._handle_local_aligned(packet["seq"], packet["value"])
             return True
         if packet_type == "s":
             return True
@@ -361,6 +376,9 @@ class AssistantFollowRuntime:
             self._write_approach_object_velocity()
             return
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            return
+        if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+            self._write_transport_object_velocity()
             return
 
         uart6_velocity = self._inputs["uart6"]["velocity"]
@@ -394,6 +412,24 @@ class AssistantFollowRuntime:
             False,
         )
 
+    def _write_transport_object_velocity(self) -> None:
+        """在搬运阶段融合头对头前馈和本地视觉修正"""
+
+        uart6_velocity = self._inputs["uart6"]["velocity"]
+        uart8_velocity = self._inputs["uart8"]["velocity"]
+        if uart6_velocity is None and uart8_velocity is None:
+            return
+
+        vx = 0.0
+        vy = 0.0
+        if uart8_velocity is not None:
+            vx += -float(uart8_velocity.get("vx", 0.0))
+            vy += -float(uart8_velocity.get("vy", 0.0))
+        if uart6_velocity is not None:
+            vx += float(uart6_velocity.get("vx", 0.0))
+            vy += float(uart6_velocity.get("vy", 0.0))
+        self._apply_effective_velocity(vx, vy, 0.0, False)
+
     def _apply_effective_velocity(self, vx: float, vy: float, omega: float, has_omega: bool) -> None:
         self._transport_car.handle_velocity_packet(
             vx,
@@ -419,6 +455,8 @@ class AssistantFollowRuntime:
     def _should_store_velocity(self, source: str) -> bool:
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
             return False
+        if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+            return True
         if self._state_machine.state != ASSISTANT_STATE_APPROACH_OBJECT:
             return True
         if source == "uart8":
@@ -487,6 +525,34 @@ class AssistantFollowRuntime:
             "sent_once": False,
         }
 
+    def _handle_local_aligned(self, seq: int, value: int) -> None:
+        self._approach_target_found_done = True
+        self._inputs["uart6"]["velocity"] = None
+        self._write_zero_velocity("assistant_aligned")
+        self._pending_target_found_report = {
+            "seq": int(seq),
+            "event": _ALIGNED_EVENT,
+            "value": int(value),
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+
+    def _enter_transport_state(self, packet: dict) -> None:
+        self._approach_target_found_done = False
+        self._pending_target_found_report = None
+        self._post_orbit_realign_active = False
+        self._clear_motion_inputs()
+        self._write_zero_velocity("assistant_transport")
+        self._pending_local_vision_sync = {
+            "seq": self._local_vision_sync_seq,
+            "state": ASSISTANT_STATE_APPROACH_OBJECT,
+            "target": int(packet["target"]),
+            "arg": int(_ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID),
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+        self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
+
     def _resume_approach_after_orbit(self) -> None:
         if self._state_machine.state != ASSISTANT_STATE_ORBIT:
             return
@@ -499,13 +565,13 @@ class AssistantFollowRuntime:
         self._state_machine.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,
             ASSISTANT_TARGET_OBJECT,
-            self._last_approach_arg,
+            _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
         )
         self._enter_approach_object_state(
             {
                 "state": ASSISTANT_STATE_APPROACH_OBJECT,
                 "target": ASSISTANT_TARGET_OBJECT,
-                "arg": self._last_approach_arg,
+                "arg": _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             }
         )
         self._post_orbit_realign_active = True
