@@ -171,6 +171,13 @@ def install_fake_transport_car(monkeypatch):
                 "angle": float(angle_deg),
             }
 
+        def set_heading_target(self, angle_deg: float) -> None:
+            events.append(("set_heading_target", float(angle_deg)))
+            self.command_lock = True
+            self.orbit_mode = False
+            self.control_state["omega"] = 0.0
+            self.control_state["angle"] = float(angle_deg)
+
         def _handle_uart_line(self, line: str, source: str) -> None:
             events.append(("handle_uart_line", source, line))
 
@@ -1176,6 +1183,38 @@ def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_ord
     ]
 
 
+def test_master_forward_runtime_keeps_orbit_heading_during_post_orbit_realign(
+    monkeypatch,
+) -> None:
+    """绕行结束后的二次对正继续维持绕行目标角度."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    uart6._buffer = b"v,3.0,4.0\n"
+
+    runtime.step()
+
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "uart6",
+        "vx": 3.0,
+        "vy": 4.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert runtime._transport_car.control_state["angle"] == float(
+        runtime._state_machine._boot_heading_deg + forward_runtime_module.MASTER_ORBIT_TARGET_DEG
+    )
+
+
 def test_master_forward_runtime_reapplies_uart6_search_velocity_after_orbit_finishes(
     monkeypatch,
 ) -> None:
@@ -1407,8 +1446,8 @@ def test_master_forward_runtime_keeps_transport_step_when_uart6_read_fails(monke
     assert runtime._transport_car.last_exception_text == "uart6 read failed"
 
 
-def test_master_forward_runtime_prints_state_debug_to_uart3(monkeypatch) -> None:
-    """主车运行时每拍向 UART3 输出状态诊断行."""
+def test_master_forward_runtime_does_not_emit_uart3_debug_line(monkeypatch) -> None:
+    """主车运行时不再额外输出调试行到 UART3."""
 
     _events, uart3, _uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, _uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1418,30 +1457,7 @@ def test_master_forward_runtime_prints_state_debug_to_uart3(monkeypatch) -> None
 
     runtime.step()
 
-    assert uart3.messages
-    assert uart3.messages[-1].startswith("dbg,state=SEARCH_OBJECT,")
-    assert "ctx=1" in uart3.messages[-1]
-    assert "pending_hook=1" in uart3.messages[-1]
-
-
-def test_master_forward_runtime_prints_orbiting_debug_to_uart3(monkeypatch) -> None:
-    """主车进入绕行后 UART3 诊断行能看到 ORBITING."""
-
-    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
-    runtime.step()
-    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
-
-    runtime.step()
-    uart8._buffer = b"a,1\n"
-    runtime.step()
-
-    assert uart3.messages[-1].startswith("dbg,state=ORBITING,")
-    assert "active_ctx=1" in uart3.messages[-1]
-    assert "orbit=1" in uart3.messages[-1]
+    assert uart3.messages == ["start\r\n"]
 
 
 def test_master_forward_runtime_prints_start_to_uart3_on_boot(monkeypatch) -> None:

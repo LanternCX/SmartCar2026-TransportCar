@@ -222,6 +222,7 @@ def install_transport_car_stubs() -> None:
     hardware_uart_bus = ModuleType("hardware.uart_bus")
     setattr(hardware_uart_bus, "create_uart3", lambda: CaptureUart())
     setattr(hardware_uart_bus, "create_uart8", lambda: CaptureUart())
+    setattr(hardware_uart_bus, "create_uart6", lambda: CaptureUart())
     sys.modules["hardware.uart_bus"] = hardware_uart_bus
 
     hardware_motors = ModuleType("hardware.motors")
@@ -270,6 +271,7 @@ def install_transport_car_stubs() -> None:
     )
     sys.modules["storage.param_manager"] = storage_param_manager
 
+    config_package = sys.modules.get("config", ModuleType("config"))
     config_params = ModuleType("config.params")
     param_values = {
         "TICK_MS": 5,
@@ -278,9 +280,15 @@ def install_transport_car_stubs() -> None:
         "RELIABLE_PACKET_SEND_DELAY_MS": 1,
         "RELIABLE_RESEND_INTERVAL_MS": 20,
         "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
+        "ASSISTANT_APPROACH_OBJECT_CONFIG_ID": 1,
+        "MASTER_TRANSPORT_HOOK_CONFIG_ID": 2,
+        "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID": 2,
+        "TRANSPORT_FORWARD_SPEED": 5.0,
         "MASTER_ORBIT_TARGET_DEG": 90,
-        "MASTER_ORBIT_RADIUS_SCALE": 1.0,
-        "ASSISTANT_ORBIT_RADIUS_SCALE": 1.0,
+        "MASTER_ORBIT_RADIUS_SCALE": 1.20,
+        "ASSISTANT_ORBIT_TARGET_DEG": -90,
+        "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
+        "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
         "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
@@ -293,7 +301,8 @@ def install_transport_car_stubs() -> None:
         "YAW_KI": 0.0,
         "YAW_KD": 0.0,
         "YAW_I_MAX": 1.0,
-        "AUTO_OMEGA_MAX": 10.0,
+        "AUTO_OMEGA_MAX": 15.0,
+        "ORBIT_AUTO_OMEGA_MAX": 1.5,
         "HOLD_SPEED_EPS": 0.1,
         "IDENT_RESULTS_FILE": "ident.txt",
         "GYRO_OFFSET_FILE": "gyro.txt",
@@ -321,6 +330,8 @@ def install_transport_car_stubs() -> None:
     }
     for key, value in param_values.items():
         setattr(config_params, key, value)
+    setattr(config_package, "params", config_params)
+    sys.modules["config"] = config_package
     sys.modules["config.params"] = config_params
 
 

@@ -367,8 +367,13 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
     runtime.step()
 
     assert ("handle_velocity", "assistant", -0.5, 0.25, 0.0) in events
-    assert runtime._transport_car.control_state == {"vx": -0.5, "vy": 0.25, "omega": 0.0}
-    assert runtime._transport_car.command_lock is False
+    assert runtime._transport_car.control_state == {
+        "vx": -0.5,
+        "vy": 0.25,
+        "omega": 0.0,
+        "angle": float(follow_runtime_module._ASSISTANT_ORBIT_TARGET_DEG),
+    }
+    assert runtime._transport_car.command_lock is True
     assert runtime._transport_car.orbit_mode is False
     assert runtime._state_machine.state == 2
     assert runtime._pending_target_found_report is None
@@ -651,6 +656,45 @@ def test_assistant_follow_runtime_reports_local_target_found_until_master_ack(
 
     assert runtime._pending_target_found_report is None
     assert len(uart8.messages) == sent_count
+
+
+def test_assistant_follow_runtime_keeps_orbit_heading_during_post_orbit_realign(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车绕行结束后的二次对正继续维持绕行目标角度"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    clock = FakeClock(100)
+    uart8._buffer = b"s,10,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=clock)
+
+    runtime.step()
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nr,7,6,300\n" % local_sync_seq).encode()
+    runtime.step()
+    uart8._buffer = b"s,12,3,1,0\n"
+    runtime.step()
+    runtime._transport_car.complete_orbit_on_next_step = True
+    runtime.step()
+
+    rearm_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nv,-0.5,0.25\n" % rearm_sync_seq).encode()
+    runtime.step()
+
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "assistant",
+        "vx": -0.5,
+        "vy": 0.25,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    assert runtime._transport_car.control_state["angle"] == float(
+        follow_runtime_module._ASSISTANT_ORBIT_TARGET_DEG
+    )
 
 
 def test_assistant_follow_runtime_realign_phase_reports_aligned_after_orbit(

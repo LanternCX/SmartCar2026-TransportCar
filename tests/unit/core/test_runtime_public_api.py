@@ -348,6 +348,50 @@ def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> Non
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
 
 
+def test_transport_car_set_heading_target_keeps_translation_and_leaves_orbit_mode() -> None:
+    """普通角度保持入口保留平移速度, 且不继续保留绕行模式."""
+    _transport_car, car = _make_control_car(
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
+        orbit_mode=True,
+        orbit_radius_scale=1.5,
+    )
+
+    car.set_heading_target(90.0)
+
+    assert car.orbit_mode is False
+    assert car.orbit_radius_scale == pytest.approx(_transport_car.MASTER_ORBIT_RADIUS_SCALE)
+    assert car.command_lock is True
+    assert car.command_mode == "locked"
+    assert car.control_state == {"vx": 8.0, "vy": -3.0, "omega": 0.0, "angle": 90.0}
+
+
+def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:
+    """运行时配置为绕行保留独立角速度限幅参数."""
+
+    assert float(real_params.ORBIT_AUTO_OMEGA_MAX) >= 0.0
+
+
+def test_transport_car_orbit_target_uses_orbit_specific_omega_limit() -> None:
+    """绕行角速度限幅与普通角度保持限幅分离."""
+    transport_car, car = _make_control_car(
+        heading_est=0.0,
+        _yaw_rate=0.0,
+        yaw_pid=RecordingController(return_value=50.0),
+    )
+
+    car.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+    car.command_lock = True
+    car.command_mode = "locked"
+    non_orbit_omega = car._compute_omega_cmd(0.005)
+
+    car.set_orbit_target(90.0, 1.0)
+    orbit_omega = car._compute_omega_cmd(0.005)
+
+    assert non_orbit_omega == pytest.approx(float(transport_car.AUTO_OMEGA_MAX))
+    assert orbit_omega == pytest.approx(float(transport_car.ORBIT_AUTO_OMEGA_MAX))
+    assert orbit_omega < non_orbit_omega
+
+
 def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius() -> None:
     """统一绕行保持旧角速度目标行为, 线速度只按半径倍率解算."""
     _transport_car, car = _make_control_car(
@@ -369,12 +413,16 @@ def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius(
     car._run_control(0.005)
     second_call = applied[-1]
 
-    assert first_call[2] == pytest.approx(4.0)
-    assert second_call[2] == pytest.approx(4.0)
+    assert first_call[2] == pytest.approx(float(_transport_car.ORBIT_AUTO_OMEGA_MAX))
+    assert second_call[2] == pytest.approx(float(_transport_car.ORBIT_AUTO_OMEGA_MAX))
     assert first_call[1] == pytest.approx(0.0)
     assert second_call[1] == pytest.approx(0.0)
-    assert first_call[0] == pytest.approx(-2.0)
-    assert second_call[0] == pytest.approx(-8.0)
+    assert first_call[0] == pytest.approx(
+        -float(_transport_car.ORBIT_AUTO_OMEGA_MAX) * 0.5
+    )
+    assert second_call[0] == pytest.approx(
+        -float(_transport_car.ORBIT_AUTO_OMEGA_MAX) * 2.0
+    )
     assert abs(second_call[0]) > abs(first_call[0])
 
 
@@ -388,8 +436,23 @@ def test_transport_car_orbit_target_runs_through_existing_inverse_kinematics_cha
     car.set_orbit_target(40.0, 2.0)
     car._run_control(0.005)
 
-    assert car.target_speeds == pytest.approx({"m": 5.0, "l": -1.0, "r": -1.0})
-    for state, target in zip(car.wheel_states, (5.0, -1.0, -1.0)):
+    expected_omega = float(_transport_car.ORBIT_AUTO_OMEGA_MAX)
+    expected_vx = -expected_omega * 2.0
+    expected_targets = {
+        "m": (-2.0 / 3.0) * expected_vx + expected_omega / 3.0,
+        "l": expected_vx / 3.0 + expected_omega / 3.0,
+        "r": expected_vx / 3.0 + expected_omega / 3.0,
+    }
+
+    assert car.target_speeds == pytest.approx(expected_targets)
+    for state, target in zip(
+        car.wheel_states,
+        (
+            expected_targets["m"],
+            expected_targets["l"],
+            expected_targets["r"],
+        ),
+    ):
         assert state["controller"].update_calls == [(target, 0.0, 0.005)]
 
 
@@ -418,7 +481,7 @@ def test_transport_car_has_no_legacy_mode_entry() -> None:
 
     assert sorted(
         name for name in dir(car) if name.startswith("set_") and name.endswith("target")
-    ) == ["set_orbit_target", "set_velocity_target"]
+    ) == ["set_heading_target", "set_orbit_target", "set_velocity_target"]
 
 
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:
