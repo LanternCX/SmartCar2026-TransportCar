@@ -73,7 +73,11 @@ def install_fake_transport_car(monkeypatch):
 
     class _TransportCar:
         def __init__(self) -> None:
-            self.wheel_states = [{"encoder": "enc-left"}, {"encoder": "enc-right"}]
+            self.wheel_states = [
+                {"encoder": "enc-m", "filtered_speed": 0.0},
+                {"encoder": "enc-l", "filtered_speed": 0.0},
+                {"encoder": "enc-r", "filtered_speed": 0.0},
+            ]
             self.imu = "imu"
             self.ticker = None
             self.uart3 = uart3

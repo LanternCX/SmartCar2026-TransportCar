@@ -608,11 +608,11 @@ def test_master_state_machine_finish_event_enters_clear_and_requests_assistant_c
         "kind": "assistant_clear",
         "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
-        "arg": 0,
+        "arg": MasterStateMachine.CLEAR_PHASE_RETREAT,
     }
 
 
-def test_master_state_machine_clear_phase_waits_for_both_cars_before_stop() -> None:
+def test_master_state_machine_clear_retreat_waits_for_both_cars_before_turn_back() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
 
@@ -633,12 +633,116 @@ def test_master_state_machine_clear_phase_waits_for_both_cars_before_stop() -> N
     assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
     assert machine.poll_assistant_request() is None
 
-    machine.handle_assistant_cleared(value=0)
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
 
-    assert machine.state == MasterStateMachine.STATE_STOP
+    assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
+    assert machine.can_start_turn_back_rotation() is True
+    assert machine.poll_assistant_request() is None
+
+
+def test_master_state_machine_turn_back_completion_requests_translate_phase() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
+
+    machine.handle_event(
+        context_id=2, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+    machine.poll_assistant_request()
+    machine.mark_transport_ready()
+    machine.poll_hook_request()
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ARRIVED, value=0
+    )
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+
+    machine.mark_turn_back_completed()
+
+    assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
     assert machine.poll_assistant_request() == {
-        "kind": "assistant_idle",
-        "state": MasterStateMachine.ASSISTANT_IDLE_SYNC_STATE,
-        "target": MasterStateMachine.ASSISTANT_IDLE_SYNC_TARGET,
+        "kind": "assistant_clear",
+        "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
+        "arg": MasterStateMachine.CLEAR_PHASE_TRANSLATE,
+    }
+
+
+def test_master_state_machine_translate_completion_restarts_search_and_assistant_follow() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
+
+    machine.handle_event(
+        context_id=2, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+    machine.poll_assistant_request()
+    machine.mark_transport_ready()
+    machine.poll_hook_request()
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ARRIVED, value=0
+    )
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+    machine.mark_turn_back_completed()
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_TRANSLATE)
+
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
+    assert machine.poll_hook_request() == {
+        "context_id": 4,
+        "state": MasterStateMachine.STATE_SEARCH_OBJECT,
+        "target": MasterStateMachine.TARGET_OBJECT,
+        "arg": 1,
+    }
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_follow",
+        "state": MasterStateMachine.ASSISTANT_FOLLOW_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_FOLLOW_SYNC_TARGET,
         "arg": 0,
     }
+    assert machine.allows_search_velocity() is False
+
+    machine.mark_assistant_follow_acknowledged()
+
+    assert machine.allows_search_velocity() is False
+
+    machine.mark_restart_search_hook_acknowledged()
+
+    assert machine.allows_search_velocity() is True
+
+
+def test_master_state_machine_restart_search_waits_both_follow_and_local_hook_ack() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
+
+    machine.handle_event(
+        context_id=2, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+    machine.poll_assistant_request()
+    machine.mark_transport_ready()
+    machine.poll_hook_request()
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ARRIVED, value=0
+    )
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+    machine.mark_turn_back_completed()
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_TRANSLATE)
+    machine.poll_hook_request()
+    machine.poll_assistant_request()
+
+    machine.mark_assistant_follow_acknowledged()
+
+    assert machine.allows_search_velocity() is False
+
+    machine.mark_restart_search_hook_acknowledged()
+
+    assert machine.allows_search_velocity() is True
