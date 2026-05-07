@@ -3,8 +3,12 @@
 @file src/vision/master/state_machine.py
 """
 
+from vision.clear_phase import CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+
 ASSISTANT_IDLE_SYNC_STATE = 0
 ASSISTANT_IDLE_SYNC_TARGET = 0
+ASSISTANT_FOLLOW_SYNC_STATE = 1
+ASSISTANT_FOLLOW_SYNC_TARGET = 0
 ASSISTANT_OBJECT_SYNC_STATE = 2
 ASSISTANT_OBJECT_SYNC_TARGET = 1
 ASSISTANT_ORBIT_SYNC_STATE = 3
@@ -33,9 +37,11 @@ EVENT_ALIGNED = 7
 EVENT_ARRIVED = 8
 EVENT_CLEARED = 9
 
+_CLEAR_STAGE_TURN_BACK = 3
+
 
 class MasterStateMachine:
-    """维护主车单车寻找与绕行状态"""
+    """维护主车单车寻找、搬运与回身状态"""
 
     def __init__(
         self,
@@ -63,12 +69,15 @@ class MasterStateMachine:
         self._search_started = False
         self._orbit_completed = False
         self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_follow_ack = False
+        self._waiting_restart_search_hook_ack = False
         self._assistant_object_request_emitted = False
         self._assistant_orbit_request_emitted = False
         self._assistant_transport_request_emitted = False
         self._master_aligned = False
         self._assistant_aligned = False
         self._transport_ready = False
+        self._clear_phase = CLEAR_PHASE_NONE
         self._master_cleared = False
         self._assistant_cleared = False
 
@@ -77,14 +86,7 @@ class MasterStateMachine:
 
         if not self._search_started and self.state == STATE_IDLE:
             self._search_started = True
-            self.state = STATE_SEARCH_OBJECT
-            self._current_context_id = (self._current_context_id + 1) % 256
-            self._pending_hook_request = {
-                "context_id": self._current_context_id,
-                "state": STATE_SEARCH_OBJECT,
-                "target": TARGET_OBJECT,
-                "arg": self._hook_arg,
-            }
+            self._enter_search_with_hook(self._hook_arg)
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
@@ -116,7 +118,11 @@ class MasterStateMachine:
             return
         event = int(event)
         if self.state == STATE_SEARCH_OBJECT:
-            if self._waiting_assistant_idle_ack:
+            if (
+                self._waiting_assistant_idle_ack
+                or self._waiting_assistant_follow_ack
+                or self._waiting_restart_search_hook_ack
+            ):
                 return
             if event == EVENT_TARGET_FOUND:
                 if self._orbit_completed:
@@ -139,14 +145,7 @@ class MasterStateMachine:
             if event != EVENT_ARRIVED:
                 return
             self.state = STATE_CLEAR_OBJECT
-            self._master_cleared = False
-            self._assistant_cleared = False
-            self._pending_assistant_request = {
-                "kind": "assistant_clear",
-                "state": ASSISTANT_CLEAR_SYNC_STATE,
-                "target": ASSISTANT_CLEAR_SYNC_TARGET,
-                "arg": 0,
-            }
+            self._enter_clear_phase(CLEAR_PHASE_RETREAT)
             return
         if self.state == STATE_CLEAR_OBJECT:
             return
@@ -154,13 +153,12 @@ class MasterStateMachine:
     def mark_assistant_idle_acknowledged(self):
         """标记辅车 idle 同步已确认"""
 
-        if not self._waiting_assistant_idle_ack:
-            return
-        self._waiting_assistant_idle_ack = False
-        self.state = STATE_ORBITING
-        self._pending_orbit_command = {
-            "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
-        }
+        if self._waiting_assistant_idle_ack:
+            self._waiting_assistant_idle_ack = False
+            self.state = STATE_ORBITING
+            self._pending_orbit_command = {
+                "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
+            }
 
     def handle_assistant_target_found(self, value):
         """消费辅车目标命中回报"""
@@ -233,35 +231,125 @@ class MasterStateMachine:
         }
 
     def mark_master_cleared(self):
-        """标记主车已完成搬运后的侧向脱离"""
+        """标记主车已完成搬运收尾当前段位置动作"""
 
         if self.state != STATE_CLEAR_OBJECT:
             return
+        if self._clear_phase not in (
+            CLEAR_PHASE_RETREAT,
+            CLEAR_PHASE_TRANSLATE,
+        ):
+            return
         self._master_cleared = True
-        self._try_finish_clear()
+        self._try_advance_clear_phase()
 
     def handle_assistant_cleared(self, value):
         """消费辅车搬运后脱离完成回报"""
 
-        _ = value
         if self.state != STATE_CLEAR_OBJECT:
             return
+        if int(value) != int(self._clear_phase):
+            return
         self._assistant_cleared = True
-        self._try_finish_clear()
+        self._try_advance_clear_phase()
 
-    def _try_finish_clear(self):
-        """在主辅都完成侧向脱离后进入停止态"""
+    def _try_advance_clear_phase(self):
+        """在当前收尾阶段完成后推进到下一阶段"""
 
         if self.state != STATE_CLEAR_OBJECT:
             return
         if not self._master_cleared or not self._assistant_cleared:
             return
-        self.state = STATE_STOP
+        if self._clear_phase == CLEAR_PHASE_RETREAT:
+            self._clear_phase = _CLEAR_STAGE_TURN_BACK
+            self._master_cleared = False
+            self._assistant_cleared = False
+            return
+        if self._clear_phase == CLEAR_PHASE_TRANSLATE:
+            self._restart_search_after_clear()
+
+    def can_start_turn_back_rotation(self):
+        """判断回身阶段是否已经满足开始旋转条件"""
+
+        return self.state == STATE_CLEAR_OBJECT and self._clear_phase == _CLEAR_STAGE_TURN_BACK
+
+    def mark_turn_back_completed(self):
+        """标记主车回身完成并进入横移阶段"""
+
+        if self.state != STATE_CLEAR_OBJECT:
+            return
+        if self._clear_phase != _CLEAR_STAGE_TURN_BACK:
+            return
+        self._enter_clear_phase(CLEAR_PHASE_TRANSLATE)
+
+    def _restart_search_after_clear(self):
+        """在搬运收尾完成后重启寻找阶段"""
+
+        self._orbit_completed = False
+        self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_follow_ack = True
+        self._waiting_restart_search_hook_ack = True
+        self._assistant_object_request_emitted = False
+        self._assistant_orbit_request_emitted = False
+        self._assistant_transport_request_emitted = False
+        self._master_aligned = False
+        self._assistant_aligned = False
+        self._transport_ready = False
+        self._clear_phase = CLEAR_PHASE_NONE
+        self._master_cleared = False
+        self._assistant_cleared = False
+        self.state = STATE_SEARCH_OBJECT
+        self._enter_search_with_hook(self._hook_arg)
         self._pending_assistant_request = {
-            "kind": "assistant_idle",
-            "state": ASSISTANT_IDLE_SYNC_STATE,
-            "target": ASSISTANT_IDLE_SYNC_TARGET,
+            "kind": "assistant_follow",
+            "state": ASSISTANT_FOLLOW_SYNC_STATE,
+            "target": ASSISTANT_FOLLOW_SYNC_TARGET,
             "arg": 0,
+        }
+
+    def mark_assistant_follow_acknowledged(self):
+        """标记辅车 follow 同步已确认"""
+
+        self._waiting_assistant_follow_ack = False
+
+    def mark_restart_search_hook_acknowledged(self):
+        """标记回身后主车本车视觉搜索 hook 已确认"""
+
+        self._waiting_restart_search_hook_ack = False
+
+    def is_post_clear_turn_back_pending(self):
+        """当前是否处于收尾阶段中的主车转身段"""
+
+        return self.state == STATE_CLEAR_OBJECT and self._clear_phase == _CLEAR_STAGE_TURN_BACK
+
+    def get_clear_phase(self):
+        """返回当前搬运收尾阶段编号"""
+
+        return self._clear_phase
+
+    def _enter_clear_phase(self, clear_phase):
+        """进入指定的搬运收尾阶段并按需同步辅车"""
+
+        self._clear_phase = int(clear_phase)
+        self._master_cleared = False
+        self._assistant_cleared = False
+        self._pending_assistant_request = {
+            "kind": "assistant_clear",
+            "state": ASSISTANT_CLEAR_SYNC_STATE,
+            "target": ASSISTANT_CLEAR_SYNC_TARGET,
+            "arg": int(clear_phase),
+        }
+
+    def _enter_search_with_hook(self, hook_arg):
+        """创建新一轮主车找物体 hook 上下文"""
+
+        self.state = STATE_SEARCH_OBJECT
+        self._current_context_id = (self._current_context_id + 1) % 256
+        self._pending_hook_request = {
+            "context_id": self._current_context_id,
+            "state": STATE_SEARCH_OBJECT,
+            "target": TARGET_OBJECT,
+            "arg": int(hook_arg),
         }
 
     def poll_hook_request(self):
@@ -296,6 +384,10 @@ class MasterStateMachine:
         if self.state != STATE_SEARCH_OBJECT:
             return False
         if self._waiting_assistant_idle_ack:
+            return False
+        if self._waiting_assistant_follow_ack:
+            return False
+        if self._waiting_restart_search_hook_ack:
             return False
         if self._master_aligned:
             return False

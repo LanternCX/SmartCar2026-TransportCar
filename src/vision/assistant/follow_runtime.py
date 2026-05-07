@@ -5,9 +5,11 @@
 
 from config import params as _params
 from protocol.link import should_resend, write_reliable_line
+from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_APPROACH_OBJECT,
+    ASSISTANT_STATE_FOLLOW,
     ASSISTANT_STATE_ORBIT,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
@@ -45,6 +47,8 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     _params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+MOTION_STOP_SPEED_THRESHOLD = getattr(_params, "MOTION_STOP_SPEED_THRESHOLD")
+MOTION_STOP_CONFIRM_TICKS = getattr(_params, "MOTION_STOP_CONFIRM_TICKS")
 
 
 def _default_now_ms() -> int:
@@ -104,6 +108,7 @@ class AssistantFollowRuntime:
         self._last_approach_arg = 0
         self._post_orbit_realign_active = False
         self._clear_completed = False
+        self._clear_stop_ticks = 0
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -318,6 +323,14 @@ class AssistantFollowRuntime:
                 source="assistant_idle",
                 has_omega=True,
             )
+        elif self._state_machine.state == ASSISTANT_STATE_FOLLOW:
+            self._inputs["uart6"]["velocity"] = None
+            self._inputs["uart8"]["velocity"] = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
+            self._enter_follow_state()
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._post_orbit_realign_active = False
             self._clear_completed = False
@@ -484,6 +497,8 @@ class AssistantFollowRuntime:
             return False
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
+        if source == "uart6" and self._pending_local_vision_sync is not None:
+            return False
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             return True
         if self._state_machine.state != ASSISTANT_STATE_APPROACH_OBJECT:
@@ -506,6 +521,20 @@ class AssistantFollowRuntime:
     def _clear_motion_inputs(self) -> None:
         self._clear_input_cache("uart6")
         self._clear_input_cache("uart8")
+
+    def _enter_follow_state(self) -> None:
+        """进入跟随状态并同步本地视觉切回色标跟随任务"""
+
+        self._write_zero_velocity("assistant_follow")
+        self._pending_local_vision_sync = {
+            "seq": self._local_vision_sync_seq,
+            "state": ASSISTANT_STATE_FOLLOW,
+            "target": 0,
+            "arg": 0,
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+        self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
 
     def _write_zero_velocity(self, source: str) -> None:
         self._transport_car.handle_velocity_packet(
@@ -589,11 +618,20 @@ class AssistantFollowRuntime:
         self._pending_target_found_report = None
         self._post_orbit_realign_active = False
         self._clear_completed = False
+        self._clear_stop_ticks = 0
         self._clear_motion_inputs()
-        self._transport_car.set_relative_translation_target(
-            -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
-            0.0,
-        )
+        clear_phase = int(self._state_machine.arg)
+        if clear_phase == CLEAR_PHASE_RETREAT:
+            self._transport_car.set_relative_translation_target(
+                0.0,
+                -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M) * 0.5,
+            )
+            return
+        if clear_phase == CLEAR_PHASE_TRANSLATE:
+            self._transport_car.set_relative_translation_target(
+                -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
+                0.0,
+            )
 
     def _resume_approach_after_orbit(self) -> None:
         if self._state_machine.state != ASSISTANT_STATE_ORBIT:
@@ -621,20 +659,42 @@ class AssistantFollowRuntime:
 
     def _finish_clear_if_needed(self) -> None:
         if self._state_machine.state != ASSISTANT_STATE_CLEAR_OBJECT:
+            self._clear_stop_ticks = 0
             return
         if self._clear_completed:
+            self._clear_stop_ticks = 0
             return
         if bool(getattr(self._transport_car, "command_lock", False)):
+            self._clear_stop_ticks = 0
             return
+        if not self._are_all_wheels_near_stop():
+            self._clear_stop_ticks = 0
+            return
+        self._clear_stop_ticks += 1
+        if self._clear_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+            return
+        self._clear_stop_ticks = 0
         self._clear_completed = True
         self._write_zero_velocity("assistant_clear_complete")
         self._pending_target_found_report = {
             "seq": int(self._now_ms()) % 256,
             "event": _CLEARED_EVENT,
-            "value": 0,
+            "value": int(self._state_machine.arg),
             "last_sent_ms": None,
             "sent_once": False,
         }
+
+    def _are_all_wheels_near_stop(self) -> bool:
+        """判断三轮实际轮速是否都已进入静止范围"""
+
+        wheel_states = getattr(self._transport_car, "wheel_states", ())
+        if len(wheel_states) < 3:
+            return False
+        threshold = float(MOTION_STOP_SPEED_THRESHOLD)
+        for state in wheel_states:
+            if abs(float(state.get("filtered_speed", 0.0))) > threshold:
+                return False
+        return True
 
     def _send_pending_local_vision_sync(self) -> None:
         pending = self._pending_local_vision_sync
