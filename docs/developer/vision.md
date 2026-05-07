@@ -24,7 +24,7 @@
 - OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成，也负责辅车找目标物体阶段的红色目标识别、速度输出和可靠事件回报。
-- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。搬运结束后的侧向脱离完成回报 `CLEARED` 由辅车 RT1021 本地生成，不依赖 OpenART Vision assistant。
+- OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。搬运收尾阶段的后退段与横移段完成回报 `CLEARED` 由辅车 RT1021 本地生成，不依赖 OpenART Vision assistant。
 - `v/o` 数据流包不做发送前后延时，`s/a/r` 可靠包发送前后各使用固定 1 ms 短延时。
 
 ## OpenART 主车搜索算法
@@ -203,7 +203,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 - `vision/assistant/` 是辅车角色运行入口：负责接入 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入。
 - `vision/assistant/follow_runtime.py` 会创建辅车角色运行时对象，并在 `step()` 控制周期中参与双路速度输入读取编排、子状态处理和底盘调度。
 - 辅车角色层在控制周期内统一编排 `UART8` 与 `UART6` 的读取：两路短包按 [串口通信协议](protocol.md) 的链路定义解释；任一路单独存在时也可以直接形成最终速度。
-- 辅车在 `ASSISTANT_FOLLOW` 中把 `UART8` 解释为前馈输入、把 `UART6` 解释为视觉输入；最终生效的 `vx / vy` 通过两路按轴裸相加形成，`omega` 只由 `UART8` 提供；角色层对两路都采用“保持上一包”的语义。
+- 辅车在 `ASSISTANT_FOLLOW` 中先向本地 OpenART 同步跟随任务，使本地视觉切回识别主车色标；本地视觉确认同步前，不使用 `UART6` 视觉速度。确认后，`UART8` 解释为前馈输入、`UART6` 解释为视觉输入；最终生效的 `vx / vy` 通过两路按轴裸相加形成，`omega` 只由 `UART8` 提供。
 - 辅车在 `ASSISTANT_IDLE` 中停止线速度, 清空 `UART8` 前馈速度缓存和 `UART6` 视觉速度缓存, 写入零速度目标, 不新增角度保持接口。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中停止使用 `UART8` 前馈, 只使用本地视觉速度向目标物体靠近；找到目标后停止并通过 `UART8` 回报主车。
 - 视觉代码可以按设备侧分别维护，但角色入口统一在 `vision/master/` 与 `vision/assistant/` 下；其中主车 RT1021 角色运行入口承担上游控制接入、车间转发和主车视觉 hook 编排职责。
@@ -234,7 +234,7 @@ OpenART Vision assistant 在 `ASSISTANT_APPROACH_OBJECT` 下执行找物体任�
 - 主车承担视觉相关决策与任务状态切换主线；主车 RT1021 角色运行入口负责 `UART3` 上游控制接入、`UART8` 当前底盘速度转发、本车 `UART6` 视觉 hook 通信、主车视觉 `v` 搜索速度接入和主车搜索状态机调度。
 - 主车视觉包作为主车视觉职责落点，不把主车视觉判断逻辑压回共享底盘。
 - 辅车角色层职责承担前馈输入、视觉输入、子状态同步的编排与共享底盘速度写回，不在角色层额外扩第二套底盘执行内核。
-- 辅车角色层在 `ASSISTANT_FOLLOW` 中同时消费 `UART8` 与 `UART6` 上的速度短包；`UART8` 负责提供前馈向量，`UART6` 负责提供视觉修正向量；任一路单独存在时都可以直接形成速度；最终速度控制继续回到共享底盘原生入口。
+- 辅车角色层在 `ASSISTANT_FOLLOW` 中同步本地视觉后消费 `UART8` 与 `UART6` 上的速度短包；`UART8` 负责提供前馈向量，`UART6` 负责提供视觉修正向量；任一路单独存在时都可以直接形成速度；最终速度控制继续回到共享底盘原生入口。
 - 辅车角色层在 `ASSISTANT_FOLLOW` 中对两路输入按统一速度向量理解：`UART8` 输入包形成前馈向量，`UART6` 输入包形成视觉向量；未出现的速度轴按 `0` 处理；两路都按最近一包持续生效；最终输出对 `vx / vy` 取两路逐轴裸相加结果，对 `omega` 只取 `UART8` 输入值。
 - 辅车角色层在 `ASSISTANT_IDLE` 中继续读取串口, 但速度短包不更新角色层速度缓存, 也不写入非零底盘速度。
 - 辅车角色层在 `ASSISTANT_APPROACH_OBJECT` 中向本地视觉同步找物体任务, 本地视觉确认后只使用 `UART6` 找物体速度。
