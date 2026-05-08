@@ -12,16 +12,29 @@ from protocol.packet import (
     format_velocity_packet,
     parse_short_packet,
 )
+from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
+    ASSISTANT_CLEAR_SYNC_STATE,
+    ASSISTANT_CLEAR_SYNC_TARGET,
+    ASSISTANT_FOLLOW_SYNC_STATE,
+    ASSISTANT_FOLLOW_SYNC_TARGET,
+    ASSISTANT_IDLE_SYNC_STATE,
+    ASSISTANT_IDLE_SYNC_TARGET,
     ASSISTANT_TRANSPORT_SYNC_STATE,
     ASSISTANT_TRANSPORT_SYNC_TARGET,
     EVENT_ALIGNED,
+    EVENT_ARRIVED,
+    EVENT_CLEARED,
     EVENT_TARGET_FOUND,
+    STATE_IDLE,
+    STATE_CLEAR_OBJECT,
     STATE_ORBITING,
     STATE_SEARCH_OBJECT,
+    STATE_STOP,
     STATE_TRANSPORT_OBJECT,
+    TARGET_EDGE_LINE,
 )
 
 
@@ -32,10 +45,20 @@ MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
 ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID")
 MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
+MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
 TRANSPORT_FORWARD_SPEED = getattr(_params, "TRANSPORT_FORWARD_SPEED")
+TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+TRANSPORT_CLEAR_RETREAT_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_RETREAT_DISTANCE_M")
+TRANSPORT_CLEAR_RETREAT_MAX_SPEED = getattr(
+    _params,
+    "TRANSPORT_CLEAR_RETREAT_MAX_SPEED",
+)
+MOTION_STOP_SPEED_THRESHOLD = getattr(_params, "MOTION_STOP_SPEED_THRESHOLD")
+MOTION_STOP_CONFIRM_TICKS = getattr(_params, "MOTION_STOP_CONFIRM_TICKS")
+MASTER_TURN_BACK_DELTA_DEG = getattr(_params, "MASTER_TURN_BACK_DELTA_DEG")
 
 
 class MasterForwardRuntime:
@@ -74,12 +97,21 @@ class MasterForwardRuntime:
         self._orbit_command_active = False
         self._transport_sync_acknowledged = False
         self._transport_hook_acknowledged = False
+        self._clear_sync_acknowledged = False
+        self._clear_motion_started = False
+        self._clear_master_completed_phase = None
+        self._clear_motion_stop_ticks = 0
+        self._turn_back_rotation_started = False
+        self._turn_back_stop_ticks = 0
+        self._turn_back_target_heading_deg = None
         self._state_machine = MasterStateMachine(
             hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+            transport_hook_arg=MASTER_TRANSPORT_HOOK_CONFIG_ID,
+            finish_hook_arg=MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID,
             initial_context_id=seed_value,
         )
         self.last_report = None
@@ -96,6 +128,17 @@ class MasterForwardRuntime:
             self._transport_car.uart3.write("start\r\n")
         except Exception:
             self._record_error("uart3 start write failed")
+
+    def _write_uart3_turn_heading_debug(self) -> None:
+        """在主车转身阶段向 UART3 输出当前角度调试信息"""
+
+        try:
+            self._transport_car.uart3.write(
+                "turn_heading,%.2f\r\n"
+                % float(getattr(self._transport_car, "heading_est", 0.0))
+            )
+        except Exception:
+            self._record_error("uart3 turn debug write failed")
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -172,6 +215,10 @@ class MasterForwardRuntime:
             self._apply_latest_uart6_velocity()
         self._forward_current_chassis_velocity()
         self._process_uart8()
+        self._drain_state_machine_outputs()
+        self._run_clear_phase()
+        self._drain_state_machine_outputs()
+        self._run_turn_back_phase()
         self._drain_state_machine_outputs()
         if self._state_machine.state == STATE_TRANSPORT_OBJECT and not transport_applied_this_tick:
             self._apply_transport_velocity()
@@ -278,6 +325,10 @@ class MasterForwardRuntime:
             return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             return
+        if self._state_machine.state == STATE_CLEAR_OBJECT:
+            return
+        if self._state_machine.state == STATE_STOP:
+            return
         if self._state_machine.is_waiting_assistant_idle_ack():
             return
         packet = parse_short_packet(line)
@@ -313,6 +364,8 @@ class MasterForwardRuntime:
                     self._transport_hook_acknowledged = True
                     if self._transport_sync_acknowledged:
                         self._state_machine.mark_transport_ready()
+                elif self._state_machine.state == STATE_SEARCH_OBJECT:
+                    self._state_machine.mark_restart_search_hook_acknowledged()
                 self._pending_hook = None
                 self._drain_pending_hook_event()
             return
@@ -357,10 +410,14 @@ class MasterForwardRuntime:
             ):
                 if pending.get("kind") == "assistant_idle":
                     self._state_machine.mark_assistant_idle_acknowledged()
+                elif pending.get("kind") == "assistant_follow":
+                    self._state_machine.mark_assistant_follow_acknowledged()
                 elif pending.get("kind") == "assistant_transport":
                     self._transport_sync_acknowledged = True
                     if self._transport_hook_acknowledged:
                         self._state_machine.mark_transport_ready()
+                elif pending.get("kind") == "assistant_clear":
+                    self._clear_sync_acknowledged = True
                 self._pending_assistant_sync = None
                 return
             pending = self._pending_sync
@@ -378,6 +435,8 @@ class MasterForwardRuntime:
                 self._state_machine.handle_assistant_target_found(packet["value"])
             elif int(packet["event"]) == EVENT_ALIGNED:
                 self._state_machine.handle_assistant_aligned(packet["value"])
+            elif int(packet["event"]) == EVENT_CLEARED:
+                self._state_machine.handle_assistant_cleared(packet["value"])
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -408,6 +467,8 @@ class MasterForwardRuntime:
         )
 
     def _forward_current_chassis_velocity(self) -> None:
+        if self._state_machine.state == STATE_CLEAR_OBJECT:
+            return
         if self._state_machine.state == STATE_SEARCH_OBJECT:
             pending_sync = self._pending_assistant_sync
             pending_hook = self._pending_hook
@@ -519,6 +580,7 @@ class MasterForwardRuntime:
             self._rx_buf6 = ""
             self._transport_hook_acknowledged = False
             self._pending_hook = {
+                "kind": hook_request.get("kind"),
                 "reliable_seq": self._hook_seq,
                 "context_id": int(hook_request["context_id"]),
                 "state": int(hook_request["state"]),
@@ -532,14 +594,19 @@ class MasterForwardRuntime:
         if assistant_request is not None:
             request_kind = assistant_request.get("kind")
             if request_kind == "assistant_idle":
+                stop_source = "master_wait_assistant_idle"
+                if self._state_machine.state == STATE_STOP:
+                    stop_source = "master_transport_finish_stop"
                 self._latest_uart6_velocity = None
                 self._transport_car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
-                    source="master_wait_assistant_idle",
+                    source=stop_source,
                     has_omega=True,
                 )
+            elif request_kind == "assistant_follow":
+                self._latest_uart6_velocity = None
             elif request_kind == "assistant_transport":
                 self._hook_seq = (self._hook_seq + 1) % 256
                 self._active_hook_context_id = None
@@ -565,6 +632,19 @@ class MasterForwardRuntime:
                     "last_sent_ms": None,
                     "sent_once": False,
                 }
+            elif request_kind == "assistant_clear":
+                self._latest_uart6_velocity = None
+                self._clear_sync_acknowledged = False
+                self._clear_motion_started = False
+                self._clear_master_completed_phase = None
+                self._clear_motion_stop_ticks = 0
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    source="master_wait_clear_ready",
+                    has_omega=True,
+                )
             seq = self._assistant_sync_seq
             self._pending_assistant_sync = {
                 "kind": request_kind,
@@ -584,6 +664,99 @@ class MasterForwardRuntime:
                 float(MASTER_ORBIT_RADIUS_SCALE),
             )
             self._orbit_command_active = True
+
+    def _run_clear_phase(self) -> None:
+        """在搬运结束后驱动主车收尾位置动作并等待辅车完成"""
+
+        if self._state_machine.state != STATE_CLEAR_OBJECT:
+            self._clear_motion_started = False
+            self._clear_master_completed_phase = None
+            self._clear_motion_stop_ticks = 0
+            self._turn_back_target_heading_deg = None
+            return
+        clear_phase = int(self._state_machine.get_clear_phase())
+        if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_TRANSLATE:
+            self._clear_motion_started = False
+            self._clear_motion_stop_ticks = 0
+            return
+        if self._clear_motion_started:
+            if bool(getattr(self._transport_car, "command_lock", False)):
+                self._clear_motion_stop_ticks = 0
+                return
+            if not self._are_all_wheels_near_stop():
+                self._clear_motion_stop_ticks = 0
+                return
+            self._clear_motion_stop_ticks += 1
+            if self._clear_motion_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+                return
+            self._clear_motion_started = False
+            self._clear_master_completed_phase = clear_phase
+            self._clear_motion_stop_ticks = 0
+            self._state_machine.mark_master_cleared()
+            return
+        if not self._clear_sync_acknowledged:
+            return
+        if self._clear_master_completed_phase == clear_phase:
+            return
+        if clear_phase == CLEAR_PHASE_RETREAT:
+            self._transport_car.set_relative_translation_target(
+                0.0,
+                -float(TRANSPORT_CLEAR_RETREAT_DISTANCE_M),
+                max_speed_cmd=float(TRANSPORT_CLEAR_RETREAT_MAX_SPEED),
+            )
+        else:
+            self._transport_car.set_relative_translation_target(
+                -float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
+                0.0,
+                hold_heading_deg=self._turn_back_target_heading_deg,
+            )
+        self._clear_motion_started = True
+        self._clear_motion_stop_ticks = 0
+
+    def _run_turn_back_phase(self) -> None:
+        """在后退完成后执行主车回身"""
+
+        if not self._state_machine.is_post_clear_turn_back_pending():
+            self._turn_back_rotation_started = False
+            self._turn_back_stop_ticks = 0
+            return
+        if self._turn_back_rotation_started:
+            self._write_uart3_turn_heading_debug()
+            if bool(getattr(self._transport_car, "command_lock", False)):
+                self._turn_back_stop_ticks = 0
+                return
+            if not self._are_all_wheels_near_stop():
+                self._turn_back_stop_ticks = 0
+                return
+            self._turn_back_stop_ticks += 1
+            if self._turn_back_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+                return
+            self._turn_back_rotation_started = False
+            self._turn_back_stop_ticks = 0
+            self._state_machine.mark_turn_back_completed()
+            return
+        if not self._state_machine.can_start_turn_back_rotation():
+            return
+        target_heading_deg = (
+            float(getattr(self._transport_car, "heading_est", 0.0))
+            + float(MASTER_TURN_BACK_DELTA_DEG)
+        )
+        self._turn_back_target_heading_deg = target_heading_deg
+        self._transport_car.set_heading_transition_target(target_heading_deg)
+        self._turn_back_rotation_started = True
+        self._turn_back_stop_ticks = 0
+
+    def _are_all_wheels_near_stop(self) -> bool:
+        """判断三轮实际轮速是否都已进入静止范围"""
+
+        wheel_states = getattr(self._transport_car, "wheel_states", ())
+        if len(wheel_states) < 3:
+            return False
+        threshold = float(MOTION_STOP_SPEED_THRESHOLD)
+        for state in wheel_states:
+            if abs(float(state.get("filtered_speed", 0.0))) > threshold:
+                return False
+        return True
 
     def _send_pending_hook(self) -> None:
         """重复发送待确认的视觉 hook 同步包"""

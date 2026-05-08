@@ -20,20 +20,34 @@ MASTER_SEARCH_HOOK_CONFIG_ID = 1
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = 1
 # 主车搬运阶段使用的视觉配置编号
 MASTER_TRANSPORT_HOOK_CONFIG_ID = 2
+# 主车搬运结束判定使用的视觉配置编号
+MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = 3
 # 辅车搬运阶段使用的视觉配置编号
 ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = 2
 # 辅车搬运态对主车 UART8 前馈的缩放系数, 范围 0.0 ~ 1.0
 ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = 0.8
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 5.0
+TRANSPORT_FORWARD_SPEED = 3.0
+# 搬运收尾阶段主辅车横移的默认步长, 单位米
+TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.20
+# 搬运收尾阶段主车后退距离, 单位米
+TRANSPORT_CLEAR_RETREAT_DISTANCE_M = 0.10
+# 搬运收尾阶段主车后退最大速度
+TRANSPORT_CLEAR_RETREAT_MAX_SPEED = 3.0
+# 状态收尾判定时三轮接近静止的默认轮速阈值, 单位脉冲/控制拍
+MOTION_STOP_SPEED_THRESHOLD = 0.5
+# 状态收尾判定时三轮接近静止需要连续满足的默认拍数
+MOTION_STOP_CONFIRM_TICKS = 3
 # 主车绕行的绝对目标角度增量, 单位度
 MASTER_ORBIT_TARGET_DEG = 90
+# 主车回到寻找构型前的原地回身角度, 单位度
+MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-MASTER_ORBIT_RADIUS_SCALE = 1.50
+MASTER_ORBIT_RADIUS_SCALE = 3.0
 # 辅车绕行的绝对目标角度, 单位度
 ASSISTANT_ORBIT_TARGET_DEG = -90
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-ASSISTANT_ORBIT_RADIUS_SCALE = 1.80
+ASSISTANT_ORBIT_RADIUS_SCALE = 3.0
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒
 ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = 20
 # ===== 电机与 PWM =====
@@ -65,7 +79,7 @@ ACTIVE_WHEELS = ("m", "l", "r")
 # 值越大滤波强度越弱, 值越小则响应越迟缓
 GYRO_LPF_ALPHA = 0.2
 # 陀螺仪比例因子, 单位 LSB / (deg/s), 用于原始数值到角速度的转换
-GYRO_SCALE = 16.384
+GYRO_SCALE = 14.285714285714286
 # 角速度 Z 轴在 IMU 返回数组中的索引位置(0-5 分别为 ax, ay, az, gx, gy, gz)
 GYRO_AXIS_Z = 5
 
@@ -78,10 +92,12 @@ YAW_KI = 0.1
 YAW_KD = 0.008
 # 积分项饱和限幅, 防止积分超调
 YAW_I_MAX = 100.0
-# 自动回正最大角速度, 对应轮速分量, 决定回正时的最大回转速度
+# 朝向保持最大角速度, 对应轮速分量, 决定保持目标朝向时的最大回转速度
 AUTO_OMEGA_MAX = 15.0
+# 朝向跳转最大角速度, 对应轮速分量, 只限制主动转到新朝向的动作
+HEADING_TRANSITION_OMEGA_MAX = 1.50
 # 绕行阶段最大角速度, 对应轮速分量, 只限制绕行时的回转速度
-ORBIT_AUTO_OMEGA_MAX = 1.5
+ORBIT_AUTO_OMEGA_MAX = 1
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
 

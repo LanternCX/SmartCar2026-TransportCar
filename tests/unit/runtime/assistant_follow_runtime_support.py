@@ -73,7 +73,11 @@ def install_fake_transport_car(monkeypatch):
 
     class _TransportCar:
         def __init__(self) -> None:
-            self.wheel_states = [{"encoder": "enc-left"}, {"encoder": "enc-right"}]
+            self.wheel_states = [
+                {"encoder": "enc-m", "filtered_speed": 0.0},
+                {"encoder": "enc-l", "filtered_speed": 0.0},
+                {"encoder": "enc-r", "filtered_speed": 0.0},
+            ]
             self.imu = "imu"
             self.ticker = None
             self.uart3 = uart3
@@ -149,6 +153,20 @@ def install_fake_transport_car(monkeypatch):
             events.append(("set_heading_target", float(target_angle_deg)))
             self.control_state["omega"] = 0.0
             self.control_state["angle"] = float(target_angle_deg)
+            self.command_lock = True
+            self.command_mode = "locked"
+            self.orbit_mode = False
+
+        def set_relative_translation_target(self, dx: float, dy: float) -> None:
+            events.append(("set_relative_translation_target", float(dx), float(dy)))
+            self.control_state = {
+                "vx": 0.0,
+                "vy": 0.0,
+                "omega": 0.0,
+                "angle": 0.0,
+                "x": float(dx),
+                "y": float(dy),
+            }
             self.command_lock = True
             self.command_mode = "locked"
             self.orbit_mode = False

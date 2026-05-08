@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-05-08-1 | 2026-05-08 | 修复状态跳转沿用未完成目标角度导致的航向保持错误 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-08-1.md` | 记录主辅车多阶段状态跳转中未完成目标角度被后续阶段沿用的问题, 以及通过持续保持理论目标角度完成的修复闭环。 | master, assistant, heading-hold, position-control, state-transition, target-heading, debug |
 | 2026-05-02-1 | 2026-05-02 | 收敛主车视觉 hook 底边判据与纵向速度饱和问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-02-1.md` | 记录主车单车视觉 hook、归一化底边判据、纵向速度饱和和 rear only 绕行链路的调试闭环。 | master, vision, hook, object-bottom, orbiting, rear-only, saturation, debug |
 | 2026-04-30-1 | 2026-04-30 | 用交叉编译避开 PR#56 注释引发的板端编译期内存峰值 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-30-1.md` | 记录 PR#56 / issue #57 中大量注释触发板端编译期内存峰值的问题，以及通过 mpy-cli-dev 交叉编译和 `.mpy` 优先部署完成闭环。 | PR56, issue57, mpy-cross, compile-time, memory-peak, comments, mpy-cli, debug |
 | 2026-04-20-1 | 2026-04-20 | 收敛辅车 UART6 视觉输入与 UART8 前馈输入的串口调试口径 | `docs/superpowers/memory/debug/entries/2026-04/2026-04-20-1.md` | 把辅车角色层的双路串口输入重新收口为“UART6 视觉、UART8 前馈、vx/vy 裸相加、omega 只取 UART8、两路都保持上一包”，并用主机侧回归和文档修正完成闭环。 | assistant, uart6, uart8, visual-input, feedforward, debug, keep-last-packet, omega |

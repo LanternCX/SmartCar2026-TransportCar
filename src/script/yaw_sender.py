@@ -17,7 +17,7 @@ import gc
 # 控制周期, 单位毫秒
 TICK_MS = 5
 # 陀螺仪比例因子, 单位 LSB / (deg/s), 用于原始值到角速度的转换
-GYRO_SCALE = 16.384
+GYRO_SCALE = 14.285714285714286
 # 陀螺仪零飘参数文件路径, 包含校准时测得的各轴偏移
 GYRO_OFFSET_FILE = "/flash/gyro_offset.txt"
 

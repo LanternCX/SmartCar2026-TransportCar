@@ -43,6 +43,7 @@ YAW_KI = getattr(_params, "YAW_KI")
 YAW_KD = getattr(_params, "YAW_KD")
 YAW_I_MAX = getattr(_params, "YAW_I_MAX")
 AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
+HEADING_TRANSITION_OMEGA_MAX = getattr(_params, "HEADING_TRANSITION_OMEGA_MAX")
 ORBIT_AUTO_OMEGA_MAX = getattr(_params, "ORBIT_AUTO_OMEGA_MAX")
 HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
@@ -141,6 +142,24 @@ def _create_null_motors():
     return {"m": _NullMotor(), "l": _NullMotor(), "r": _NullMotor()}
 
 
+def _normalize_heading_delta_deg(delta_deg):
+    """把角度差归一化到 [-180, 180) 区间."""
+
+    delta = float(delta_deg)
+    while delta >= 180.0:
+        delta -= 360.0
+    while delta < -180.0:
+        delta += 360.0
+    return delta
+
+
+def _resolve_heading_target_near_current(target_deg, current_deg):
+    """把目标角映射到当前角附近的等价表示."""
+
+    current = float(current_deg)
+    return current + _normalize_heading_delta_deg(float(target_deg) - current)
+
+
 class TransportCar:
     """
     @brief 搬运车核心控制单例
@@ -211,7 +230,7 @@ class TransportCar:
 
         # 偏航角位置式 PID 控制器, 输出目标角速度以追踪目标航向
         # @details 使用位置式 PID 以支持 I 项积分防饱和(YAW_I_MAX)
-        #          输出限幅为 ±AUTO_OMEGA_MAX, 防止过度转向
+        #          基础输出限幅为 ±AUTO_OMEGA_MAX, 主动跳转和绕行阶段再按各自上限收口
         #          yaw_integral: 调试辅助字段, 记录积分项当前值
         self.yaw_pid = PositionalPIDController(
             output_limit=AUTO_OMEGA_MAX, integral_limit=YAW_I_MAX
@@ -291,6 +310,7 @@ class TransportCar:
         #          command_lock: 位置锁定标志, True 时位置/角度目标有效
         #          command_mode: 当前锁定诊断状态, 取值 locked/unlocked/none
         #          lock_start_time: 位置锁定开始时间(毫秒)
+        #          heading_transition_mode: 主动朝向跳转标志, True 时使用独立跳转限幅
         #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
         #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
         #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整短包行
@@ -301,6 +321,7 @@ class TransportCar:
         self.command_lock = False
         self.command_mode = "none"
         self.lock_start_time = 0
+        self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self.rx_buf3 = ""
@@ -337,6 +358,7 @@ class TransportCar:
         self._pending_dy = None
         self._pending_d_angle = None
         self._pending_lock = None
+        self._translation_speed_limit_cmd = None
 
         # 初始化速度环 PID 增益, 每轮独立配置
         self.init_pid()
@@ -537,6 +559,7 @@ class TransportCar:
         self.control_state["omega"] = 0.0
         self.control_state["angle"] = float(target_angle_deg)
         self.command_lock = True
+        self.heading_transition_mode = False
         self.orbit_mode = True
         self.orbit_radius_scale = radius_scale
         self.heading_target = float(target_angle_deg)
@@ -555,7 +578,69 @@ class TransportCar:
         self.control_state["angle"] = float(target_angle_deg)
         self.control_state["omega"] = 0.0
         self.command_lock = True
+        self.heading_transition_mode = False
         self.heading_target = float(target_angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
+    def set_heading_transition_target(self, target_angle_deg):
+        """写入主动朝向跳转目标
+
+        @param target_angle_deg 绝对目标航向角, 单位度
+        """
+
+        self._clear_orbit_mode()
+        self.control_state["angle"] = float(target_angle_deg)
+        self.control_state["omega"] = 0.0
+        self.command_lock = True
+        self.heading_transition_mode = True
+        self.heading_target = float(target_angle_deg)
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
+    def set_relative_translation_target(
+        self,
+        dx,
+        dy,
+        hold_heading_deg=None,
+        max_speed_cmd=None,
+    ):
+        """写入车体系相对平移目标并保持当前朝向
+
+        @param dx 车体系 x 方向相对位移, 单位米
+        @param dy 车体系 y 方向相对位移, 单位米
+        @param hold_heading_deg 可选的保持朝向角, 单位度
+        @param max_speed_cmd 可选的该段位置控制最大命令速度
+        """
+
+        dx = float(dx)
+        dy = float(dy)
+        heading_deg = float(self.heading_est)
+        if hold_heading_deg is not None:
+            heading_deg = float(hold_heading_deg)
+        heading_rad = math.radians(heading_deg)
+        cos_t = math.cos(heading_rad)
+        sin_t = math.sin(heading_rad)
+        world_dx = dx * cos_t - dy * sin_t
+        world_dy = dx * sin_t + dy * cos_t
+
+        self._clear_orbit_mode()
+        self.control_state["vx"] = 0.0
+        self.control_state["vy"] = 0.0
+        self.control_state["omega"] = 0.0
+        self.control_state["x"] = float(self.odometry.x) + world_dx
+        self.control_state["y"] = float(self.odometry.y) + world_dy
+        self.control_state["angle"] = heading_deg
+        self.command_lock = True
+        self.heading_transition_mode = False
+        self.heading_target = heading_deg
+        self._translation_speed_limit_cmd = (
+            None if max_speed_cmd is None else float(max_speed_cmd)
+        )
         self.yaw_pid.reset()
         self.yaw_integral = 0.0
         self._pending_lock = None
@@ -576,12 +661,14 @@ class TransportCar:
         self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
         self.command_lock = False
         self.command_mode = "none"
+        self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self._pending_lock = None
         self._pending_dx = None
         self._pending_dy = None
         self._pending_d_angle = None
+        self._translation_speed_limit_cmd = None
 
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""
@@ -598,11 +685,13 @@ class TransportCar:
         self.control_state.pop("y", None)
         self._pending_dx = None
         self._pending_dy = None
+        self._translation_speed_limit_cmd = None
 
     def _clear_rotation_control_targets(self):
         """清理角度位置目标."""
 
         self.control_state.pop("angle", None)
+        self.heading_transition_mode = False
         self._pending_d_angle = None
 
     def _clear_orbit_mode(self):
@@ -619,6 +708,7 @@ class TransportCar:
         else:
             self.command_lock = False
             self.command_mode = "none"
+            self._translation_speed_limit_cmd = None
 
     def handle_velocity_packet(self, vx, vy, omega=0.0, source="protocol", has_omega=True):
         """接收结构化速度短包结果
@@ -970,7 +1060,8 @@ class TransportCar:
         1. 角度模式(cmd_angle != None):
            - 使用位置式 PID 跟踪目标航向角
            - 微分项直接使用滤波角速度, 增强稳定性
-           - 输出限幅在 ±AUTO_OMEGA_MAX
+           - 朝向保持默认输出限幅在 ±AUTO_OMEGA_MAX
+           - 主动朝向跳转输出限幅在 ±HEADING_TRANSITION_OMEGA_MAX
 
         2. 角速度模式(omega != None):
            - 直接跟随控制目标中的 omega 值
@@ -983,7 +1074,7 @@ class TransportCar:
 
         @param dt_s 时间增量(秒), 用于 PID 积分
 
-        @return 限幅后的目标角速度(脉冲/周期), 范围 ±AUTO_OMEGA_MAX
+        @return 限幅后的目标角速度(脉冲/周期)
 
         @warning YAW_KD 配置应使用本地微分而不是 PID 的 D 项, 因为已有低通滤波
         """
@@ -991,19 +1082,35 @@ class TransportCar:
         omega_value = self.control_state.get("omega")
 
         if cmd_angle is not None:
-            self.heading_target = cmd_angle
-            omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
+            self.heading_target = float(cmd_angle)
+            pid_target = _resolve_heading_target_near_current(
+                self.heading_target, self.heading_est
+            )
+            if bool(getattr(self, "heading_transition_mode", False)) and hasattr(
+                self.yaw_pid, "integral"
+            ):
+                self.yaw_pid.integral = 0.0
+            omega_pid = self.yaw_pid.update(pid_target, self.heading_est, dt_s)
+            if bool(getattr(self, "heading_transition_mode", False)) and hasattr(
+                self.yaw_pid, "integral"
+            ):
+                self.yaw_pid.integral = 0.0
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_limit = AUTO_OMEGA_MAX
             if self.orbit_mode:
                 omega_limit = ORBIT_AUTO_OMEGA_MAX
+            elif bool(getattr(self, "heading_transition_mode", False)):
+                omega_limit = HEADING_TRANSITION_OMEGA_MAX
             omega_cmd = clamp(omega_auto, -omega_limit, omega_limit)
 
         elif omega_value is not None:
             omega_cmd = omega_value
             if abs(omega_cmd) < HOLD_SPEED_EPS:
+                pid_target = _resolve_heading_target_near_current(
+                    self.heading_target, self.heading_est
+                )
                 omega_pid = self.yaw_pid.update(
-                    self.heading_target, self.heading_est, dt_s
+                    pid_target, self.heading_est, dt_s
                 )
                 omega_auto = omega_pid - YAW_KD * self._yaw_rate
                 omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
@@ -1012,7 +1119,10 @@ class TransportCar:
                 self.yaw_pid.reset()
                 self.yaw_integral = 0.0
         else:
-            omega_pid = self.yaw_pid.update(self.heading_target, self.heading_est, dt_s)
+            pid_target = _resolve_heading_target_near_current(
+                self.heading_target, self.heading_est
+            )
+            omega_pid = self.yaw_pid.update(pid_target, self.heading_est, dt_s)
             omega_auto = omega_pid - YAW_KD * self._yaw_rate
             omega_cmd = clamp(omega_auto, -AUTO_OMEGA_MAX, AUTO_OMEGA_MAX)
 
@@ -1066,7 +1176,7 @@ class TransportCar:
             v_world_y = err_y * POS_KP
 
             v_speed = math.sqrt(v_world_x * v_world_x + v_world_y * v_world_y)
-            if v_speed > POS_MAX_SPEED:
+            if self._translation_speed_limit_cmd is None and v_speed > POS_MAX_SPEED:
                 scale = POS_MAX_SPEED / v_speed
                 v_world_x *= scale
                 v_world_y *= scale
@@ -1083,6 +1193,15 @@ class TransportCar:
 
             target_vx_cmd = vx_pulses * 3.0
             target_vy_cmd = vy_pulses * 3.0
+            if self._translation_speed_limit_cmd is not None:
+                cmd_limit = float(self._translation_speed_limit_cmd)
+                cmd_speed = math.sqrt(
+                    target_vx_cmd * target_vx_cmd + target_vy_cmd * target_vy_cmd
+                )
+                if cmd_speed > cmd_limit and cmd_speed > 0.0:
+                    scale = cmd_limit / cmd_speed
+                    target_vx_cmd *= scale
+                    target_vy_cmd *= scale
 
         else:
             target_vx_cmd = float(self.control_state.get("vx", 0.0))
@@ -1162,7 +1281,9 @@ class TransportCar:
 
         angle_ok = True
         if self._has_active_rotation_target():
-            err_angle = abs(self.heading_target - self.heading_est)
+            err_angle = abs(
+                _normalize_heading_delta_deg(self.heading_target - self.heading_est)
+            )
             if err_angle > ANGLE_TOLERANCE:
                 angle_ok = False
 
@@ -1181,6 +1302,8 @@ class TransportCar:
                 pos_ok = False
 
         if angle_ok and pos_ok:
+            had_translation_target = self._has_active_translation_target()
+            had_rotation_target = self._has_active_rotation_target()
             self.command_lock = False
             self.command_mode = "none"
             if self.orbit_mode:
@@ -1190,10 +1313,17 @@ class TransportCar:
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()
                 self.yaw_integral = 0.0
-                self.heading_target = self.heading_est
                 for state in self.wheel_states:
                     state["motor"].duty(0)
                     state["duty"] = 0.0
+                return
+            if had_translation_target:
+                self._clear_translation_control_targets()
+                self.control_state["vx"] = 0.0
+                self.control_state["vy"] = 0.0
+            if had_rotation_target:
+                self._clear_rotation_control_targets()
+                self.control_state["omega"] = 0.0
 
     def _process_uart(self):
         """

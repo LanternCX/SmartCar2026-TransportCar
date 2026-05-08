@@ -29,7 +29,11 @@ def test_assistant_follow_runtime_keeps_remote_control_surface(monkeypatch) -> N
     runtime.mark_tick(12)
     runtime.set_ticker(ticker_obj)
 
-    assert runtime.wheel_states == [{"encoder": "enc-left"}, {"encoder": "enc-right"}]
+    assert runtime.wheel_states == [
+        {"encoder": "enc-m", "filtered_speed": 0.0},
+        {"encoder": "enc-l", "filtered_speed": 0.0},
+        {"encoder": "enc-r", "filtered_speed": 0.0},
+    ]
     assert runtime.imu == "imu"
     assert hasattr(runtime, "step")
     assert events[:2] == [("mark_tick", 12), ("set_ticker", ticker_obj)]

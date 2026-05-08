@@ -1,6 +1,9 @@
 """`TransportCar` 对外行为测试."""
 
+import importlib.util
 import inspect
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -10,8 +13,13 @@ from tests.unit.core.runtime_support import (
     DummyMotor,
     DummyTicker,
     RecordingController,
+    import_transport_car_module,
     make_minimal_transport_car,
 )
+
+
+ROOT = Path(__file__).resolve().parents[3]
+SRC = ROOT / "src"
 
 
 class _ResettableWithArgs:
@@ -50,6 +58,7 @@ class _Quat:
 
 def _make_control_car(**attrs):
     """构造可执行底盘控制入口的最小对象."""
+    transport_car = import_transport_car_module()
     motors = [DummyMotor(), DummyMotor(), DummyMotor()]
     defaults = {
         "control_state": {"vx": 0.0, "vy": 0.0, "omega": 0.0},
@@ -71,6 +80,7 @@ def _make_control_car(**attrs):
         "q_est": _Quat(),
         "last_yaw_rad": 9.0,
         "odometry": _Odom(),
+        "kinematics": transport_car.OmniKinematics(),
         "target_speeds": {"m": 0.0, "l": 0.0, "r": 0.0},
         "wheel_states": [
             {
@@ -97,7 +107,23 @@ def _make_control_car(**attrs):
         ],
     }
     defaults.update(attrs)
-    return make_minimal_transport_car(**defaults)
+    car = transport_car.TransportCar.__new__(transport_car.TransportCar)
+    for key, value in defaults.items():
+        setattr(car, key, value)
+    return transport_car, car
+
+
+def _load_real_positional_pid_controller():
+    module_path = SRC / "control" / "pid_controller.py"
+    spec = importlib.util.spec_from_file_location(
+        "test_real_pid_controller_module", module_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load pid controller module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.pop("control.pid_math", None)
+    spec.loader.exec_module(module)
+    return module.PositionalPIDController
 
 
 @pytest.mark.parametrize(
@@ -121,6 +147,12 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0.0 <= float(real_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
     assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert float(real_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) > 0.0
+    assert float(real_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
+    assert float(real_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
+    assert float(real_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
+    assert int(real_params.MOTION_STOP_CONFIRM_TICKS) > 0
+    assert float(real_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(real_params.MAX_DUTY) <= 10000.0
     assert float(real_params.V_CMD_MAX) > 0.0
     assert float(real_params.TARGET_SPEED_MAX) > 0.0
@@ -133,7 +165,14 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0 <= int(real_params.GYRO_AXIS_Z) <= 5
     assert float(real_params.YAW_I_MAX) >= 0.0
     assert float(real_params.AUTO_OMEGA_MAX) >= 0.0
+    assert float(real_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
     assert float(real_params.HOLD_SPEED_EPS) >= 0.0
+
+
+def test_transport_clear_retreat_distance_matches_pre_turn_back_request() -> None:
+    """主车转身前后退距离按调试要求保持 0.1m."""
+
+    assert float(real_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) == pytest.approx(0.1)
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:
@@ -366,10 +405,71 @@ def test_transport_car_set_heading_target_keeps_translation_and_leaves_orbit_mod
     assert car.control_state == {"vx": 8.0, "vy": -3.0, "omega": 0.0, "angle": 90.0}
 
 
+def test_transport_car_set_relative_translation_target_builds_world_target_and_heading_hold() -> None:
+    """相对平移入口把车体系位移写成世界系目标并保持当前朝向."""
+    _transport_car, car = _make_control_car(
+        heading_est=90.0,
+        heading_target=12.0,
+        odometry=_Odom(x=1.0, y=2.0),
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
+    )
+
+    car.set_relative_translation_target(0.2, -0.1)
+
+    assert car.command_lock is True
+    assert car.command_mode == "locked"
+    assert car.control_state["vx"] == pytest.approx(0.0)
+    assert car.control_state["vy"] == pytest.approx(0.0)
+    assert car.control_state["omega"] == pytest.approx(0.0)
+    assert car.control_state["angle"] == pytest.approx(90.0)
+    assert car.control_state["x"] == pytest.approx(1.1)
+    assert car.control_state["y"] == pytest.approx(2.2)
+    assert car.heading_target == pytest.approx(90.0)
+
+
+def test_transport_car_set_relative_translation_target_accepts_hold_heading_override() -> None:
+    """相对平移入口可显式指定保持朝向, 不应总是继承当前角度."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=320.0,
+        heading_target=270.0,
+        odometry=_Odom(x=1.0, y=2.0),
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
+    )
+
+    car.set_relative_translation_target(0.2, 0.0, hold_heading_deg=270.0)
+
+    assert car.control_state["angle"] == pytest.approx(270.0)
+    assert car.control_state["x"] == pytest.approx(1.0)
+    assert car.control_state["y"] == pytest.approx(1.8)
+    assert car.heading_target == pytest.approx(270.0)
+
+
+def test_transport_car_set_relative_translation_target_accepts_command_speed_limit_override() -> None:
+    """相对平移入口可显式指定该段位置控制命令速度上限."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=0.0,
+        odometry=_Odom(x=0.0, y=0.0),
+    )
+
+    car.set_relative_translation_target(0.2, 0.0, max_speed_cmd=0.09)
+    vx_cmd, vy_cmd = car._compute_planar_targets(0.005, 0.0)
+
+    assert vx_cmd == pytest.approx(0.09)
+    assert vy_cmd == pytest.approx(0.0)
+
+
 def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:
     """运行时配置为绕行保留独立角速度限幅参数."""
 
     assert float(real_params.ORBIT_AUTO_OMEGA_MAX) >= 0.0
+
+
+def test_runtime_config_accepts_separate_heading_transition_omega_limit() -> None:
+    """运行时配置为朝向跳转保留独立角速度限幅参数."""
+
+    assert float(real_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
 
 
 def test_transport_car_orbit_target_uses_orbit_specific_omega_limit() -> None:
@@ -391,6 +491,72 @@ def test_transport_car_orbit_target_uses_orbit_specific_omega_limit() -> None:
     assert non_orbit_omega == pytest.approx(float(transport_car.AUTO_OMEGA_MAX))
     assert orbit_omega == pytest.approx(float(transport_car.ORBIT_AUTO_OMEGA_MAX))
     assert orbit_omega < non_orbit_omega
+
+
+def test_transport_car_heading_transition_target_uses_transition_specific_omega_limit() -> None:
+    """朝向跳转角速度限幅与普通朝向保持限幅分离."""
+    transport_car, car = _make_control_car(
+        heading_est=0.0,
+        _yaw_rate=0.0,
+        yaw_pid=RecordingController(return_value=50.0),
+    )
+
+    car.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+    car.command_lock = True
+    car.command_mode = "locked"
+    non_transition_omega = car._compute_omega_cmd(0.005)
+
+    car.set_heading_transition_target(90.0)
+    transition_omega = car._compute_omega_cmd(0.005)
+
+    assert non_transition_omega == pytest.approx(float(transport_car.AUTO_OMEGA_MAX))
+    assert transition_omega == pytest.approx(
+        float(transport_car.HEADING_TRANSITION_OMEGA_MAX)
+    )
+
+
+def test_transport_car_heading_transition_reverses_after_crossing_target() -> None:
+    """朝向跳转跨过目标后应立即给出反向修正, 不能继续同向推动."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=91.63,
+        _yaw_rate=0.0,
+    )
+    PositionalPIDController = _load_real_positional_pid_controller()
+    car.yaw_pid = PositionalPIDController(
+        output_limit=float(real_params.AUTO_OMEGA_MAX),
+        integral_limit=float(real_params.YAW_I_MAX),
+    )
+    car.yaw_pid.set_gains(
+        float(real_params.YAW_KP),
+        float(real_params.YAW_KI),
+        0.0,
+    )
+
+    car.set_heading_transition_target(271.63)
+    for _ in range(140):
+        car.heading_est = 91.63
+        car._compute_omega_cmd(0.005)
+
+    car.heading_est = 320.36
+
+    assert car._compute_omega_cmd(0.005) <= 0.0
+
+
+def test_transport_car_heading_transition_unlock_accepts_wraparound_small_error() -> None:
+    """朝向跳转跨过 0/360 边界时仍应按最短角差判定完成."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=359.5,
+        heading_target=0.0,
+        control_state={"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 0.0},
+        command_lock=True,
+        command_mode="locked",
+    )
+
+    car._check_unlock()
+
+    assert car.command_lock is False
 
 
 def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius() -> None:
@@ -425,6 +591,34 @@ def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius(
         -float(_transport_car.ORBIT_AUTO_OMEGA_MAX) * 2.0
     )
     assert abs(second_call[0]) > abs(first_call[0])
+
+
+def test_transport_car_orbit_target_keeps_left_right_radius_symmetric() -> None:
+    """相同半径倍率下, 左右绕行只改变方向, 不改变半径大小."""
+    class DirectionalController(RecordingController):
+        def update(self, target, measured, dt_s):
+            self.update_calls.append((target, measured, dt_s))
+            return target - measured
+
+    _transport_car, car = _make_control_car(
+        heading_est=0.0,
+        yaw_pid=DirectionalController(),
+    )
+
+    car.set_orbit_target(90.0, 1.5)
+    right_omega = car._compute_omega_cmd(0.005)
+    right_vx, right_vy = car._compute_planar_targets(0.005, right_omega)
+
+    car.set_orbit_target(-90.0, 1.5)
+    left_omega = car._compute_omega_cmd(0.005)
+    left_vx, left_vy = car._compute_planar_targets(0.005, left_omega)
+
+    assert right_omega == pytest.approx(float(_transport_car.ORBIT_AUTO_OMEGA_MAX))
+    assert left_omega == pytest.approx(-float(_transport_car.ORBIT_AUTO_OMEGA_MAX))
+    assert right_vy == pytest.approx(0.0)
+    assert left_vy == pytest.approx(0.0)
+    assert abs(right_vx / right_omega) == pytest.approx(abs(left_vx / left_omega))
+    assert abs(right_vx / right_omega) == pytest.approx(1.5)
 
 
 def test_transport_car_orbit_target_runs_through_existing_inverse_kinematics_chain() -> None:
@@ -476,13 +670,52 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
         assert state["motor"].duties == [0]
 
 
+def test_transport_car_translation_target_unlock_clears_pose_targets_and_output() -> None:
+    """相对平移目标收敛后清理位置锁定字段并停住."""
+    _transport_car, car = _make_control_car(
+        heading_est=30.0,
+        heading_target=30.0,
+        odometry=_Odom(x=1.0, y=2.0),
+    )
+
+    car.set_relative_translation_target(0.0, 0.0)
+    car._check_unlock()
+
+    assert car.command_lock is False
+    assert car.command_mode == "none"
+    assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+
+def test_transport_car_heading_transition_unlock_keeps_target_heading() -> None:
+    """朝向跳转解锁后仍应保持原目标角, 不能改写成当前角度."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=179.5,
+        heading_target=180.0,
+        control_state={"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 180.0},
+        command_lock=True,
+        command_mode="locked",
+    )
+
+    car._check_unlock()
+
+    assert car.command_lock is False
+    assert car.heading_target == pytest.approx(180.0)
+
+
 def test_transport_car_has_no_legacy_mode_entry() -> None:
     """共享底盘不再暴露旧模式入口."""
     _transport_car, car = _make_control_car()
 
     assert sorted(
         name for name in dir(car) if name.startswith("set_") and name.endswith("target")
-    ) == ["set_heading_target", "set_orbit_target", "set_velocity_target"]
+    ) == [
+        "set_heading_target",
+        "set_heading_transition_target",
+        "set_orbit_target",
+        "set_relative_translation_target",
+        "set_velocity_target",
+    ]
 
 
 def test_transport_car_reset_control_state_keeps_reset_behavior() -> None:
