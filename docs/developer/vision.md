@@ -21,7 +21,7 @@
 - OpenART Vision master 通过本车 `UART6` 接收主车 RT1021 下发的 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>`，建立本次 hook 上下文。
 - OpenART Vision master 收到有效 `s` 包后发送 `a,<reliable_seq>`，重复 `s` 包按幂等规则处理并重新确认。
 - OpenART Vision master 在该上下文下维护主车搜索 P 环，根据识别框中心点横向误差和归一化底边纵向误差生成 `v,<vx>,<vy>` 搜索速度。
-- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
+- OpenART Vision master 在 hook 条件满足时通过 `r,<reliable_seq>,<context_id>,<event>,<value>` 按配置可靠回报 `TARGET_FOUND`、`ALIGNED` 或 `ARRIVED`，并在收到 `a,<reliable_seq>` 前按可靠通信层节奏重复发送。
 - OpenART Vision master 输出主车搜索平移速度，不维护全局状态机。
 - OpenART Vision assistant 运行在辅车 OpenART，负责面向辅车跟随的色标识别与速度修正量生成，也负责辅车找目标物体阶段的红色目标识别、速度输出和可靠事件回报。
 - OpenART Vision assistant 通过辅车 `UART6` 输出 `v,<vx>,<vy>`，不输出 `omega`；在找物体模式下通过 `r,<seq>,<event>,<value>` 按配置回报 `TARGET_FOUND` 或 `ALIGNED`。搬运收尾阶段的后退段与横移段完成回报 `CLEARED` 由辅车 RT1021 本地生成，不依赖 OpenART Vision assistant。
@@ -59,7 +59,7 @@ OpenART Vision master 负责主车物体识别、搜索 P 环、hook 上下文�
 - 横向误差来自识别框中心点 x 坐标相对画面目标点的像素偏差。
 - 纵向误差来自归一化底边相对画面目标点的像素偏差。
 - 主车搜索 P 环使用中心点 `x` 误差和归一化底边 `y` 误差生成 `vx / vy` 搜索速度。
-- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点按 hook 配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`。
+- 归一化底边量按 `image_height - rect_top` 计算；搜索目标点按 hook 配置编号切换：`arg=1` 使用寻找阶段目标点，默认按 QVGA `320x240` 使用 `x=160` 与 `y=210`；`arg=2` 使用搬运入口对正目标点，默认 `x=160` 与 `y=240`；`arg=3` 使用搬运结束判定, 保持主车搜索速度输出并额外判断黄色边线占比。
 - 误差死区、比例系数和速度限幅由 OpenART Vision master 的搜索配置定义。
 
 ### 搜索速度输出
@@ -74,7 +74,21 @@ OpenART Vision master 在 `SEARCH_OBJECT` hook 上下文下维护主车搜索 P 
 - 无有效目标或误差位于死区内时，对应速度轴输出 `0`。
 - 纵向速度按图像高度缩放后限幅，目标越接近图像底边，`vy` 绝对值越小。
 - `TARGET_FOUND` 的判断使用目标强度和误差稳定条件，其中横向、纵向命中窗口与搜索速度停下时使用的死区保持一致。
-- `arg=1` 对应寻找阶段, 稳定满足条件后回报 `TARGET_FOUND`; `arg=2` 对应搬运入口对正阶段, 稳定满足条件后回报 `ALIGNED`。
+- `arg=1` 对应寻找阶段, 稳定满足条件后回报 `TARGET_FOUND`; `arg=2` 对应搬运入口对正阶段, 稳定满足条件后回报 `ALIGNED`; `arg=3` 对应搬运结束判定, 稳定满足条件后回报 `ARRIVED`。
+
+### 主车搬运结束判定
+
+主车 OpenART 在 `arg=3` 的搬运结束 hook 下继续输出 `v,<vx>,<vy>` 搜索速度, 同时用当前选中目标识别框外侧的黄色边线占比判断搬运是否到位。
+
+判定流程:
+
+1. 读取当前选中目标的识别框。
+2. 将识别框向外扩固定像素宽度。
+3. 使用外扩框减去原识别框得到环带区域。
+4. 在环带区域统计黄色像素占比。
+5. 黄色占比连续满足阈值后, 通过可靠事件回报 `ARRIVED`。
+
+`ARRIVED` 的事件帧格式为 `r,<reliable_seq>,<context_id>,8,<value>`, `value` 为黄色边线占比的整数百分比。
 
 ### 主车输出规则
 

@@ -1,6 +1,6 @@
 # 主车推行收尾黄线判定与停车状态机计划
 
-> 执行状态: In Progress
+> 执行状态: Archive
 > 日期: 2026-05-07
 > 执行方式: Subagent-Driven
 

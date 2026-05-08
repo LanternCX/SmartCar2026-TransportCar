@@ -219,12 +219,13 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 主车视觉 hook 事件：
 
-- 主车 OpenART 使用 `r,<reliable_seq>,<context_id>,<event>,<value>` 可靠回报 `TARGET_FOUND` 或 `ALIGNED`。
+- 主车 OpenART 使用 `r,<reliable_seq>,<context_id>,<event>,<value>` 可靠回报 `TARGET_FOUND`、`ALIGNED` 或 `ARRIVED`。
 - `event` 为 `TARGET_FOUND` 时, `value` 表示寻找阶段目标强度, 本阶段使用候选目标面积。
 - `event` 为 `ALIGNED` 时, 表示搬运入口对正完成, `value` 继续使用候选目标面积。
+- `event` 为 `ARRIVED` 时, 表示搬运结束判据满足, `value` 表示黄色边线占比的整数百分比。
 - 主车 RT1021 收到格式合法的 `r` 包后，每次都返回 `a,<reliable_seq>`。
 - 重复 `r` 包必须幂等处理并重新确认。
-- 上下文匹配且事件为 `TARGET_FOUND` 或 `ALIGNED` 时, 只触发主车状态机判断。
+- 上下文匹配且事件为 `TARGET_FOUND`、`ALIGNED` 或 `ARRIVED` 时, 只触发主车状态机判断。
 - 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
 - 事件确认只表示可靠送达，不表达全局状态迁移。
 
@@ -271,7 +272,7 @@ r,<seq>,<event>,<value>
 
 ## 10. Vision 端协议职责
 
-- OpenART Vision master 是 Vision 仓库主车视觉入口，运行在主车 OpenART，负责接收 `s` hook 上下文、发送 `a` 确认、维护主车搜索 P 环、通过 `v,<vx>,<vy>` 下发主车搜索速度，并在 hook 条件满足时按配置通过可靠 `r` 回报 `TARGET_FOUND` 或 `ALIGNED`。
+- OpenART Vision master 是 Vision 仓库主车视觉入口，运行在主车 OpenART，负责接收 `s` hook 上下文、发送 `a` 确认、维护主车搜索 P 环、通过 `v,<vx>,<vy>` 下发主车搜索速度，并在 hook 条件满足时按配置通过可靠 `r` 回报 `TARGET_FOUND`、`ALIGNED` 或 `ARRIVED`。
 - OpenART Vision assistant 运行在辅车 OpenART，负责在跟随模式输出 `v,<vx>,<vy>` 视觉速度修正量，在找物体模式接收本地同步、输出找物体速度并按配置可靠回报 `TARGET_FOUND` 或 `ALIGNED`。
 - Vision 端不维护全局状态机。
 - 协议解析层不维护主车全局状态机或辅车子状态机。
