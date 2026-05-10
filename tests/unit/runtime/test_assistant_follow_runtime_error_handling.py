@@ -17,7 +17,7 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
 ) -> None:
     """串口读取异常不能把角色层 step 炸掉，并且要留下最小错误信息。"""
 
-    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"broken"
     uart8.read_error = ValueError("uart8 boom")
     uart6 = _FakeUart()
@@ -39,6 +39,31 @@ def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
     assert snapshot["uart6_input_status"] == "error"
     assert snapshot["uart8_input_status"] == "error"
     assert snapshot["last_error_text"] == "uart8 read failed: uart8 boom"
+
+
+def test_assistant_follow_runtime_catches_uart_any_errors(
+    monkeypatch,
+) -> None:
+    """串口 any 异常要被按来源捕获并记录。"""
+
+    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    def _raise_any():
+        raise RuntimeError("uart8 any boom")
+
+    uart8.any = _raise_any
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["uart8_input_status"] == "error"
+    assert snapshot["last_error_text"] == "uart8 any failed: uart8 any boom"
 
 
 def test_assistant_follow_runtime_keeps_uart8_effective_velocity_when_uart6_packet_is_invalid(
@@ -71,7 +96,7 @@ def test_assistant_follow_runtime_records_uart8_decode_errors_symmetrically(
 ) -> None:
     """UART8 解码错误也要像 UART6 一样按来源单独记录。"""
 
-    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"\xff\n"
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -139,6 +164,30 @@ def test_assistant_follow_runtime_rejects_unknown_sync_state_without_ack(
     assert snapshot["last_error_text"] == "unknown assistant sync state: 99"
 
 
+def test_assistant_follow_runtime_catches_uart8_reliable_ack_write_error(
+    monkeypatch,
+) -> None:
+    """UART8 可靠 ACK 写失败要被捕获并记录。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,1,1,0\n"
+    uart8.write_error = RuntimeError("uart8 boom")
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert runtime._sync_apply_count == 1
+    assert uart8.messages == []
+    assert snapshot["last_error_text"] == "uart8 write failed: uart8 boom"
+
+
 def test_assistant_follow_runtime_bounds_oversized_uart8_input(
     monkeypatch,
 ) -> None:
@@ -158,8 +207,10 @@ def test_assistant_follow_runtime_bounds_oversized_uart8_input(
     snapshot = runtime.build_follow_snapshot()
 
     assert runtime._inputs["uart8"]["buffer"] == ""
+    assert uart8._buffer == b""
     assert snapshot["uart8_input_status"] == "invalid"
-    assert snapshot["last_error_text"] == "invalid uart8 input"
+    assert snapshot["last_error_text"] == "none"
+    assert _uart3.messages == []
 
 
 def test_assistant_follow_runtime_bounds_oversized_uart6_input(
@@ -182,5 +233,59 @@ def test_assistant_follow_runtime_bounds_oversized_uart6_input(
     snapshot = runtime.build_follow_snapshot()
 
     assert runtime._inputs["uart6"]["buffer"] == ""
+    assert uart6._buffer == b""
     assert snapshot["uart6_input_status"] == "invalid"
-    assert snapshot["last_error_text"] == "invalid uart6 input"
+    assert snapshot["last_error_text"] == "none"
+    assert _uart3.messages == []
+
+
+def test_assistant_follow_runtime_parses_reliable_packet_before_uart8_overflow_tail(
+    monkeypatch,
+) -> None:
+    """UART8 超长积压时, 限制窗口内的可靠包仍要先被处理。"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"x\ns,12,1,1,0\n" + b"z" * 300
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert runtime._sync_apply_count == 1
+    assert uart8.messages == ["a,12\r\n"]
+    assert uart8._buffer == b""
+    assert snapshot["assistant_state"] == follow_runtime_module.ASSISTANT_STATE_FOLLOW
+    assert snapshot["uart8_input_status"] == "idle"
+    assert _uart3.messages == []
+
+
+def test_assistant_follow_runtime_limits_single_uart_read_size(
+    monkeypatch,
+) -> None:
+    """辅车单次串口读取长度不能随硬件缓存无限放大。"""
+
+    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+    oversized_input = b"x" * (follow_runtime_module._INPUT_LIMIT + 200)
+    uart6._buffer = oversized_input
+    uart8._buffer = oversized_input
+
+    runtime.step()
+
+    assert uart6.read_sizes
+    assert uart8.read_sizes
+    assert max(uart6.read_sizes) <= follow_runtime_module._INPUT_LIMIT
+    assert max(uart8.read_sizes) <= follow_runtime_module._INPUT_LIMIT
+    assert uart3.messages == []
