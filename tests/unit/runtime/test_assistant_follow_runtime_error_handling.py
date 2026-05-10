@@ -9,6 +9,7 @@ from .assistant_follow_runtime_support import (
     install_fake_transport_car,
     install_fake_uart6_factory,
 )
+import builtins
 
 
 def test_assistant_follow_runtime_keeps_running_and_records_uart_errors(
@@ -88,6 +89,30 @@ def test_assistant_follow_runtime_records_uart8_decode_errors_symmetrically(
     assert snapshot["last_error_text"] == (
         "uart8 decode failed: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
     )
+
+
+def test_assistant_follow_runtime_decode_error_does_not_depend_on_builtin_exception_name(
+    monkeypatch,
+) -> None:
+    """板端缺少 UnicodeDecodeError 名称时, 解码异常仍要被记录."""
+
+    monkeypatch.delattr(builtins, "UnicodeDecodeError")
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"\xff\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module(
+        "vision.assistant.follow_runtime", monkeypatch
+    )
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    snapshot = runtime.build_follow_snapshot()
+
+    assert snapshot["uart8_input_status"] == "error"
+    assert snapshot["last_error_text"].startswith("uart8 decode failed:")
+    assert "UnicodeDecodeError" not in snapshot["last_error_text"]
 
 
 def test_assistant_follow_runtime_rejects_unknown_sync_state_without_ack(

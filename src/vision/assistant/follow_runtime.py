@@ -204,13 +204,12 @@ class AssistantFollowRuntime:
 
         try:
             state["buffer"] += uart.read(buf_len).decode()
-        except UnicodeDecodeError as exc:
-            state["status"] = "error"
-            self._record_error("%s decode failed" % source, exc)
-            return False
         except Exception as exc:
             state["status"] = "error"
-            self._record_error("%s read failed" % source, exc)
+            if exc.__class__.__name__ == "UnicodeDecodeError":
+                self._record_error("%s decode failed" % source, exc)
+            else:
+                self._record_error("%s read failed" % source, exc)
             return False
         if len(state["buffer"]) > _INPUT_LIMIT:
             state["buffer"] = ""
