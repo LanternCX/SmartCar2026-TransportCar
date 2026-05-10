@@ -394,3 +394,10 @@ class MasterStateMachine:
         if self._assistant_transport_request_emitted and not self._transport_ready:
             return False
         return True
+
+    def allows_assistant_velocity_forward(self):
+        """当前状态是否允许向辅车转发速度前馈"""
+
+        if self.state == STATE_TRANSPORT_OBJECT:
+            return True
+        return self.allows_search_velocity()

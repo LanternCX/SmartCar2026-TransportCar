@@ -9,8 +9,6 @@
 # ===== 时序与周期 =====
 # 主控制循环周期, 单位毫秒
 TICK_MS = 5
-# 可靠短包发送前后的固定延时, 单位毫秒
-RELIABLE_PACKET_SEND_DELAY_MS = 1
 # 待确认可靠短包重发间隔, 单位毫秒
 RELIABLE_RESEND_INTERVAL_MS = 20
 # ===== 主车搜索参数 =====

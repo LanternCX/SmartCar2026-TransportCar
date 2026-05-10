@@ -639,6 +639,40 @@ def test_master_forward_runtime_repeats_state_sync_until_ack(monkeypatch) -> Non
     assert _reliable_messages(uart8) == ["s,0,3,1,0\r\n", "s,0,3,1,0\r\n"]
 
 
+def test_master_forward_runtime_skips_uart8_velocity_when_sync_is_sent(
+    monkeypatch,
+) -> None:
+    """主车同一拍发 UART8 可靠同步时不再发速度前馈."""
+
+    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart3._buffer = b"v,1.0,2.0,0.5\n"
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0))
+
+    runtime.request_state_sync(3, 1, 0)
+    runtime.step()
+
+    assert uart8.messages == ["s,0,3,1,0\r\n"]
+
+
+def test_master_forward_runtime_skips_uart8_velocity_during_assistant_idle_sync(
+    monkeypatch,
+) -> None:
+    """主车进入辅车 idle 同步阶段时不发速度前馈."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20))
+
+    runtime.step()
+    uart8.messages = []
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+
+    assert uart8.messages == ["s,1,0,0,0\r\n"]
+
+
 def test_master_forward_runtime_records_report_packet(monkeypatch) -> None:
     """主车通过 UART8 记录事件回报短包."""
 

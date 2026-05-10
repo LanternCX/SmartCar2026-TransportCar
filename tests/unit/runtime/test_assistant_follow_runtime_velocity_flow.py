@@ -226,7 +226,7 @@ def test_assistant_follow_runtime_consumes_short_packet_directly(
 ) -> None:
     """! @brief 辅车运行时直接消费速度短包"""
 
-    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"v,1.0,2.0,0.5\nx=9,y=8\n"
     uart6 = _FakeUart(["v,0.25,-0.5"])
     install_fake_uart6_factory(monkeypatch, uart6)
@@ -238,6 +238,7 @@ def test_assistant_follow_runtime_consumes_short_packet_directly(
 
     routed_lines = [event for event in events if event[0] == "handle_uart_line"]
     assert routed_lines == []
+    assert uart3.messages == []
     assert runtime._transport_car.control_state == {"vx": 1.25, "vy": 1.5, "omega": 0.5}
 
 

@@ -46,6 +46,7 @@ class _FakeUart:
         self.messages = []
         self.read_sizes = []
         self.read_error: Optional[BaseException] = None
+        self.write_error: Optional[BaseException] = None
 
     def any(self) -> int:
         return len(self._buffer)
@@ -59,6 +60,8 @@ class _FakeUart:
         return chunk
 
     def write(self, text) -> None:
+        if self.write_error is not None:
+            raise self.write_error
         self.messages.append(text)
 
 

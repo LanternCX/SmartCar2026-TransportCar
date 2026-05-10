@@ -30,7 +30,7 @@ from vision.assistant.velocity_packet import (
 )
 
 
-_INPUT_LIMIT = 128
+_INPUT_LIMIT = 32
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
@@ -195,62 +195,104 @@ class AssistantFollowRuntime:
             state["status"] = self._resolve_input_status(source)
             return False
 
-        buf_len = uart.any()
+        try:
+            buf_len = uart.any()
+        except Exception as exc:
+            state["status"] = "error"
+            self._record_error("%s any failed" % source, exc)
+            return False
         if not buf_len:
             state["status"] = self._resolve_input_status(source)
             return False
 
         has_velocity = False
 
+        input_overflow = buf_len > _INPUT_LIMIT
+        if input_overflow:
+            buf_len = _INPUT_LIMIT
+
         try:
             state["buffer"] += uart.read(buf_len).decode()
-        except UnicodeDecodeError as exc:
-            state["status"] = "error"
-            self._record_error("%s decode failed" % source, exc)
-            return False
         except Exception as exc:
             state["status"] = "error"
-            self._record_error("%s read failed" % source, exc)
+            if exc.__class__.__name__ == "UnicodeDecodeError":
+                self._record_error("%s decode failed" % source, exc)
+            else:
+                self._record_error("%s read failed" % source, exc)
             return False
-        if len(state["buffer"]) > _INPUT_LIMIT:
-            state["buffer"] = ""
-            state["status"] = "invalid"
-            self._record_error_text("invalid %s input" % source)
-            return False
+        handled_valid = False
 
         while True:
             idx = state["buffer"].find("\n")
             if idx == -1:
+                if input_overflow:
+                    discarded = self._discard_pending_input(source, uart)
+                    state["buffer"] = ""
+                    if discarded and not handled_valid:
+                        state["status"] = "invalid"
+                    return has_velocity
+                if len(state["buffer"]) > _INPUT_LIMIT:
+                    state["buffer"] = ""
+                    state["status"] = "invalid"
+                    return has_velocity
                 state["status"] = self._resolve_input_status(source)
                 return has_velocity
             if idx > _INPUT_LIMIT:
                 state["buffer"] = state["buffer"][idx + 1 :]
                 state["status"] = "invalid"
-                self._record_error_text("invalid %s input" % source)
                 continue
             line = state["buffer"][:idx].rstrip("\r").strip()
             state["buffer"] = state["buffer"][idx + 1 :]
             if source == "uart8" and self._handle_uart8_control_packet(line, uart):
-                state["status"] = self._resolve_input_status(source)
+                self._mark_input_valid(source)
+                handled_valid = True
                 continue
             if source == "uart6" and self._handle_uart6_control_packet(line):
-                state["status"] = self._resolve_input_status(source)
+                self._mark_input_valid(source)
+                handled_valid = True
                 continue
             if self._state_machine.is_idle():
                 state["status"] = self._resolve_input_status(source)
                 continue
             consume_result, parsed = split_velocity_line(line)
             if consume_result == CONSUME_ACCEPTED and parsed is not None:
+                handled_valid = True
                 if self._should_store_velocity(source):
                     state["velocity"] = self._normalize_input_velocity(source, parsed)
                     state["status"] = "active"
                     has_velocity = True
                 else:
-                    state["status"] = self._resolve_input_status(source)
+                    self._mark_input_valid(source)
             elif consume_result == CONSUME_INVALID:
                 state["status"] = "invalid"
             else:
                 state["status"] = self._resolve_input_status(source)
+
+    def _discard_pending_input(self, source: str, uart) -> bool:
+        while True:
+            try:
+                pending = uart.any()
+            except Exception as exc:
+                self._inputs[source]["status"] = "error"
+                self._record_error("%s any failed" % source, exc)
+                return False
+            if not pending:
+                return True
+            if pending > _INPUT_LIMIT:
+                pending = _INPUT_LIMIT
+            try:
+                uart.read(pending)
+            except Exception as exc:
+                self._inputs[source]["status"] = "error"
+                self._record_error("%s read failed" % source, exc)
+                return False
+
+    def _mark_input_valid(self, source: str) -> None:
+        state = self._inputs[source]
+        if state["velocity"] is not None:
+            state["status"] = "active"
+        else:
+            state["status"] = "idle"
 
     def _handle_uart8_control_packet(self, line: str, uart) -> bool:
         if self._handle_sync_packet(line, uart):
@@ -260,10 +302,13 @@ class AssistantFollowRuntime:
             return False
         if packet.get("type") == "a":
             pending = self._pending_target_found_report
-            if (
+            matched = (
                 pending is not None
                 and pending.get("sent_once")
                 and int(packet["seq"]) == int(pending["seq"])
+            )
+            if (
+                matched
             ):
                 self._pending_target_found_report = None
             return True
@@ -280,7 +325,7 @@ class AssistantFollowRuntime:
         seq = int(packet["seq"])
         is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
         if not is_new_sync and seq != self._last_sync_seq:
-            uart.write("%s\r\n" % format_ack_packet(seq))
+            self._write_forward_reliable_line(format_ack_packet(seq))
             return True
         accepted = self._apply_sync_context(packet)
         if not accepted:
@@ -294,7 +339,7 @@ class AssistantFollowRuntime:
             }
             self._last_sync_seq = seq
             self._sync_apply_count += 1
-        uart.write("%s\r\n" % format_ack_packet(seq))
+        self._write_forward_reliable_line(format_ack_packet(seq))
         return True
 
     def _apply_sync_context(self, packet: dict) -> bool:
@@ -355,10 +400,13 @@ class AssistantFollowRuntime:
         packet_type = packet.get("type")
         if packet_type == "a":
             pending = self._pending_local_vision_sync
-            if (
+            matched = (
                 pending is not None
                 and pending.get("sent_once")
                 and int(packet["seq"]) == int(pending["seq"])
+            )
+            if (
+                matched
             ):
                 self._pending_local_vision_sync = None
             return True
@@ -744,7 +792,8 @@ class AssistantFollowRuntime:
         if uart is None:
             return False
         try:
-            return bool(write_reliable_line(uart, line))
+            wrote_all = bool(write_reliable_line(uart, line))
+            return wrote_all
         except Exception as exc:
             self._record_error("uart8 write failed", exc)
             return False
@@ -754,7 +803,8 @@ class AssistantFollowRuntime:
         if uart is None:
             return False
         try:
-            return bool(write_reliable_line(uart, line))
+            wrote_all = bool(write_reliable_line(uart, line))
+            return wrote_all
         except Exception as exc:
             self._record_error("uart6 write failed", exc)
             return False

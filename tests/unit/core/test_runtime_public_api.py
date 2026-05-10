@@ -141,7 +141,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     """运行时配置中能从代码直接确定范围的参数保持在合法区间."""
 
     assert int(real_params.TICK_MS) > 0
-    assert int(real_params.RELIABLE_PACKET_SEND_DELAY_MS) >= 0
+    assert not hasattr(real_params, "RELIABLE_PACKET_SEND_DELAY_MS")
     assert int(real_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
     assert 0 <= int(real_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255

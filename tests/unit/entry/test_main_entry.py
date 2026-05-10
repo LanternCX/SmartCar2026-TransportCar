@@ -38,6 +38,23 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
     assert main.resolve_startup_script([0, 2, 0, 0]) == "script/calibrate_gyro.py"
 
 
+def test_main_entry_allocates_emergency_exception_buffer(monkeypatch) -> None:
+    """入口加载时申请 MicroPython 中断异常缓冲。"""
+
+    calls = []
+    micropython_module = ModuleType("micropython")
+    setattr(
+        micropython_module,
+        "alloc_emergency_exception_buf",
+        lambda size: calls.append(size),
+    )
+    monkeypatch.setitem(sys.modules, "micropython", micropython_module)
+
+    load_main_module()
+
+    assert calls == [100]
+
+
 def test_resolve_startup_script_defaults_to_remote_control() -> None:
     """没有长按时进入默认运行脚本."""
 

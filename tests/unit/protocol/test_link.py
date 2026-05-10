@@ -10,7 +10,6 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from config import params as _params  # noqa: E402
 from protocol.link import (  # noqa: E402
     should_resend,
     write_data_line,
@@ -38,17 +37,12 @@ def test_should_resend_handles_wrapped_tick_difference() -> None:
     assert should_resend(5, 250, 10) is True
 
 
-def test_write_reliable_line_uses_configured_delay_around_write() -> None:
+def test_write_reliable_line_writes_without_delay_hook() -> None:
     uart = _FakeUart()
-    calls = []
 
-    wrote_all = write_reliable_line(uart, "a,12", sleep_fn=lambda delay_ms: calls.append(delay_ms))
+    wrote_all = write_reliable_line(uart, "a,12")
 
     assert uart.messages == ["a,12\r\n"]
-    assert calls == [
-        _params.RELIABLE_PACKET_SEND_DELAY_MS,
-        _params.RELIABLE_PACKET_SEND_DELAY_MS,
-    ]
     assert wrote_all is True
 
 

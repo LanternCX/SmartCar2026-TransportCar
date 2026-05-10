@@ -3,6 +3,26 @@
 @file src/main.py
 """
 
+
+def _allocate_emergency_exception_buffer() -> bool:
+    """申请中断异常缓冲区, 保障板端异常可捕获。"""
+
+    try:
+        import micropython
+    except ImportError:
+        return False
+    alloc_buffer = getattr(micropython, "alloc_emergency_exception_buf", None)
+    if alloc_buffer is None:
+        return False
+    try:
+        alloc_buffer(100)
+    except Exception:
+        return False
+    return True
+
+
+_allocate_emergency_exception_buffer()
+
 from utils.startup_log import startup_log
 
 # 启动后等待时间, 等待外设稳定
