@@ -277,7 +277,6 @@ def install_transport_car_stubs() -> None:
         "TICK_MS": 5,
         "MAX_DUTY": 1000,
         "TARGET_SPEED_MAX": 100.0,
-        "RELIABLE_PACKET_SEND_DELAY_MS": 1,
         "RELIABLE_RESEND_INTERVAL_MS": 20,
         "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
         "ASSISTANT_APPROACH_OBJECT_CONFIG_ID": 1,

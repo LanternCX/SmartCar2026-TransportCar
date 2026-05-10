@@ -213,7 +213,6 @@ class MasterForwardRuntime:
             )
         elif not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
-        self._forward_current_chassis_velocity()
         self._process_uart8()
         self._drain_state_machine_outputs()
         self._run_clear_phase()
@@ -222,9 +221,9 @@ class MasterForwardRuntime:
         self._drain_state_machine_outputs()
         if self._state_machine.state == STATE_TRANSPORT_OBJECT and not transport_applied_this_tick:
             self._apply_transport_velocity()
-            self._forward_current_chassis_velocity()
         self._send_pending_hook()
         self._send_pending_sync()
+        self._forward_current_chassis_velocity()
 
     def _process_uart3(self) -> None:
         """接管 UART3 按行读取并处理短包输入"""
@@ -467,15 +466,10 @@ class MasterForwardRuntime:
         )
 
     def _forward_current_chassis_velocity(self) -> None:
-        if self._state_machine.state == STATE_CLEAR_OBJECT:
+        if not self._state_machine.allows_assistant_velocity_forward():
             return
-        if self._state_machine.state == STATE_SEARCH_OBJECT:
-            pending_sync = self._pending_assistant_sync
-            pending_hook = self._pending_hook
-            if pending_sync is not None and pending_sync.get("kind") == "assistant_transport":
-                return
-            if pending_hook is not None and pending_hook.get("kind") == "transport_hook":
-                return
+        if self._pending_assistant_sync is not None or self._pending_sync is not None:
+            return
         state = self._transport_car.control_state
         omega = state.get("omega")
         if omega is None:

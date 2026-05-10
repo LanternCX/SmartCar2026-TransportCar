@@ -3,29 +3,6 @@
 @brief 可靠短包写出辅助
 """
 
-from config import params as _params
-
-
-def _sleep_reliable_send_delay(sleep_fn):
-    """
-    @brief 执行可靠短包发送保护延时
-
-    @param sleep_fn 测试注入的毫秒延时函数, 为 None 时使用运行时默认时间模块
-    """
-
-    delay_ms = _params.RELIABLE_PACKET_SEND_DELAY_MS
-    if sleep_fn is not None:
-        sleep_fn(delay_ms)
-        return
-
-    import time
-
-    sleep_ms = getattr(time, "sleep_ms", None)
-    if sleep_ms is not None:
-        sleep_ms(delay_ms)
-        return
-    time.sleep(delay_ms / 1000.0)
-
 
 def default_now_ms():
     """
@@ -42,20 +19,16 @@ def default_now_ms():
     return int(time.time() * 1000)
 
 
-def write_reliable_line(uart, line, sleep_fn=None):
+def write_reliable_line(uart, line):
     """
-    @brief 写出可靠短包, 并在写出前后执行固定延时
+    @brief 写出可靠短包
 
     @param uart 目标串口对象
     @param line 不含行尾的短包文本
-    @param sleep_fn 测试注入的毫秒延时函数
     @return 是否完整写出整行短包
     """
 
-    _sleep_reliable_send_delay(sleep_fn)
-    wrote_all = _write_line(uart, line)
-    _sleep_reliable_send_delay(sleep_fn)
-    return wrote_all
+    return _write_line(uart, line)
 
 
 def write_data_line(uart, line):
