@@ -13,9 +13,9 @@
 ## 本地命令
 
 ```bash
-python3 -m pytest tests/unit -q
-python3 -m pytest tests/contract/serial_protocol -q
-python3 -m pytest tests/unit tests/contract/serial_protocol -q
+uv run --group test python -m pytest tests/unit -q
+uv run --group test python -m pytest tests/contract/serial_protocol -q
+uv run --group test python -m pytest tests/unit tests/contract/serial_protocol -q
 ```
 
 ## 板端确认

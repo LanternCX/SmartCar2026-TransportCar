@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MPY_CLI="${MPY_CLI:-mpy-cli}"
+if [[ -n "${MPY_CLI:-}" ]]; then
+  MPY_CMD=("${MPY_CLI}")
+else
+  MPY_CMD=(uv run --group board mpy-cli)
+fi
 MODE="${1:-incremental}"
 
 case "${MODE}" in
   incremental)
-    "${MPY_CLI}" deploy --mode incremental --base master --no-interactive --yes
+    "${MPY_CMD[@]}" deploy --mode incremental --base master --no-interactive --yes
     ;;
   full)
-    "${MPY_CLI}" deploy --mode full --no-interactive --yes
+    "${MPY_CMD[@]}" deploy --mode full --no-interactive --yes
     ;;
   *)
     echo "Usage: bash build.sh [full]" >&2

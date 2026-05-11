@@ -22,3 +22,20 @@
 - [串口协议](docs/developer/protocol.md)
 - [状态机定义](docs/developer/state.md)
 - [视觉设计](docs/developer/vision.md)
+
+## 本地开发
+
+本仓库使用 `uv` 管理主机侧开发环境。
+
+```bash
+uv sync --group test
+uv run --group test python -m pytest tests/unit tests/contract/serial_protocol -q
+```
+
+板端工具通过独立依赖组进入环境：
+
+```bash
+uv sync --group board
+uv run --group board mpy-cli plan
+bash build.sh
+```
