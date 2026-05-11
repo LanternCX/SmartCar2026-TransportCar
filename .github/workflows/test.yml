@@ -23,4 +23,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run unit tests
-        run: uv run --locked --only-group test python -m pytest tests/unit -q
+        run: uv run --no-project --with "pytest>=9.0.2" python -m pytest tests/unit -q
