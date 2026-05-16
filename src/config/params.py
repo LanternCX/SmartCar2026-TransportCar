@@ -11,6 +11,11 @@
 TICK_MS = 5
 # 待确认可靠短包重发间隔, 单位毫秒
 RELIABLE_RESEND_INTERVAL_MS = 20
+
+# ===== 上电电压保护 =====
+# 上电允许进入核心脚本的最低电池电压, 单位 V
+POWER_MIN_VOLTAGE_V = 11.5
+
 # ===== 主车搜索参数 =====
 # 主车搜索下发给视觉 hook 的配置编号
 MASTER_SEARCH_HOOK_CONFIG_ID = 1

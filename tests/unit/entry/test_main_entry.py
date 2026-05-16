@@ -18,6 +18,8 @@ MAIN_PATH = PROJECT_ROOT / "src" / "main.py"
 def load_main_module():
     """按文件路径加载入口模块."""
 
+    sys.modules.pop("config", None)
+    sys.modules.pop("config.params", None)
     sys.modules.pop("utils.startup_log", None)
     spec = spec_from_file_location("transport_main_entry", MAIN_PATH)
     assert spec is not None
@@ -79,6 +81,7 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     launched_scripts = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
     monkeypatch.setattr(
         main,
@@ -92,9 +95,79 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     assert result == "script/remote_control.py"
     assert launched_scripts == ["script/remote_control.py"]
     assert "[boot] main: entry start" in output_lines
+    assert "[boot] main: power voltage=12.00V" in output_lines
     assert "[boot] main: startup keys=[0, 0, 0, 0]" in output_lines
     assert "[boot] main: selected script=script/remote_control.py" in output_lines
     assert "[boot] main: launching script=script/remote_control.py" in output_lines
+
+
+def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
+    """入口阶段电压不足时只进入蜂鸣告警."""
+
+    main = load_main_module()
+    launched_scripts = []
+    alarmed = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 11.4)
+    monkeypatch.setattr(
+        main,
+        "_run_low_voltage_alarm",
+        lambda voltage: alarmed.append(voltage) or "alarm",
+    )
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda script_path: launched_scripts.append(script_path),
+    )
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result == "alarm"
+    assert launched_scripts == []
+    assert alarmed == [11.4]
+    assert "[boot] main: low voltage=11.40V" in output_lines
+
+
+def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:
+    """入口阶段使用配置阈值判定低电压."""
+
+    main = load_main_module()
+    launched_scripts = []
+    alarmed = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main.params, "POWER_MIN_VOLTAGE_V", 12.1)
+    monkeypatch.setattr(
+        main,
+        "_run_low_voltage_alarm",
+        lambda voltage: alarmed.append(voltage) or "alarm",
+    )
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda script_path: launched_scripts.append(script_path),
+    )
+
+    assert main.main() == "alarm"
+    assert launched_scripts == []
+    assert alarmed == [12.0]
+
+
+def test_convert_power_adc_to_voltage_uses_board_divider() -> None:
+    """B27 电池分压按板端 demo 公式换算."""
+
+    main = load_main_module()
+    half_scale = 32768
+
+    voltage = main._convert_power_adc_to_voltage(half_scale)
+    expected = half_scale / 65535 * 3.3 * 11.0
+
+    assert voltage == pytest.approx(expected)
 
 
 def test_resolve_existing_startup_script_prefers_compiled_file(monkeypatch) -> None:
