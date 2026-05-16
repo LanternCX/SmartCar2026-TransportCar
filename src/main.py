@@ -8,7 +8,7 @@ def _allocate_emergency_exception_buffer() -> bool:
     """申请中断异常缓冲区, 保障板端异常可捕获。"""
 
     try:
-        import micropython
+        import micropython  # pyright: ignore[reportMissingImports]
     except ImportError:
         return False
     alloc_buffer = getattr(micropython, "alloc_emergency_exception_buf", None)
@@ -23,6 +23,7 @@ def _allocate_emergency_exception_buffer() -> bool:
 
 _allocate_emergency_exception_buffer()
 
+from config import params
 from utils.startup_log import startup_log
 
 # 启动后等待时间, 等待外设稳定
@@ -115,6 +116,50 @@ def _sleep_ms(delay_ms):
     time.sleep(float(delay_ms) / 1000.0)
 
 
+def _convert_power_adc_to_voltage(adc_value):
+    """将 B27 ADC 原始值换算为电池电压."""
+
+    return (
+        int(adc_value)
+        / 65535
+        * 3.3
+        * 11.0
+    )
+
+
+def _read_startup_voltage():
+    """读取上电阶段电池电压."""
+
+    from machine import ADC
+
+    power_adc = ADC("B27")
+    return _convert_power_adc_to_voltage(power_adc.read_u16())
+
+
+def _run_low_voltage_alarm(voltage):
+    """低电压时循环蜂鸣告警."""
+
+    from machine import Pin
+
+    on_ms = 100
+    beep = Pin("D24", Pin.OUT, value=False)
+    off_ms = 1000 - on_ms
+    if off_ms < 0:
+        off_ms = 0
+
+    while True:
+        beep.high()
+        _sleep_ms(on_ms)
+        beep.low()
+        _sleep_ms(off_ms)
+
+
+def _should_block_startup_for_voltage(voltage):
+    """判断上电电压是否低于保护阈值."""
+
+    return float(voltage) < float(params.POWER_MIN_VOLTAGE_V)
+
+
 def _noop_ticker_callback(_ticker_obj):
     """空 ticker 回调函数, 用于初始化阶段占位"""
     return None
@@ -196,6 +241,11 @@ def main():
 
     startup_log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
+    voltage = _read_startup_voltage()
+    startup_log("main", "power voltage=%.2fV" % voltage)
+    if _should_block_startup_for_voltage(voltage):
+        startup_log("main", "low voltage=%.2fV" % voltage)
+        return _run_low_voltage_alarm(voltage)
     key_states = _scan_startup_key_states()
     startup_log("main", "startup keys=%s" % key_states)
     try:
