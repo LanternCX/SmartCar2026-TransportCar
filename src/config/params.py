@@ -42,13 +42,13 @@ MOTION_STOP_SPEED_THRESHOLD = 0.5
 # 状态收尾判定时三轮接近静止需要连续满足的默认拍数
 MOTION_STOP_CONFIRM_TICKS = 3
 # 主车绕行的绝对目标角度增量, 单位度
-MASTER_ORBIT_TARGET_DEG = 90
+MASTER_ORBIT_TARGET_DEG = 180
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 3.0
 # 辅车绕行的绝对目标角度, 单位度
-ASSISTANT_ORBIT_TARGET_DEG = -90
+ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 ASSISTANT_ORBIT_RADIUS_SCALE = 3.0
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒
