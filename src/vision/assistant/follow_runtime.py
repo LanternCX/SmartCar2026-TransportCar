@@ -5,7 +5,7 @@
 
 from config import params as _params
 from protocol.link import should_resend, write_reliable_line
-from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_APPROACH_OBJECT,
@@ -675,10 +675,10 @@ class AssistantFollowRuntime:
                 -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M) * 0.5,
             )
             return
-        if clear_phase == CLEAR_PHASE_TRANSLATE:
+        if clear_phase == CLEAR_PHASE_FORWARD:
             self._transport_car.set_relative_translation_target(
-                -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 0.0,
+                float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
             )
 
     def _resume_approach_after_orbit(self) -> None:

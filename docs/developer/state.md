@@ -107,7 +107,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT -> CLEAR_
 
 ### `CLEAR_OBJECT`
 
-主车在搬运结束后执行三段式收尾。第一段先同步辅车进入后退段，等待辅车确认后，主车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，辅车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。第二段等待主辅都完成后退后，主车原地回身 `180` 度。第三段由主车同步辅车进入横移段，等待辅车确认后，主车与辅车都按自身车体系 `X` 负方向执行固定步长平移。每一段位置动作都在锁定解除后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成横移后，主车直接重启 `SEARCH_OBJECT`。
+主车在搬运结束后执行三段式收尾。第一段先同步辅车进入后退段，等待辅车确认后，主车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，辅车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。第二段等待主辅都完成后退后，主车原地回身 `180` 度。第三段由主车同步辅车进入前进段，等待辅车确认后，主车与辅车都按自身车体系 `Y` 正方向执行固定步长前进。每一段位置动作都在锁定解除后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成前进后，主车直接重启 `SEARCH_OBJECT`。
 
 ## 6. 主车全局状态编号
 
@@ -167,7 +167,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `8` | `ARRIVED` | 到位 |
 | `9` | `CLEARED` | 搬运收尾当前段位置动作完成 |
 
-`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`ARRIVED` 表示主车搬运结束判据满足。`CLEARED` 表示搬运收尾当前段位置动作完成，其中 `value=1` 表示后退段完成，`value=2` 表示横移段完成；完成判定要求该段位置锁定已经释放，且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
+`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`ARRIVED` 表示主车搬运结束判据满足。`CLEARED` 表示搬运收尾当前段位置动作完成，其中 `value=1` 表示后退段完成，`value=2` 表示前进段完成；完成判定要求该段位置锁定已经释放，且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
 
 
 ## 10. 辅车子状态编号
@@ -179,7 +179,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 | `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
 | `3` | `ASSISTANT_ORBIT` | 辅车使用统一绕行模式绕行后再继续本地对正 |
 | `4` | `ASSISTANT_TRANSPORT_OBJECT` | 辅车在搬运态融合缩放后的 `UART8` 前馈与本地视觉修正 |
-| `5` | `ASSISTANT_CLEAR_OBJECT` | 辅车在搬运收尾阶段按主车同步的后退段或横移段执行位置动作 |
+| `5` | `ASSISTANT_CLEAR_OBJECT` | 辅车在搬运收尾阶段按主车同步的后退段或前进段执行位置动作 |
 
 辅车子状态目标编号：
 
@@ -198,7 +198,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `ASSISTANT_TRANSPORT_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和搬运配置编号。辅车进入该状态后清空上一阶段遗留的运动目标；搬运期间把 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 然后与本地 `UART6` 视觉修正叠加后写入共享底盘；`UART8` 的 `omega` 不作为搬运态旋转输入。
 
-`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT`，并由参数区分收尾阶段：`1` 表示后退段，辅车进入后清空两路运动输入，并按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半；`2` 表示横移段，辅车进入后按自身车体系 `X` 负方向执行固定步长平移。每一段位置动作完成后，辅车都在位置锁定释放且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍后，通过 `UART8` 可靠回报 `CLEARED`，并把当前阶段编号写入 `value`。
+`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT`，并由参数区分收尾阶段：`1` 表示后退段，辅车进入后清空两路运动输入，并按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半；`2` 表示前进段，辅车进入后按自身车体系 `Y` 正方向执行固定步长前进。每一段位置动作完成后，辅车都在位置锁定释放且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍后，通过 `UART8` 可靠回报 `CLEARED`，并把当前阶段编号写入 `value`。
 
 ## 11. 状态跳转原则
 
@@ -207,13 +207,13 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
 - 主车在绕行后的 `SEARCH_OBJECT` 中等待本车和辅车都回报 `ALIGNED`, 双方搬运入口同步确认后进入 `TRANSPORT_OBJECT`。
 - 主车在 `TRANSPORT_OBJECT` 中融合基础推进速度与本车视觉修正, 并通过 `UART8` 向辅车转发当前底盘速度作为搬运前馈。
-- 主车在 `CLEAR_OBJECT` 中先等待本车与辅车都完成后退段，再执行主车原地回身 `180` 度，随后同步辅车进入横移段。
-- 主辅都完成横移段后，主车直接重建 `SEARCH_OBJECT` hook，并同步辅车回到 follow；主车本车视觉 hook 和辅车 follow 都确认完成后，主车才重新开始搜索运动。
+- 主车在 `CLEAR_OBJECT` 中先等待本车与辅车都完成后退段，再执行主车原地回身 `180` 度，随后同步辅车进入前进段。
+- 主辅都完成前进段后，主车直接重建 `SEARCH_OBJECT` hook，并同步辅车回到 follow；主车本车视觉 hook 和辅车 follow 都确认完成后，主车才重新开始搜索运动。
 - 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
 - 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
 - 辅车在 `ASSISTANT_ORBIT` 中忽略速度短包；绕行完成后，本地回到持续对正目标的语义。
 - 辅车在 `ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 搬运前馈先做头对头换向和系数缩放, 再叠加本地视觉修正。
-- 辅车在 `ASSISTANT_CLEAR_OBJECT` 中忽略速度短包, 只执行当前同步要求的后退段或横移段位置动作, 并回报带阶段编号的 `CLEARED`。
+- 辅车在 `ASSISTANT_CLEAR_OBJECT` 中忽略速度短包, 只执行当前同步要求的后退段或前进段位置动作, 并回报带阶段编号的 `CLEARED`。
 - 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
 - 可靠包确认只表示对端已处理该包，不表示状态已切换。

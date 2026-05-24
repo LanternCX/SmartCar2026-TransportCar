@@ -12,7 +12,7 @@ from protocol.packet import (
     format_velocity_packet,
     parse_short_packet,
 )
-from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
@@ -669,7 +669,7 @@ class MasterForwardRuntime:
             self._turn_back_target_heading_deg = None
             return
         clear_phase = int(self._state_machine.get_clear_phase())
-        if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_TRANSLATE:
+        if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_FORWARD:
             self._clear_motion_started = False
             self._clear_motion_stop_ticks = 0
             return
@@ -700,8 +700,8 @@ class MasterForwardRuntime:
             )
         else:
             self._transport_car.set_relative_translation_target(
-                -float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 0.0,
+                float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 hold_heading_deg=self._turn_back_target_heading_deg,
             )
         self._clear_motion_started = True
