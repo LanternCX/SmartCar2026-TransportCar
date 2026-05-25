@@ -20,6 +20,14 @@ ASSISTANT_UART_INPUT_LIMIT = 32
 RELIABLE_RESEND_INTERVAL_MS = 20
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒
 ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = 20
+# 序号最小值
+SEQ_MIN = 0
+# 序号最大值
+SEQ_MAX = 255
+# 序号环长度
+SEQ_RING_SIZE = 256
+# 判定新序号的半环长度
+SEQ_HALF_RING = 128
 # UART3 在 machine.UART 中的端口编号
 UART3_PORT_ID = 2
 # UART6 在 machine.UART 中的端口编号

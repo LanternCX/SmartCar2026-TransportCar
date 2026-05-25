@@ -155,6 +155,10 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(comm_params.ASSISTANT_UART_INPUT_LIMIT) > 0
     assert int(comm_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
     assert int(comm_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert int(comm_params.SEQ_MIN) == 0
+    assert int(comm_params.SEQ_MAX) == 255
+    assert int(comm_params.SEQ_RING_SIZE) == 256
+    assert int(comm_params.SEQ_HALF_RING) == 128
     assert int(motion_params.TICK_MS) > 0
     assert not hasattr(comm_params, "RELIABLE_PACKET_SEND_DELAY_MS")
     assert 0 <= int(vision_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255

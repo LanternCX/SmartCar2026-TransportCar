@@ -339,6 +339,10 @@ def install_transport_car_stubs() -> None:
         "ASSISTANT_UART_INPUT_LIMIT": 32,
         "RELIABLE_RESEND_INTERVAL_MS": 20,
         "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
+        "SEQ_MIN": 0,
+        "SEQ_MAX": 255,
+        "SEQ_RING_SIZE": 256,
+        "SEQ_HALF_RING": 128,
     }
     storage_values = {
         "IDENT_RESULTS_FILE": "ident.txt",
