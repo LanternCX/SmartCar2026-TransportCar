@@ -164,8 +164,10 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0 <= int(vision_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_TRANSPORT_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_ORBIT_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID) <= 255
     assert 0.0 <= float(vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
     assert float(motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) >= 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
@@ -410,11 +412,11 @@ def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> Non
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
 
 
-def test_transport_car_set_heading_target_keeps_translation_and_leaves_orbit_mode() -> None:
-    """普通角度保持入口保留平移速度, 且不继续保留绕行模式."""
+def test_transport_car_set_heading_target_keeps_non_orbit_translation() -> None:
+    """普通角度保持入口在非绕行模式保留平移速度."""
     _transport_car, car = _make_control_car(
         control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
-        orbit_mode=True,
+        orbit_mode=False,
         orbit_radius_scale=1.5,
     )
 
@@ -613,6 +615,52 @@ def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius(
         -float(_transport_car.ORBIT_AUTO_OMEGA_MAX) * 2.0
     )
     assert abs(second_call[0]) > abs(first_call[0])
+
+
+def test_transport_car_orbit_velocity_correction_adds_wheel_targets() -> None:
+    """绕行视觉修正先独立解算为三轮目标, 再叠加到底盘目标."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=10.0,
+        yaw_pid=RecordingController(return_value=4.0),
+    )
+
+    car.set_orbit_target(40.0, 120.0)
+    car.set_orbit_velocity_correction(60.0, 0.0)
+    car._run_control(0.005)
+
+    omega_cmd = float(_transport_car.ORBIT_AUTO_OMEGA_MAX)
+    base_targets = car._inverse_kinematics(
+        -omega_cmd * 120.0,
+        0.0,
+        omega_cmd,
+    )
+    correction_targets = car._inverse_kinematics(60.0, 0.0, 0.0)
+    expected_targets = {
+        "m": base_targets[0] + correction_targets[0],
+        "l": base_targets[1] + correction_targets[1],
+        "r": base_targets[2] + correction_targets[2],
+    }
+
+    assert car.target_speeds == pytest.approx(expected_targets)
+    assert car.orbit_mode is True
+    assert car.command_lock is True
+
+
+def test_transport_car_leaving_orbit_clears_velocity_correction() -> None:
+    """离开绕行模式时清空视觉修正, 避免泄漏成普通平移速度."""
+
+    _transport_car, car = _make_control_car()
+
+    car.set_orbit_target(40.0, 2.0)
+    car.set_orbit_velocity_correction(3.0, -2.0)
+    car.set_heading_target(40.0)
+
+    vx_cmd, vy_cmd = car._compute_planar_targets(0.005, 0.0)
+
+    assert car.orbit_mode is False
+    assert vx_cmd == pytest.approx(0.0)
+    assert vy_cmd == pytest.approx(0.0)
 
 
 def test_transport_car_orbit_target_keeps_left_right_radius_symmetric() -> None:

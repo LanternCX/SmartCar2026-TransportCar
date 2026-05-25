@@ -570,6 +570,21 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_orbit_velocity_correction(self, vx, vy):
+        """写入统一绕行平移修正量
+
+        @param vx 车体系 x 方向平移修正量
+        @param vy 车体系 y 方向平移修正量
+        """
+
+        if not self.orbit_mode:
+            raise RuntimeError("orbit velocity correction requires orbit mode")
+        self.control_state["vx"] = float(vx)
+        self.control_state["vy"] = float(vy)
+        self._clear_translation_control_targets()
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def set_heading_target(self, target_angle_deg):
         """写入非绕行角度保持目标
 
@@ -699,6 +714,9 @@ class TransportCar:
     def _clear_orbit_mode(self):
         """清理统一绕行模式状态."""
 
+        if self.orbit_mode:
+            self.control_state["vx"] = 0.0
+            self.control_state["vy"] = 0.0
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
 
@@ -1236,6 +1254,15 @@ class TransportCar:
             target_vy_cmd,
             float(omega_cmd),
         )
+        if self.orbit_mode:
+            corr_vm, corr_vl, corr_vr = self._inverse_kinematics(
+                float(self.control_state.get("vx", 0.0)),
+                float(self.control_state.get("vy", 0.0)),
+                0.0,
+            )
+            vm += corr_vm
+            vl += corr_vl
+            vr += corr_vr
 
         self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
         self.target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)

@@ -152,6 +152,18 @@ def install_fake_transport_car(monkeypatch):
             self.orbit_mode = True
             self.orbit_radius_scale = float(radius_scale)
 
+        def set_orbit_velocity_correction(self, vx: float, vy: float) -> None:
+            events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
+            self.control_state["vx"] = float(vx)
+            self.control_state["vy"] = float(vy)
+            self.last_chassis_target = {
+                "source": "assistant_orbit_vision",
+                "vx": float(vx),
+                "vy": float(vy),
+                "omega": self.control_state.get("omega", 0.0),
+                "has_omega": False,
+            }
+
         def set_heading_target(self, target_angle_deg: float) -> None:
             events.append(("set_heading_target", float(target_angle_deg)))
             self.control_state["omega"] = 0.0

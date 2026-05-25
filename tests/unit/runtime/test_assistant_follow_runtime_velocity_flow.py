@@ -310,7 +310,11 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     assert uart8.messages == ["a,12\r\n"]
     assert runtime._inputs["uart6"]["velocity"] is None
     assert runtime._inputs["uart8"]["velocity"] is None
-    assert runtime._pending_local_vision_sync is None
+    assert runtime._pending_local_vision_sync is not None
+    local_sync = runtime._pending_local_vision_sync
+    assert local_sync["state"] == 3
+    assert local_sync["target"] == 1
+    assert local_sync["arg"] == follow_runtime_module._ASSISTANT_ORBIT_OBJECT_CONFIG_ID
     assert runtime._pending_target_found_report is None
     assert runtime._approach_target_found_done is False
     assert ("set_orbit_target", -90.0, 1.5) in events
@@ -328,7 +332,7 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
 def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report(
     monkeypatch,
 ) -> None:
-    """! @brief 辅车绕行期间屏蔽速度输入, 到位后重新对正且不回报完成"""
+    """! @brief 辅车绕行期间只使用本地视觉修正, 到位后重新对正且不回报完成"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"s,10,2,1,1\n"
@@ -348,11 +352,18 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
 
     event_count = len(events)
     uart8._buffer = b"v,1.0,2.0,0.5\n"
-    uart6._buffer = b"v,-0.25,0.5\n"
+    orbit_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nv,-0.25,0.5\n" % orbit_sync_seq).encode()
     runtime.step()
 
     assert not any(event[0] == "handle_velocity" for event in events[event_count:])
-    assert runtime._inputs["uart6"]["velocity"] is None
+    assert ("set_orbit_velocity_correction", -0.25, 0.5) in events[event_count:]
+    assert runtime._inputs["uart6"]["velocity"] == {
+        "vx": -0.25,
+        "vy": 0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
     assert runtime._inputs["uart8"]["velocity"] is None
     assert runtime._pending_local_vision_sync is None
     assert runtime._pending_target_found_report is None

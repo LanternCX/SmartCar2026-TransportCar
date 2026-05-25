@@ -37,6 +37,7 @@ from vision.master.state_machine import (
     STATE_STOP,
     STATE_TRANSPORT_OBJECT,
     TARGET_EDGE_LINE,
+    TARGET_OBJECT,
 )
 
 
@@ -57,6 +58,7 @@ MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
     vision_params,
     "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
 )
+MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_ID")
 MASTER_ORBIT_TARGET_DEG = getattr(motion_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
@@ -98,6 +100,7 @@ class MasterForwardRuntime:
         self._uart3_velocity_received_this_tick = False
         self._last_error_text = "none"
         self._hook_seq = seed_value
+        self._orbit_hook_seq = (seed_value + 128) % 256
         self._active_hook_context_id = None
         self._pending_hook = None
         self._pending_hook_event = None
@@ -217,6 +220,8 @@ class MasterForwardRuntime:
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             self._apply_transport_velocity()
             transport_applied_this_tick = True
+        elif self._state_machine.state == STATE_ORBITING:
+            self._apply_orbit_velocity_correction()
         elif self._state_machine.state == STATE_SEARCH_OBJECT and getattr(self._state_machine, "_master_aligned", False):
             self._transport_car.handle_velocity_packet(
                 0.0,
@@ -362,7 +367,14 @@ class MasterForwardRuntime:
             return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
-            if self._state_machine.allows_search_velocity() or self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            if (
+                self._state_machine.allows_search_velocity()
+                or self._state_machine.state == STATE_TRANSPORT_OBJECT
+                or (
+                    self._state_machine.state == STATE_ORBITING
+                    and self._pending_hook is None
+                )
+            ):
                 self._latest_uart6_velocity = packet
             return
         if packet is not None and packet.get("type") == "a":
@@ -463,6 +475,15 @@ class MasterForwardRuntime:
                     + float(MASTER_ORBIT_TARGET_DEG)
                 )
                 self._transport_car.set_heading_target(target_heading_deg)
+
+    def _apply_orbit_velocity_correction(self) -> None:
+        packet = self._latest_uart6_velocity
+        if packet is None:
+            return
+        self._transport_car.set_orbit_velocity_correction(
+            float(packet.get("vx", 0.0)),
+            float(packet.get("vy", 0.0)),
+        )
 
     def _apply_transport_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -575,6 +596,8 @@ class MasterForwardRuntime:
         self._state_machine.step(orbit_finished=orbit_finished)
         if self._state_machine.state != STATE_ORBITING:
             self._orbit_command_active = False
+            if self._pending_hook is not None and self._pending_hook.get("kind") == "orbit_hook":
+                self._pending_hook = None
 
     def _drain_state_machine_outputs(self) -> None:
         """消费主车状态机的一次性输出"""
@@ -667,6 +690,21 @@ class MasterForwardRuntime:
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:
+            self._active_hook_context_id = None
+            self._latest_uart6_velocity = None
+            self._pending_hook_event = None
+            self._rx_buf6 = ""
+            self._pending_hook = {
+                "kind": "orbit_hook",
+                "reliable_seq": self._orbit_hook_seq,
+                "context_id": int(self._state_machine._current_context_id),
+                "state": STATE_ORBITING,
+                "target": TARGET_OBJECT,
+                "arg": int(MASTER_ORBIT_HOOK_CONFIG_ID),
+                "last_sent_ms": None,
+                "sent_once": False,
+            }
+            self._orbit_hook_seq = (self._orbit_hook_seq + 1) % 256
             self._transport_car.set_orbit_target(
                 float(orbit_command["target_heading_deg"]),
                 float(MASTER_ORBIT_RADIUS_SCALE),
