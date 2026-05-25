@@ -8,8 +8,8 @@
 
 # 最小直行搬运基础速度
 TRANSPORT_FORWARD_SPEED = 3.0
-# 搬运收尾阶段主辅车第二段前进的默认步长, 单位米
-TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.20
+# 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
+TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = 0.10
 # 搬运收尾阶段主车后退最大速度

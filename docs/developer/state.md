@@ -107,7 +107,7 @@ IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT -> CLEAR_
 
 ### `CLEAR_OBJECT`
 
-主车在搬运结束后执行三段式收尾。第一段先同步辅车进入后退段，等待辅车确认后，主车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，辅车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。第二段等待主辅都完成后退后，主车原地回身 `180` 度。第三段由主车同步辅车进入前进段，等待辅车确认后，主车与辅车都按自身车体系 `Y` 正方向执行固定步长前进。每一段位置动作都在锁定解除后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成前进后，主车直接重启 `SEARCH_OBJECT`。
+主车在搬运结束后执行三段式收尾。第一段先同步辅车进入后退段，等待辅车确认后，主车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，辅车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。第二段等待主辅都完成后退后，主车原地回身 `180` 度。第三段保留前进段同步位，等待辅车确认后，主车与辅车都按自身车体系 `Y` 正方向执行 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 指定的位移；默认值为 `0`，用于直接结束收尾并回到搜索流程。每一段位置动作都在锁定解除后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成前进段后，主车直接重启 `SEARCH_OBJECT`。
 
 ## 6. 主车全局状态编号
 
@@ -198,7 +198,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 
 `ASSISTANT_TRANSPORT_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和搬运配置编号。辅车进入该状态后清空上一阶段遗留的运动目标；搬运期间把 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 然后与本地 `UART6` 视觉修正叠加后写入共享底盘；`UART8` 的 `omega` 不作为搬运态旋转输入。
 
-`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT`，并由参数区分收尾阶段：`1` 表示后退段，辅车进入后清空两路运动输入，并按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半；`2` 表示前进段，辅车进入后按自身车体系 `Y` 正方向执行固定步长前进。每一段位置动作完成后，辅车都在位置锁定释放且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍后，通过 `UART8` 可靠回报 `CLEARED`，并把当前阶段编号写入 `value`。
+`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT`，并由参数区分收尾阶段：`1` 表示后退段，辅车进入后清空两路运动输入，并按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半；`2` 表示前进段，辅车进入后按自身车体系 `Y` 正方向执行 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 指定的位移；默认值为 `0`，用于仅保留同步位。每一段位置动作完成后，辅车都在位置锁定释放且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍后，通过 `UART8` 可靠回报 `CLEARED`，并把当前阶段编号写入 `value`。
 
 ## 11. 状态跳转原则
 
@@ -207,7 +207,7 @@ r,<reliable_seq>,<context_id>,<event>,<value>
 - 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
 - 主车在绕行后的 `SEARCH_OBJECT` 中等待本车和辅车都回报 `ALIGNED`, 双方搬运入口同步确认后进入 `TRANSPORT_OBJECT`。
 - 主车在 `TRANSPORT_OBJECT` 中融合基础推进速度与本车视觉修正, 并通过 `UART8` 向辅车转发当前底盘速度作为搬运前馈。
-- 主车在 `CLEAR_OBJECT` 中先等待本车与辅车都完成后退段，再执行主车原地回身 `180` 度，随后同步辅车进入前进段。
+- 主车在 `CLEAR_OBJECT` 中先等待本车与辅车都完成后退段，再执行主车原地回身 `180` 度，随后进入保留的前进段同步位。
 - 主辅都完成前进段后，主车直接重建 `SEARCH_OBJECT` hook，并同步辅车回到 follow；主车本车视觉 hook 和辅车 follow 都确认完成后，主车才重新开始搜索运动。
 - 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
 - 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
