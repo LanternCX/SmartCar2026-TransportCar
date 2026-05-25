@@ -542,6 +542,46 @@ def test_assistant_follow_runtime_repeats_ack_without_reapplying_same_sync(monke
     assert runtime._sync_apply_count == 1
 
 
+def test_assistant_follow_runtime_duplicate_follow_sync_does_not_rearm_local_vision_side_effect(
+    monkeypatch,
+) -> None:
+    """! @brief 重复 follow 同步只确认, 不重复清零或重建本地视觉同步"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,1,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    first_pending_sync = dict(runtime._pending_local_vision_sync)
+    uart8.messages = []
+    uart6.messages = []
+    runtime._transport_car.last_chassis_target = {
+        "source": "probe",
+        "vx": 9.0,
+        "vy": 8.0,
+        "omega": 7.0,
+        "has_omega": True,
+    }
+    uart8._buffer = b"s,12,1,0,0\n"
+
+    runtime.step()
+
+    assert uart8.messages == ["a,12\r\n"]
+    assert uart6.messages == []
+    assert runtime._pending_local_vision_sync == first_pending_sync
+    assert runtime._transport_car.last_chassis_target == {
+        "source": "probe",
+        "vx": 9.0,
+        "vy": 8.0,
+        "omega": 7.0,
+        "has_omega": True,
+    }
+
+
 def test_assistant_follow_runtime_ignores_earlier_sync_without_context_rollback(monkeypatch) -> None:
     """! @brief 序号较早的同步包不会回退本地同步上下文"""
 
