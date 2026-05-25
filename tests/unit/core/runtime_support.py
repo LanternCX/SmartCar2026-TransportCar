@@ -99,7 +99,11 @@ def install_transport_car_stubs() -> None:
         "hardware.encoders",
         "hardware.imu",
         "storage.param_manager",
-        "config.params",
+        "config.motion",
+        "config.vision",
+        "config.safety",
+        "config.comm",
+        "config.storage",
     ]
     for name in module_names:
         sys.modules.pop(name, None)
@@ -272,31 +276,19 @@ def install_transport_car_stubs() -> None:
     sys.modules["storage.param_manager"] = storage_param_manager
 
     config_package = sys.modules.get("config", ModuleType("config"))
-    config_params = ModuleType("config.params")
-    param_values = {
+    config_motion = ModuleType("config.motion")
+    config_vision = ModuleType("config.vision")
+    config_safety = ModuleType("config.safety")
+    config_comm = ModuleType("config.comm")
+    config_storage = ModuleType("config.storage")
+    motion_values = {
         "TICK_MS": 5,
-        "MAX_DUTY": 1000,
-        "TARGET_SPEED_MAX": 100.0,
-        "RELIABLE_RESEND_INTERVAL_MS": 20,
-        "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
-        "ASSISTANT_APPROACH_OBJECT_CONFIG_ID": 1,
-        "MASTER_TRANSPORT_HOOK_CONFIG_ID": 2,
-        "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID": 3,
-        "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID": 2,
-        "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE": 1.0,
         "TRANSPORT_FORWARD_SPEED": 5.0,
         "TRANSPORT_CLEAR_STEP_DISTANCE_M": 0.12,
         "TRANSPORT_CLEAR_RETREAT_DISTANCE_M": 0.10,
         "TRANSPORT_CLEAR_RETREAT_MAX_SPEED": 3.0,
         "MOTION_STOP_SPEED_THRESHOLD": 0.5,
         "MOTION_STOP_CONFIRM_TICKS": 3,
-        "MASTER_ORBIT_TARGET_DEG": 90,
-        "MASTER_TURN_BACK_DELTA_DEG": 180,
-        "MASTER_ORBIT_RADIUS_SCALE": 1.20,
-        "ASSISTANT_ORBIT_TARGET_DEG": -90,
-        "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
-        "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
-        "V_CMD_MAX": 100.0,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
         "POS_TOLERANCE": 0.01,
@@ -312,35 +304,71 @@ def install_transport_car_stubs() -> None:
         "HEADING_TRANSITION_OMEGA_MAX": 30.0,
         "ORBIT_AUTO_OMEGA_MAX": 1.5,
         "HOLD_SPEED_EPS": 0.1,
+        "MASTER_ORBIT_TARGET_DEG": 90,
+        "MASTER_TURN_BACK_DELTA_DEG": 180,
+        "MASTER_ORBIT_RADIUS_SCALE": 1.20,
+        "ASSISTANT_ORBIT_TARGET_DEG": -90,
+        "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
+        "ACTIVE_WHEELS": ("m", "l", "r"),
+        "PID_MAP": {"m": (1.0, 0.0, 0.0), "l": (1.0, 0.0, 0.0), "r": (1.0, 0.0, 0.0)},
+    }
+    vision_values = {
+        "RELIABLE_RESEND_INTERVAL_MS": 20,
+        "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
+        "MASTER_TRANSPORT_HOOK_CONFIG_ID": 2,
+        "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID": 3,
+        "ASSISTANT_APPROACH_OBJECT_CONFIG_ID": 1,
+        "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID": 2,
+        "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE": 1.0,
+        "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
+    }
+    safety_values = {
+        "POWER_MIN_VOLTAGE_V": 11.0,
+        "MAX_DUTY": 1000,
+        "TARGET_SPEED_MAX": 100.0,
+        "V_CMD_MAX": 100.0,
+    }
+    comm_values = {
+        "UART_BAUDRATE": 115200,
+        "UART3_PORT_ID": 2,
+        "UART6_PORT_ID": 5,
+        "UART8_PORT_ID": 7,
+        "MASTER_UART3_INPUT_LIMIT": 128,
+        "MASTER_UART6_INPUT_LIMIT": 128,
+        "MASTER_UART8_INPUT_LIMIT": 128,
+        "ASSISTANT_UART_INPUT_LIMIT": 32,
+        "RELIABLE_RESEND_INTERVAL_MS": 20,
+        "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
+        "SEQ_MIN": 0,
+        "SEQ_MAX": 255,
+        "SEQ_RING_SIZE": 256,
+        "SEQ_HALF_RING": 128,
+    }
+    storage_values = {
         "IDENT_RESULTS_FILE": "ident.txt",
         "GYRO_OFFSET_FILE": "gyro.txt",
-        "PID_MAP": {"m": (1.0, 0.0, 0.0), "l": (1.0, 0.0, 0.0), "r": (1.0, 0.0, 0.0)},
-        "VISION_OBSERVATION_TIMEOUT_MS": 100,
-        "VISION_TARGET_X_PX": 0.0,
-        "VISION_TARGET_Y_PX": 0.0,
-        "VISION_ANGLE_KP": 0.0,
-        "VISION_DIST_KP": 0.0,
-        "VISION_DX_KP": 0.0,
-        "VISION_PUSH_DX_KP": 0.0,
-        "VISION_PUSH_DY_M": 0.0,
-        "VISION_PUSH_DISTANCE_M": 0.0,
-        "VISION_PUSH_ANGLE_DEG": 0.0,
-        "VISION_ANGLE_DEADZONE_PX": 0.0,
-        "VISION_ANGLE_REENTRY_PX": 0.0,
-        "VISION_DIST_DEADZONE_PX": 0.0,
-        "VISION_DX_DEADZONE_PX": 0.0,
-        "VISION_HEADING_TOLERANCE_DEG": 0.0,
-        "VISION_STABLE_FRAMES": 1,
-        "VISION_MAX_DX_M": 0.0,
-        "VISION_MAX_DY_M": 0.0,
-        "VISION_MAX_D_ANGLE_DEG": 0.0,
-        "VISION_DONE_HOLD_MS": 0,
     }
-    for key, value in param_values.items():
-        setattr(config_params, key, value)
-    setattr(config_package, "params", config_params)
+    for key, value in motion_values.items():
+        setattr(config_motion, key, value)
+    for key, value in vision_values.items():
+        setattr(config_vision, key, value)
+    for key, value in safety_values.items():
+        setattr(config_safety, key, value)
+    for key, value in comm_values.items():
+        setattr(config_comm, key, value)
+    for key, value in storage_values.items():
+        setattr(config_storage, key, value)
+    setattr(config_package, "motion", config_motion)
+    setattr(config_package, "vision", config_vision)
+    setattr(config_package, "safety", config_safety)
+    setattr(config_package, "comm", config_comm)
+    setattr(config_package, "storage", config_storage)
     sys.modules["config"] = config_package
-    sys.modules["config.params"] = config_params
+    sys.modules["config.motion"] = config_motion
+    sys.modules["config.vision"] = config_vision
+    sys.modules["config.safety"] = config_safety
+    sys.modules["config.comm"] = config_comm
+    sys.modules["config.storage"] = config_storage
 
 
 def import_transport_car_module():

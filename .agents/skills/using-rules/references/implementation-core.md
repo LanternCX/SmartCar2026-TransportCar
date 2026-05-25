@@ -18,7 +18,7 @@
 - 主线运行时代码中的包内依赖与硬件模块依赖必须直接导入, 不保留 `ImportError` / `ModuleNotFoundError` 兜底、假对象或默认值回退。
 - 硬件接口必须以 `seekfree_demo/` 中已出现的能力为准; demo 未出现的方法或行为不得自行假设。
 - `seekfree_demo/v3.0.0/` 与其他 demo 冲突时, 默认优先以 `v3.0.0` 为准; 对 `IMU660RX` 与 `encoder` 的 `get()` 读取, 先按新 demo 建立 `ticker.capture_list(...)` 采样触发链。
-- 参数与阈值统一集中到 `src/config/params.py`。
+- 参数与阈值统一放在 `src/config/` 分层配置下, 按运动、视觉、安全和持久化边界取用。
 - 禁止静默失败; 只捕获预期异常并保留上下文。
 
 ## 目录与职责边界

@@ -62,8 +62,8 @@
 - 主车在辅车脱离同步确认后，先按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，并使用 `TRANSPORT_CLEAR_RETREAT_MAX_SPEED` 限制该段速度；该速度单位与 `TRANSPORT_FORWARD_SPEED` 一致。
 - 辅车在第一段脱离中按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。
 - 每一段位置动作都在锁定释放后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成后退后，主车原地向后旋转 `180` 度。
-- 主车回身完成后，再同步辅车进入第二段脱离；主车与辅车都按自身车体系 `X` 负方向执行同一固定步长平移。
-- 主辅都完成第二段横移后，主车直接重建下一轮搜索 hook，并同步辅车回到 follow；辅车 follow ACK 和主车本车视觉 hook ACK 都到达前，主车不恢复新的搜索速度。
+- 主车回身完成后，再同步辅车进入第二段脱离；主车与辅车都按自身车体系 `Y` 正方向执行同一固定步长前进。
+- 主辅都完成第二段前进后，主车直接重建下一轮搜索 hook，并同步辅车回到 follow；辅车 follow ACK 和主车本车视觉 hook ACK 都到达前，主车不恢复新的搜索速度。
 - 同一控制拍内存在合法 `UART3` 上游速度包和合法 `UART6` 视觉速度包时，角色层优先使用 `UART3` 输入作为最终底盘速度；同拍没有合法 `UART3` 上游速度包时，主车视觉 `v` 搜索速度生效。
 - 主车 `UART6` 视觉速度按最近一个合法 `v,<vx>,<vy>` 包保持；收到显式零包 `v,0,0` 后清空视觉速度。
 - 上下文不匹配的合法视觉事件需要确认，但不触发状态跳转。
@@ -150,7 +150,7 @@
 - 负责按车号切换主车或辅车使用的视觉运行入口
 - `vehicle_role.py` 负责车号识别
 - `master/` 负责主车 `UART3` 上游控制接入、`UART8` 当前底盘速度转发、本车 `UART6` 主车视觉 hook 通信、主车视觉 `v` 搜索速度接入、主车搜索状态机调度和搬运结束后的主车三段式收尾
-- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中同步本地视觉切回色标跟随任务，确认后最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止；`ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE` 后与本车视觉修正叠加；`ASSISTANT_CLEAR_OBJECT` 中按主车同步依次执行后退段与横移段位置动作，并向主车回报完成
+- `assistant/` 负责辅车角色运行入口，在角色层控制周期中统一编排 `UART8` 前馈输入、`UART8` 子状态同步与 `UART6` 视觉输入；`ASSISTANT_FOLLOW` 中同步本地视觉切回色标跟随任务，确认后最终输出对 `vx / vy` 取两路裸相加结果，对 `omega` 只取 `UART8` 输入值，并继续通过共享底盘原生速度控制入口执行；`ASSISTANT_IDLE` 中输出零速度目标；`ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度找物体并在完成后停止；`ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE` 后与本车视觉修正叠加；`ASSISTANT_CLEAR_OBJECT` 中按主车同步依次执行后退段与前进段位置动作，并向主车回报完成
 
 ## 核心控制流程
 

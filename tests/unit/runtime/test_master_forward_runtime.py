@@ -2068,7 +2068,7 @@ def test_master_forward_runtime_retreat_completion_waits_assistant_cleared_befor
         message.startswith("s,11,%d,%d,%d" % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         ))
         for message in _reliable_messages(uart8)
     )
@@ -2156,10 +2156,10 @@ def test_master_forward_runtime_both_retreats_complete_then_start_turn_back(
     ) in events
 
 
-def test_master_forward_runtime_turn_back_completion_syncs_translate_phase(
+def test_master_forward_runtime_turn_back_completion_syncs_forward_phase(
     monkeypatch,
 ) -> None:
-    """主车转身完成后同步辅车进入横移阶段."""
+    """主车转身完成后同步辅车进入前进阶段."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2223,7 +2223,7 @@ def test_master_forward_runtime_turn_back_completion_syncs_translate_phase(
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) not in _reliable_messages(uart8)
 
@@ -2235,7 +2235,7 @@ def test_master_forward_runtime_turn_back_completion_syncs_translate_phase(
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) not in _reliable_messages(uart8)
 
@@ -2247,15 +2247,15 @@ def test_master_forward_runtime_turn_back_completion_syncs_translate_phase(
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) in _reliable_messages(uart8)
 
 
-def test_master_forward_runtime_translate_sync_ack_starts_master_side_step(
+def test_master_forward_runtime_forward_sync_ack_starts_master_forward_step(
     monkeypatch,
 ) -> None:
-    """主车在第二段脱离同步确认后按自身 X 负方向横移."""
+    """主车在第二段脱离同步确认后按自身 Y 正方向前进."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2312,7 +2312,7 @@ def test_master_forward_runtime_translate_sync_ack_starts_master_side_step(
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) in _reliable_messages(uart8)
 
@@ -2322,16 +2322,16 @@ def test_master_forward_runtime_translate_sync_ack_starts_master_side_step(
 
     assert (
         "set_relative_translation_target",
-        -float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         0.0,
+        float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         float(forward_runtime_module.MASTER_TURN_BACK_DELTA_DEG),
     ) in events
 
 
-def test_master_forward_runtime_translate_step_keeps_turn_back_target_heading(
+def test_master_forward_runtime_forward_step_keeps_turn_back_target_heading(
     monkeypatch,
 ) -> None:
-    """主车第二段横移应保持回身目标角, 不能改用转完时的当前角度."""
+    """主车第二段前进应保持回身目标角, 不能改用转完时的当前角度."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2391,7 +2391,7 @@ def test_master_forward_runtime_translate_step_keeps_turn_back_target_heading(
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) in _reliable_messages(uart8)
 
@@ -2401,16 +2401,16 @@ def test_master_forward_runtime_translate_step_keeps_turn_back_target_heading(
 
     assert (
         "set_relative_translation_target",
-        -float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         0.0,
+        float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         float(forward_runtime_module.MASTER_TURN_BACK_DELTA_DEG),
     ) in events
 
 
-def test_master_forward_runtime_waits_after_master_translate_done_without_restarting_step(
+def test_master_forward_runtime_waits_after_master_forward_done_without_restarting_step(
     monkeypatch,
 ) -> None:
-    """主车完成横移后等待辅车回报, 不重复启动本车横移."""
+    """主车完成前进后等待辅车回报, 不重复启动本车前进."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2465,13 +2465,13 @@ def test_master_forward_runtime_waits_after_master_translate_done_without_restar
     uart8._buffer = b"a,11\n"
     runtime.step()
 
-    translate_event = (
+    forward_event = (
         "set_relative_translation_target",
-        -float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         0.0,
+        float(forward_runtime_module.TRANSPORT_CLEAR_STEP_DISTANCE_M),
         float(forward_runtime_module.MASTER_TURN_BACK_DELTA_DEG),
     )
-    assert events.count(translate_event) == 1
+    assert events.count(forward_event) == 1
 
     clock.value = 280
     runtime._transport_car.command_lock = False
@@ -2483,13 +2483,13 @@ def test_master_forward_runtime_waits_after_master_translate_done_without_restar
     runtime.step()
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_CLEAR_OBJECT
-    assert events.count(translate_event) == 1
+    assert events.count(forward_event) == 1
 
 
-def test_master_forward_runtime_translate_completion_restarts_search_and_waits_follow_ack(
+def test_master_forward_runtime_forward_completion_restarts_search_and_waits_follow_ack(
     monkeypatch,
 ) -> None:
-    """第二段横移完成后直接重启搜索, 仍继续等待 follow 与本车 hook 确认."""
+    """第二段前进完成后直接重启搜索, 仍继续等待 follow 与本车 hook 确认."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2546,7 +2546,7 @@ def test_master_forward_runtime_translate_completion_restarts_search_and_waits_f
         % (
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_STATE,
             forward_runtime_module.ASSISTANT_CLEAR_SYNC_TARGET,
-            forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+            forward_runtime_module.CLEAR_PHASE_FORWARD,
         )
     ) in _reliable_messages(uart8)
 
@@ -2557,7 +2557,7 @@ def test_master_forward_runtime_translate_completion_restarts_search_and_waits_f
     runtime._transport_car.command_lock = False
     uart8._buffer = ("r,21,%d,%d\n" % (
         EVENT_CLEARED,
-        forward_runtime_module.CLEAR_PHASE_TRANSLATE,
+        forward_runtime_module.CLEAR_PHASE_FORWARD,
     )).encode()
 
     runtime.step()

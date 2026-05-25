@@ -3,7 +3,9 @@
 @file src/vision/master/forward_runtime.py
 """
 
-from config import params as _params
+from config import comm as comm_params
+from config import motion as motion_params
+from config import vision as vision_params
 from hardware.uart_bus import create_uart6
 from protocol.link import default_now_ms, should_resend, write_reliable_line
 from protocol.packet import (
@@ -12,7 +14,7 @@ from protocol.packet import (
     format_velocity_packet,
     parse_short_packet,
 )
-from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
@@ -38,27 +40,39 @@ from vision.master.state_machine import (
 )
 
 
-_UART6_INPUT_LIMIT = 128
-_UART3_INPUT_LIMIT = 128
-_UART8_INPUT_LIMIT = 128
-MASTER_SEARCH_HOOK_CONFIG_ID = getattr(_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
-ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_APPROACH_OBJECT_CONFIG_ID")
-ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID")
-MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
-MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(_params, "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID")
-MASTER_ORBIT_TARGET_DEG = getattr(_params, "MASTER_ORBIT_TARGET_DEG")
-MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
-RELIABLE_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
-TRANSPORT_FORWARD_SPEED = getattr(_params, "TRANSPORT_FORWARD_SPEED")
-TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
-TRANSPORT_CLEAR_RETREAT_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_RETREAT_DISTANCE_M")
+_UART6_INPUT_LIMIT = getattr(comm_params, "MASTER_UART6_INPUT_LIMIT")
+_UART3_INPUT_LIMIT = getattr(comm_params, "MASTER_UART3_INPUT_LIMIT")
+_UART8_INPUT_LIMIT = getattr(comm_params, "MASTER_UART8_INPUT_LIMIT")
+MASTER_SEARCH_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
+ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(
+    vision_params,
+    "ASSISTANT_APPROACH_OBJECT_CONFIG_ID",
+)
+ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
+    vision_params,
+    "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID",
+)
+MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
+MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
+    vision_params,
+    "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
+)
+MASTER_ORBIT_TARGET_DEG = getattr(motion_params, "MASTER_ORBIT_TARGET_DEG")
+MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
+RELIABLE_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
+TRANSPORT_FORWARD_SPEED = getattr(motion_params, "TRANSPORT_FORWARD_SPEED")
+TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+TRANSPORT_CLEAR_RETREAT_DISTANCE_M = getattr(
+    motion_params,
+    "TRANSPORT_CLEAR_RETREAT_DISTANCE_M",
+)
 TRANSPORT_CLEAR_RETREAT_MAX_SPEED = getattr(
-    _params,
+    motion_params,
     "TRANSPORT_CLEAR_RETREAT_MAX_SPEED",
 )
-MOTION_STOP_SPEED_THRESHOLD = getattr(_params, "MOTION_STOP_SPEED_THRESHOLD")
-MOTION_STOP_CONFIRM_TICKS = getattr(_params, "MOTION_STOP_CONFIRM_TICKS")
-MASTER_TURN_BACK_DELTA_DEG = getattr(_params, "MASTER_TURN_BACK_DELTA_DEG")
+MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
+MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
+MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG")
 
 
 class MasterForwardRuntime:
@@ -669,7 +683,7 @@ class MasterForwardRuntime:
             self._turn_back_target_heading_deg = None
             return
         clear_phase = int(self._state_machine.get_clear_phase())
-        if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_TRANSLATE:
+        if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_FORWARD:
             self._clear_motion_started = False
             self._clear_motion_stop_ticks = 0
             return
@@ -700,8 +714,8 @@ class MasterForwardRuntime:
             )
         else:
             self._transport_car.set_relative_translation_target(
-                -float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 0.0,
+                float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 hold_heading_deg=self._turn_back_target_heading_deg,
             )
         self._clear_motion_started = True

@@ -1025,10 +1025,10 @@ def test_assistant_follow_runtime_clear_sync_starts_retreat_step(
     assert "a,12\r\n" in uart8.messages
 
 
-def test_assistant_follow_runtime_clear_sync_starts_outward_side_step_after_turn_back(
+def test_assistant_follow_runtime_clear_sync_starts_forward_step_after_turn_back(
     monkeypatch,
 ) -> None:
-    """! @brief 辅车收到第二段脱离同步后再按自身 X 负方向横移"""
+    """! @brief 辅车收到第二段脱离同步后再按自身 Y 正方向前进"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"s,12,5,1,2\n"
@@ -1042,8 +1042,8 @@ def test_assistant_follow_runtime_clear_sync_starts_outward_side_step_after_turn
     assert runtime._state_machine.state == follow_runtime_module.ASSISTANT_STATE_CLEAR_OBJECT
     assert (
         "set_relative_translation_target",
-        -float(follow_runtime_module._TRANSPORT_CLEAR_STEP_DISTANCE_M),
         0.0,
+        float(follow_runtime_module._TRANSPORT_CLEAR_STEP_DISTANCE_M),
     ) in events
     assert "a,12\r\n" in uart8.messages
 

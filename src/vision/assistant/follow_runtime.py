@@ -3,9 +3,11 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
-from config import params as _params
+from config import comm as comm_params
+from config import motion as motion_params
+from config import vision as vision_params
 from protocol.link import should_resend, write_reliable_line
-from vision.clear_phase import CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_APPROACH_OBJECT,
@@ -30,25 +32,25 @@ from vision.assistant.velocity_packet import (
 )
 
 
-_INPUT_LIMIT = 32
+_INPUT_LIMIT = getattr(comm_params, "ASSISTANT_UART_INPUT_LIMIT")
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
 _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
-    _params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
+    comm_params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
 )
-_MASTER_REPORT_RESEND_INTERVAL_MS = getattr(_params, "RELIABLE_RESEND_INTERVAL_MS")
-_ASSISTANT_ORBIT_TARGET_DEG = getattr(_params, "ASSISTANT_ORBIT_TARGET_DEG")
-_ASSISTANT_ORBIT_RADIUS_SCALE = getattr(_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
+_MASTER_REPORT_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
+_ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
+_ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
-    _params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
+    vision_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
 )
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
-    _params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
+    vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
-_TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
-MOTION_STOP_SPEED_THRESHOLD = getattr(_params, "MOTION_STOP_SPEED_THRESHOLD")
-MOTION_STOP_CONFIRM_TICKS = getattr(_params, "MOTION_STOP_CONFIRM_TICKS")
+_TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
+MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 
 
 def _default_now_ms() -> int:
@@ -675,10 +677,10 @@ class AssistantFollowRuntime:
                 -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M) * 0.5,
             )
             return
-        if clear_phase == CLEAR_PHASE_TRANSLATE:
+        if clear_phase == CLEAR_PHASE_FORWARD:
             self._transport_car.set_relative_translation_target(
-                -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
                 0.0,
+                float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
             )
 
     def _resume_approach_after_orbit(self) -> None:

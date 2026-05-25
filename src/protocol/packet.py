@@ -3,13 +3,14 @@
 @brief 串口短包协议解析与格式化工具
 """
 
+from config import comm as comm_params
 import math
 
 
-SEQ_MIN = 0
-SEQ_MAX = 255
-_SEQ_RING_SIZE = 256
-_SEQ_HALF_RING = 128
+SEQ_MIN = getattr(comm_params, "SEQ_MIN")
+SEQ_MAX = getattr(comm_params, "SEQ_MAX")
+_SEQ_RING_SIZE = getattr(comm_params, "SEQ_RING_SIZE")
+_SEQ_HALF_RING = getattr(comm_params, "SEQ_HALF_RING")
 
 
 def _split_fields(line):

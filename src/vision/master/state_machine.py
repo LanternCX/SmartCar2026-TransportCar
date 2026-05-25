@@ -3,7 +3,7 @@
 @file src/vision/master/state_machine.py
 """
 
-from vision.clear_phase import CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT, CLEAR_PHASE_TRANSLATE
+from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
 
 ASSISTANT_IDLE_SYNC_STATE = 0
 ASSISTANT_IDLE_SYNC_TARGET = 0
@@ -237,7 +237,7 @@ class MasterStateMachine:
             return
         if self._clear_phase not in (
             CLEAR_PHASE_RETREAT,
-            CLEAR_PHASE_TRANSLATE,
+            CLEAR_PHASE_FORWARD,
         ):
             return
         self._master_cleared = True
@@ -265,7 +265,7 @@ class MasterStateMachine:
             self._master_cleared = False
             self._assistant_cleared = False
             return
-        if self._clear_phase == CLEAR_PHASE_TRANSLATE:
+        if self._clear_phase == CLEAR_PHASE_FORWARD:
             self._restart_search_after_clear()
 
     def can_start_turn_back_rotation(self):
@@ -274,13 +274,13 @@ class MasterStateMachine:
         return self.state == STATE_CLEAR_OBJECT and self._clear_phase == _CLEAR_STAGE_TURN_BACK
 
     def mark_turn_back_completed(self):
-        """标记主车回身完成并进入横移阶段"""
+        """标记主车回身完成并进入前进阶段"""
 
         if self.state != STATE_CLEAR_OBJECT:
             return
         if self._clear_phase != _CLEAR_STAGE_TURN_BACK:
             return
-        self._enter_clear_phase(CLEAR_PHASE_TRANSLATE)
+        self._enter_clear_phase(CLEAR_PHASE_FORWARD)
 
     def _restart_search_after_clear(self):
         """在搬运收尾完成后重启寻找阶段"""

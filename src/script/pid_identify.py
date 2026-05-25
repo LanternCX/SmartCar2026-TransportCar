@@ -16,6 +16,10 @@
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
+from config import comm as comm_params
+from config import motion as motion_params
+from config import safety as safety_params
+from config import storage as storage_params
 from control.wheel import build_wheel_state
 from control.pid_controller import IncrementalPIDController
 from control.pid_math import compute_pi_from_id, reset_pi_state
@@ -30,9 +34,9 @@ import gc
 
 
 # 采样/控制周期, 单位毫秒
-TICK_MS = 5
+TICK_MS = getattr(motion_params, "TICK_MS")
 # PWM 占空比上限, 范围 0 ~ 10000
-MAX_DUTY = 10000
+MAX_DUTY = getattr(safety_params, "MAX_DUTY")
 # 辨识阶跃幅值, 单位为占空比值, 施加到电机的激励强度
 IDENT_STEP_DUTY = 5000
 # 辨识持续时间, 单位毫秒, 每轮的激励持续时长
@@ -52,11 +56,13 @@ GAIN_BOOST = 0.5
 # PID 参数保存路径, 用于后续控制环节加载
 PID_PARAM_FILE = "/flash/pid_params.txt"
 # 辨识结果记录路径, 用于记录时间常数和增益
-IDENT_RESULTS_FILE = "/flash/ident_params.txt"
+IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
+
+UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
 
 
 uart3 = UART(2)
-uart3.init(115200)
+uart3.init(UART_BAUDRATE)
 
 led = Pin("C4", Pin.OUT, value=True)
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)

@@ -8,6 +8,9 @@
 from machine import UART
 from seekfree import IMU963RX
 from smartcar import ticker
+from config import comm as comm_params
+from config import motion as motion_params
+from config import storage as storage_params
 from utils.quaternion import Quaternion
 import math
 import time
@@ -15,16 +18,18 @@ import gc
 
 # ===== 配置参数 (保持与 remote_control.py 一致) =====
 # 控制周期, 单位毫秒
-TICK_MS = 5
+TICK_MS = getattr(motion_params, "TICK_MS")
 # 陀螺仪比例因子, 单位 LSB / (deg/s), 用于原始值到角速度的转换
-GYRO_SCALE = 14.285714285714286
+GYRO_SCALE = getattr(motion_params, "GYRO_SCALE")
 # 陀螺仪零飘参数文件路径, 包含校准时测得的各轴偏移
-GYRO_OFFSET_FILE = "/flash/gyro_offset.txt"
+GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
+# 串口波特率
+UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
 
 # ===== 硬件初始化 =====
 # UART3 用于发送数据到上游
 uart3 = UART(2)
-uart3.init(115200)
+uart3.init(UART_BAUDRATE)
 uart3.write("IMU Yaw Sender Starting...\r\n")
 
 # IMU 初始化

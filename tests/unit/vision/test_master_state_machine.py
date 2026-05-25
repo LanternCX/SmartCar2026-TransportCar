@@ -640,7 +640,7 @@ def test_master_state_machine_clear_retreat_waits_for_both_cars_before_turn_back
     assert machine.poll_assistant_request() is None
 
 
-def test_master_state_machine_turn_back_completion_requests_translate_phase() -> None:
+def test_master_state_machine_turn_back_completion_requests_forward_phase() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
 
@@ -665,11 +665,11 @@ def test_master_state_machine_turn_back_completion_requests_translate_phase() ->
         "kind": "assistant_clear",
         "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
-        "arg": MasterStateMachine.CLEAR_PHASE_TRANSLATE,
+        "arg": MasterStateMachine.CLEAR_PHASE_FORWARD,
     }
 
 
-def test_master_state_machine_translate_completion_restarts_search_and_assistant_follow() -> None:
+def test_master_state_machine_forward_completion_restarts_search_and_assistant_follow() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
 
@@ -689,7 +689,7 @@ def test_master_state_machine_translate_completion_restarts_search_and_assistant
     machine.mark_turn_back_completed()
     machine.poll_assistant_request()
     machine.mark_master_cleared()
-    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_TRANSLATE)
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_FORWARD)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert machine.poll_hook_request() == {
@@ -735,7 +735,7 @@ def test_master_state_machine_restart_search_waits_both_follow_and_local_hook_ac
     machine.mark_turn_back_completed()
     machine.poll_assistant_request()
     machine.mark_master_cleared()
-    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_TRANSLATE)
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_FORWARD)
     machine.poll_hook_request()
     machine.poll_assistant_request()
 

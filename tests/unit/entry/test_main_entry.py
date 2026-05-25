@@ -19,7 +19,7 @@ def load_main_module():
     """按文件路径加载入口模块."""
 
     sys.modules.pop("config", None)
-    sys.modules.pop("config.params", None)
+    sys.modules.pop("config.safety", None)
     sys.modules.pop("utils.startup_log", None)
     spec = spec_from_file_location("transport_main_entry", MAIN_PATH)
     assert spec is not None
@@ -140,7 +140,7 @@ def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
-    monkeypatch.setattr(main.params, "POWER_MIN_VOLTAGE_V", 12.1)
+    monkeypatch.setattr(main.safety_params, "POWER_MIN_VOLTAGE_V", 12.1)
     monkeypatch.setattr(
         main,
         "_run_low_voltage_alarm",

@@ -7,13 +7,13 @@
 """
 
 from smartcar import ticker
-from config import params as _params
+from config import motion as motion_params
 from utils.startup_log import startup_log
 from vision import create_role_transport_car
 from vision.vehicle_role import read_vehicle_role
 
 
-TICK_MS = getattr(_params, "TICK_MS")
+TICK_MS = getattr(motion_params, "TICK_MS")
 
 
 def _create_transport_car(role):

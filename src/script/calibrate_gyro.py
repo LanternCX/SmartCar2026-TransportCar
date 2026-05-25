@@ -13,6 +13,7 @@
 """
 from machine import Pin
 from seekfree import IMU660RX
+from config import storage as storage_params
 from storage.param_manager import save_gyro_offsets
 import time
 
@@ -26,7 +27,7 @@ GYRO_AXIS_Z = 5
 # 采样样本数, 用于计算平均值的稳定性
 SAMPLE_COUNT = 2000
 # 零飘偏移文件保存路径
-OFFSET_FILE = "/flash/gyro_offset.txt"
+OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
 
 
 print("=" * 40)
