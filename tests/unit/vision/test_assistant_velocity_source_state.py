@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from vision.velocity_packet import (  # noqa: E402
+from vision.assistant.velocity_packet import (  # noqa: E402
     CONSUME_ACCEPTED,
     CONSUME_IGNORED,
     CONSUME_INVALID,
@@ -51,10 +51,3 @@ def test_non_short_packet_velocity_text_is_not_formal_velocity_input() -> None:
 
     assert consume_result == CONSUME_IGNORED
     assert parsed is None
-
-
-def test_velocity_short_packet_can_drop_omega_for_planar_only_consumer() -> None:
-    consume_result, parsed = split_velocity_line("v,6.5,8,1.5", allow_omega=False)
-
-    assert consume_result == CONSUME_ACCEPTED
-    assert parsed == {"vx": 6.5, "vy": 8.0, "omega": 0.0, "has_omega": False}

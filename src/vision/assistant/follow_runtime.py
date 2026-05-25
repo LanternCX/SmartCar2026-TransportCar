@@ -25,16 +25,7 @@ from vision.assistant.uart8_packet import (
     is_newer_seq,
     parse_short_packet,
 )
-from vision.reliable_channel import ReliableChannel
-from vision.uart_line_reader import (
-    STATUS_ANY_ERROR,
-    STATUS_DECODE_ERROR,
-    STATUS_NO_DATA,
-    STATUS_OVERFLOW,
-    STATUS_READ_ERROR,
-    UartLineReader,
-)
-from vision.velocity_packet import (
+from vision.assistant.velocity_packet import (
     CONSUME_ACCEPTED,
     CONSUME_INVALID,
     split_velocity_line,
@@ -92,14 +83,6 @@ class AssistantFollowRuntime:
         self._now_ms = now_ms or _default_now_ms
         self._last_error_text = "none"
         self._state_machine = AssistantStateMachine()
-        self._local_vision_sync_channel = ReliableChannel(
-            self._now_ms,
-            _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS,
-        )
-        self._master_report_channel = ReliableChannel(
-            self._now_ms,
-            _MASTER_REPORT_RESEND_INTERVAL_MS,
-        )
         self._inputs = {
             "uart6": {
                 "uart": uart6,
@@ -107,10 +90,6 @@ class AssistantFollowRuntime:
                 "status": "idle",
                 "velocity": None,
                 "factory": "create_uart6",
-                "reader": UartLineReader(
-                    _INPUT_LIMIT,
-                    discard_remainder_on_overflow=True,
-                ),
             },
             "uart8": {
                 "uart": uart8,
@@ -118,10 +97,6 @@ class AssistantFollowRuntime:
                 "status": "idle",
                 "velocity": None,
                 "factory": "create_uart8",
-                "reader": UartLineReader(
-                    _INPUT_LIMIT,
-                    discard_remainder_on_overflow=True,
-                ),
             },
         }
         self.sync_context = None
@@ -223,35 +198,53 @@ class AssistantFollowRuntime:
             return False
 
         try:
-            result = state["reader"].read_available(uart)
+            buf_len = uart.any()
         except Exception as exc:
             state["status"] = "error"
-            self._record_error("%s read failed" % source, exc)
+            self._record_error("%s any failed" % source, exc)
             return False
-
-        state["buffer"] = result["buffer"]
-
-        status = result["status"]
-        if status == STATUS_NO_DATA:
+        if not buf_len:
             state["status"] = self._resolve_input_status(source)
-            return False
-        if status == STATUS_ANY_ERROR:
-            state["status"] = "error"
-            self._record_error("%s any failed" % source, result["exception"])
-            return False
-        if status == STATUS_DECODE_ERROR:
-            state["status"] = "error"
-            self._record_error("%s decode failed" % source, result["exception"])
-            return False
-        if status == STATUS_READ_ERROR:
-            state["status"] = "error"
-            self._record_error("%s read failed" % source, result["exception"])
             return False
 
         has_velocity = False
+
+        input_overflow = buf_len > _INPUT_LIMIT
+        if input_overflow:
+            buf_len = _INPUT_LIMIT
+
+        try:
+            state["buffer"] += uart.read(buf_len).decode()
+        except Exception as exc:
+            state["status"] = "error"
+            if exc.__class__.__name__ == "UnicodeDecodeError":
+                self._record_error("%s decode failed" % source, exc)
+            else:
+                self._record_error("%s read failed" % source, exc)
+            return False
         handled_valid = False
 
-        for line in result["lines"]:
+        while True:
+            idx = state["buffer"].find("\n")
+            if idx == -1:
+                if input_overflow:
+                    discarded = self._discard_pending_input(source, uart)
+                    state["buffer"] = ""
+                    if discarded and not handled_valid:
+                        state["status"] = "invalid"
+                    return has_velocity
+                if len(state["buffer"]) > _INPUT_LIMIT:
+                    state["buffer"] = ""
+                    state["status"] = "invalid"
+                    return has_velocity
+                state["status"] = self._resolve_input_status(source)
+                return has_velocity
+            if idx > _INPUT_LIMIT:
+                state["buffer"] = state["buffer"][idx + 1 :]
+                state["status"] = "invalid"
+                continue
+            line = state["buffer"][:idx].rstrip("\r").strip()
+            state["buffer"] = state["buffer"][idx + 1 :]
             if source == "uart8" and self._handle_uart8_control_packet(line, uart):
                 self._mark_input_valid(source)
                 handled_valid = True
@@ -276,11 +269,25 @@ class AssistantFollowRuntime:
                 state["status"] = "invalid"
             else:
                 state["status"] = self._resolve_input_status(source)
-        if status == STATUS_OVERFLOW:
-            if not handled_valid:
-                state["status"] = "invalid"
-            return has_velocity
-        return has_velocity
+
+    def _discard_pending_input(self, source: str, uart) -> bool:
+        while True:
+            try:
+                pending = uart.any()
+            except Exception as exc:
+                self._inputs[source]["status"] = "error"
+                self._record_error("%s any failed" % source, exc)
+                return False
+            if not pending:
+                return True
+            if pending > _INPUT_LIMIT:
+                pending = _INPUT_LIMIT
+            try:
+                uart.read(pending)
+            except Exception as exc:
+                self._inputs[source]["status"] = "error"
+                self._record_error("%s read failed" % source, exc)
+                return False
 
     def _mark_input_valid(self, source: str) -> None:
         state = self._inputs[source]
@@ -318,24 +325,22 @@ class AssistantFollowRuntime:
         if "seq" not in packet:
             return False
         seq = int(packet["seq"])
-        if self._last_sync_seq is not None and seq == self._last_sync_seq:
-            self._write_forward_reliable_line(format_ack_packet(seq))
-            return True
         is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
-        if not is_new_sync:
+        if not is_new_sync and seq != self._last_sync_seq:
             self._write_forward_reliable_line(format_ack_packet(seq))
             return True
         accepted = self._apply_sync_context(packet)
         if not accepted:
             return True
-        self.sync_context = {
-            "seq": seq,
-            "state": int(packet["state"]),
-            "target": int(packet["target"]),
-            "arg": int(packet["arg"]),
-        }
-        self._last_sync_seq = seq
-        self._sync_apply_count += 1
+        if is_new_sync:
+            self.sync_context = {
+                "seq": seq,
+                "state": int(packet["state"]),
+                "target": int(packet["target"]),
+                "arg": int(packet["arg"]),
+            }
+            self._last_sync_seq = seq
+            self._sync_apply_count += 1
         self._write_forward_reliable_line(format_ack_packet(seq))
         return True
 
@@ -396,12 +401,16 @@ class AssistantFollowRuntime:
             return False
         packet_type = packet.get("type")
         if packet_type == "a":
-            self._pending_local_vision_sync, matched = (
-                self._local_vision_sync_channel.consume_ack(
-                    self._pending_local_vision_sync,
-                    int(packet["seq"]),
-                )
+            pending = self._pending_local_vision_sync
+            matched = (
+                pending is not None
+                and pending.get("sent_once")
+                and int(packet["seq"]) == int(pending["seq"])
             )
+            if (
+                matched
+            ):
+                self._pending_local_vision_sync = None
             return True
         if packet_type == "r":
             self._write_uart6_reliable_line(format_ack_packet(packet["seq"]))
@@ -554,8 +563,7 @@ class AssistantFollowRuntime:
 
     def _clear_input_cache(self, source: str) -> None:
         state = self._inputs[source]
-        state["reader"].clear()
-        state["buffer"] = state["reader"].buffer
+        state["buffer"] = ""
         state["velocity"] = None
         if state.get("status") != "error":
             state["status"] = "idle"
@@ -743,7 +751,11 @@ class AssistantFollowRuntime:
         if pending is None:
             return
         now_ms = self._now_ms()
-        if not self._local_vision_sync_channel.should_send_at(pending, now_ms):
+        if not should_resend(
+            now_ms,
+            pending.get("last_sent_ms"),
+            _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS,
+        ):
             return
         if self._write_uart6_reliable_line(
             format_state_sync_packet(
@@ -753,14 +765,19 @@ class AssistantFollowRuntime:
                 pending["arg"],
             )
         ):
-            self._local_vision_sync_channel.mark_sent_at(pending, now_ms)
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
 
     def _send_pending_target_found_report(self) -> None:
         pending = self._pending_target_found_report
         if pending is None:
             return
         now_ms = self._now_ms()
-        if not self._master_report_channel.should_send_at(pending, now_ms):
+        if not should_resend(
+            now_ms,
+            pending.get("last_sent_ms"),
+            _MASTER_REPORT_RESEND_INTERVAL_MS,
+        ):
             return
         if self._write_forward_reliable_line(
             format_event_packet(
@@ -769,7 +786,8 @@ class AssistantFollowRuntime:
                 pending["value"],
             )
         ):
-            self._master_report_channel.mark_sent_at(pending, now_ms)
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
 
     def _write_forward_reliable_line(self, line: str) -> bool:
         uart = self._inputs["uart8"]["uart"]

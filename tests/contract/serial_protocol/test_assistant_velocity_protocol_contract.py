@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from vision.velocity_packet import split_velocity_line  # noqa: E402
+from vision.assistant.velocity_packet import split_velocity_line  # noqa: E402
 
 
 def test_assistant_velocity_protocol_accepts_v_short_packet() -> None:

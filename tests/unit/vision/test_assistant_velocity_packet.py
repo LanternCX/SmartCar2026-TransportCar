@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from vision.velocity_packet import (  # noqa: E402
+from vision.assistant.velocity_packet import (  # noqa: E402
     CONSUME_ACCEPTED,
     CONSUME_IGNORED,
     CONSUME_INVALID,
@@ -51,10 +51,3 @@ def test_split_velocity_line_ignores_non_velocity_short_packet() -> None:
 
     assert consume_result == CONSUME_IGNORED
     assert parsed is None
-
-
-def test_split_velocity_line_clamps_each_axis_with_shared_limit() -> None:
-    consume_result, parsed = split_velocity_line("v,2000,-2000,3000")
-
-    assert consume_result == CONSUME_ACCEPTED
-    assert parsed == {"vx": 1000.0, "vy": -1000.0, "omega": 1000.0, "has_omega": True}

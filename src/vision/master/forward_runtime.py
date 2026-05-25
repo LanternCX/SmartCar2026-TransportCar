@@ -7,7 +7,7 @@ from config import comm as comm_params
 from config import motion as motion_params
 from config import vision as vision_params
 from hardware.uart_bus import create_uart6
-from protocol.link import default_now_ms, write_reliable_line
+from protocol.link import default_now_ms, should_resend, write_reliable_line
 from protocol.packet import (
     format_ack_packet,
     format_state_sync_packet,
@@ -15,19 +15,6 @@ from protocol.packet import (
     parse_short_packet,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from vision.reliable_channel import ReliableChannel
-from vision.uart_line_reader import (
-    STATUS_ANY_ERROR,
-    STATUS_DECODE_ERROR,
-    STATUS_OVERFLOW,
-    STATUS_READ_ERROR,
-    UartLineReader,
-)
-from vision.velocity_packet import (
-    CONSUME_ACCEPTED,
-    CONSUME_INVALID,
-    split_velocity_line,
-)
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
@@ -103,14 +90,7 @@ class MasterForwardRuntime:
         self.wheel_states = car.wheel_states
         self.imu = car.imu
         self._now_ms = now_ms or default_now_ms
-        self._reliable_channel = ReliableChannel(
-            self._now_ms,
-            RELIABLE_RESEND_INTERVAL_MS,
-        )
         self._uart6 = create_uart6()
-        self._uart3_reader = UartLineReader(_UART3_INPUT_LIMIT)
-        self._uart6_reader = UartLineReader(_UART6_INPUT_LIMIT)
-        self._uart8_reader = UartLineReader(_UART8_INPUT_LIMIT)
         self._rx_buf3 = ""
         self._rx_buf6 = ""
         self._rx_buf8 = ""
@@ -262,24 +242,24 @@ class MasterForwardRuntime:
     def _process_uart3(self) -> None:
         """接管 UART3 按行读取并处理短包输入"""
 
-        self._consume_uart_lines(
-            self._uart3_reader,
+        self._read_uart_lines(
             self._transport_car.uart3,
             "_rx_buf3",
             self._handle_uart3_line,
             overflow_error_text="invalid uart3 input",
+            input_limit=_UART3_INPUT_LIMIT,
         )
 
     def _process_uart6(self) -> None:
         """接管 UART6 按行读取本车视觉速度输入"""
 
-        self._consume_uart_lines(
-            self._uart6_reader,
+        self._read_uart_lines(
             self._uart6,
             "_rx_buf6",
             self._handle_uart6_line,
             read_error_text="uart6 read failed",
             overflow_error_text="invalid uart6 input",
+            input_limit=_UART6_INPUT_LIMIT,
         )
 
     def _process_uart8(self) -> None:
@@ -288,33 +268,63 @@ class MasterForwardRuntime:
         uart8 = self._transport_car.uart8
         if getattr(uart8, "any", None) is None:
             return
-        self._consume_uart_lines(
-            self._uart8_reader,
+        self._read_uart_lines(
             uart8,
             "_rx_buf8",
             self._handle_uart8_line,
             overflow_error_text="invalid uart8 input",
+            input_limit=_UART8_INPUT_LIMIT,
         )
 
-    def _consume_uart_lines(
+    def _read_uart_lines(
         self,
-        reader,
         uart,
         buffer_name: str,
         handler,
         read_error_text: str = "uart read failed",
         overflow_error_text=None,
+        input_limit=None,
     ) -> None:
-        result = reader.read_available(uart)
-        setattr(self, buffer_name, result["buffer"])
-        for line in result["lines"]:
+        while True:
+            buf_len = uart.any()
+            if not buf_len:
+                return
+            input_overflow = input_limit is not None and buf_len > input_limit
+            if input_overflow:
+                buf_len = input_limit
+            try:
+                chunk = uart.read(buf_len).decode()
+            except Exception:
+                self._record_error(read_error_text)
+                return
+            setattr(self, buffer_name, getattr(self, buffer_name) + chunk)
+            if input_overflow:
+                setattr(self, buffer_name, "")
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                return
+            if self._drain_uart_lines(buffer_name, handler, overflow_error_text, input_limit):
+                return
+
+    def _drain_uart_lines(self, buffer_name: str, handler, overflow_error_text, input_limit) -> bool:
+        while True:
+            buffer = getattr(self, buffer_name)
+            if input_limit is not None and len(buffer) > input_limit:
+                setattr(self, buffer_name, "")
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                return True
+            idx = buffer.find("\n")
+            if idx == -1:
+                return False
+            if input_limit is not None and idx > input_limit:
+                setattr(self, buffer_name, buffer[idx + 1 :])
+                if overflow_error_text is not None:
+                    self._record_error(overflow_error_text)
+                continue
+            line = buffer[:idx].rstrip("\r").strip()
+            setattr(self, buffer_name, buffer[idx + 1 :])
             handler(line)
-        if result["status"] == STATUS_OVERFLOW:
-            if overflow_error_text is not None:
-                self._record_error(overflow_error_text)
-            return
-        if result["status"] in (STATUS_ANY_ERROR, STATUS_READ_ERROR, STATUS_DECODE_ERROR):
-            self._record_error(read_error_text)
 
     def _handle_uart3_line(self, line: str) -> None:
         """处理单条 UART3 短包输入行
@@ -334,12 +344,12 @@ class MasterForwardRuntime:
             return
         if self._state_machine.is_waiting_assistant_idle_ack():
             return
-        consume_result, packet = split_velocity_line(line)
-        if consume_result == CONSUME_ACCEPTED and packet is not None:
+        packet = parse_short_packet(line)
+        if packet is not None and packet.get("type") == "v":
             self._apply_velocity_packet(packet, source="uart3")
             self._uart3_velocity_received_this_tick = True
             return
-        if consume_result == CONSUME_INVALID:
+        if line.lower().startswith("v,"):
             self._record_error("invalid velocity packet")
 
     def _handle_uart6_line(self, line: str) -> None:
@@ -350,21 +360,17 @@ class MasterForwardRuntime:
 
         if not line:
             return
-        consume_result, velocity = split_velocity_line(line, allow_omega=False)
-        if consume_result == CONSUME_ACCEPTED and velocity is not None:
-            if self._state_machine.allows_search_velocity() or self._state_machine.state == STATE_TRANSPORT_OBJECT:
-                self._latest_uart6_velocity = velocity
-            return
-        if consume_result == CONSUME_INVALID:
-            self._record_error("invalid uart6 velocity packet")
-            return
         packet = parse_short_packet(line)
+        if packet is not None and packet.get("type") == "v":
+            if self._state_machine.allows_search_velocity() or self._state_machine.state == STATE_TRANSPORT_OBJECT:
+                self._latest_uart6_velocity = packet
+            return
         if packet is not None and packet.get("type") == "a":
             pending = self._pending_hook
-            if self._reliable_channel.ack_matches(
-                pending,
-                int(packet["reliable_seq"]),
-                seq_field="reliable_seq",
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and int(packet["reliable_seq"]) == int(pending["reliable_seq"])
             ):
                 self._active_hook_context_id = int(pending["context_id"])
                 if pending.get("kind") == "transport_hook":
@@ -395,6 +401,8 @@ class MasterForwardRuntime:
                     "value": int(packet["value"]),
                 }
             return
+        if line.lower().startswith("v,"):
+            self._record_error("invalid uart6 velocity packet")
 
     def _handle_uart8_line(self, line: str) -> None:
         """处理 UART8 回传短包
@@ -408,7 +416,11 @@ class MasterForwardRuntime:
         if packet.get("type") == "a":
             seq = int(packet["seq"])
             pending = self._pending_assistant_sync
-            if self._reliable_channel.ack_matches(pending, seq):
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and seq == int(pending["seq"])
+            ):
                 if pending.get("kind") == "assistant_idle":
                     self._state_machine.mark_assistant_idle_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
@@ -422,7 +434,11 @@ class MasterForwardRuntime:
                 self._pending_assistant_sync = None
                 return
             pending = self._pending_sync
-            if self._reliable_channel.ack_matches(pending, seq):
+            if (
+                pending is not None
+                and pending.get("sent_once")
+                and seq == int(pending["seq"])
+            ):
                 self._pending_sync = None
         elif packet.get("type") == "r":
             self._write_forward_reliable_line(format_ack_packet(packet["seq"]))
@@ -491,14 +507,15 @@ class MasterForwardRuntime:
         if pending is None:
             return
         now_ms = self._now_ms()
-        if not self._reliable_channel.should_send_at(pending, now_ms):
+        if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
             return
         wrote_all = self._write_forward_reliable_line(
             "s,%d,%d,%d,%d"
             % (pending["seq"], pending["state"], pending["target"], pending["arg"])
         )
         if wrote_all:
-            self._reliable_channel.mark_sent_at(pending, now_ms)
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
 
     def _select_active_pending_sync(self):
         """选择当前应该发送或重发的 UART8 可靠同步请求"""
@@ -756,7 +773,7 @@ class MasterForwardRuntime:
         if pending is None:
             return
         now_ms = self._now_ms()
-        if not self._reliable_channel.should_send_at(pending, now_ms):
+        if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
             return
         wrote_all = self._write_uart6_reliable_line(
             format_state_sync_packet(
@@ -768,7 +785,8 @@ class MasterForwardRuntime:
             )
         )
         if wrote_all:
-            self._reliable_channel.mark_sent_at(pending, now_ms)
+            pending["last_sent_ms"] = now_ms
+            pending["sent_once"] = True
 
     def _drain_pending_hook_event(self) -> None:
         """在 hook 建立后补发此前暂存的命中事件"""
