@@ -8,6 +8,7 @@
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
+from config import comm as comm_params
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
@@ -64,9 +65,11 @@ def load_ident_lookup(path):
         lookup[name] = (vals.get("gain"), vals.get("tau"))
     return lookup
 
+UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
+
 
 uart3 = UART(2)
-uart3.init(115200)
+uart3.init(UART_BAUDRATE)
 
 led = Pin("C4", Pin.OUT, value=True)
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)

@@ -3,6 +3,7 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
+from config import comm as comm_params
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.link import should_resend, write_reliable_line
@@ -40,14 +41,14 @@ from vision.velocity_packet import (
 )
 
 
-_INPUT_LIMIT = 32
+_INPUT_LIMIT = getattr(comm_params, "ASSISTANT_UART_INPUT_LIMIT")
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
 _LOCAL_VISION_SYNC_RESEND_INTERVAL_MS = getattr(
-    vision_params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
+    comm_params, "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS"
 )
-_MASTER_REPORT_RESEND_INTERVAL_MS = getattr(vision_params, "RELIABLE_RESEND_INTERVAL_MS")
+_MASTER_REPORT_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
 _ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(

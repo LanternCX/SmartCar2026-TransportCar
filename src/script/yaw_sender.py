@@ -8,6 +8,7 @@
 from machine import UART
 from seekfree import IMU963RX
 from smartcar import ticker
+from config import comm as comm_params
 from config import motion as motion_params
 from config import storage as storage_params
 from utils.quaternion import Quaternion
@@ -22,11 +23,13 @@ TICK_MS = getattr(motion_params, "TICK_MS")
 GYRO_SCALE = getattr(motion_params, "GYRO_SCALE")
 # 陀螺仪零飘参数文件路径, 包含校准时测得的各轴偏移
 GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
+# 串口波特率
+UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
 
 # ===== 硬件初始化 =====
 # UART3 用于发送数据到上游
 uart3 = UART(2)
-uart3.init(115200)
+uart3.init(UART_BAUDRATE)
 uart3.write("IMU Yaw Sender Starting...\r\n")
 
 # IMU 初始化

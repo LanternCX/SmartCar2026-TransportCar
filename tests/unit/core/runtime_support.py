@@ -102,6 +102,7 @@ def install_transport_car_stubs() -> None:
         "config.motion",
         "config.vision",
         "config.safety",
+        "config.comm",
         "config.storage",
     ]
     for name in module_names:
@@ -278,6 +279,7 @@ def install_transport_car_stubs() -> None:
     config_motion = ModuleType("config.motion")
     config_vision = ModuleType("config.vision")
     config_safety = ModuleType("config.safety")
+    config_comm = ModuleType("config.comm")
     config_storage = ModuleType("config.storage")
     motion_values = {
         "TICK_MS": 5,
@@ -326,6 +328,18 @@ def install_transport_car_stubs() -> None:
         "TARGET_SPEED_MAX": 100.0,
         "V_CMD_MAX": 100.0,
     }
+    comm_values = {
+        "UART_BAUDRATE": 115200,
+        "UART3_PORT_ID": 2,
+        "UART6_PORT_ID": 5,
+        "UART8_PORT_ID": 7,
+        "MASTER_UART3_INPUT_LIMIT": 128,
+        "MASTER_UART6_INPUT_LIMIT": 128,
+        "MASTER_UART8_INPUT_LIMIT": 128,
+        "ASSISTANT_UART_INPUT_LIMIT": 32,
+        "RELIABLE_RESEND_INTERVAL_MS": 20,
+        "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
+    }
     storage_values = {
         "IDENT_RESULTS_FILE": "ident.txt",
         "GYRO_OFFSET_FILE": "gyro.txt",
@@ -336,16 +350,20 @@ def install_transport_car_stubs() -> None:
         setattr(config_vision, key, value)
     for key, value in safety_values.items():
         setattr(config_safety, key, value)
+    for key, value in comm_values.items():
+        setattr(config_comm, key, value)
     for key, value in storage_values.items():
         setattr(config_storage, key, value)
     setattr(config_package, "motion", config_motion)
     setattr(config_package, "vision", config_vision)
     setattr(config_package, "safety", config_safety)
+    setattr(config_package, "comm", config_comm)
     setattr(config_package, "storage", config_storage)
     sys.modules["config"] = config_package
     sys.modules["config.motion"] = config_motion
     sys.modules["config.vision"] = config_vision
     sys.modules["config.safety"] = config_safety
+    sys.modules["config.comm"] = config_comm
     sys.modules["config.storage"] = config_storage
 
 

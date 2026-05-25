@@ -3,6 +3,7 @@
 @file src/vision/master/forward_runtime.py
 """
 
+from config import comm as comm_params
 from config import motion as motion_params
 from config import vision as vision_params
 from hardware.uart_bus import create_uart6
@@ -52,9 +53,9 @@ from vision.master.state_machine import (
 )
 
 
-_UART6_INPUT_LIMIT = 128
-_UART3_INPUT_LIMIT = 128
-_UART8_INPUT_LIMIT = 128
+_UART6_INPUT_LIMIT = getattr(comm_params, "MASTER_UART6_INPUT_LIMIT")
+_UART3_INPUT_LIMIT = getattr(comm_params, "MASTER_UART3_INPUT_LIMIT")
+_UART8_INPUT_LIMIT = getattr(comm_params, "MASTER_UART8_INPUT_LIMIT")
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(
     vision_params,
@@ -71,7 +72,7 @@ MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
 )
 MASTER_ORBIT_TARGET_DEG = getattr(motion_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
-RELIABLE_RESEND_INTERVAL_MS = getattr(vision_params, "RELIABLE_RESEND_INTERVAL_MS")
+RELIABLE_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
 TRANSPORT_FORWARD_SPEED = getattr(motion_params, "TRANSPORT_FORWARD_SPEED")
 TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = getattr(

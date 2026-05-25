@@ -16,6 +16,7 @@
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
+from config import comm as comm_params
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
@@ -57,9 +58,11 @@ PID_PARAM_FILE = "/flash/pid_params.txt"
 # 辨识结果记录路径, 用于记录时间常数和增益
 IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
 
+UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
+
 
 uart3 = UART(2)
-uart3.init(115200)
+uart3.init(UART_BAUDRATE)
 
 led = Pin("C4", Pin.OUT, value=True)
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)

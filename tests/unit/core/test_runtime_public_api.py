@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from config import comm as comm_params
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
@@ -144,16 +145,24 @@ def test_orbit_radius_scale_params_exist_and_are_positive(param_name: str) -> No
 def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     """运行时配置中能从代码直接确定范围的参数保持在合法区间."""
 
+    assert int(comm_params.UART_BAUDRATE) > 0
+    assert int(comm_params.UART3_PORT_ID) >= 0
+    assert int(comm_params.UART6_PORT_ID) >= 0
+    assert int(comm_params.UART8_PORT_ID) >= 0
+    assert int(comm_params.MASTER_UART3_INPUT_LIMIT) > 0
+    assert int(comm_params.MASTER_UART6_INPUT_LIMIT) > 0
+    assert int(comm_params.MASTER_UART8_INPUT_LIMIT) > 0
+    assert int(comm_params.ASSISTANT_UART_INPUT_LIMIT) > 0
+    assert int(comm_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
+    assert int(comm_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
     assert int(motion_params.TICK_MS) > 0
-    assert not hasattr(vision_params, "RELIABLE_PACKET_SEND_DELAY_MS")
-    assert int(vision_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
+    assert not hasattr(comm_params, "RELIABLE_PACKET_SEND_DELAY_MS")
     assert 0 <= int(vision_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_TRANSPORT_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
     assert 0.0 <= float(vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
-    assert int(vision_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
     assert float(motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) > 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
