@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from config import params as real_params
+from config import motion as motion_params
+from config import safety as safety_params
+from config import storage as storage_params
+from config import vision as vision_params
 from tests.unit.core.runtime_support import (
     CaptureUart,
     DummyMotor,
@@ -132,7 +135,8 @@ def _load_real_positional_pid_controller():
 )
 def test_orbit_radius_scale_params_exist_and_are_positive(param_name: str) -> None:
     """主辅车绕行半径倍率参数存在且保持正数语义."""
-    value = float(getattr(real_params, param_name))
+    module = motion_params
+    value = float(getattr(module, param_name))
 
     assert value > 0.0
 
@@ -140,39 +144,44 @@ def test_orbit_radius_scale_params_exist_and_are_positive(param_name: str) -> No
 def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     """运行时配置中能从代码直接确定范围的参数保持在合法区间."""
 
-    assert int(real_params.TICK_MS) > 0
-    assert not hasattr(real_params, "RELIABLE_PACKET_SEND_DELAY_MS")
-    assert int(real_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
-    assert 0 <= int(real_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
-    assert 0 <= int(real_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
-    assert 0.0 <= float(real_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
-    assert int(real_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
-    assert float(real_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) > 0.0
-    assert float(real_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
-    assert float(real_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
-    assert float(real_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
-    assert int(real_params.MOTION_STOP_CONFIRM_TICKS) > 0
-    assert float(real_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
-    assert 0 < float(real_params.MAX_DUTY) <= 10000.0
-    assert float(real_params.V_CMD_MAX) > 0.0
-    assert float(real_params.TARGET_SPEED_MAX) > 0.0
-    assert float(real_params.POS_MAX_SPEED) > 0.0
-    assert float(real_params.POS_TOLERANCE) >= 0.0
-    assert float(real_params.ANGLE_TOLERANCE) >= 0.0
-    assert set(real_params.ACTIVE_WHEELS).issubset({"m", "l", "r"})
-    assert 0.0 <= float(real_params.GYRO_LPF_ALPHA) <= 1.0
-    assert float(real_params.GYRO_SCALE) > 0.0
-    assert 0 <= int(real_params.GYRO_AXIS_Z) <= 5
-    assert float(real_params.YAW_I_MAX) >= 0.0
-    assert float(real_params.AUTO_OMEGA_MAX) >= 0.0
-    assert float(real_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
-    assert float(real_params.HOLD_SPEED_EPS) >= 0.0
+    assert int(motion_params.TICK_MS) > 0
+    assert not hasattr(vision_params, "RELIABLE_PACKET_SEND_DELAY_MS")
+    assert int(vision_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
+    assert 0 <= int(vision_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_TRANSPORT_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
+    assert 0.0 <= float(vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
+    assert int(vision_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
+    assert float(motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) > 0.0
+    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
+    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
+    assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
+    assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
+    assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
+    assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
+    assert float(safety_params.V_CMD_MAX) > 0.0
+    assert float(safety_params.TARGET_SPEED_MAX) > 0.0
+    assert float(motion_params.POS_MAX_SPEED) > 0.0
+    assert float(motion_params.POS_TOLERANCE) >= 0.0
+    assert float(motion_params.ANGLE_TOLERANCE) >= 0.0
+    assert set(motion_params.ACTIVE_WHEELS).issubset({"m", "l", "r"})
+    assert 0.0 <= float(motion_params.GYRO_LPF_ALPHA) <= 1.0
+    assert float(motion_params.GYRO_SCALE) > 0.0
+    assert 0 <= int(motion_params.GYRO_AXIS_Z) <= 5
+    assert float(motion_params.YAW_I_MAX) >= 0.0
+    assert float(motion_params.AUTO_OMEGA_MAX) >= 0.0
+    assert float(motion_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
+    assert float(motion_params.HOLD_SPEED_EPS) >= 0.0
+    assert isinstance(storage_params.IDENT_RESULTS_FILE, str)
+    assert isinstance(storage_params.GYRO_OFFSET_FILE, str)
 
 
 def test_transport_clear_retreat_distance_matches_pre_turn_back_request() -> None:
     """主车转身前后退距离按调试要求保持 0.1m."""
 
-    assert float(real_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) == pytest.approx(0.1)
+    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) == pytest.approx(0.1)
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:
@@ -463,13 +472,13 @@ def test_transport_car_set_relative_translation_target_accepts_command_speed_lim
 def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:
     """运行时配置为绕行保留独立角速度限幅参数."""
 
-    assert float(real_params.ORBIT_AUTO_OMEGA_MAX) >= 0.0
+    assert float(motion_params.ORBIT_AUTO_OMEGA_MAX) >= 0.0
 
 
 def test_runtime_config_accepts_separate_heading_transition_omega_limit() -> None:
     """运行时配置为朝向跳转保留独立角速度限幅参数."""
 
-    assert float(real_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
+    assert float(motion_params.HEADING_TRANSITION_OMEGA_MAX) >= 0.0
 
 
 def test_transport_car_orbit_target_uses_orbit_specific_omega_limit() -> None:
@@ -524,12 +533,12 @@ def test_transport_car_heading_transition_reverses_after_crossing_target() -> No
     )
     PositionalPIDController = _load_real_positional_pid_controller()
     car.yaw_pid = PositionalPIDController(
-        output_limit=float(real_params.AUTO_OMEGA_MAX),
-        integral_limit=float(real_params.YAW_I_MAX),
+        output_limit=float(motion_params.AUTO_OMEGA_MAX),
+        integral_limit=float(motion_params.YAW_I_MAX),
     )
     car.yaw_pid.set_gains(
-        float(real_params.YAW_KP),
-        float(real_params.YAW_KI),
+        float(motion_params.YAW_KP),
+        float(motion_params.YAW_KI),
         0.0,
     )
 

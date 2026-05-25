@@ -25,6 +25,8 @@ def _load_calibrate_gyro_module():
     }
 
     for name in (
+        "config",
+        "config.storage",
         "machine",
         "seekfree",
         "storage",
@@ -98,8 +100,9 @@ def test_calibrate_gyro_keeps_led_on_after_save() -> None:
     """保存完成后应停止闪烁并保持常亮."""
 
     state = _load_calibrate_gyro_module()
+    from config import storage as storage_params
 
-    assert state["saved_path"] == "/flash/gyro_offset.txt"
+    assert state["saved_path"] == storage_params.GYRO_OFFSET_FILE
     assert state["saved_offsets"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     assert state["led"] is not None
     assert state["led"].value() is False

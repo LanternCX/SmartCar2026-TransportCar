@@ -3,7 +3,7 @@
 @file src/vision/velocity_packet.py
 """
 
-from config import params as _params
+from config import safety as safety_params
 from protocol.packet import parse_short_packet
 
 
@@ -11,7 +11,7 @@ CONSUME_IGNORED = "ignored"
 CONSUME_ACCEPTED = "accepted"
 CONSUME_INVALID = "invalid"
 
-V_CMD_MAX = getattr(_params, "V_CMD_MAX")
+V_CMD_MAX = getattr(safety_params, "V_CMD_MAX")
 
 
 def clamp_command_value(value: float) -> float:

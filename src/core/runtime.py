@@ -19,7 +19,9 @@ from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
 from utils.startup_log import startup_log
-from config import params as _params
+from config import motion as motion_params
+from config import safety as safety_params
+from config import storage as storage_params
 from hardware.uart_bus import create_uart3, create_uart8
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
@@ -28,28 +30,28 @@ from storage.param_manager import load_ident_lookup, load_gyro_offsets
 from protocol.packet import parse_short_packet
 
 
-TICK_MS = getattr(_params, "TICK_MS")
-MAX_DUTY = getattr(_params, "MAX_DUTY")
-TARGET_SPEED_MAX = getattr(_params, "TARGET_SPEED_MAX")
-POS_MAX_SPEED = getattr(_params, "POS_MAX_SPEED")
-POS_KP = getattr(_params, "POS_KP")
-POS_TOLERANCE = getattr(_params, "POS_TOLERANCE")
-ANGLE_TOLERANCE = getattr(_params, "ANGLE_TOLERANCE")
-ACTIVE_WHEELS = getattr(_params, "ACTIVE_WHEELS")
-GYRO_LPF_ALPHA = getattr(_params, "GYRO_LPF_ALPHA")
-GYRO_SCALE = getattr(_params, "GYRO_SCALE")
-YAW_KP = getattr(_params, "YAW_KP")
-YAW_KI = getattr(_params, "YAW_KI")
-YAW_KD = getattr(_params, "YAW_KD")
-YAW_I_MAX = getattr(_params, "YAW_I_MAX")
-AUTO_OMEGA_MAX = getattr(_params, "AUTO_OMEGA_MAX")
-HEADING_TRANSITION_OMEGA_MAX = getattr(_params, "HEADING_TRANSITION_OMEGA_MAX")
-ORBIT_AUTO_OMEGA_MAX = getattr(_params, "ORBIT_AUTO_OMEGA_MAX")
-HOLD_SPEED_EPS = getattr(_params, "HOLD_SPEED_EPS")
-MASTER_ORBIT_RADIUS_SCALE = getattr(_params, "MASTER_ORBIT_RADIUS_SCALE")
-IDENT_RESULTS_FILE = getattr(_params, "IDENT_RESULTS_FILE")
-GYRO_OFFSET_FILE = getattr(_params, "GYRO_OFFSET_FILE")
-PID_MAP = getattr(_params, "PID_MAP")
+TICK_MS = getattr(motion_params, "TICK_MS")
+MAX_DUTY = getattr(safety_params, "MAX_DUTY")
+TARGET_SPEED_MAX = getattr(safety_params, "TARGET_SPEED_MAX")
+POS_MAX_SPEED = getattr(motion_params, "POS_MAX_SPEED")
+POS_KP = getattr(motion_params, "POS_KP")
+POS_TOLERANCE = getattr(motion_params, "POS_TOLERANCE")
+ANGLE_TOLERANCE = getattr(motion_params, "ANGLE_TOLERANCE")
+ACTIVE_WHEELS = getattr(motion_params, "ACTIVE_WHEELS")
+GYRO_LPF_ALPHA = getattr(motion_params, "GYRO_LPF_ALPHA")
+GYRO_SCALE = getattr(motion_params, "GYRO_SCALE")
+YAW_KP = getattr(motion_params, "YAW_KP")
+YAW_KI = getattr(motion_params, "YAW_KI")
+YAW_KD = getattr(motion_params, "YAW_KD")
+YAW_I_MAX = getattr(motion_params, "YAW_I_MAX")
+AUTO_OMEGA_MAX = getattr(motion_params, "AUTO_OMEGA_MAX")
+HEADING_TRANSITION_OMEGA_MAX = getattr(motion_params, "HEADING_TRANSITION_OMEGA_MAX")
+ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
+HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
+MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
+IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
+GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
+PID_MAP = getattr(motion_params, "PID_MAP")
 
 
 class _NullImu:

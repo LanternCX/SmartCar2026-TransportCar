@@ -41,11 +41,11 @@ def load_remote_control_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "smartcar", smartcar_module)
 
     config_module = ModuleType("config")
-    config_params = ModuleType("config.params")
-    setattr(config_params, "TICK_MS", 5)
-    setattr(config_module, "params", config_params)
+    config_motion = ModuleType("config.motion")
+    setattr(config_motion, "TICK_MS", 5)
+    setattr(config_module, "motion", config_motion)
     monkeypatch.setitem(sys.modules, "config", config_module)
-    monkeypatch.setitem(sys.modules, "config.params", config_params)
+    monkeypatch.setitem(sys.modules, "config.motion", config_motion)
 
     startup_log_module = ModuleType("utils.startup_log")
     setattr(startup_log_module, "startup_log", lambda *_args, **_kwargs: None)

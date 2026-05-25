@@ -8,6 +8,9 @@
 from machine import Pin, UART
 from seekfree import MOTOR_CONTROLLER
 from smartcar import encoder, ticker
+from config import motion as motion_params
+from config import safety as safety_params
+from config import storage as storage_params
 from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController
 from control.pid_store import load_ident_params
@@ -18,19 +21,19 @@ import gc
 
 
 # 采样/控制周期, 单位毫秒
-TICK_MS = 5
+TICK_MS = getattr(motion_params, "TICK_MS")
 # PWM 占空比上限, 范围 0 ~ 10000
-MAX_DUTY = 10000
+MAX_DUTY = getattr(safety_params, "MAX_DUTY")
 # 默认目标速度, 单位 m/s, 可在运行时通过命令修改
 TARGET_SPEEDS = {"m": 0.0, "l": -5.0, "r": 5.0}
 # 目标速度安全上限, 超过此值的指令会被截断
-TARGET_SPEED_MAX = 30.0
+TARGET_SPEED_MAX = getattr(safety_params, "TARGET_SPEED_MAX")
 # 参与闭环的电机列表
-ACTIVE_WHEELS = ("m", "l", "r")
+ACTIVE_WHEELS = getattr(motion_params, "ACTIVE_WHEELS")
 # ACTIVE_WHEELS = ("r",)
 
 # 辨识参数文件路径, 用于加载电机增益和时间常数
-IDENT_RESULTS_FILE = "/flash/ident_params.txt"
+IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
 
 # PID_MAP = {
 #     "m": (100, 500, 1)

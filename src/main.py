@@ -23,7 +23,7 @@ def _allocate_emergency_exception_buffer() -> bool:
 
 _allocate_emergency_exception_buffer()
 
-from config import params
+from config import safety as safety_params
 from utils.startup_log import startup_log
 
 # 启动后等待时间, 等待外设稳定
@@ -157,7 +157,7 @@ def _run_low_voltage_alarm(voltage):
 def _should_block_startup_for_voltage(voltage):
     """判断上电电压是否低于保护阈值."""
 
-    return float(voltage) < float(params.POWER_MIN_VOLTAGE_V)
+    return float(voltage) < float(safety_params.POWER_MIN_VOLTAGE_V)
 
 
 def _noop_ticker_callback(_ticker_obj):
