@@ -41,7 +41,7 @@
   - 两份视觉代码可分开维护，但必须遵循统一车端协议。
   - 辅车车体提供可识别标记，辅车底盘不处理图像数据。
 - 通信方式：主辅通过 `UART8` 直连通信协同。
-- 无线串口控制链路作为遥控链路；主车通过 `UART3` 接收上游速度短包，`UART3` 控制链打通即视为遥控能力打通。
+- 无线串口链路作为调试链路；`UART3` 接入 REPL，用于板端运行日志与现场调试。
 - 视觉层按 `vision/master/` 与 `vision/assistant/` 维护主辅角色入口；主车视觉负责物体观测、hook 上下文与事件回报，辅车视觉负责跟随速度修正。协议以 `docs/developer/protocol.md`、状态以 `docs/developer/state.md`、视觉职责以 `docs/developer/vision.md` 为准。
 
 ### 能力边界

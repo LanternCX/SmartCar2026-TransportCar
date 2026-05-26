@@ -336,7 +336,6 @@ def install_transport_car_stubs() -> None:
         "UART3_PORT_ID": 2,
         "UART6_PORT_ID": 5,
         "UART8_PORT_ID": 7,
-        "MASTER_UART3_INPUT_LIMIT": 128,
         "MASTER_UART6_INPUT_LIMIT": 128,
         "MASTER_UART8_INPUT_LIMIT": 128,
         "ASSISTANT_UART_INPUT_LIMIT": 32,

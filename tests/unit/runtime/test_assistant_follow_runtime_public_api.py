@@ -120,22 +120,6 @@ def test_assistant_follow_runtime_step_runs_role_cycle_boundary(monkeypatch) -> 
     assert events.index("role_cycle") < events.index("transport_step")
 
 
-def test_assistant_follow_runtime_keeps_transport_uart3_processing_active(
-    monkeypatch,
-) -> None:
-    """辅车角色层接管 UART8 后，不应顺手屏蔽共享底盘自己的 UART3 输入链。"""
-
-    events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
-    follow_runtime_module = import_assistant_module(
-        "vision.assistant.follow_runtime", monkeypatch
-    )
-
-    runtime = follow_runtime_module.AssistantFollowRuntime()
-    runtime._transport_car._process_uart()
-
-    assert "transport_process_uart" in events
-
-
 def test_assistant_package_entry_builds_follow_runtime(monkeypatch) -> None:
     """辅车包入口要继续给启动壳创建辅车角色运行时对象."""
 

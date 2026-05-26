@@ -42,7 +42,6 @@ from vision.master.state_machine import (
 
 
 _UART6_INPUT_LIMIT = getattr(comm_params, "MASTER_UART6_INPUT_LIMIT")
-_UART3_INPUT_LIMIT = getattr(comm_params, "MASTER_UART3_INPUT_LIMIT")
 _UART8_INPUT_LIMIT = getattr(comm_params, "MASTER_UART8_INPUT_LIMIT")
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(
@@ -83,7 +82,7 @@ MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG"
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART3 与本车 UART6, 并把当前底盘速度转发到 UART8
+    @brief 在共享底盘外层接管本车 UART6, 并把当前底盘速度转发到 UART8
     """
 
     def __init__(self, now_ms=None) -> None:
@@ -96,11 +95,9 @@ class MasterForwardRuntime:
         self.imu = car.imu
         self._now_ms = now_ms or default_now_ms
         self._uart6 = create_uart6()
-        self._rx_buf3 = ""
         self._rx_buf6 = ""
         self._rx_buf8 = ""
         self._latest_uart6_velocity = None
-        self._uart3_velocity_received_this_tick = False
         self._last_error_text = "none"
         self._hook_seq = seed_value
         self._orbit_hook_seq = (seed_value + 128) % 256
@@ -135,30 +132,6 @@ class MasterForwardRuntime:
             initial_context_id=seed_value,
         )
         self.last_report = None
-
-        if getattr(car, "_process_uart", None) is not None:
-            car._process_uart = self._noop_transport_uart
-        self._write_uart3_boot_start()
-
-
-    def _write_uart3_boot_start(self) -> None:
-        """向 UART3 输出启动标记"""
-
-        try:
-            self._transport_car.uart3.write("start\r\n")
-        except Exception:
-            self._record_error("uart3 start write failed")
-
-    def _write_uart3_turn_heading_debug(self) -> None:
-        """在主车转身阶段向 UART3 输出当前角度调试信息"""
-
-        try:
-            self._transport_car.uart3.write(
-                "turn_heading,%.2f\r\n"
-                % float(getattr(self._transport_car, "heading_est", 0.0))
-            )
-        except Exception:
-            self._record_error("uart3 turn debug write failed")
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -215,8 +188,6 @@ class MasterForwardRuntime:
 
         self._advance_state_machine()
         self._drain_state_machine_outputs()
-        self._uart3_velocity_received_this_tick = False
-        self._process_uart3()
         self._process_uart6()
         self._drain_state_machine_outputs()
         transport_applied_this_tick = False
@@ -233,7 +204,7 @@ class MasterForwardRuntime:
                 source="master_aligned_hold",
                 has_omega=True,
             )
-        elif not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
+        elif self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
         self._process_uart8()
         self._drain_state_machine_outputs()
@@ -246,17 +217,6 @@ class MasterForwardRuntime:
         self._send_pending_hook()
         self._send_pending_sync()
         self._forward_current_chassis_velocity()
-
-    def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理短包输入"""
-
-        self._read_uart_lines(
-            self._transport_car.uart3,
-            "_rx_buf3",
-            self._handle_uart3_line,
-            overflow_error_text="invalid uart3 input",
-            input_limit=_UART3_INPUT_LIMIT,
-        )
 
     def _process_uart6(self) -> None:
         """接管 UART6 按行读取本车视觉速度输入"""
@@ -333,32 +293,6 @@ class MasterForwardRuntime:
             line = buffer[:idx].rstrip("\r").strip()
             setattr(self, buffer_name, buffer[idx + 1 :])
             handler(line)
-
-    def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 短包输入行
-
-        @param line 原始输入行
-        """
-
-        if not line:
-            return
-        if self._state_machine.state == STATE_ORBITING:
-            return
-        if self._state_machine.state == STATE_TRANSPORT_OBJECT:
-            return
-        if self._state_machine.state == STATE_CLEAR_OBJECT:
-            return
-        if self._state_machine.state == STATE_STOP:
-            return
-        if self._state_machine.is_waiting_assistant_idle_ack():
-            return
-        packet = parse_short_packet(line)
-        if packet is not None and packet.get("type") == "v":
-            self._apply_velocity_packet(packet, source="uart3")
-            self._uart3_velocity_received_this_tick = True
-            return
-        if line.lower().startswith("v,"):
-            self._record_error("invalid velocity packet")
 
     def _handle_uart6_line(self, line: str) -> None:
         """处理单条 UART6 视觉速度输入行
@@ -772,7 +706,6 @@ class MasterForwardRuntime:
             self._turn_back_stop_ticks = 0
             return
         if self._turn_back_rotation_started:
-            self._write_uart3_turn_heading_debug()
             if bool(getattr(self._transport_car, "command_lock", False)):
                 self._turn_back_stop_ticks = 0
                 return
@@ -852,9 +785,3 @@ class MasterForwardRuntime:
 
         self._last_error_text = text
         self._transport_car.last_exception_text = text
-
-    @staticmethod
-    def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART3 消费入口"""
-
-        return None

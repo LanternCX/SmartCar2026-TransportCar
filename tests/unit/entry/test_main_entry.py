@@ -57,6 +57,30 @@ def test_main_entry_allocates_emergency_exception_buffer(monkeypatch) -> None:
     assert calls == [100]
 
 
+def test_main_entry_binds_uart3_to_repl_before_startup_logs(
+    capsys, monkeypatch
+) -> None:
+    """正式入口启动时必须先把 UART3 交给 REPL."""
+
+    main = load_main_module()
+    events = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(main, "_run_script", lambda _script_path: None)
+    monkeypatch.setattr(
+        main,
+        "startup_log",
+        lambda stage, detail="": events.append(("log", stage, detail)),
+    )
+    monkeypatch.setattr(main, "_bind_uart3_repl", lambda: events.append("repl"))
+
+    main.main()
+
+    assert events[0] == "repl"
+
+
 def test_resolve_startup_script_defaults_to_remote_control() -> None:
     """没有长按时进入默认运行脚本."""
 

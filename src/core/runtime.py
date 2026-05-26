@@ -22,12 +22,11 @@ from utils.startup_log import startup_log
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
-from hardware.uart_bus import create_uart3, create_uart8
+from hardware.uart_bus import create_uart8
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
-from protocol.packet import parse_short_packet
 
 
 TICK_MS = getattr(motion_params, "TICK_MS")
@@ -204,8 +203,7 @@ class TransportCar:
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
 
-        # 串口通信接口: uart3 接收上位机速度短包, uart8 用于主辅设备间通信
-        self.uart3 = create_uart3()
+        # 运行时持有 UART8 主辅通信链路
         self.uart8 = create_uart8()
         startup_log("transport_car", "uart ready")
 
@@ -315,7 +313,6 @@ class TransportCar:
         #          heading_transition_mode: 主动朝向跳转标志, True 时使用独立跳转限幅
         #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
         #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
-        #          rx_buf3: UART3 接收缓冲区, 累积接收数据直到完整短包行
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
@@ -326,7 +323,6 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
-        self.rx_buf3 = ""
 
         # 时间与性能监控
         # @details ticker: ticker 对象引用, 用于停止中断
@@ -443,10 +439,9 @@ class TransportCar:
         @details 主循环流程
         1. 首次执行时记录启动日志
         2. 检测 ticker 标志, 执行单次控制周期 (_handle_tick)
-        3. 处理 UART 接收的短包
-        4. 检测硬件紧急停止按钮 switch2, 触发时安全停止
-        5. 执行垃圾回收, 释放内存
-        6. 返回继续运行标志
+        3. 检测硬件紧急停止按钮 switch2, 触发时安全停止
+        4. 执行垃圾回收, 释放内存
+        5. 返回继续运行标志
 
         @return True 表示继续运行主循环
                 False 表示检测到致命错误(如急停)应退出主循环
@@ -469,8 +464,6 @@ class TransportCar:
             self._handle_tick()
             self.pit_flag = False
 
-        self._process_uart()
-
         if self.switch2.value() != self.switch2_init:
             self.stop()
             return False
@@ -486,42 +479,12 @@ class TransportCar:
         1. 停止 ticker 中断, 防止新的控制周期
         2. 重置所有轮子 PID 控制器的积分状态, 清除累积误差
         3. 将所有电机占空比设置为 0, 停止转动
-        4. 向 UART3 发送停止确认消息 "stop\r\n"
 
         @warning 此函数应在检测到致命错误(如急停)时调用, 确保硬件安全
         """
         if self.ticker:
             self.ticker.stop()
         self.zero_motors()
-        self.uart3.write("stop\r\n")
-
-    def _handle_uart_line(self, line, source):
-        """
-        @brief 处理来自串口的单行正式短包
-
-        @details 处理逻辑
-        - 空行忽略
-        - 非短包或未消费短包忽略
-        - 速度短包写入结构化速度入口
-
-        @param line 输入行字符串, 可能为空或已去除首尾空格
-        @param source 串口来源标识(如 "uart3"), 用于调试和日志
-        """
-        if not line:
-            return
-
-        packet = parse_short_packet(line)
-        if packet is None:
-            return
-
-        if packet.get("type") == "v":
-            self.handle_velocity_packet(
-                float(packet["vx"]),
-                float(packet["vy"]),
-                float(packet.get("omega", 0.0)),
-                source=source,
-                has_omega=bool(packet.get("has_omega")),
-            )
 
     def set_velocity_target(self, vx, vy, omega=0.0, has_omega=True):
         """写入结构化速度控制目标
@@ -1353,31 +1316,3 @@ class TransportCar:
             if had_rotation_target:
                 self._clear_rotation_control_targets()
                 self.control_state["omega"] = 0.0
-
-    def _process_uart(self):
-        """
-        @brief 轮询 UART3 接收缓冲区, 处理正式短包输入
-
-        @details 处理流程
-        1. 检查 UART3 缓冲区是否有待接收字节
-        2. 解码接收数据追加到接收缓冲 rx_buf3
-        3. 按行分割(以 \n 为界), 去除 \r 和首尾空格
-        4. 对每行调用 _handle_uart_line 进行正式短包分发
-        5. 异常时向串口回写错误信息
-
-        @warning 此函数在主循环中非中断上下文调用, 可安全执行耗时操作
-        """
-        buf_len = self.uart3.any()
-        if buf_len:
-            try:
-                self.rx_buf3 += self.uart3.read(buf_len).decode()
-                while True:
-                    idx = self.rx_buf3.find("\n")
-                    if idx == -1:
-                        break
-                    line = self.rx_buf3[: idx].rstrip("\r").strip()
-                    self.rx_buf3 = self.rx_buf3[idx + 1 : ]
-                    self._handle_uart_line(line, source="uart3")
-            except Exception as exc:
-                self.last_exception_text = str(exc)
-                self.uart3.write("ERR %s\r\n" % exc)

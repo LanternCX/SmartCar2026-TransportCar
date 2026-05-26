@@ -8,8 +8,6 @@
 
 # 串口统一波特率
 UART_BAUDRATE = 115200
-# 主车运行时 UART3 输入缓冲上限
-MASTER_UART3_INPUT_LIMIT = 32
 # 主车运行时 UART6 输入缓冲上限
 MASTER_UART6_INPUT_LIMIT = 32
 # 主车运行时 UART8 输入缓冲上限
@@ -28,7 +26,7 @@ SEQ_MAX = 255
 SEQ_RING_SIZE = 256
 # 判定新序号的半环长度
 SEQ_HALF_RING = 128
-# UART3 在 machine.UART 中的端口编号
+# UART3 在 machine.UART 中的 REPL 调试端口编号
 UART3_PORT_ID = 2
 # UART6 在 machine.UART 中的端口编号
 UART6_PORT_ID = 5

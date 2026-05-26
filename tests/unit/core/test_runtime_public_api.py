@@ -149,7 +149,6 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(comm_params.UART3_PORT_ID) >= 0
     assert int(comm_params.UART6_PORT_ID) >= 0
     assert int(comm_params.UART8_PORT_ID) >= 0
-    assert int(comm_params.MASTER_UART3_INPUT_LIMIT) > 0
     assert int(comm_params.MASTER_UART6_INPUT_LIMIT) > 0
     assert int(comm_params.MASTER_UART8_INPUT_LIMIT) > 0
     assert int(comm_params.ASSISTANT_UART_INPUT_LIMIT) > 0
@@ -210,8 +209,8 @@ def test_transport_car_has_no_query_uart_public_api() -> None:
     assert not hasattr(car, "get_query_uart")
 
 
-def test_transport_car_stop_stops_ticker_zeroes_motors_and_writes_stop() -> None:
-    """停止时关闭 ticker、清零电机并回写 stop."""
+def test_transport_car_stop_stops_ticker_and_zeroes_motors() -> None:
+    """停止时关闭 ticker 并清零电机."""
     ticker = DummyTicker()
     motors = [DummyMotor(), DummyMotor()]
     _transport_car, car = make_minimal_transport_car(
@@ -220,7 +219,6 @@ def test_transport_car_stop_stops_ticker_zeroes_motors_and_writes_stop() -> None
             {"motor": motors[0]},
             {"motor": motors[1]},
         ],
-        uart3=CaptureUart(),
     )
 
     car.stop()
@@ -228,7 +226,6 @@ def test_transport_car_stop_stops_ticker_zeroes_motors_and_writes_stop() -> None
     assert ticker.stop_count == 1
     assert motors[0].duties == [0]
     assert motors[1].duties == [0]
-    assert car.uart3.messages == ["stop\r\n"]
 
 
 def test_transport_car_builds_health_snapshot() -> None:

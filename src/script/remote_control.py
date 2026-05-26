@@ -3,7 +3,7 @@
 @file src/script/remote_control.py
 @brief 搬运车的核心控制入口, 初始化系统并启动 5ms 周期的控制循环
 
-@details 根据车辆角色 (主车/辅车) 创建对应的运行时实例, 启动定时中断驱动的控制循环, 支持通过 UART3 接收上游指令, 按角色使用 UART8 / UART6 进行视觉数据通信
+@details 根据车辆角色 (主车/辅车) 创建对应的运行时实例, 启动定时中断驱动的控制循环, 按角色使用 UART8 / UART6 进行视觉数据通信
 """
 
 from smartcar import ticker

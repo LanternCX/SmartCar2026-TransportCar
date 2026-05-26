@@ -55,6 +55,23 @@ def _path_exists(path):
         return False
 
 
+def _bind_uart3_repl() -> bool:
+    """将 UART3 绑定为板端 REPL 调试终端."""
+
+    try:
+        import os
+        from hardware.uart_bus import create_uart3
+
+        uart3 = create_uart3()
+        dupterm = getattr(os, "dupterm", None)
+        if dupterm is None:
+            return False
+        dupterm(uart3)
+        return True
+    except Exception:
+        return False
+
+
 def resolve_existing_startup_script(script_path):
     """根据板端实际文件选择启动脚本路径."""
 
@@ -248,6 +265,7 @@ def _save_fatal_error_log(message: str) -> None:
 def _run_main_body():
     """入口阶段只负责按钮判定和脚本分发"""
 
+    _bind_uart3_repl()
     startup_log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
     voltage = _read_startup_voltage()
