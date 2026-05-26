@@ -71,7 +71,7 @@ def test_main_entry_binds_uart3_to_repl_before_startup_logs(
     monkeypatch.setattr(main, "_run_script", lambda _script_path: None)
     monkeypatch.setattr(
         main,
-        "startup_log",
+        "log",
         lambda stage, detail="": events.append(("log", stage, detail)),
     )
     monkeypatch.setattr(main, "_bind_uart3_repl", lambda: events.append("repl"))
@@ -118,11 +118,17 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
 
     assert result == "script/remote_control.py"
     assert launched_scripts == ["script/remote_control.py"]
-    assert "[boot] main: entry start" in output_lines
-    assert "[boot] main: power voltage=12.00V" in output_lines
-    assert "[boot] main: startup keys=[0, 0, 0, 0]" in output_lines
-    assert "[boot] main: selected script=script/remote_control.py" in output_lines
-    assert "[boot] main: launching script=script/remote_control.py" in output_lines
+    assert any(line.endswith("main: entry start") for line in output_lines)
+    assert any(line.endswith("main: power voltage=12.00V") for line in output_lines)
+    assert any(line.endswith("main: startup keys=[0, 0, 0, 0]") for line in output_lines)
+    assert any(
+        line.endswith("main: selected script=script/remote_control.py")
+        for line in output_lines
+    )
+    assert any(
+        line.endswith("main: launching script=script/remote_control.py")
+        for line in output_lines
+    )
 
 
 def test_main_entry_catches_and_saves_fatal_errors(
@@ -147,7 +153,7 @@ def test_main_entry_catches_and_saves_fatal_errors(
     output_lines = capsys.readouterr().out.splitlines()
 
     assert result is None
-    assert "[boot] main: fatal error: script boom" in output_lines
+    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
     assert log_path.read_text() == "fatal error: script boom\n"
 
 
@@ -174,8 +180,11 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
     output_lines = capsys.readouterr().out.splitlines()
 
     assert result is None
-    assert "[boot] main: fatal error: script boom" in output_lines
-    assert "[boot] main: fatal log save failed: flash full" in output_lines
+    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
+    assert any(
+        line.endswith("main: fatal log save failed: flash full")
+        for line in output_lines
+    )
 
 
 def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
@@ -205,7 +214,7 @@ def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> No
     assert result == "alarm"
     assert launched_scripts == []
     assert alarmed == [11.4]
-    assert "[boot] main: low voltage=11.40V" in output_lines
+    assert any(line.endswith("main: low voltage=11.40V") for line in output_lines)
 
 
 def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:

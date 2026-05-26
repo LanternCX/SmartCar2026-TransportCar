@@ -18,7 +18,7 @@ from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
 from utils.quaternion import Quaternion
-from utils.startup_log import startup_log
+from utils.startup_log import log
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
@@ -196,7 +196,7 @@ class TransportCar:
                                使用空占位对象替代 IMU、电机和编码器
         """
         self.diagnostic_mode = bool(diagnostic_mode)
-        startup_log("transport_car", "init start")
+        log("transport_car", "init start")
 
         # 硬件接口: 板载 LED 用于运行状态指示, switch2 为硬件紧急停止按钮
         self.led = Pin("C4", Pin.OUT, value=True)
@@ -205,17 +205,17 @@ class TransportCar:
 
         # 运行时持有 UART8 主辅通信链路
         self.uart8 = create_uart8()
-        startup_log("transport_car", "uart ready")
+        log("transport_car", "uart ready")
 
         # IMU 传感器(陀螺仪+加速度计), 用于姿态估计与航向角反馈
         # 诊断模式下使用空占位对象避免硬件依赖
         if self.diagnostic_mode:
-            startup_log("transport_car", "diagnostic mode skip IMU init")
+            log("transport_car", "diagnostic mode skip IMU init")
             self.imu = _NullImu()
         else:
-            startup_log("transport_car", "IMU init start")
+            log("transport_car", "IMU init start")
             self.imu = create_imu()
-            startup_log("transport_car", "IMU ready")
+            log("transport_car", "IMU ready")
         self.imu_data = self.imu.get()
 
         # 姿态估计与陀螺仪滤波状态
@@ -250,24 +250,24 @@ class TransportCar:
         # 电机和编码器: 三轮独立驱动与速度反馈
         # 诊断模式下使用空占位对象避免硬件依赖
         if self.diagnostic_mode:
-            startup_log("transport_car", "diagnostic mode skip motor/encoder init")
+            log("transport_car", "diagnostic mode skip motor/encoder init")
             self.motors = _create_null_motors()
             self.encoders = _create_null_encoders()
         else:
-            startup_log("transport_car", "motor/encoder init start")
+            log("transport_car", "motor/encoder init start")
             self.motors = create_motors()
             self.encoders = create_encoders()
-            startup_log("transport_car", "motor/encoder ready")
+            log("transport_car", "motor/encoder ready")
 
         # 速度环 PID 参数: 加载电机辨识结果, 包括增益和时间常数
         # 用于每轮独立的速度环整定, 从文件 IDENT_RESULTS_FILE 读取
-        startup_log("transport_car", "loading calibration data")
+        log("transport_car", "loading calibration data")
         self.ident_lookup = load_ident_lookup(IDENT_RESULTS_FILE)
 
         # 陀螺仪零偏校正: 从文件 GYRO_OFFSET_FILE 加载, 用于抵消硬件漂移
         self.imu_offsets = load_gyro_offsets(
             GYRO_OFFSET_FILE,
-            logger=lambda msg: startup_log("transport_car", msg),
+            logger=lambda msg: log("transport_car", msg),
         )
 
         # 轮组状态构造: 每轮包含编码器、电机、滤波器、PID 控制器
@@ -361,7 +361,7 @@ class TransportCar:
         # 初始化速度环 PID 增益, 每轮独立配置
         self.init_pid()
 
-        startup_log("transport_car", "init complete")
+        log("transport_car", "init complete")
 
     # Public API (公开接口)
     def mark_tick(self, _tick=None): # noqa: F841
@@ -454,12 +454,12 @@ class TransportCar:
         @endcode
         """
         if not self._boot_step_logged:
-            startup_log("transport_car", "step loop active")
+            log("transport_car", "step loop active")
             self._boot_step_logged = True
 
         if self.pit_flag:
             if not self._boot_tick_logged:
-                startup_log("transport_car", "first ticker event received")
+                log("transport_car", "first ticker event received")
                 self._boot_tick_logged = True
             self._handle_tick()
             self.pit_flag = False

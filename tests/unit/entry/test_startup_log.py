@@ -1,19 +1,20 @@
-"""启动日志工具测试.
+"""日志工具测试.
 
 @file tests/unit/entry/test_startup_log.py
 """
 
-from utils.startup_log import startup_log
+from utils import startup_log
 
 
-def test_startup_log_prints_consistent_boot_prefix(capsys) -> None:
-    """启动日志工具必须直接打印到标准输出."""
+def test_log_prints_consistent_text(capsys) -> None:
+    """日志工具必须直接打印到标准输出."""
 
-    message = startup_log("remote_control", "ticker started")
+    startup_log.cnt = 0
+
+    message = startup_log.log("remote_control", "ticker started")
     output = capsys.readouterr().out
 
-    assert message.startswith("[boot] ")
-    assert "remote_control" in message
-    assert "ticker started" in message
+    assert message == "0 remote_control: ticker started"
     assert output.endswith("\n")
     assert message in output
+    assert startup_log.cnt == 1

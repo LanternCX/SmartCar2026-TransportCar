@@ -62,6 +62,19 @@ def test_master_state_machine_enters_search_and_builds_hook_context() -> None:
     }
 
 
+def test_master_state_machine_prints_when_entering_new_state(capsys) -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        hook_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+    )
+
+    machine.step(orbit_finished=False)
+
+    assert capsys.readouterr().out.endswith("master_state: SEARCH_OBJECT\n")
+
+
 def test_master_state_machine_matching_target_found_enters_orbiting() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(

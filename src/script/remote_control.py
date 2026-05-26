@@ -8,7 +8,7 @@
 
 from smartcar import ticker
 from config import motion as motion_params
-from utils.startup_log import startup_log
+from utils.startup_log import log
 from vision import create_role_transport_car
 from vision.vehicle_role import read_vehicle_role
 
@@ -64,7 +64,7 @@ def _run_control_loop(car) -> None:
     loop_logged = False
     while True:
         if not loop_logged:
-            startup_log("remote_control", "main loop first iteration")
+            log("remote_control", "main loop first iteration")
             loop_logged = True
         if not car.step():
             break
@@ -77,12 +77,12 @@ def _stop_runtime_after_fatal(car, pit1) -> None:
         try:
             pit1.stop()
         except Exception as exc:
-            startup_log("remote_control", "fatal ticker stop failed: %s" % exc)
+            log("remote_control", "fatal ticker stop failed: %s" % exc)
     if car is not None:
         try:
             car.stop()
         except Exception as exc:
-            startup_log("remote_control", "fatal car stop failed: %s" % exc)
+            log("remote_control", "fatal car stop failed: %s" % exc)
 
 
 def main():
@@ -94,26 +94,26 @@ def main():
     car = None
     pit1 = None
     try:
-        startup_log("remote_control", "module start")
+        log("remote_control", "module start")
         role = read_vehicle_role()
-        startup_log("remote_control", "vehicle role=%s" % role)
-        startup_log("remote_control", "vision runtime ready=%s" % role)
+        log("remote_control", "vehicle role=%s" % role)
+        log("remote_control", "vision runtime ready=%s" % role)
 
-        startup_log("remote_control", "creating TransportCar")
+        log("remote_control", "creating TransportCar")
         car = _create_transport_car(role)
-        startup_log("remote_control", "TransportCar ready")
+        log("remote_control", "TransportCar ready")
 
-        startup_log("remote_control", "creating ticker")
+        log("remote_control", "creating ticker")
         pit1 = _create_ticker()
         capture_items = _build_capture_items(car)
-        startup_log("remote_control", "binding capture items=%d" % len(capture_items))
+        log("remote_control", "binding capture items=%d" % len(capture_items))
         pit1.capture_list(*capture_items)
         pit1.callback(car.mark_tick)
         car.set_ticker(pit1)
 
-        startup_log("remote_control", "starting ticker=%dms" % TICK_MS)
+        log("remote_control", "starting ticker=%dms" % TICK_MS)
         pit1.start(TICK_MS)
-        startup_log("remote_control", "entering main loop")
+        log("remote_control", "entering main loop")
         _run_control_loop(car)
         return role
     except Exception as exc:

@@ -24,7 +24,7 @@ def _allocate_emergency_exception_buffer() -> bool:
 _allocate_emergency_exception_buffer()
 
 from config import safety as safety_params
-from utils.startup_log import startup_log
+from utils.startup_log import log
 
 # 启动后等待时间, 等待外设稳定
 STARTUP_SETTLE_MS = 100
@@ -266,22 +266,22 @@ def _run_main_body():
     """入口阶段只负责按钮判定和脚本分发"""
 
     _bind_uart3_repl()
-    startup_log("main", "entry start")
+    log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
     voltage = _read_startup_voltage()
-    startup_log("main", "power voltage=%.2fV" % voltage)
+    log("main", "power voltage=%.2fV" % voltage)
     if _should_block_startup_for_voltage(voltage):
-        startup_log("main", "low voltage=%.2fV" % voltage)
+        log("main", "low voltage=%.2fV" % voltage)
         return _run_low_voltage_alarm(voltage)
     key_states = _scan_startup_key_states()
-    startup_log("main", "startup keys=%s" % key_states)
+    log("main", "startup keys=%s" % key_states)
     try:
         script_path = resolve_existing_startup_script(resolve_startup_script(key_states))
     except ValueError as exc:
         print(str(exc))
         return None
-    startup_log("main", "selected script=%s" % script_path)
-    startup_log("main", "launching script=%s" % script_path)
+    log("main", "selected script=%s" % script_path)
+    log("main", "launching script=%s" % script_path)
     _run_script(script_path)
     return script_path
 
@@ -293,11 +293,11 @@ def main():
         return _run_main_body()
     except Exception as exc:
         fatal_message = "fatal error: %s" % exc
-        startup_log("main", fatal_message)
+        log("main", fatal_message)
         try:
             _save_fatal_error_log(fatal_message)
         except Exception as save_exc:
-            startup_log("main", "fatal log save failed: %s" % save_exc)
+            log("main", "fatal log save failed: %s" % save_exc)
         return None
 
 

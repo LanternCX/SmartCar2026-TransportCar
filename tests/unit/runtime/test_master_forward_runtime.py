@@ -922,6 +922,7 @@ def test_master_forward_runtime_applies_uart6_velocity_as_orbit_correction(monke
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    forward_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = True
 
     runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
     runtime.step()

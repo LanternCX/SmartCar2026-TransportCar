@@ -59,6 +59,20 @@ def test_assistant_state_machine_accepts_idle_command() -> None:
     assert machine.is_idle() is True
 
 
+def test_assistant_state_machine_prints_when_entering_new_state(capsys) -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_IDLE,
+        module.ASSISTANT_TARGET_NONE,
+        0,
+    )
+
+    assert applied is True
+    assert capsys.readouterr().out.endswith("assistant_state: IDLE\n")
+
+
 def test_assistant_state_machine_accepts_approach_object_command() -> None:
     module = _load_assistant_state_machine()
     machine = module.AssistantStateMachine()

@@ -220,7 +220,7 @@ def install_transport_car_stubs() -> None:
     sys.modules["utils.quaternion"] = utils_quaternion
 
     utils_startup_log = ModuleType("utils.startup_log")
-    setattr(utils_startup_log, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(utils_startup_log, "log", lambda *_args, **_kwargs: None)
     sys.modules["utils.startup_log"] = utils_startup_log
 
     hardware_uart_bus = ModuleType("hardware.uart_bus")

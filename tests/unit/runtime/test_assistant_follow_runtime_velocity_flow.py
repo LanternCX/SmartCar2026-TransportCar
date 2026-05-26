@@ -366,6 +366,7 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = True
 
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
 

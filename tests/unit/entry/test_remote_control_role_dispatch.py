@@ -50,7 +50,7 @@ def load_remote_control_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "config.motion", config_motion)
 
     startup_log_module = ModuleType("utils.startup_log")
-    setattr(startup_log_module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(startup_log_module, "log", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
     vehicle_role_module = ModuleType("vision.vehicle_role")
@@ -147,7 +147,7 @@ def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> Non
         ),
     )
     setattr(module, "_run_control_loop", lambda car: events.append(("loop", car)))
-    setattr(module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(module, "log", lambda *_args, **_kwargs: None)
 
     module.main()
 
@@ -198,7 +198,7 @@ def test_remote_control_main_returns_assistant_role_and_dispatches_it(
             },
         )(),
     )
-    setattr(module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(module, "log", lambda *_args, **_kwargs: None)
 
     role = module.main()
 

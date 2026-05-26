@@ -3,6 +3,8 @@
 @file src/vision/assistant/state_machine.py
 """
 
+from utils.startup_log import log
+
 # 辅车子状态编号
 ASSISTANT_STATE_IDLE = 0
 ASSISTANT_STATE_FOLLOW = 1
@@ -10,6 +12,14 @@ ASSISTANT_STATE_APPROACH_OBJECT = 2
 ASSISTANT_STATE_ORBIT = 3
 ASSISTANT_STATE_TRANSPORT_OBJECT = 4
 ASSISTANT_STATE_CLEAR_OBJECT = 5
+_STATE_NAMES = (
+    "IDLE",
+    "FOLLOW",
+    "APPROACH_OBJECT",
+    "ORBIT",
+    "TRANSPORT_OBJECT",
+    "CLEAR_OBJECT",
+)
 
 # 辅车目标编号
 ASSISTANT_TARGET_NONE = 0
@@ -23,6 +33,15 @@ class AssistantStateMachine:
         self.state = ASSISTANT_STATE_FOLLOW
         self.target = ASSISTANT_TARGET_NONE
         self.arg = 0
+
+    def _enter_state(self, state):
+        """进入辅车子状态并输出一次跳转日志"""
+
+        state = int(state)
+        if self.state == state:
+            return
+        self.state = state
+        log("assistant_state", _STATE_NAMES[state])
 
     def apply_master_state(self, state, target, arg):
         """应用主车下发的辅车子状态
@@ -54,7 +73,7 @@ class AssistantStateMachine:
             and target != ASSISTANT_TARGET_OBJECT
         ):
             return False
-        self.state = state
+        self._enter_state(state)
         self.target = target
         self.arg = int(arg)
         return True
