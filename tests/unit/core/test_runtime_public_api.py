@@ -168,6 +168,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID) <= 255
+    assert isinstance(vision_params.ORBIT_VISION_CORRECTION_ENABLED, bool)
     assert 0.0 <= float(vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE) <= 1.0
     assert float(motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) >= 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0

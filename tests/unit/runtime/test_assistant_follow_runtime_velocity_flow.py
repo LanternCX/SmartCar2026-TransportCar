@@ -329,6 +329,33 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     assert runtime._transport_car.orbit_mode is True
 
 
+def test_assistant_follow_runtime_orbit_vision_switch_only_disables_motion_correction(
+    monkeypatch,
+) -> None:
+    """关闭绕行视觉修正时, 辅车仍同步本车视觉, 但不写入运动修正."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,3,1,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = False
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    event_count = len(events)
+    uart6._buffer = b"v,-0.25,0.5\n"
+    runtime.step()
+
+    assert runtime._pending_local_vision_sync is not None
+    assert uart6.messages == ["s,100,3,1,3\r\n"]
+    assert runtime._inputs["uart6"]["velocity"] is None
+    assert not any(event[0] == "set_orbit_velocity_correction" for event in events[event_count:])
+    assert runtime._transport_car.command_lock is True
+    assert runtime._transport_car.orbit_mode is True
+
+
 def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report(
     monkeypatch,
 ) -> None:

@@ -48,6 +48,9 @@ _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = getattr(
     vision_params, "ASSISTANT_ORBIT_OBJECT_CONFIG_ID"
 )
+ORBIT_VISION_CORRECTION_ENABLED = bool(
+    getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
+)
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
@@ -522,6 +525,8 @@ class AssistantFollowRuntime:
     def _write_orbit_velocity_correction(self) -> None:
         """在绕行阶段只使用本地视觉平移修正"""
 
+        if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
         if self._pending_local_vision_sync is not None:
             return
         uart6_velocity = self._inputs["uart6"]["velocity"]
@@ -561,7 +566,10 @@ class AssistantFollowRuntime:
 
     def _should_store_velocity(self, source: str) -> bool:
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
-            return source == "uart6" and self._pending_local_vision_sync is None
+            return (
+                source == "uart6"
+                and self._pending_local_vision_sync is None
+            )
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
         if source == "uart6" and self._pending_local_vision_sync is not None:

@@ -59,6 +59,9 @@ MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
     "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
 )
 MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_ID")
+ORBIT_VISION_CORRECTION_ENABLED = bool(
+    getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
+)
 MASTER_ORBIT_TARGET_DEG = getattr(motion_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
 RELIABLE_RESEND_INTERVAL_MS = getattr(comm_params, "RELIABLE_RESEND_INTERVAL_MS")
@@ -477,6 +480,8 @@ class MasterForwardRuntime:
                 self._transport_car.set_heading_target(target_heading_deg)
 
     def _apply_orbit_velocity_correction(self) -> None:
+        if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
         packet = self._latest_uart6_velocity
         if packet is None:
             return

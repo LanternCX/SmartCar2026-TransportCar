@@ -954,7 +954,7 @@ def test_master_forward_runtime_stops_search_velocity_while_waiting_assistant_id
     }
 
     event_count = len(events)
-    uart6._buffer = b"v,3.0,4.0\n"
+    uart6._buffer = b"a,128\nv,3.0,4.0\n"
     runtime.step()
 
     assert ("handle_velocity", "uart6", 3.0, 4.0, 0.0) not in events[event_count:]
@@ -1117,6 +1117,36 @@ def test_master_forward_runtime_sends_orbit_vision_hook_when_orbit_starts(monkey
     runtime.step()
 
     assert _orbit_hook_sync_message(forward_runtime_module) in uart6.messages
+
+
+def test_master_forward_runtime_orbit_vision_switch_only_disables_motion_correction(monkeypatch) -> None:
+    """关闭绕行视觉修正时, 主车仍建立视觉 hook, 但不写入运动修正."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    forward_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = False
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    event_count = len(events)
+    uart6._buffer = b"a,128\nv,3.0,4.0\n"
+
+    runtime.step()
+
+    assert _orbit_hook_sync_message(forward_runtime_module) in uart6.messages
+    assert not any(event[0] == "set_orbit_velocity_correction" for event in events[event_count:])
+    assert runtime._latest_uart6_velocity == {
+        "type": "v",
+        "vx": 3.0,
+        "vy": 4.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_master_forward_runtime_stale_orbit_hook_ack_does_not_ack_post_orbit_hook(
