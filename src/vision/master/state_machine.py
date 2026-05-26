@@ -173,6 +173,7 @@ class MasterStateMachine:
 
         if self._waiting_assistant_idle_ack:
             self._waiting_assistant_idle_ack = False
+            self._current_context_id = (self._current_context_id + 1) % 256
             self._enter_state(STATE_ORBITING)
             self._pending_orbit_command = {
                 "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
