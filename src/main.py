@@ -41,6 +41,8 @@ SCRIPT_PID_IDENTIFY = "script/pid_identify.py"
 SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
 # 遥控主脚本路径
 SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
+# 致命异常保存路径
+FATAL_ERROR_LOG_PATH = "last_fatal_error.log"
 
 
 def _path_exists(path):
@@ -236,7 +238,14 @@ def _run_script(script_path):
     return execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
 
 
-def main():
+def _save_fatal_error_log(message: str) -> None:
+    """保存最近一次致命异常文本."""
+
+    with open(FATAL_ERROR_LOG_PATH, "w") as log_file:
+        log_file.write("%s\n" % message)
+
+
+def _run_main_body():
     """入口阶段只负责按钮判定和脚本分发"""
 
     startup_log("main", "entry start")
@@ -257,6 +266,21 @@ def main():
     startup_log("main", "launching script=%s" % script_path)
     _run_script(script_path)
     return script_path
+
+
+def main():
+    """正式入口最外层异常兜底."""
+
+    try:
+        return _run_main_body()
+    except Exception as exc:
+        fatal_message = "fatal error: %s" % exc
+        startup_log("main", fatal_message)
+        try:
+            _save_fatal_error_log(fatal_message)
+        except Exception as save_exc:
+            startup_log("main", "fatal log save failed: %s" % save_exc)
+        return None
 
 
 if __name__ == "__main__" and globals().get("__spec__") is None:

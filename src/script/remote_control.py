@@ -70,34 +70,55 @@ def _run_control_loop(car) -> None:
             break
 
 
+def _stop_runtime_after_fatal(car, pit1) -> None:
+    """致命异常后停止板端运行资源."""
+
+    if pit1 is not None:
+        try:
+            pit1.stop()
+        except Exception as exc:
+            startup_log("remote_control", "fatal ticker stop failed: %s" % exc)
+    if car is not None:
+        try:
+            car.stop()
+        except Exception as exc:
+            startup_log("remote_control", "fatal car stop failed: %s" % exc)
+
+
 def main():
     """按角色切换视觉运行入口并启动正式运行链
 
     @brief 启动序列入口, 读取拨码开关、创建车体实例、启动定时中断、运行主循环
     """
 
-    startup_log("remote_control", "module start")
-    role = read_vehicle_role()
-    startup_log("remote_control", "vehicle role=%s" % role)
-    startup_log("remote_control", "vision runtime ready=%s" % role)
+    car = None
+    pit1 = None
+    try:
+        startup_log("remote_control", "module start")
+        role = read_vehicle_role()
+        startup_log("remote_control", "vehicle role=%s" % role)
+        startup_log("remote_control", "vision runtime ready=%s" % role)
 
-    startup_log("remote_control", "creating TransportCar")
-    car = _create_transport_car(role)
-    startup_log("remote_control", "TransportCar ready")
+        startup_log("remote_control", "creating TransportCar")
+        car = _create_transport_car(role)
+        startup_log("remote_control", "TransportCar ready")
 
-    startup_log("remote_control", "creating ticker")
-    pit1 = _create_ticker()
-    capture_items = _build_capture_items(car)
-    startup_log("remote_control", "binding capture items=%d" % len(capture_items))
-    pit1.capture_list(*capture_items)
-    pit1.callback(car.mark_tick)
-    car.set_ticker(pit1)
+        startup_log("remote_control", "creating ticker")
+        pit1 = _create_ticker()
+        capture_items = _build_capture_items(car)
+        startup_log("remote_control", "binding capture items=%d" % len(capture_items))
+        pit1.capture_list(*capture_items)
+        pit1.callback(car.mark_tick)
+        car.set_ticker(pit1)
 
-    startup_log("remote_control", "starting ticker=%dms" % TICK_MS)
-    pit1.start(TICK_MS)
-    startup_log("remote_control", "entering main loop")
-    _run_control_loop(car)
-    return role
+        startup_log("remote_control", "starting ticker=%dms" % TICK_MS)
+        pit1.start(TICK_MS)
+        startup_log("remote_control", "entering main loop")
+        _run_control_loop(car)
+        return role
+    except Exception as exc:
+        _stop_runtime_after_fatal(car, pit1)
+        raise
 
 
 if globals().get("__spec__") is None:

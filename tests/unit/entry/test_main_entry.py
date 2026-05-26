@@ -101,6 +101,59 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     assert "[boot] main: launching script=script/remote_control.py" in output_lines
 
 
+def test_main_entry_catches_and_saves_fatal_errors(
+    capsys, tmp_path, monkeypatch
+) -> None:
+    """正式入口必须兜住脚本运行期异常并保存到板端文件."""
+
+    main = load_main_module()
+    log_path = tmp_path / "last_fatal_error.log"
+
+    monkeypatch.setattr(main, "FATAL_ERROR_LOG_PATH", str(log_path))
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+
+    def _raise_script(_script_path):
+        raise RuntimeError("script boom")
+
+    monkeypatch.setattr(main, "_run_script", _raise_script)
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result is None
+    assert "[boot] main: fatal error: script boom" in output_lines
+    assert log_path.read_text() == "fatal error: script boom\n"
+
+
+def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> None:
+    """致命错误保存失败时, 入口仍要完成兜底日志输出."""
+
+    main = load_main_module()
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda _script_path: (_ for _ in ()).throw(RuntimeError("script boom")),
+    )
+    monkeypatch.setattr(
+        main,
+        "_save_fatal_error_log",
+        lambda _message: (_ for _ in ()).throw(OSError("flash full")),
+    )
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result is None
+    assert "[boot] main: fatal error: script boom" in output_lines
+    assert "[boot] main: fatal log save failed: flash full" in output_lines
+
+
 def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
     """入口阶段电压不足时只进入蜂鸣告警."""
 
