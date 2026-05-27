@@ -1,6 +1,6 @@
 ---
 name: project-extension-requesting-code-review
-description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements.
+description: Repository-local extension of superpowers:requesting-code-review; use only after the upstream requesting-code-review workflow applies and repository-specific completion gates or memory checks are needed.
 ---
 
 # Project Extension Requesting Code Review

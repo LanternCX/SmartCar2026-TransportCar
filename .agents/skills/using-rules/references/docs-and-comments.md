@@ -17,10 +17,15 @@
 
 - 仓库新建文档统一使用中文。
 - 正式开发文档优先放在 `docs/developer/`、`docs/problem_statement/` 或 `docs/superpowers/` 的对应目录。
-- `docs/developer/` 只写当前方向、协议、控制、视觉和状态机事实, 不写历史迁移说明。
+- `docs/developer/` 优先作为短索引和外部约定入口, 通过路径引导阅读代码、注释、测试和 memory。
+- `docs/developer/` 只写代码外事实、阅读入口和职责边界, 不镜像代码已经表达的流程、字段表、状态表或参数细节。
+- Agent 理解代码功能时优先读代码、注释和行为测试, 因为这些事实更接近实现并能被测试约束。
+- 文档没有代码同等粒度的测试保护, 复制代码功能说明会增加同步风险。
+- 局部设计原因优先由贴近代码的注释承载, 开发文档只负责把 Agent 引到对应代码位置。
 - 新增主入口或一级目录后同步更新 `docs/AGENTS.md`。
 - 文档正文不要维护兼容层说明、多套字段双轨说明或过期路径镜像。
-- 需要历史追溯时依赖 git 历史、归档 spec / plan 或 memory, 不把历史解释写进正式正文。
+- 需要历史追溯、阶段取舍或事故背景时依赖 git 历史、归档 spec / plan 或 memory, 不把历史解释写进正式正文。
+- 可复用设计取舍、调试结论和阶段闭环优先写入 `docs/superpowers/memory/`, 不塞回正式开发文档正文。
 
 ## Skill 文档规则
 
@@ -68,15 +73,15 @@ self.last_result = {
 ```
 
 ```python
-"""主车应用编排入口
+"""主车角色运行时
 
-@file src/master/app.py
+@file src/vision/master/forward_runtime.py
 """
 
 
-class MasterApp:
-    """负责串联视觉输入、决策输出和运行时状态
+class MasterForwardRuntime:
+    """负责主车视觉输入、状态机推进和主辅同步编排
 
-    @brief 对外提供主车应用的单步推进入口
+    @brief 对外提供主车角色的单步推进入口
     """
 ```

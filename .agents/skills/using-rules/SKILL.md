@@ -36,7 +36,7 @@ description: Use when implementing or refactoring code in this repository and ne
 - 仓库正文没有给出具体引脚、串口、电平、接线或设备行为事实
 - 协议字段、坐标方向、车体参考系或视觉输入职责出现冲突
 - 改动不能直接服务当前完赛主线, 或会把当前任务扩成另一条主线
-- 改动触及 `TransportCar`、控制执行内核、角色运行入口、诊断面或板端 probe, 但内存与板端验证边界说不清
+- 改动触及共享底盘执行内核、角色运行入口、诊断面或板端探针, 但内存与板端验证边界说不清
 
 ## 边界
 
