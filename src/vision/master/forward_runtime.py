@@ -8,6 +8,7 @@ from config import motion as motion_params
 from config import vision as vision_params
 from hardware.uart_bus import create_uart6
 from protocol.link import default_now_ms, should_resend, write_reliable_line
+from protocol.link import write_data_line
 from protocol.packet import (
     format_ack_packet,
     format_state_sync_packet,
@@ -116,6 +117,8 @@ class MasterForwardRuntime:
         self._transport_sync_acknowledged = False
         self._transport_hook_acknowledged = False
         self._clear_sync_acknowledged = False
+        self._pending_hook_created_this_cycle = False
+        self._pending_assistant_sync_created_this_cycle = False
         self._clear_motion_started = False
         self._clear_master_completed_phase = None
         self._clear_motion_stop_ticks = 0
@@ -187,6 +190,8 @@ class MasterForwardRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
 
+        self._pending_hook_created_this_cycle = False
+        self._pending_assistant_sync_created_this_cycle = False
         self._advance_state_machine()
         self._drain_state_machine_outputs()
         self._process_uart6()
@@ -215,8 +220,21 @@ class MasterForwardRuntime:
         self._drain_state_machine_outputs()
         if self._state_machine.state == STATE_TRANSPORT_OBJECT and not transport_applied_this_tick:
             self._apply_transport_velocity()
-        self._send_pending_hook()
-        self._send_pending_sync()
+        delay_transport_hook_for_assistant_object = (
+            self._pending_hook_created_this_cycle
+            and self._pending_assistant_sync_created_this_cycle
+            and self._pending_hook is not None
+            and self._pending_assistant_sync is not None
+            and self._pending_hook.get("kind") == "transport_hook"
+            and self._pending_assistant_sync.get("kind") == "assistant_object"
+        )
+        if delay_transport_hook_for_assistant_object:
+            sent_reliable = self._send_pending_sync()
+            if not sent_reliable:
+                self._send_pending_hook()
+        else:
+            self._send_pending_hook()
+            self._send_pending_sync()
         self._forward_current_chassis_velocity()
 
     def _process_uart6(self) -> None:
@@ -224,6 +242,7 @@ class MasterForwardRuntime:
 
         self._read_uart_lines(
             self._uart6,
+            "uart6",
             "_rx_buf6",
             self._handle_uart6_line,
             read_error_text="uart6 read failed",
@@ -239,6 +258,7 @@ class MasterForwardRuntime:
             return
         self._read_uart_lines(
             uart8,
+            "uart8",
             "_rx_buf8",
             self._handle_uart8_line,
             overflow_error_text="invalid uart8 input",
@@ -248,6 +268,7 @@ class MasterForwardRuntime:
     def _read_uart_lines(
         self,
         uart,
+        link_name: str,
         buffer_name: str,
         handler,
         read_error_text: str = "uart read failed",
@@ -466,13 +487,13 @@ class MasterForwardRuntime:
             has_omega=False if force_no_omega else bool(packet.get("has_omega")),
         )
 
-    def _send_pending_sync(self) -> None:
+    def _send_pending_sync(self) -> bool:
         pending = self._select_active_pending_sync()
         if pending is None:
-            return
+            return False
         now_ms = self._now_ms()
         if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
-            return
+            return False
         wrote_all = self._write_forward_reliable_line(
             "s,%d,%d,%d,%d"
             % (pending["seq"], pending["state"], pending["target"], pending["arg"])
@@ -482,6 +503,8 @@ class MasterForwardRuntime:
                 self._log_sync_start("master->assistant", pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
+            return True
+        return False
 
     def _select_active_pending_sync(self):
         """选择当前应该发送或重发的 UART8 可靠同步请求"""
@@ -499,7 +522,8 @@ class MasterForwardRuntime:
         """
 
         try:
-            self._transport_car.uart8.write("%s\r\n" % line)
+            if not write_data_line(self._transport_car.uart8, line):
+                self._record_error("uart8 forward write failed")
         except Exception:
             self._record_error("uart8 forward write failed")
 
@@ -519,7 +543,8 @@ class MasterForwardRuntime:
         """
 
         try:
-            self._uart6.write("%s\r\n" % line)
+            if not write_data_line(self._uart6, line):
+                self._record_error("uart6 write failed")
         except Exception:
             self._record_error("uart6 write failed")
 
@@ -565,6 +590,7 @@ class MasterForwardRuntime:
                 "last_sent_ms": None,
                 "sent_once": False,
             }
+            self._pending_hook_created_this_cycle = True
 
         assistant_request = self._state_machine.poll_assistant_request()
         if assistant_request is not None:
@@ -608,6 +634,7 @@ class MasterForwardRuntime:
                     "last_sent_ms": None,
                     "sent_once": False,
                 }
+                self._pending_hook_created_this_cycle = True
             elif request_kind == "assistant_clear":
                 self._latest_uart6_velocity = None
                 self._clear_sync_acknowledged = False
@@ -632,6 +659,7 @@ class MasterForwardRuntime:
                 "sent_once": False,
             }
             self._assistant_sync_seq = (self._assistant_sync_seq + 2) % 256
+            self._pending_assistant_sync_created_this_cycle = True
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:
@@ -650,6 +678,7 @@ class MasterForwardRuntime:
                 "sent_once": False,
             }
             self._orbit_hook_seq = (self._orbit_hook_seq + 1) % 256
+            self._pending_hook_created_this_cycle = True
             self._transport_car.set_orbit_target(
                 float(orbit_command["target_heading_deg"]),
                 float(MASTER_ORBIT_RADIUS_SCALE),
@@ -748,15 +777,15 @@ class MasterForwardRuntime:
                 return False
         return True
 
-    def _send_pending_hook(self) -> None:
+    def _send_pending_hook(self) -> bool:
         """重复发送待确认的视觉 hook 同步包"""
 
         pending = self._pending_hook
         if pending is None:
-            return
+            return False
         now_ms = self._now_ms()
         if not should_resend(now_ms, pending.get("last_sent_ms"), RELIABLE_RESEND_INTERVAL_MS):
-            return
+            return False
         wrote_all = self._write_uart6_reliable_line(
             format_state_sync_packet(
                 pending["reliable_seq"],
@@ -771,6 +800,8 @@ class MasterForwardRuntime:
                 self._log_hook_sync_start(pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
+            return True
+        return False
 
     def _drain_pending_hook_event(self) -> None:
         """在 hook 建立后补发此前暂存的命中事件"""

@@ -44,6 +44,7 @@ class _FakeUart:
         self.read_sizes = []
         self.read_error: Optional[BaseException] = None
         self.write_error: Optional[BaseException] = None
+        self.write_return_value: Optional[int] = None
 
     def any(self) -> int:
         return len(self._buffer)
@@ -56,10 +57,13 @@ class _FakeUart:
         self._buffer = self._buffer[size:]
         return chunk
 
-    def write(self, text) -> None:
+    def write(self, text) -> int | None:
         if self.write_error is not None:
             raise self.write_error
         self.messages.append(text)
+        if self.write_return_value is None:
+            return len(text)
+        return self.write_return_value
 
 
 class _FakeNowMs:
@@ -677,6 +681,68 @@ def test_master_forward_runtime_logs_hook_sync_start_and_done(monkeypatch) -> No
             )
         ),
     ]
+
+
+def test_master_forward_runtime_sends_only_one_reliable_sync_per_cycle(monkeypatch) -> None:
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=lambda: 100)
+    def _mark_new_reliable_pair():
+        runtime._pending_hook_created_this_cycle = True
+        runtime._pending_assistant_sync_created_this_cycle = True
+
+    runtime._advance_state_machine = _mark_new_reliable_pair
+    runtime._drain_state_machine_outputs = lambda: None
+    runtime._process_uart6 = lambda: None
+    runtime._process_uart8 = lambda: None
+    runtime._run_clear_phase = lambda: None
+    runtime._run_turn_back_phase = lambda: None
+    runtime._forward_current_chassis_velocity = lambda: None
+    runtime._pending_hook = {
+        "kind": "transport_hook",
+        "reliable_seq": 9,
+        "context_id": 7,
+        "state": forward_runtime_module.STATE_SEARCH_OBJECT,
+        "target": forward_runtime_module.TARGET_OBJECT,
+        "arg": forward_runtime_module.MASTER_TRANSPORT_HOOK_CONFIG_ID,
+        "last_sent_ms": None,
+        "sent_once": False,
+    }
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_object",
+        "seq": 10,
+        "state": 2,
+        "target": 1,
+        "arg": forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+        "last_sent_ms": None,
+        "sent_once": False,
+    }
+    runtime._run_role_cycle()
+
+    assert uart6.messages == []
+    assert uart8.messages == [
+        "s,10,%d,1,%d\r\n"
+        % (
+            2,
+            forward_runtime_module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
+        )
+    ]
+    assert runtime._pending_hook["sent_once"] is False
+
+    runtime._pending_assistant_sync_created_this_cycle = False
+    runtime._run_role_cycle()
+
+    assert uart6.messages == [
+        "s,9,7,%d,%d,%d\r\n"
+        % (
+            forward_runtime_module.STATE_SEARCH_OBJECT,
+            forward_runtime_module.TARGET_OBJECT,
+            forward_runtime_module.MASTER_TRANSPORT_HOOK_CONFIG_ID,
+        )
+    ]
+    assert runtime._pending_hook["sent_once"] is True
 
 
 def test_master_forward_runtime_old_uart6_ack_does_not_cancel_unsent_new_hook(monkeypatch) -> None:
@@ -1603,6 +1669,7 @@ def test_master_forward_runtime_does_not_emit_uart3_debug_line(monkeypatch) -> N
     runtime.step()
 
     assert uart3.messages == []
+
 
 
 def test_master_forward_runtime_does_not_print_start_to_uart3_on_boot(monkeypatch) -> None:
