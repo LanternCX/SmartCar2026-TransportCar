@@ -22,8 +22,10 @@ class _FakeUart:
         self.messages = []
         self.return_value = None
 
-    def write(self, text) -> None:
+    def write(self, text) -> int | None:
         self.messages.append(text)
+        if self.return_value is None:
+            return len(text)
         return self.return_value
 
 
@@ -60,3 +62,10 @@ def test_write_line_reports_incomplete_write() -> None:
     uart.return_value = 0
 
     assert write_data_line(uart, "v,1,2") is False
+
+
+def test_write_line_reports_timeout_when_uart_write_returns_none() -> None:
+    uart = _FakeUart()
+    uart.write = lambda text: (uart.messages.append(text), None)[1]
+
+    assert write_reliable_line(uart, "a,12") is False

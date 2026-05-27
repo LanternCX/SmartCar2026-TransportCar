@@ -47,6 +47,7 @@ class _FakeUart:
         self.read_sizes = []
         self.read_error: Optional[BaseException] = None
         self.write_error: Optional[BaseException] = None
+        self.write_return_value: Optional[int] = None
 
     def any(self) -> int:
         return len(self._buffer)
@@ -59,10 +60,13 @@ class _FakeUart:
         self._buffer = self._buffer[size:]
         return chunk
 
-    def write(self, text) -> None:
+    def write(self, text) -> int | None:
         if self.write_error is not None:
             raise self.write_error
         self.messages.append(text)
+        if self.write_return_value is None:
+            return len(text)
+        return self.write_return_value
 
 
 def install_fake_transport_car(monkeypatch):

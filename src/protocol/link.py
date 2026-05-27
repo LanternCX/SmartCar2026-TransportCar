@@ -56,7 +56,7 @@ def _write_line(uart, line):
     while remaining:
         written = uart.write(remaining)
         if written is None:
-            written = len(remaining)
+            return False
         written = int(written)
         if written <= 0:
             return False
