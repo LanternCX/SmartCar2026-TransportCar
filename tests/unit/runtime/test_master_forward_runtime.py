@@ -1589,6 +1589,25 @@ def test_master_forward_runtime_clears_oversized_uart6_input_buffer_and_records_
     assert runtime._transport_car.last_exception_text == "invalid uart6 input"
 
 
+def test_master_forward_runtime_discards_pending_hardware_uart6_bytes_after_overflow(
+    monkeypatch,
+) -> None:
+    """UART6 溢出后要把本轮剩余硬件缓存一起读空, 避免下拍继续消费旧积压."""
+
+    _events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    uart6._buffer = b"x" * 300
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime()
+
+    runtime.step()
+
+    assert uart6.any() == 0
+    assert runtime._rx_buf6 == ""
+    assert runtime._transport_car.last_exception_text == "invalid uart6 input"
+
+
 def test_master_forward_runtime_drops_oversized_uart6_line_before_parsing(monkeypatch) -> None:
     """UART6 带换行超长行在解析前丢弃并记录输入无效."""
 
@@ -1635,6 +1654,7 @@ def test_master_forward_runtime_clears_oversized_uart8_input_buffer_and_records_
 
     runtime.step()
 
+    assert uart8.any() == 0
     assert runtime._rx_buf8 == ""
     assert runtime._transport_car.last_exception_text == "invalid uart8 input"
 

@@ -290,11 +290,29 @@ class MasterForwardRuntime:
             setattr(self, buffer_name, getattr(self, buffer_name) + chunk)
             if input_overflow:
                 setattr(self, buffer_name, "")
+                self._discard_pending_input(uart, input_limit, read_error_text)
                 if overflow_error_text is not None:
                     self._record_error(overflow_error_text)
                 return
             if self._drain_uart_lines(buffer_name, handler, overflow_error_text, input_limit):
                 return
+
+    def _discard_pending_input(self, uart, input_limit, read_error_text: str) -> bool:
+        while True:
+            try:
+                pending = uart.any()
+            except Exception:
+                self._record_error(read_error_text)
+                return False
+            if not pending:
+                return True
+            if input_limit is not None and pending > input_limit:
+                pending = input_limit
+            try:
+                uart.read(pending)
+            except Exception:
+                self._record_error(read_error_text)
+                return False
 
     def _drain_uart_lines(self, buffer_name: str, handler, overflow_error_text, input_limit) -> bool:
         while True:
