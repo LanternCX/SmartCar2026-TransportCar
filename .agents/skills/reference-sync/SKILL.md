@@ -18,10 +18,8 @@ description: Use when repository reference links, source records, or docs/superp
 
 ## 路由规则
 
-- 同步触发与维护边界 -> `references/sync-rules.md`
-- 来源记录、追溯要求与质量检查 -> `references/source-and-quality.md`
-- 文档来源、正式落点与触发条件 -> `references/source-registry.md`
-- 持续维护对象与检查项 -> `references/maintenance-checklist.md`
+- 来源、正式落点与同步触发条件 -> `references/source-registry.md`
+- 持续维护对象、检查项与质量复核 -> `references/maintenance-checklist.md`
 - `docs/superpowers/specs/` 与 `docs/superpowers/plans/` 归档整理 -> `references/superpowers-doc-archive.md`
 - 模板资产 -> `assets/source-record-template.md`
 

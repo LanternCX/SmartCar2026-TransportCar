@@ -70,15 +70,15 @@ self.last_result = {
 ```
 
 ```python
-"""主车应用编排入口
+"""主车角色运行时
 
-@file src/master/app.py
+@file src/vision/master/forward_runtime.py
 """
 
 
-class MasterApp:
-    """负责串联视觉输入、决策输出和运行时状态
+class MasterForwardRuntime:
+    """负责主车视觉输入、状态机推进和主辅同步编排
 
-    @brief 对外提供主车应用的单步推进入口
+    @brief 对外提供主车角色的单步推进入口
     """
 ```

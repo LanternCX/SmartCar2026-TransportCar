@@ -11,22 +11,12 @@
 
 - 未在仓库正文或代码中明确给出的引脚、串口、电平、接线或设备行为事实, 必须先问用户, 禁止猜测。
 - 现场判断角色时先看输入电平, 不要直接按开关朝向口头推断。
-- D8 / D9 角色输入按 `src/vision/vehicle_role.py` 解码:
-  - `D8=0, D9=1` 表示主车。
-  - `D8=1, D9=0` 表示辅车。
-  - 其他组合属于异常输入。
-- `src/main.py` 使用 `C8 / C9` 长按做启动脚本分发:
-  - 长按 `C8` 进入 `src/script/pid_identify.py`。
-  - 长按 `C9` 进入 `src/script/calibrate_gyro.py`。
-  - 不按按钮进入 `src/script/remote_control.py`。
-  - 两个按钮同时长按视为异常启动场景。
+- 角色输入解码以 `src/vision/vehicle_role.py` 为准。
+- 启动脚本分发以 `src/main.py` 和入口测试为准。
 
 ## 串口链路事实
 
-- `UART3`: 调试终端 <-> 车端, 用于 REPL 调试。
-- `UART8`: 主车 -> 辅车, 用于主辅速度前馈与状态同步短包。
-- 主车本车 `UART6`: 主车 OpenART -> 主车, 用于主车视觉速度输入。
-- 辅车本车 `UART6`: 辅车视觉 -> 辅车, 用于视觉速度修正。
+- 串口职责、方向和用途以 `docs/developer/protocol.md`、`src/config/comm.py` 与 `src/hardware/uart_bus.py` 为准。
 - 未确认硬件接线的视觉同步链路不指定串口号。
 - 新增串口链路前, 先登记串口号、方向、用途和报文类型。
 
@@ -50,8 +40,7 @@
 ## 视觉输入边界
 
 - 车端底盘不处理图像数据。
-- 主车角色入口负责主车本车 `UART6` 视觉速度输入接入与 `UART8` 当前底盘速度转发, 不处理图像数据。
-- 辅车角色入口消费 `UART8` 前馈输入与 `UART6` 视觉速度修正, 最终速度回到共享底盘执行链。
+- 主辅角色入口职责以 `docs/developer/vision.md` 和 `src/vision/` 代码为准。
 - 视觉端输出字段和速度修正语义以 `docs/developer/protocol.md` 与 `docs/developer/vision.md` 为准。
 - 引入更多视觉设备、观测字段或环境感知能力前, 先明确职责分工与协议字段。
 
