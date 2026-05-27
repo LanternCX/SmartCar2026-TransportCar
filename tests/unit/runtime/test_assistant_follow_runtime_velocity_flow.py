@@ -641,6 +641,32 @@ def test_assistant_follow_runtime_repeats_ack_without_reapplying_same_sync(monke
     assert runtime._sync_apply_count == 1
 
 
+def test_assistant_follow_runtime_does_not_recreate_local_sync_for_same_seq(
+    monkeypatch,
+) -> None:
+    """重复相同 seq 的主车同步只回 ACK, 不重新创建新的本地视觉同步."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    uart8._buffer = b"s,12,2,1,1\ns,12,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    uart8._buffer += b"s,12,2,1,1\n"
+    runtime.step()
+
+    assert uart8.messages == ["a,12\r\n", "a,12\r\n"]
+    assert runtime._sync_apply_count == 1
+    assert logs == [
+        "sync|master->assistant sync done seq=12 state=2 target=1 arg=1",
+        "sync|assistant->camera sync start seq=100 state=2 target=1 arg=1",
+    ]
+
+
 def test_assistant_follow_runtime_ignores_earlier_sync_without_context_rollback(monkeypatch) -> None:
     """! @brief 序号较早的同步包不会回退本地同步上下文"""
 
@@ -824,6 +850,30 @@ def test_assistant_follow_runtime_reports_local_target_found_until_master_ack(
 
     assert runtime._pending_target_found_report is None
     assert len(uart8.messages) == sent_count
+
+
+def test_assistant_follow_runtime_does_not_reconsume_same_uart6_event_seq(
+    monkeypatch,
+) -> None:
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    clock = FakeClock(100)
+    uart8._buffer = b"s,12,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=clock)
+
+    runtime.step()
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nr,7,6,300\nr,7,6,300\n" % local_sync_seq).encode()
+
+    runtime.step()
+
+    assert uart6.messages.count("a,7\r\n") == 2
+    assert uart8.messages[-1] == "r,7,6,300\r\n"
+    assert runtime._approach_target_found_done is True
+    assert runtime._pending_target_found_report is not None
 
 
 def test_assistant_follow_runtime_keeps_orbit_heading_during_post_orbit_realign(

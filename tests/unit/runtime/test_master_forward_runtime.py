@@ -796,6 +796,31 @@ def test_master_forward_runtime_matching_uart6_target_found_acknowledges_and_sta
     assert _default_orbit_target_event(forward_runtime_module) in events
 
 
+def test_master_forward_runtime_does_not_reconsume_same_uart8_report_seq(
+    monkeypatch,
+) -> None:
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60, 80))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime.step()
+    uart8.messages = []
+    uart8._buffer = b"r,11,6,300\nr,11,6,300\n"
+
+    runtime.step()
+
+    assert _reliable_messages(uart8).count("a,11\r\n") == 2
+    assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 1
+    assert events.count(_default_orbit_target_event(forward_runtime_module)) == 1
+
+
 def test_master_forward_runtime_target_found_before_hook_ack_starts_orbit_after_ack(monkeypatch) -> None:
     """命中先到、hook 确认后到时, 主车在确认建立后仍能进入统一绕行入口."""
 

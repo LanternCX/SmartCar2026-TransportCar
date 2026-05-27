@@ -108,6 +108,7 @@ class AssistantFollowRuntime:
         }
         self.sync_context = None
         self._last_sync_seq = None
+        self._last_uart6_event_seq = None
         self._sync_apply_count = 0
         seed_value = int(self._now_ms()) % 256
         self._local_vision_sync_seq = seed_value
@@ -333,6 +334,9 @@ class AssistantFollowRuntime:
             return False
         seq = int(packet["seq"])
         is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
+        if self._last_sync_seq is not None and seq == self._last_sync_seq:
+            self._write_forward_reliable_line(format_ack_packet(seq))
+            return True
         if not is_new_sync and seq != self._last_sync_seq:
             self._write_forward_reliable_line(format_ack_packet(seq))
             return True
@@ -419,7 +423,11 @@ class AssistantFollowRuntime:
                 self._pending_local_vision_sync = None
             return True
         if packet_type == "r":
-            self._write_uart6_reliable_line(format_ack_packet(packet["seq"]))
+            event_seq = int(packet["seq"])
+            self._write_uart6_reliable_line(format_ack_packet(event_seq))
+            if self._last_uart6_event_seq == event_seq:
+                return True
+            self._last_uart6_event_seq = event_seq
             if (
                 self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
                 and int(packet["event"]) == _TARGET_FOUND_EVENT

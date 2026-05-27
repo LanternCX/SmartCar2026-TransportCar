@@ -106,6 +106,8 @@ class MasterForwardRuntime:
         self._active_hook_context_id = None
         self._pending_hook = None
         self._pending_hook_event = None
+        self._last_uart6_event_seq = None
+        self._last_uart8_report_seq = None
         self._generic_sync_seq = seed_value & 0xFE
         self._assistant_sync_seq = (seed_value + 1) & 0xFF
         if (self._assistant_sync_seq % 2) == 0:
@@ -373,7 +375,11 @@ class MasterForwardRuntime:
                 self._drain_pending_hook_event()
             return
         if packet is not None and packet.get("type") == "r":
-            self._write_uart6_reliable_line(format_ack_packet(packet["reliable_seq"]))
+            event_seq = int(packet["reliable_seq"])
+            self._write_uart6_reliable_line(format_ack_packet(event_seq))
+            if self._last_uart6_event_seq == event_seq:
+                return
+            self._last_uart6_event_seq = event_seq
             if self._active_hook_context_id == int(packet["context_id"]):
                 self._state_machine.handle_event(
                     context_id=packet["context_id"],
@@ -433,7 +439,11 @@ class MasterForwardRuntime:
                 self._log_sync_done("master->assistant", pending)
                 self._pending_sync = None
         elif packet.get("type") == "r":
-            self._write_forward_reliable_line(format_ack_packet(packet["seq"]))
+            report_seq = int(packet["seq"])
+            self._write_forward_reliable_line(format_ack_packet(report_seq))
+            if self._last_uart8_report_seq == report_seq:
+                return
+            self._last_uart8_report_seq = report_seq
             self.last_report = packet
             if int(packet["event"]) == EVENT_TARGET_FOUND:
                 self._assistant_target_found_report = dict(packet)
