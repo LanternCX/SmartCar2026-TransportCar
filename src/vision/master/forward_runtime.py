@@ -39,6 +39,7 @@ from vision.master.state_machine import (
     TARGET_EDGE_LINE,
     TARGET_OBJECT,
 )
+from utils.startup_log import log
 
 
 _UART6_INPUT_LIMIT = getattr(comm_params, "MASTER_UART6_INPUT_LIMIT")
@@ -321,6 +322,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and int(packet["reliable_seq"]) == int(pending["reliable_seq"])
             ):
+                self._log_hook_sync_done(pending)
                 self._active_hook_context_id = int(pending["context_id"])
                 if pending.get("kind") == "transport_hook":
                     self._transport_hook_acknowledged = True
@@ -370,6 +372,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and seq == int(pending["seq"])
             ):
+                self._log_sync_done("master->assistant", pending)
                 if pending.get("kind") == "assistant_idle":
                     self._state_machine.mark_assistant_idle_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
@@ -388,6 +391,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and seq == int(pending["seq"])
             ):
+                self._log_sync_done("master->assistant", pending)
                 self._pending_sync = None
         elif packet.get("type") == "r":
             self._write_forward_reliable_line(format_ack_packet(packet["seq"]))
@@ -474,6 +478,8 @@ class MasterForwardRuntime:
             % (pending["seq"], pending["state"], pending["target"], pending["arg"])
         )
         if wrote_all:
+            if not pending.get("sent_once"):
+                self._log_sync_start("master->assistant", pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
@@ -761,6 +767,8 @@ class MasterForwardRuntime:
             )
         )
         if wrote_all:
+            if not pending.get("sent_once"):
+                self._log_hook_sync_start(pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
@@ -775,6 +783,58 @@ class MasterForwardRuntime:
             context_id=pending_event["context_id"],
             event=pending_event["event"],
             value=pending_event["value"],
+        )
+
+    def _log_sync_start(self, link_name: str, pending: dict) -> None:
+        log(
+            "sync",
+            "%s sync start seq=%d state=%d target=%d arg=%d"
+            % (
+                link_name,
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_sync_done(self, link_name: str, pending: dict) -> None:
+        log(
+            "sync",
+            "%s sync done seq=%d state=%d target=%d arg=%d"
+            % (
+                link_name,
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_hook_sync_start(self, pending: dict) -> None:
+        log(
+            "sync",
+            "master->camera sync start seq=%d context=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["reliable_seq"]),
+                int(pending["context_id"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_hook_sync_done(self, pending: dict) -> None:
+        log(
+            "sync",
+            "master->camera sync done seq=%d context=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["reliable_seq"]),
+                int(pending["context_id"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
         )
 
     def _record_error(self, text: str) -> None:

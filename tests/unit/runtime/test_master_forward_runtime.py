@@ -277,6 +277,21 @@ def install_fake_uart6_factory(monkeypatch, uart6=None):
     return calls, uart6
 
 
+def install_fake_startup_log(monkeypatch):
+    """注入启动日志桩并收集日志文本."""
+
+    logs = []
+    startup_log_module = ModuleType("utils.startup_log")
+
+    def _log(stage, detail=""):
+        logs.append("%s|%s" % (stage, detail))
+        return logs[-1]
+
+    setattr(startup_log_module, "log", _log)
+    monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
+    return logs
+
+
 def test_master_forward_runtime_keeps_remote_control_surface(monkeypatch) -> None:
     """主车角色运行时保留启动壳依赖的对外外观."""
 
@@ -512,6 +527,28 @@ def test_master_forward_runtime_repeats_state_sync_until_ack(monkeypatch) -> Non
     assert _reliable_messages(uart8) == ["s,0,3,1,0\r\n", "s,0,3,1,0\r\n"]
 
 
+def test_master_forward_runtime_logs_generic_sync_start_and_done(monkeypatch) -> None:
+    """主车对辅车的通用同步在首次发起和确认完成时各记一次日志."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+
+    seq = runtime.request_state_sync(3, 1, 0)
+    runtime.step()
+    uart8._buffer = ("a,%d\n" % seq).encode()
+    runtime.step()
+
+    sync_logs = [
+        message for message in logs if message.startswith("sync|master->assistant")
+    ]
+    assert sync_logs == [
+        "sync|master->assistant sync start seq=0 state=3 target=1 arg=0",
+        "sync|master->assistant sync done seq=0 state=3 target=1 arg=0",
+    ]
+
+
 def test_master_forward_runtime_skips_uart8_velocity_when_sync_is_sent(
     monkeypatch,
 ) -> None:
@@ -607,6 +644,39 @@ def test_master_forward_runtime_stops_resending_uart6_hook_after_ack(monkeypatch
 
     expected_message = _hook_sync_message(forward_runtime_module)
     assert uart6.messages == [expected_message, expected_message]
+
+
+def test_master_forward_runtime_logs_hook_sync_start_and_done(monkeypatch) -> None:
+    """主车对摄像头的 hook 同步在首次发起和确认完成时各记一次日志."""
+
+    _events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+
+    runtime.step()
+    uart6._buffer = b"a,1\n"
+    runtime.step()
+
+    sync_logs = [message for message in logs if message.startswith("sync|")]
+    assert sync_logs == [
+        (
+            "sync|master->camera sync start seq=1 context=1 state=%d target=1 arg=%d"
+            % (
+                forward_runtime_module.STATE_SEARCH_OBJECT,
+                forward_runtime_module.MASTER_SEARCH_HOOK_CONFIG_ID,
+            )
+        ),
+        (
+            "sync|master->camera sync done seq=1 context=1 state=%d target=1 arg=%d"
+            % (
+                forward_runtime_module.STATE_SEARCH_OBJECT,
+                forward_runtime_module.MASTER_SEARCH_HOOK_CONFIG_ID,
+            )
+        ),
+    ]
 
 
 def test_master_forward_runtime_old_uart6_ack_does_not_cancel_unsent_new_hook(monkeypatch) -> None:
