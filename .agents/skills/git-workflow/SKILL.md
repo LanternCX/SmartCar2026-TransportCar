@@ -10,7 +10,7 @@ description: Use when creating branches, committing, merging, or preparing relea
 # Scope Rule
 
 - 本技能是项目 Git 规范的权威来源
-- Worktree 触发场景先路由到 `.agents/skills/using-git-worktrees/SKILL.md`，再回到本技能处理分支、提交、合并与发布规则
+- 本技能只处理分支、提交、合并与发布规则
 
 # When to Use
 

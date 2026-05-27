@@ -17,4 +17,3 @@
 - `project-extension-writing-skills`：Skill 新建、重构、迁移与写作规范入口
 - `mpy-cli-tool`：`mpy-cli` 工具使用、路径边界和排障入口
 - `git-workflow`：仓库 Git Flow 与 Angular Conventional Commit 规范入口
-- `using-git-worktrees`：worktree 触发场景的本地 Git 流程重定向入口
