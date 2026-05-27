@@ -1,6 +1,6 @@
 ---
 name: project-extension-writing-skills
-description: Use when creating new skills, editing existing skills, or verifying skills work before deployment.
+description: Repository-local extension of superpowers:writing-skills; use only after the upstream writing-skills workflow applies and repository-specific skill structure, routing, or cleanup rules are needed.
 ---
 
 # Project Extension Writing Skills
