@@ -1,219 +1,32 @@
-# 状态机定义
+# 状态机说明
 
-## 1. 定位
+## 文档边界
 
-本文件定义主车全局状态、辅车子状态、目标、事件和同步语义。
+本文件只维护状态机所有权和阅读入口。状态编号、事件编号、状态流、等待条件和跳转细节以状态机代码和行为测试为准。
 
-串口报文格式见 [串口通信协议](protocol.md)。协议只负责传输 `state`、`target`、`arg`、`event` 等字段, 不拥有业务状态机或业务常量。本文件负责说明这些字段在主车和辅车语境中的状态机含义。
+## 所有权
 
-## 2. 状态所有权
+- 主车全局状态机由 [src/vision/master/state_machine.py](../../src/vision/master/state_machine.py) 维护。
+- 辅车子状态机由 [src/vision/assistant/state_machine.py](../../src/vision/assistant/state_machine.py) 维护。
+- 协议层只解析和格式化短包字段，不维护业务状态机。
+- 视觉端只提供速度控制量和事件，不维护车端全局状态机。
+- 辅车子状态由主车同步包驱动，不由辅车本地视觉包、速度包或底盘状态自行切换。
 
-- 主车全局状态机由 `vision/master/` 维护。
-- 辅车子状态机由 `vision/assistant/` 维护。
-- 协议层只解析和格式化短包字段, 不维护状态机对象或业务常量。
-- 主车通过本车 `UART6` 的 `s` 包同步视觉 hook 上下文。
-- 主车通过 `UART8` 的 `s` 包同步辅车子状态。
-- 主车视觉端接收上下文后执行本地识别任务并维护主车搜索 P 环。
-- 主车视觉端通过 `v,<vx>,<vy>` 输出主车搜索速度，通过可靠 `r` 包回报事件或结果。
-- `r` 包不直接改变全局状态，全局状态切换由主车状态机判断后执行。
-- 视觉事件只触发主车判断，不直接迁移全局状态。
-- 辅车子状态只由主车 `UART8` 同步包驱动, 不由辅车本地视觉包、速度包或底盘状态自行切换。
+## 代码阅读顺序
 
-## 3. 主车视觉 hook 同步字段
+1. 主车状态编号、目标编号、事件编号和状态跳转: [src/vision/master/state_machine.py](../../src/vision/master/state_machine.py)
+2. 辅车子状态编号、目标编号和主车同步应用: [src/vision/assistant/state_machine.py](../../src/vision/assistant/state_machine.py)
+3. 搬运收尾阶段编号: [src/vision/clear_phase.py](../../src/vision/clear_phase.py)
+4. 主车状态机接入运行时的位置: [src/vision/master/forward_runtime.py](../../src/vision/master/forward_runtime.py)
+5. 辅车状态机接入运行时的位置: [src/vision/assistant/follow_runtime.py](../../src/vision/assistant/follow_runtime.py)
 
-主车视觉 hook 同步包格式：
+## 行为事实入口
 
-```text
-s,<reliable_seq>,<context_id>,<state>,<target>,<arg>
-```
+- 主车纯状态机行为: [tests/unit/vision/test_master_state_machine.py](../../tests/unit/vision/test_master_state_machine.py)
+- 辅车纯状态机行为: [tests/unit/vision/test_assistant_state_machine.py](../../tests/unit/vision/test_assistant_state_machine.py)
+- 主车运行时状态接入: [tests/unit/runtime/test_master_forward_runtime.py](../../tests/unit/runtime/test_master_forward_runtime.py)
+- 辅车运行时状态接入: [tests/unit/runtime/test_assistant_follow_runtime_velocity_flow.py](../../tests/unit/runtime/test_assistant_follow_runtime_velocity_flow.py)
 
-字段含义：
+## 变更入口
 
-| 字段 | 含义 |
-| --- | --- |
-| `reliable_seq` | 可靠包序号，用于确认、重发和去重 |
-| `context_id` | 业务上下文编号，用于 `s/o/r` 匹配 |
-| `state` | 主车全局状态编号 |
-| `target` | 主车状态使用的目标编号 |
-| `arg` | 主车状态短参数 |
-
-确认包 `a,<reliable_seq>` 只确认可靠包，不表达业务上下文。
-
-## 4. 辅车子状态同步字段
-
-辅车子状态同步包格式：
-
-```text
-s,<seq>,<state>,<target>,<arg>
-```
-
-字段含义：
-
-| 字段 | 含义 |
-| --- | --- |
-| `seq` | 状态同步序号, 用于确认、重发和去重 |
-| `state` | 辅车子状态编号 |
-| `target` | 辅车子状态目标编号 |
-| `arg` | 辅车子状态短参数 |
-
-确认包 `a,<seq>` 只确认对应同步包已被辅车处理。该确认不携带主车视觉 `context_id`, 也不表示辅车主动回报业务状态。
-
-## 5. 主车物体搜索与搬运入口状态流
-
-主车物体搜索与搬运闭环的状态流为：
-
-```text
-IDLE -> SEARCH_OBJECT -> ORBITING -> SEARCH_OBJECT -> TRANSPORT_OBJECT -> CLEAR_OBJECT -> SEARCH_OBJECT
-```
-
-### `IDLE`
-
-空闲安全状态，底盘输出为零。主车搜索运行入口进入角色周期后，状态机从该状态进入 `SEARCH_OBJECT`。
-
-### `SEARCH_OBJECT`
-
-主车主动搜索物体。
-
-行为：
-
-- 主车创建新的 `context_id`。
-- 主车通过本车 `UART6` 向主车 OpenART 发送 `s,<reliable_seq>,<context_id>,<state>,<target>,<arg>` 建立视觉 hook 上下文。
-- 主车状态机不计算视觉 P 环。
-- 主车平移速度来源为 OpenART Vision master 通过本车 `UART6` 发送的 `v,<vx>,<vy>`。
-- 主车状态机不显式接管 `omega`。
-- 主车视觉通过可靠 `r,<reliable_seq>,<context_id>,<event>,<value>` 回报 `TARGET_FOUND` 或 `ALIGNED`。
-
-跳转条件：
-
-- 主车收到匹配 `context_id` 下的 `TARGET_FOUND`。
-- 主车确认该事件后, 由主车状态机判断是否发起辅车 idle 同步。
-- 主车等待辅车 idle ACK 期间保持 `SEARCH_OBJECT` 正式状态, 本车停止搜索运动。
-- 辅车 idle ACK 到达后, 主车进入 `ORBITING`。
-- 绕行完成后, 主车回到 `SEARCH_OBJECT` 持续对正目标, 并向主车 OpenART 下发搬运入口 hook 配置。
-- 绕行后的 `SEARCH_OBJECT` 继续使用视觉速度, 不再发起新的绕行；主车收到本车 `ALIGNED` 且收到辅车 `ALIGNED` 后同步辅车搬运子状态。
-- 主车和辅车搬运入口同步都确认后, 主车进入 `TRANSPORT_OBJECT`。
-- 主车和辅车完成搬运收尾后, 主车直接重建新一轮找物体 hook 并再次进入 `SEARCH_OBJECT`。
-- 新一轮 `SEARCH_OBJECT` 会先同步辅车回到跟随子状态, 并等待主车本车视觉新一轮 hook 确认；辅车 follow ACK 和主车本车视觉 hook ACK 都到达前, 主车不应用新的搜索速度, 也不消费新的搜索事件。
-- 上下文不匹配的合法 `r` 包需要确认，但不触发状态跳转。
-- 重复 `r` 包幂等处理，不重复迁移状态。
-
-### `ORBITING`
-
-主车使用共享底盘统一绕行模式绕到上电基准航向的绝对 `+90°`。该状态不使用主车视觉搜索速度；主车只有在辅车 idle 同步被确认后进入该状态。绕行完成后回到 `SEARCH_OBJECT`，并向辅车同步找物体子状态。
-
-### `TRANSPORT_OBJECT`
-
-主车执行最小直行搬运。主车在基础推进速度上叠加本车 `UART6` 视觉修正, 写入共享底盘并通过 `UART8` 转发给辅车作为搬运前馈；搬运态不使用视觉 `omega` 作为旋转输入。
-
-### `CLEAR_OBJECT`
-
-主车在搬运结束后执行三段式收尾。第一段先同步辅车进入后退段，等待辅车确认后，主车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_RETREAT_DISTANCE_M`，辅车按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半。第二段等待主辅都完成后退后，主车原地回身 `180` 度。第三段保留前进段同步位，等待辅车确认后，主车与辅车都按自身车体系 `Y` 正方向执行 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 指定的位移；默认值为 `0`，用于直接结束收尾并回到搜索流程。每一段位置动作都在锁定解除后继续等待三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍，主辅都完成前进段后，主车直接重启 `SEARCH_OBJECT`。
-
-## 6. 主车全局状态编号
-
-| `state` | 名称 | 含义 |
-| --- | --- | --- |
-| `0` | `IDLE` | 空闲，底盘不执行状态机任务 |
-| `1` | `SEARCH_OBJECT` | 主车使用 OpenART Vision master 下发的 `v,<vx>,<vy>` 搜索物体 |
-| `2` | `ORBITING` | 主车使用统一绕行模式绕到上电基准航向 `+90°` |
-| `3` | `STOP` | 预留的安全停止状态 |
-| `4` | `TRANSPORT_OBJECT` | 主车融合基础推进速度与本车视觉修正执行搬运 |
-| `5` | `CLEAR_OBJECT` | 主车在搬运结束后执行三段式收尾并等待辅车完成对应位置动作 |
-
-## 7. 主车目标编号
-
-| `target` | 名称 | 含义 |
-| --- | --- | --- |
-| `0` | `NONE` | 无目标 |
-| `1` | `OBJECT` | 搬运目标物体 |
-| `2` | `MASTER_MARKER` | 主车侧标 |
-| `3` | `EDGE_LINE` | 边线 |
-
-具体颜色、类别或视觉识别方式由视觉端按状态解释，不写入串口协议字段名。
-
-## 8. 主车状态参数 `arg`
-
-`arg` 是状态相关短参数，固定为 `i16`。
-
-| `state` | `arg` 含义 |
-| --- | --- |
-| `IDLE` | 固定为 `0` |
-| `SEARCH_OBJECT` | hook 配置编号 |
-| `ORBITING` | 固定为 `0` |
-| `STOP` | 固定为 `0` |
-| `TRANSPORT_OBJECT` | 固定为 `0` |
-| `CLEAR_OBJECT` | 固定为 `0` |
-
-## 9. 主车事件编号
-
-事件回报包格式：
-
-```text
-r,<reliable_seq>,<context_id>,<event>,<value>
-```
-
-事件编号：
-
-| `event` | 名称 | 含义 |
-| --- | --- | --- |
-| `0` | `NONE` | 无事件 |
-| `1` | `RUNNING` | 状态执行中 |
-| `2` | `DONE` | 状态条件满足 |
-| `3` | `FAILED` | 状态失败 |
-| `4` | `WAITING_PEER` | 本端正在等待对端 |
-| `5` | `TARGET_LOST` | 目标丢失 |
-| `6` | `TARGET_FOUND` | 目标发现 |
-| `7` | `ALIGNED` | 角度或位置调整完成 |
-| `8` | `ARRIVED` | 到位 |
-| `9` | `CLEARED` | 搬运收尾当前段位置动作完成 |
-
-`SEARCH_OBJECT` 中的 `TARGET_FOUND` 表示寻找阶段目标强度达到阈值且目标误差连续稳定进入画面目标窗口。`ALIGNED` 表示搬运入口对正完成。`ARRIVED` 表示主车搬运结束判据满足。`CLEARED` 表示搬运收尾当前段位置动作完成，其中 `value=1` 表示后退段完成，`value=2` 表示前进段完成；完成判定要求该段位置锁定已经释放，且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍。`value` 表示事件附加值，含义由 `state` 和 `event` 共同决定。
-
-
-## 10. 辅车子状态编号
-
-| `state` | 名称 | 含义 |
-| --- | --- | --- |
-| `0` | `ASSISTANT_IDLE` | 辅车停止线速度, 忽略速度输入, 保持已有朝向控制语义 |
-| `1` | `ASSISTANT_FOLLOW` | 辅车融合 `UART8` 前馈与 `UART6` 视觉修正 |
-| `2` | `ASSISTANT_APPROACH_OBJECT` | 辅车使用本地视觉寻找目标物体 |
-| `3` | `ASSISTANT_ORBIT` | 辅车使用统一绕行模式绕行后再继续本地对正 |
-| `4` | `ASSISTANT_TRANSPORT_OBJECT` | 辅车在搬运态融合缩放后的 `UART8` 前馈与本地视觉修正 |
-| `5` | `ASSISTANT_CLEAR_OBJECT` | 辅车在搬运收尾阶段按主车同步的后退段或前进段执行位置动作 |
-
-辅车子状态目标编号：
-
-| `target` | 名称 | 含义 |
-| --- | --- | --- |
-| `0` | `ASSISTANT_TARGET_NONE` | 无辅车子目标 |
-| `1` | `ASSISTANT_TARGET_OBJECT` | 搬运目标物体 |
-
-`ASSISTANT_IDLE` 使用 `ASSISTANT_TARGET_NONE` 和参数 `0`。辅车进入 idle 后清空 `UART8` 前馈速度缓存和 `UART6` 视觉速度缓存, 写入零速度目标, 不写入角度目标。
-
-`ASSISTANT_FOLLOW` 使用 `ASSISTANT_TARGET_NONE` 和参数 `0`。辅车进入 follow 后清空上一阶段遗留的速度缓存，向辅车 OpenART 同步跟随任务，使本地视觉切回识别主车色标；本地视觉确认同步前，辅车不使用 `UART6` 视觉速度。
-
-`ASSISTANT_APPROACH_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和找物体配置编号。辅车进入该状态后清空两路运动输入，向辅车 OpenART 同步找物体任务；本地视觉确认同步后，辅车只使用本地 `UART6` 视觉速度向目标物体靠近，不叠加 `UART8` 速度前馈。辅车本地视觉回报 `TARGET_FOUND` 后，辅车写入零速度并通过 `UART8` 向主车可靠回报结果。
-
-`ASSISTANT_ORBIT` 使用 `ASSISTANT_TARGET_OBJECT` 和参数 `0`。辅车进入该状态后清空两路运动输入，并使用统一绕行模式执行一次绕行。绕行完成后，辅车本地恢复 `ASSISTANT_APPROACH_OBJECT` 的视觉对正语义，继续只使用本地 `UART6` 视觉速度对正目标，不再因为后续 `TARGET_FOUND` 再次上报或再次发起绕行。
-
-`ASSISTANT_TRANSPORT_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT` 和搬运配置编号。辅车进入该状态后清空上一阶段遗留的运动目标；搬运期间把 `UART8` 前馈先做头对头换向, 再乘以 `ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE`, 然后与本地 `UART6` 视觉修正叠加后写入共享底盘；`UART8` 的 `omega` 不作为搬运态旋转输入。
-
-`ASSISTANT_CLEAR_OBJECT` 使用 `ASSISTANT_TARGET_OBJECT`，并由参数区分收尾阶段：`1` 表示后退段，辅车进入后清空两路运动输入，并按自身车体系 `Y` 负方向后退 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 的一半；`2` 表示前进段，辅车进入后按自身车体系 `Y` 正方向执行 `TRANSPORT_CLEAR_STEP_DISTANCE_M` 指定的位移；默认值为 `0`，用于仅保留同步位。每一段位置动作完成后，辅车都在位置锁定释放且三轮实际轮速进入接近 `0` 的范围并连续稳定若干拍后，通过 `UART8` 可靠回报 `CLEARED`，并把当前阶段编号写入 `value`。
-
-## 11. 状态跳转原则
-
-- 主车接收事件后判断是否切换全局状态。
-- 视觉端只提供速度控制量和事件，不维护全局状态。
-- 主车等待辅车 idle ACK 是 `SEARCH_OBJECT -> ORBITING` 跳转的内部过程, 不是新的主车全局状态编号。
-- 主车在绕行后的 `SEARCH_OBJECT` 中等待本车和辅车都回报 `ALIGNED`, 双方搬运入口同步确认后进入 `TRANSPORT_OBJECT`。
-- 主车在 `TRANSPORT_OBJECT` 中融合基础推进速度与本车视觉修正, 并通过 `UART8` 向辅车转发当前底盘速度作为搬运前馈。
-- 主车在 `CLEAR_OBJECT` 中先等待本车与辅车都完成后退段，再执行主车原地回身 `180` 度，随后进入保留的前进段同步位。
-- 主辅都完成前进段后，主车直接重建 `SEARCH_OBJECT` hook，并同步辅车回到 follow；主车本车视觉 hook 和辅车 follow 都确认完成后，主车才重新开始搜索运动。
-- 辅车在 `ASSISTANT_FOLLOW` 中接收 `UART8` 速度前馈和本车视觉速度修正。
-- 辅车在 `ASSISTANT_IDLE` 中忽略后续速度短包对角色层速度缓存和底盘速度输出的影响。
-- 辅车在 `ASSISTANT_APPROACH_OBJECT` 中只使用本地视觉速度寻找目标物体，目标物体找到后停止并回报主车。
-- 辅车在 `ASSISTANT_ORBIT` 中忽略速度短包；绕行完成后，本地回到持续对正目标的语义。
-- 辅车在 `ASSISTANT_TRANSPORT_OBJECT` 中对 `UART8` 搬运前馈先做头对头换向和系数缩放, 再叠加本地视觉修正。
-- 辅车在 `ASSISTANT_CLEAR_OBJECT` 中忽略速度短包, 只执行当前同步要求的后退段或前进段位置动作, 并回报带阶段编号的 `CLEARED`。
-- 状态切换不能通过 `v`、`o` 或 `r` 包隐式完成。
-- 可靠包确认只表示对端已处理该包，不表示状态已切换。
+改状态编号、事件编号或状态顺序时，优先改状态机代码和行为测试，再按需要更新本页入口说明。需要理解某次状态机调整的背景时查 [docs/superpowers/memory/milestone/INDEX.md](../superpowers/memory/milestone/INDEX.md) 与 [docs/superpowers/memory/debug/INDEX.md](../superpowers/memory/debug/INDEX.md)。

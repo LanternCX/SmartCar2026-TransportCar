@@ -17,10 +17,12 @@
 
 - 仓库新建文档统一使用中文。
 - 正式开发文档优先放在 `docs/developer/`、`docs/problem_statement/` 或 `docs/superpowers/` 的对应目录。
-- `docs/developer/` 只写当前方向、协议、控制、视觉和状态机事实, 不写历史迁移说明。
+- `docs/developer/` 优先作为短索引和外部约定入口, 通过路径引导阅读代码、注释、测试和 memory。
+- `docs/developer/` 只写代码外事实、阅读入口和职责边界, 不镜像代码已经表达的流程、字段表、状态表或参数细节。
 - 新增主入口或一级目录后同步更新 `docs/AGENTS.md`。
 - 文档正文不要维护兼容层说明、多套字段双轨说明或过期路径镜像。
 - 需要历史追溯时依赖 git 历史、归档 spec / plan 或 memory, 不把历史解释写进正式正文。
+- 可复用设计取舍、调试结论和阶段闭环优先写入 `docs/superpowers/memory/`, 不塞回正式开发文档正文。
 
 ## Skill 文档规则
 
