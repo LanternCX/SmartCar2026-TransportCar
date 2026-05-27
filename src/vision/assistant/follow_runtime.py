@@ -410,13 +410,10 @@ class AssistantFollowRuntime:
         packet_type = packet.get("type")
         if packet_type == "a":
             pending = self._pending_local_vision_sync
-            matched = (
+            if (
                 pending is not None
                 and pending.get("sent_once")
                 and int(packet["seq"]) == int(pending["seq"])
-            )
-            if (
-                matched
             ):
                 self._log_local_vision_sync_done(pending)
                 self._pending_local_vision_sync = None

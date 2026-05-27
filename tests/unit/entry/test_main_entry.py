@@ -290,3 +290,24 @@ def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
 
     assert main._run_script("script/remote_control.mpy") == "ok"
     assert calls == ["chdir", "script.remote_control", "main-called"]
+
+
+def test_run_python_script_uses_machine_execfile(monkeypatch) -> None:
+    """普通脚本必须通过板端脚本执行能力运行."""
+
+    main = load_main_module()
+    calls = []
+    machine_module = ModuleType("machine")
+    setattr(
+        machine_module,
+        "execfile",
+        lambda script_path: calls.append(("execfile", script_path)) or "ok",
+    )
+    monkeypatch.setitem(sys.modules, "machine", machine_module)
+    monkeypatch.setattr(main, "_chdir_flash", lambda: calls.append(("chdir", None)))
+
+    assert main._run_script("script/remote_control.py") == "ok"
+    assert calls == [
+        ("chdir", None),
+        ("execfile", "script/remote_control.py"),
+    ]

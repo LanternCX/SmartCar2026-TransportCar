@@ -252,7 +252,9 @@ def _run_script(script_path):
     if script_path.endswith(".mpy"):
         module = _import_module(_script_path_to_module_name(script_path))
         return module.main()
-    return execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
+    from machine import execfile
+
+    return execfile(script_path)
 
 
 def _save_fatal_error_log(message: str) -> None:
