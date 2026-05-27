@@ -13,7 +13,7 @@
 
 - `using-rules`：实现前与实现中的仓库规则、协议、硬件事实和知识入口
 - `project-extension-requesting-code-review`：任务收口、评审门禁与内存自检入口
-- `reference-sync`：参考文档导入、更新、来源追溯与维护清单入口
+- `reference-sync`：参考链接、来源追溯、维护清单与协作文档归档入口
 - `project-extension-writing-skills`：Skill 新建、重构、迁移与写作规范入口
 - `mpy-cli-tool`：`mpy-cli` 工具使用、路径边界和排障入口
 - `git-workflow`：仓库 Git Flow 与 Angular Conventional Commit 规范入口

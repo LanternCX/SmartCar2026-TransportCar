@@ -3,9 +3,10 @@
 ## 使用说明
 
 - 本页用于持续维护，不承接正式正文。
-- 每次更新正式正文或题面文档集时，都要同时核对来源、正式落点和检查项是否仍然成立。
+- 每次更新正式正文或外部链接入口时，都要同时核对来源、正式落点和检查项是否仍然成立。
 - 新增长期维护对象时，先补本页，再补 `source-registry.md`。
 - 外部资料、官方题面、官方问答或 GitHub PR 状态可能变化时，必须通过联网核对、用户提供的官方资料或本地可验证记录确认来源。
+- 外部题面资料只维护链接入口，不导入本地正文。
 
 ## 维护 checklist
 
@@ -37,12 +38,11 @@
   - [ ] 搬运规则没有混入具体设计正文或执行正文
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
-### `problem_statement` 文档集
+### `problem_statement` 外部链接入口
 
-- 正式落点：`docs/problem_statement/README.md`、`docs/problem_statement/sources.md`、`docs/problem_statement/spec.md`、`docs/problem_statement/qa.md`
+- 正式落点：`docs/problem_statement/README.md`
 - 维护检查项：
-  - [ ] `README.md`、`sources.md`、`spec.md`、`qa.md` 四个对象都仍在维护范围内
-  - [ ] 官方规则或问答变化后，规格正文与问答正文已同步复核
-  - [ ] 来源追溯、抓取依据、本地产物映射仍可复查
-  - [ ] 需要联网或用户提供官方资料时，已记录来源与获取时间
+  - [ ] 总则、蚂蚁搬家细则、细则镜像和问答入口链接仍然可用或已标注不可用
+  - [ ] 本地没有恢复题面正文、问答正文、清洗副本或 REQ 编号镜像
+  - [ ] 规则相关开发任务能从 README 直接跳到外部来源
   - [ ] 本页与 `source-registry.md` 的对象列表保持一致
