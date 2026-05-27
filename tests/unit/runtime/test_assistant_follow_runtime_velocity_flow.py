@@ -9,11 +9,28 @@ from .assistant_follow_runtime_support import (
     install_fake_transport_car,
     install_fake_uart6_factory,
 )
+from types import ModuleType
+import sys
 
 
 def _set_filtered_speeds(car, *speeds):
     for state, speed in zip(car.wheel_states, speeds):
         state["filtered_speed"] = float(speed)
+
+
+def install_fake_startup_log(monkeypatch):
+    """注入启动日志桩并收集日志文本."""
+
+    logs = []
+    startup_log_module = ModuleType("utils.startup_log")
+
+    def _log(stage, detail=""):
+        logs.append("%s|%s" % (stage, detail))
+        return logs[-1]
+
+    setattr(startup_log_module, "log", _log)
+    monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
+    return logs
 
 
 def test_assistant_follow_runtime_fuses_feedforward_and_vision_velocity(monkeypatch) -> None:
@@ -260,6 +277,24 @@ def test_assistant_follow_runtime_records_sync_context_and_replies_ack(monkeypat
     assert runtime._sync_apply_count == 1
 
 
+def test_assistant_follow_runtime_logs_master_sync_done(monkeypatch) -> None:
+    """辅车收到主车同步并应用后记录完成日志."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    uart8._buffer = b"s,12,0,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+
+    sync_logs = [message for message in logs if message.startswith("sync|")]
+    assert sync_logs == ["sync|master->assistant sync done seq=12 state=0 target=0 arg=0"]
+
+
 def test_assistant_state_machine_accepts_orbit_command(monkeypatch) -> None:
     """! @brief 辅车子状态机接受 orbit 子状态并记录固定上下文"""
 
@@ -310,7 +345,11 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     assert uart8.messages == ["a,12\r\n"]
     assert runtime._inputs["uart6"]["velocity"] is None
     assert runtime._inputs["uart8"]["velocity"] is None
-    assert runtime._pending_local_vision_sync is None
+    assert runtime._pending_local_vision_sync is not None
+    local_sync = runtime._pending_local_vision_sync
+    assert local_sync["state"] == 3
+    assert local_sync["target"] == 1
+    assert local_sync["arg"] == follow_runtime_module._ASSISTANT_ORBIT_OBJECT_CONFIG_ID
     assert runtime._pending_target_found_report is None
     assert runtime._approach_target_found_done is False
     assert ("set_orbit_target", -90.0, 1.5) in events
@@ -325,16 +364,44 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     assert runtime._transport_car.orbit_mode is True
 
 
+def test_assistant_follow_runtime_orbit_vision_switch_only_disables_motion_correction(
+    monkeypatch,
+) -> None:
+    """关闭绕行视觉修正时, 辅车仍同步本车视觉, 但不写入运动修正."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    uart8._buffer = b"s,12,3,1,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = False
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    event_count = len(events)
+    uart6._buffer = b"v,-0.25,0.5\n"
+    runtime.step()
+
+    assert runtime._pending_local_vision_sync is not None
+    assert uart6.messages == ["s,100,3,1,3\r\n"]
+    assert runtime._inputs["uart6"]["velocity"] is None
+    assert not any(event[0] == "set_orbit_velocity_correction" for event in events[event_count:])
+    assert runtime._transport_car.command_lock is True
+    assert runtime._transport_car.orbit_mode is True
+
+
 def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report(
     monkeypatch,
 ) -> None:
-    """! @brief 辅车绕行期间屏蔽速度输入, 到位后重新对正且不回报完成"""
+    """! @brief 辅车绕行期间只使用本地视觉修正, 到位后重新对正且不回报完成"""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"s,10,2,1,1\n"
     uart6 = _FakeUart()
     install_fake_uart6_factory(monkeypatch, uart6)
     follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+    follow_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = True
 
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
 
@@ -348,11 +415,18 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
 
     event_count = len(events)
     uart8._buffer = b"v,1.0,2.0,0.5\n"
-    uart6._buffer = b"v,-0.25,0.5\n"
+    orbit_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nv,-0.25,0.5\n" % orbit_sync_seq).encode()
     runtime.step()
 
     assert not any(event[0] == "handle_velocity" for event in events[event_count:])
-    assert runtime._inputs["uart6"]["velocity"] is None
+    assert ("set_orbit_velocity_correction", -0.25, 0.5) in events[event_count:]
+    assert runtime._inputs["uart6"]["velocity"] == {
+        "vx": -0.25,
+        "vy": 0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
     assert runtime._inputs["uart8"]["velocity"] is None
     assert runtime._pending_local_vision_sync is None
     assert runtime._pending_target_found_report is None
@@ -478,6 +552,31 @@ def test_assistant_follow_runtime_follow_sync_rearms_local_vision_and_clears_mot
     }
     assert ("handle_velocity", "assistant_follow", 0.0, 0.0, 0.0) in events
     assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
+
+def test_assistant_follow_runtime_logs_local_vision_sync_start_and_done(
+    monkeypatch,
+) -> None:
+    """辅车对摄像头的本地同步在首次发起和确认完成时各记一次日志."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    uart8._buffer = b"s,12,1,0,0\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
+
+    runtime.step()
+    uart6._buffer = b"a,100\n"
+    runtime.step()
+
+    assert logs == [
+        "sync|master->assistant sync done seq=12 state=1 target=0 arg=0",
+        "sync|assistant->camera sync start seq=100 state=1 target=0 arg=0",
+        "sync|assistant->camera sync done seq=100 state=1 target=0 arg=0",
+    ]
 
 
 def test_assistant_follow_runtime_ignores_uart6_until_follow_vision_ack(

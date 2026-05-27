@@ -3,12 +3,12 @@
 @file src/script/remote_control.py
 @brief 搬运车的核心控制入口, 初始化系统并启动 5ms 周期的控制循环
 
-@details 根据车辆角色 (主车/辅车) 创建对应的运行时实例, 启动定时中断驱动的控制循环, 支持通过 UART3 接收上游指令, 按角色使用 UART8 / UART6 进行视觉数据通信
+@details 根据车辆角色 (主车/辅车) 创建对应的运行时实例, 启动定时中断驱动的控制循环, 按角色使用 UART8 / UART6 进行视觉数据通信
 """
 
 from smartcar import ticker
 from config import motion as motion_params
-from utils.startup_log import startup_log
+from utils.startup_log import log
 from vision import create_role_transport_car
 from vision.vehicle_role import read_vehicle_role
 
@@ -64,10 +64,25 @@ def _run_control_loop(car) -> None:
     loop_logged = False
     while True:
         if not loop_logged:
-            startup_log("remote_control", "main loop first iteration")
+            log("remote_control", "main loop first iteration")
             loop_logged = True
         if not car.step():
             break
+
+
+def _stop_runtime_after_fatal(car, pit1) -> None:
+    """致命异常后停止板端运行资源."""
+
+    if pit1 is not None:
+        try:
+            pit1.stop()
+        except Exception as exc:
+            log("remote_control", "fatal ticker stop failed: %s" % exc)
+    if car is not None:
+        try:
+            car.stop()
+        except Exception as exc:
+            log("remote_control", "fatal car stop failed: %s" % exc)
 
 
 def main():
@@ -76,28 +91,34 @@ def main():
     @brief 启动序列入口, 读取拨码开关、创建车体实例、启动定时中断、运行主循环
     """
 
-    startup_log("remote_control", "module start")
-    role = read_vehicle_role()
-    startup_log("remote_control", "vehicle role=%s" % role)
-    startup_log("remote_control", "vision runtime ready=%s" % role)
+    car = None
+    pit1 = None
+    try:
+        log("remote_control", "module start")
+        role = read_vehicle_role()
+        log("remote_control", "vehicle role=%s" % role)
+        log("remote_control", "vision runtime ready=%s" % role)
 
-    startup_log("remote_control", "creating TransportCar")
-    car = _create_transport_car(role)
-    startup_log("remote_control", "TransportCar ready")
+        log("remote_control", "creating TransportCar")
+        car = _create_transport_car(role)
+        log("remote_control", "TransportCar ready")
 
-    startup_log("remote_control", "creating ticker")
-    pit1 = _create_ticker()
-    capture_items = _build_capture_items(car)
-    startup_log("remote_control", "binding capture items=%d" % len(capture_items))
-    pit1.capture_list(*capture_items)
-    pit1.callback(car.mark_tick)
-    car.set_ticker(pit1)
+        log("remote_control", "creating ticker")
+        pit1 = _create_ticker()
+        capture_items = _build_capture_items(car)
+        log("remote_control", "binding capture items=%d" % len(capture_items))
+        pit1.capture_list(*capture_items)
+        pit1.callback(car.mark_tick)
+        car.set_ticker(pit1)
 
-    startup_log("remote_control", "starting ticker=%dms" % TICK_MS)
-    pit1.start(TICK_MS)
-    startup_log("remote_control", "entering main loop")
-    _run_control_loop(car)
-    return role
+        log("remote_control", "starting ticker=%dms" % TICK_MS)
+        pit1.start(TICK_MS)
+        log("remote_control", "entering main loop")
+        _run_control_loop(car)
+        return role
+    except Exception as exc:
+        _stop_runtime_after_fatal(car, pit1)
+        raise
 
 
 if globals().get("__spec__") is None:

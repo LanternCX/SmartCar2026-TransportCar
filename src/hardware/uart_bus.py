@@ -1,6 +1,6 @@
 """UART 总线初始化封装
 
-提供三条 UART 总线的工厂函数, 分别服务于控制命令、主辅车通信和本车本地视觉链路
+提供三条 UART 总线的工厂函数, 分别服务于 REPL 调试、主辅车通信和本车本地视觉链路
 """
 
 from config import comm as comm_params
@@ -16,7 +16,7 @@ UART8_PORT_ID = getattr(comm_params, "UART8_PORT_ID")
 def create_uart3():
     """@brief 创建并初始化 UART3
 
-    UART3 承担上游控制命令与查询回包的传输职责
+    UART3 承担 REPL 调试终端职责
 
     @return 已初始化至配置波特率的 UART3 对象
     """

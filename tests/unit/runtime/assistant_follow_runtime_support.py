@@ -83,7 +83,6 @@ def install_fake_transport_car(monkeypatch):
             ]
             self.imu = "imu"
             self.ticker = None
-            self.uart3 = uart3
             self.uart8 = uart8
             self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
             self.last_chassis_target = {
@@ -98,11 +97,6 @@ def install_fake_transport_car(monkeypatch):
             self.command_lock = False
             self.complete_orbit_on_next_step = False
             self.command_mode = "none"
-            self._process_uart = self._original_process_uart
-
-        def _original_process_uart(self) -> None:
-            events.append("transport_process_uart")
-
         def mark_tick(self, tick=None) -> None:
             events.append(("mark_tick", tick))
 
@@ -151,6 +145,18 @@ def install_fake_transport_car(monkeypatch):
             self.command_mode = "locked"
             self.orbit_mode = True
             self.orbit_radius_scale = float(radius_scale)
+
+        def set_orbit_velocity_correction(self, vx: float, vy: float) -> None:
+            events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
+            self.control_state["vx"] = float(vx)
+            self.control_state["vy"] = float(vy)
+            self.last_chassis_target = {
+                "source": "assistant_orbit_vision",
+                "vx": float(vx),
+                "vy": float(vy),
+                "omega": self.control_state.get("omega", 0.0),
+                "has_omega": False,
+            }
 
         def set_heading_target(self, target_angle_deg: float) -> None:
             events.append(("set_heading_target", float(target_angle_deg)))

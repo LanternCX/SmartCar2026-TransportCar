@@ -37,11 +37,12 @@ from vision.master.state_machine import (
     STATE_STOP,
     STATE_TRANSPORT_OBJECT,
     TARGET_EDGE_LINE,
+    TARGET_OBJECT,
 )
+from utils.startup_log import log
 
 
 _UART6_INPUT_LIMIT = getattr(comm_params, "MASTER_UART6_INPUT_LIMIT")
-_UART3_INPUT_LIMIT = getattr(comm_params, "MASTER_UART3_INPUT_LIMIT")
 _UART8_INPUT_LIMIT = getattr(comm_params, "MASTER_UART8_INPUT_LIMIT")
 MASTER_SEARCH_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(
@@ -56,6 +57,10 @@ MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_TRANSPORT_HOOK_
 MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
     vision_params,
     "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
+)
+MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_ID")
+ORBIT_VISION_CORRECTION_ENABLED = bool(
+    getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
 )
 MASTER_ORBIT_TARGET_DEG = getattr(motion_params, "MASTER_ORBIT_TARGET_DEG")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
@@ -78,7 +83,7 @@ MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG"
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观
 
-    @brief 在共享底盘外层接管 UART3 与本车 UART6, 并把当前底盘速度转发到 UART8
+    @brief 在共享底盘外层接管本车 UART6, 并把当前底盘速度转发到 UART8
     """
 
     def __init__(self, now_ms=None) -> None:
@@ -91,13 +96,12 @@ class MasterForwardRuntime:
         self.imu = car.imu
         self._now_ms = now_ms or default_now_ms
         self._uart6 = create_uart6()
-        self._rx_buf3 = ""
         self._rx_buf6 = ""
         self._rx_buf8 = ""
         self._latest_uart6_velocity = None
-        self._uart3_velocity_received_this_tick = False
         self._last_error_text = "none"
         self._hook_seq = seed_value
+        self._orbit_hook_seq = (seed_value + 128) % 256
         self._active_hook_context_id = None
         self._pending_hook = None
         self._pending_hook_event = None
@@ -129,30 +133,6 @@ class MasterForwardRuntime:
             initial_context_id=seed_value,
         )
         self.last_report = None
-
-        if getattr(car, "_process_uart", None) is not None:
-            car._process_uart = self._noop_transport_uart
-        self._write_uart3_boot_start()
-
-
-    def _write_uart3_boot_start(self) -> None:
-        """向 UART3 输出启动标记"""
-
-        try:
-            self._transport_car.uart3.write("start\r\n")
-        except Exception:
-            self._record_error("uart3 start write failed")
-
-    def _write_uart3_turn_heading_debug(self) -> None:
-        """在主车转身阶段向 UART3 输出当前角度调试信息"""
-
-        try:
-            self._transport_car.uart3.write(
-                "turn_heading,%.2f\r\n"
-                % float(getattr(self._transport_car, "heading_est", 0.0))
-            )
-        except Exception:
-            self._record_error("uart3 turn debug write failed")
 
     def mark_tick(self, tick=None) -> None:
         """转发 ticker 中断标记
@@ -209,14 +189,14 @@ class MasterForwardRuntime:
 
         self._advance_state_machine()
         self._drain_state_machine_outputs()
-        self._uart3_velocity_received_this_tick = False
-        self._process_uart3()
         self._process_uart6()
         self._drain_state_machine_outputs()
         transport_applied_this_tick = False
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             self._apply_transport_velocity()
             transport_applied_this_tick = True
+        elif self._state_machine.state == STATE_ORBITING:
+            self._apply_orbit_velocity_correction()
         elif self._state_machine.state == STATE_SEARCH_OBJECT and getattr(self._state_machine, "_master_aligned", False):
             self._transport_car.handle_velocity_packet(
                 0.0,
@@ -225,7 +205,7 @@ class MasterForwardRuntime:
                 source="master_aligned_hold",
                 has_omega=True,
             )
-        elif not self._uart3_velocity_received_this_tick and self._state_machine.allows_search_velocity():
+        elif self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
         self._process_uart8()
         self._drain_state_machine_outputs()
@@ -238,17 +218,6 @@ class MasterForwardRuntime:
         self._send_pending_hook()
         self._send_pending_sync()
         self._forward_current_chassis_velocity()
-
-    def _process_uart3(self) -> None:
-        """接管 UART3 按行读取并处理短包输入"""
-
-        self._read_uart_lines(
-            self._transport_car.uart3,
-            "_rx_buf3",
-            self._handle_uart3_line,
-            overflow_error_text="invalid uart3 input",
-            input_limit=_UART3_INPUT_LIMIT,
-        )
 
     def _process_uart6(self) -> None:
         """接管 UART6 按行读取本车视觉速度输入"""
@@ -326,32 +295,6 @@ class MasterForwardRuntime:
             setattr(self, buffer_name, buffer[idx + 1 :])
             handler(line)
 
-    def _handle_uart3_line(self, line: str) -> None:
-        """处理单条 UART3 短包输入行
-
-        @param line 原始输入行
-        """
-
-        if not line:
-            return
-        if self._state_machine.state == STATE_ORBITING:
-            return
-        if self._state_machine.state == STATE_TRANSPORT_OBJECT:
-            return
-        if self._state_machine.state == STATE_CLEAR_OBJECT:
-            return
-        if self._state_machine.state == STATE_STOP:
-            return
-        if self._state_machine.is_waiting_assistant_idle_ack():
-            return
-        packet = parse_short_packet(line)
-        if packet is not None and packet.get("type") == "v":
-            self._apply_velocity_packet(packet, source="uart3")
-            self._uart3_velocity_received_this_tick = True
-            return
-        if line.lower().startswith("v,"):
-            self._record_error("invalid velocity packet")
-
     def _handle_uart6_line(self, line: str) -> None:
         """处理单条 UART6 视觉速度输入行
 
@@ -362,7 +305,14 @@ class MasterForwardRuntime:
             return
         packet = parse_short_packet(line)
         if packet is not None and packet.get("type") == "v":
-            if self._state_machine.allows_search_velocity() or self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            if (
+                self._state_machine.allows_search_velocity()
+                or self._state_machine.state == STATE_TRANSPORT_OBJECT
+                or (
+                    self._state_machine.state == STATE_ORBITING
+                    and self._pending_hook is None
+                )
+            ):
                 self._latest_uart6_velocity = packet
             return
         if packet is not None and packet.get("type") == "a":
@@ -372,6 +322,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and int(packet["reliable_seq"]) == int(pending["reliable_seq"])
             ):
+                self._log_hook_sync_done(pending)
                 self._active_hook_context_id = int(pending["context_id"])
                 if pending.get("kind") == "transport_hook":
                     self._transport_hook_acknowledged = True
@@ -421,6 +372,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and seq == int(pending["seq"])
             ):
+                self._log_sync_done("master->assistant", pending)
                 if pending.get("kind") == "assistant_idle":
                     self._state_machine.mark_assistant_idle_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
@@ -439,6 +391,7 @@ class MasterForwardRuntime:
                 and pending.get("sent_once")
                 and seq == int(pending["seq"])
             ):
+                self._log_sync_done("master->assistant", pending)
                 self._pending_sync = None
         elif packet.get("type") == "r":
             self._write_forward_reliable_line(format_ack_packet(packet["seq"]))
@@ -463,6 +416,17 @@ class MasterForwardRuntime:
                     + float(MASTER_ORBIT_TARGET_DEG)
                 )
                 self._transport_car.set_heading_target(target_heading_deg)
+
+    def _apply_orbit_velocity_correction(self) -> None:
+        if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
+        packet = self._latest_uart6_velocity
+        if packet is None:
+            return
+        self._transport_car.set_orbit_velocity_correction(
+            float(packet.get("vx", 0.0)),
+            float(packet.get("vy", 0.0)),
+        )
 
     def _apply_transport_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -514,6 +478,8 @@ class MasterForwardRuntime:
             % (pending["seq"], pending["state"], pending["target"], pending["arg"])
         )
         if wrote_all:
+            if not pending.get("sent_once"):
+                self._log_sync_start("master->assistant", pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
@@ -575,6 +541,8 @@ class MasterForwardRuntime:
         self._state_machine.step(orbit_finished=orbit_finished)
         if self._state_machine.state != STATE_ORBITING:
             self._orbit_command_active = False
+            if self._pending_hook is not None and self._pending_hook.get("kind") == "orbit_hook":
+                self._pending_hook = None
 
     def _drain_state_machine_outputs(self) -> None:
         """消费主车状态机的一次性输出"""
@@ -667,6 +635,21 @@ class MasterForwardRuntime:
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:
+            self._active_hook_context_id = None
+            self._latest_uart6_velocity = None
+            self._pending_hook_event = None
+            self._rx_buf6 = ""
+            self._pending_hook = {
+                "kind": "orbit_hook",
+                "reliable_seq": self._orbit_hook_seq,
+                "context_id": int(self._state_machine._current_context_id),
+                "state": STATE_ORBITING,
+                "target": TARGET_OBJECT,
+                "arg": int(MASTER_ORBIT_HOOK_CONFIG_ID),
+                "last_sent_ms": None,
+                "sent_once": False,
+            }
+            self._orbit_hook_seq = (self._orbit_hook_seq + 1) % 256
             self._transport_car.set_orbit_target(
                 float(orbit_command["target_heading_deg"]),
                 float(MASTER_ORBIT_RADIUS_SCALE),
@@ -729,7 +712,6 @@ class MasterForwardRuntime:
             self._turn_back_stop_ticks = 0
             return
         if self._turn_back_rotation_started:
-            self._write_uart3_turn_heading_debug()
             if bool(getattr(self._transport_car, "command_lock", False)):
                 self._turn_back_stop_ticks = 0
                 return
@@ -785,6 +767,8 @@ class MasterForwardRuntime:
             )
         )
         if wrote_all:
+            if not pending.get("sent_once"):
+                self._log_hook_sync_start(pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
@@ -801,6 +785,58 @@ class MasterForwardRuntime:
             value=pending_event["value"],
         )
 
+    def _log_sync_start(self, link_name: str, pending: dict) -> None:
+        log(
+            "sync",
+            "%s sync start seq=%d state=%d target=%d arg=%d"
+            % (
+                link_name,
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_sync_done(self, link_name: str, pending: dict) -> None:
+        log(
+            "sync",
+            "%s sync done seq=%d state=%d target=%d arg=%d"
+            % (
+                link_name,
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_hook_sync_start(self, pending: dict) -> None:
+        log(
+            "sync",
+            "master->camera sync start seq=%d context=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["reliable_seq"]),
+                int(pending["context_id"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_hook_sync_done(self, pending: dict) -> None:
+        log(
+            "sync",
+            "master->camera sync done seq=%d context=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["reliable_seq"]),
+                int(pending["context_id"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
     def _record_error(self, text: str) -> None:
         """记录最小错误文本供联调使用
 
@@ -809,9 +845,3 @@ class MasterForwardRuntime:
 
         self._last_error_text = text
         self._transport_car.last_exception_text = text
-
-    @staticmethod
-    def _noop_transport_uart() -> None:
-        """屏蔽共享底盘自己的 UART3 消费入口"""
-
-        return None

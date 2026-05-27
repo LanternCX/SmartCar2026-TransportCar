@@ -57,6 +57,30 @@ def test_main_entry_allocates_emergency_exception_buffer(monkeypatch) -> None:
     assert calls == [100]
 
 
+def test_main_entry_binds_uart3_to_repl_before_startup_logs(
+    capsys, monkeypatch
+) -> None:
+    """正式入口启动时必须先把 UART3 交给 REPL."""
+
+    main = load_main_module()
+    events = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(main, "_run_script", lambda _script_path: None)
+    monkeypatch.setattr(
+        main,
+        "log",
+        lambda stage, detail="": events.append(("log", stage, detail)),
+    )
+    monkeypatch.setattr(main, "_bind_uart3_repl", lambda: events.append("repl"))
+
+    main.main()
+
+    assert events[0] == "repl"
+
+
 def test_resolve_startup_script_defaults_to_remote_control() -> None:
     """没有长按时进入默认运行脚本."""
 
@@ -94,11 +118,73 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
 
     assert result == "script/remote_control.py"
     assert launched_scripts == ["script/remote_control.py"]
-    assert "[boot] main: entry start" in output_lines
-    assert "[boot] main: power voltage=12.00V" in output_lines
-    assert "[boot] main: startup keys=[0, 0, 0, 0]" in output_lines
-    assert "[boot] main: selected script=script/remote_control.py" in output_lines
-    assert "[boot] main: launching script=script/remote_control.py" in output_lines
+    assert any(line.endswith("main: entry start") for line in output_lines)
+    assert any(line.endswith("main: power voltage=12.00V") for line in output_lines)
+    assert any(line.endswith("main: startup keys=[0, 0, 0, 0]") for line in output_lines)
+    assert any(
+        line.endswith("main: selected script=script/remote_control.py")
+        for line in output_lines
+    )
+    assert any(
+        line.endswith("main: launching script=script/remote_control.py")
+        for line in output_lines
+    )
+
+
+def test_main_entry_catches_and_saves_fatal_errors(
+    capsys, tmp_path, monkeypatch
+) -> None:
+    """正式入口必须兜住脚本运行期异常并保存到板端文件."""
+
+    main = load_main_module()
+    log_path = tmp_path / "last_fatal_error.log"
+
+    monkeypatch.setattr(main, "FATAL_ERROR_LOG_PATH", str(log_path))
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+
+    def _raise_script(_script_path):
+        raise RuntimeError("script boom")
+
+    monkeypatch.setattr(main, "_run_script", _raise_script)
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result is None
+    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
+    assert log_path.read_text() == "fatal error: script boom\n"
+
+
+def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> None:
+    """致命错误保存失败时, 入口仍要完成兜底日志输出."""
+
+    main = load_main_module()
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda _script_path: (_ for _ in ()).throw(RuntimeError("script boom")),
+    )
+    monkeypatch.setattr(
+        main,
+        "_save_fatal_error_log",
+        lambda _message: (_ for _ in ()).throw(OSError("flash full")),
+    )
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result is None
+    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
+    assert any(
+        line.endswith("main: fatal log save failed: flash full")
+        for line in output_lines
+    )
 
 
 def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
@@ -128,7 +214,7 @@ def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> No
     assert result == "alarm"
     assert launched_scripts == []
     assert alarmed == [11.4]
-    assert "[boot] main: low voltage=11.40V" in output_lines
+    assert any(line.endswith("main: low voltage=11.40V") for line in output_lines)
 
 
 def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:

@@ -7,6 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-05-25-1 | 2026-05-25 | 接入主辅绕行阶段视觉平移修正 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-25-1.md` | 记录主车和辅车绕行阶段通过 OpenART 输出 `v,<vx>,<vy>` 平移修正, 并在车端统一绕行基准运动上叠加修正量。 | orbit, vision, uart6, master, assistant, correction, milestone |
 | 2026-05-08-2 | 2026-05-08 | 完成主辅车联动搬运状态闭环 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-08-2.md` | 记录 PR#64、PR#68、PR#70、PR#76 和 PR#80 将主车和辅车状态机串成搜索、绕行、对正、搬运、收尾和下一轮搜索的完整协同搬运闭环。 | PR64, PR68, PR70, PR76, PR80, state-machine, master, assistant, transport, milestone |
 | 2026-05-08-1 | 2026-05-08 | 确立 UDP 数据流与 TCP 可靠同步双模式控制协议 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-08-1.md` | 记录 PR#60 和 PR#61 将控制协议收口为高频 UDP 数据流与低频 TCP 可靠同步的短包通信基线。 | PR60, PR61, protocol, UDP, TCP, reliable-sync, high-frequency, short-packet, milestone |
 | 2026-04-30-1 | 2026-04-30 | 完成 PR#61 短包通信协议与状态机前置边界收口 | `docs/superpowers/memory/milestone/entries/2026-04/2026-04-30-1.md` | 记录 PR#61 将短包通信协议、车端运行时入口、主辅车链路、视觉链路、Mono Repo 边界、测试和归档统一收口为状态机前置基线。 | PR61, protocol, short-packet, runtime, vision, mono-repo, state-machine, milestone |

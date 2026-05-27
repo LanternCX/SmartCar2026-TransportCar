@@ -24,7 +24,7 @@ def _allocate_emergency_exception_buffer() -> bool:
 _allocate_emergency_exception_buffer()
 
 from config import safety as safety_params
-from utils.startup_log import startup_log
+from utils.startup_log import log
 
 # 启动后等待时间, 等待外设稳定
 STARTUP_SETTLE_MS = 100
@@ -41,6 +41,8 @@ SCRIPT_PID_IDENTIFY = "script/pid_identify.py"
 SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
 # 遥控主脚本路径
 SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
+# 致命异常保存路径
+FATAL_ERROR_LOG_PATH = "last_fatal_error.log"
 
 
 def _path_exists(path):
@@ -50,6 +52,23 @@ def _path_exists(path):
         os.stat(path)
         return True
     except OSError:
+        return False
+
+
+def _bind_uart3_repl() -> bool:
+    """将 UART3 绑定为板端 REPL 调试终端."""
+
+    try:
+        import os
+        from hardware.uart_bus import create_uart3
+
+        uart3 = create_uart3()
+        dupterm = getattr(os, "dupterm", None)
+        if dupterm is None:
+            return False
+        dupterm(uart3)
+        return True
+    except Exception:
         return False
 
 
@@ -236,27 +255,50 @@ def _run_script(script_path):
     return execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
 
 
-def main():
+def _save_fatal_error_log(message: str) -> None:
+    """保存最近一次致命异常文本."""
+
+    with open(FATAL_ERROR_LOG_PATH, "w") as log_file:
+        log_file.write("%s\n" % message)
+
+
+def _run_main_body():
     """入口阶段只负责按钮判定和脚本分发"""
 
-    startup_log("main", "entry start")
+    _bind_uart3_repl()
+    log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
     voltage = _read_startup_voltage()
-    startup_log("main", "power voltage=%.2fV" % voltage)
+    log("main", "power voltage=%.2fV" % voltage)
     if _should_block_startup_for_voltage(voltage):
-        startup_log("main", "low voltage=%.2fV" % voltage)
+        log("main", "low voltage=%.2fV" % voltage)
         return _run_low_voltage_alarm(voltage)
     key_states = _scan_startup_key_states()
-    startup_log("main", "startup keys=%s" % key_states)
+    log("main", "startup keys=%s" % key_states)
     try:
         script_path = resolve_existing_startup_script(resolve_startup_script(key_states))
     except ValueError as exc:
         print(str(exc))
         return None
-    startup_log("main", "selected script=%s" % script_path)
-    startup_log("main", "launching script=%s" % script_path)
+    log("main", "selected script=%s" % script_path)
+    log("main", "launching script=%s" % script_path)
     _run_script(script_path)
     return script_path
+
+
+def main():
+    """正式入口最外层异常兜底."""
+
+    try:
+        return _run_main_body()
+    except Exception as exc:
+        fatal_message = "fatal error: %s" % exc
+        log("main", fatal_message)
+        try:
+            _save_fatal_error_log(fatal_message)
+        except Exception as save_exc:
+            log("main", "fatal log save failed: %s" % save_exc)
+        return None
 
 
 if __name__ == "__main__" and globals().get("__spec__") is None:

@@ -7,6 +7,7 @@ from config import comm as comm_params
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.link import should_resend, write_reliable_line
+from utils.startup_log import log
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_CLEAR_OBJECT,
@@ -44,6 +45,12 @@ _ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
     vision_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
+)
+_ASSISTANT_ORBIT_OBJECT_CONFIG_ID = getattr(
+    vision_params, "ASSISTANT_ORBIT_OBJECT_CONFIG_ID"
+)
+ORBIT_VISION_CORRECTION_ENABLED = bool(
+    getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
 )
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
@@ -341,6 +348,7 @@ class AssistantFollowRuntime:
             }
             self._last_sync_seq = seq
             self._sync_apply_count += 1
+            self._log_master_sync_done(packet)
         self._write_forward_reliable_line(format_ack_packet(seq))
         return True
 
@@ -410,6 +418,7 @@ class AssistantFollowRuntime:
             if (
                 matched
             ):
+                self._log_local_vision_sync_done(pending)
                 self._pending_local_vision_sync = None
             return True
         if packet_type == "r":
@@ -458,6 +467,7 @@ class AssistantFollowRuntime:
             self._write_approach_object_velocity()
             return
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            self._write_orbit_velocity_correction()
             return
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return
@@ -515,6 +525,21 @@ class AssistantFollowRuntime:
             vy += float(uart6_velocity.get("vy", 0.0))
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
+    def _write_orbit_velocity_correction(self) -> None:
+        """在绕行阶段只使用本地视觉平移修正"""
+
+        if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
+        if self._pending_local_vision_sync is not None:
+            return
+        uart6_velocity = self._inputs["uart6"]["velocity"]
+        if uart6_velocity is None:
+            return
+        self._transport_car.set_orbit_velocity_correction(
+            float(uart6_velocity.get("vx", 0.0)),
+            float(uart6_velocity.get("vy", 0.0)),
+        )
+
     def _apply_effective_velocity(self, vx: float, vy: float, omega: float, has_omega: bool) -> None:
         self._transport_car.handle_velocity_packet(
             vx,
@@ -544,7 +569,10 @@ class AssistantFollowRuntime:
 
     def _should_store_velocity(self, source: str) -> bool:
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
-            return False
+            return (
+                source == "uart6"
+                and self._pending_local_vision_sync is None
+            )
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
         if source == "uart6" and self._pending_local_vision_sync is not None:
@@ -613,9 +641,17 @@ class AssistantFollowRuntime:
 
     def _enter_orbit_state(self) -> None:
         self._approach_target_found_done = False
-        self._pending_local_vision_sync = None
         self._pending_target_found_report = None
         self._clear_motion_inputs()
+        self._pending_local_vision_sync = {
+            "seq": self._local_vision_sync_seq,
+            "state": ASSISTANT_STATE_ORBIT,
+            "target": ASSISTANT_TARGET_OBJECT,
+            "arg": int(_ASSISTANT_ORBIT_OBJECT_CONFIG_ID),
+            "last_sent_ms": None,
+            "sent_once": False,
+        }
+        self._local_vision_sync_seq = (self._local_vision_sync_seq + 1) % 256
         self._transport_car.set_orbit_target(
             float(_ASSISTANT_ORBIT_TARGET_DEG),
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
@@ -765,6 +801,8 @@ class AssistantFollowRuntime:
                 pending["arg"],
             )
         ):
+            if not pending.get("sent_once"):
+                self._log_local_vision_sync_start(pending)
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
@@ -799,6 +837,42 @@ class AssistantFollowRuntime:
         except Exception as exc:
             self._record_error("uart8 write failed", exc)
             return False
+
+    def _log_master_sync_done(self, packet: dict) -> None:
+        log(
+            "sync",
+            "master->assistant sync done seq=%d state=%d target=%d arg=%d"
+            % (
+                int(packet["seq"]),
+                int(packet["state"]),
+                int(packet["target"]),
+                int(packet["arg"]),
+            ),
+        )
+
+    def _log_local_vision_sync_start(self, pending: dict) -> None:
+        log(
+            "sync",
+            "assistant->camera sync start seq=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
+
+    def _log_local_vision_sync_done(self, pending: dict) -> None:
+        log(
+            "sync",
+            "assistant->camera sync done seq=%d state=%d target=%d arg=%d"
+            % (
+                int(pending["seq"]),
+                int(pending["state"]),
+                int(pending["target"]),
+                int(pending["arg"]),
+            ),
+        )
 
     def _write_uart6_reliable_line(self, line: str) -> bool:
         uart = self._inputs["uart6"]["uart"]

@@ -27,7 +27,7 @@ GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
 UART_BAUDRATE = getattr(comm_params, "UART_BAUDRATE")
 
 # ===== 硬件初始化 =====
-# UART3 用于发送数据到上游
+# UART3 用于输出调试数据
 uart3 = UART(2)
 uart3.init(UART_BAUDRATE)
 uart3.write("IMU Yaw Sender Starting...\r\n")

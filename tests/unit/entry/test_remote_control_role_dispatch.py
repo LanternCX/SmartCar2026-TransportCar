@@ -8,6 +8,8 @@ from pathlib import Path
 from types import ModuleType
 import sys
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REMOTE_CONTROL_PATH = PROJECT_ROOT / "src" / "script" / "remote_control.py"
@@ -48,7 +50,7 @@ def load_remote_control_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "config.motion", config_motion)
 
     startup_log_module = ModuleType("utils.startup_log")
-    setattr(startup_log_module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(startup_log_module, "log", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
     vehicle_role_module = ModuleType("vision.vehicle_role")
@@ -145,7 +147,7 @@ def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> Non
         ),
     )
     setattr(module, "_run_control_loop", lambda car: events.append(("loop", car)))
-    setattr(module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(module, "log", lambda *_args, **_kwargs: None)
 
     module.main()
 
@@ -196,10 +198,57 @@ def test_remote_control_main_returns_assistant_role_and_dispatches_it(
             },
         )(),
     )
-    setattr(module, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(module, "log", lambda *_args, **_kwargs: None)
 
     role = module.main()
 
     assert role == "assistant"
     assert ("car", "assistant") in events
     assert len(events) == 1
+
+
+def test_remote_control_main_stops_runtime_and_reraises_fatal_error(
+    monkeypatch,
+) -> None:
+    """正式运行入口遇到未捕获异常时, 必须尽量停机并继续上抛."""
+
+    module, _state = load_remote_control_module(monkeypatch)
+    events = []
+
+    class _Car:
+        wheel_states = [{"encoder": "enc_m"}]
+        imu = "imu"
+
+        def mark_tick(self, _tick=None) -> None:
+            return None
+
+        def set_ticker(self, _ticker) -> None:
+            return None
+
+        def step(self) -> bool:
+            raise RuntimeError("loop boom")
+
+        def stop(self) -> None:
+            events.append("car_stop")
+
+    class _Ticker:
+        def capture_list(self, *items) -> None:
+            return None
+
+        def callback(self, callback_fn) -> None:
+            return None
+
+        def start(self, tick_ms) -> None:
+            events.append(("ticker_start", tick_ms))
+
+        def stop(self) -> None:
+            events.append("ticker_stop")
+
+    setattr(module, "read_vehicle_role", lambda: "master")
+    setattr(module, "create_role_transport_car", lambda role: _Car())
+    setattr(module, "_create_ticker", lambda: _Ticker())
+
+    with pytest.raises(RuntimeError, match="loop boom"):
+        module.main()
+    assert "ticker_stop" in events
+    assert "car_stop" in events

@@ -100,13 +100,22 @@ def _hook_sync_message(module, seq=1, context_id=1):
     )
 
 
-def _finish_hook_sync_message(module, seq=4, context_id=3):
+def _finish_hook_sync_message(module, seq=4, context_id=4):
     return "s,%d,%d,%d,%d,%d\r\n" % (
         int(seq),
         int(context_id),
         int(module.STATE_TRANSPORT_OBJECT),
         int(module.TARGET_EDGE_LINE),
         int(module.MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID),
+    )
+
+
+def _orbit_hook_sync_message(module, seq=128, context_id=2):
+    return "s,%d,%d,%d,1,%d\r\n" % (
+        int(seq),
+        int(context_id),
+        int(module.STATE_ORBITING),
+        int(module.MASTER_ORBIT_HOOK_CONFIG_ID),
     )
 
 
@@ -148,7 +157,6 @@ def install_fake_transport_car(monkeypatch):
                 {"encoder": "enc-r", "filtered_speed": 0.0},
             ]
             self.imu = "imu"
-            self.uart3 = uart3
             self.uart8 = uart8
             self.last_exception_text = "none"
             self.heading_est = 0.0
@@ -162,11 +170,6 @@ def install_fake_transport_car(monkeypatch):
                 "omega": 0.0,
                 "has_omega": False,
             }
-            self._process_uart = self._original_process_uart
-
-        def _original_process_uart(self) -> None:
-            events.append("transport_process_uart")
-
         def mark_tick(self, tick=None) -> None:
             events.append(("mark_tick", tick))
 
@@ -197,6 +200,18 @@ def install_fake_transport_car(monkeypatch):
                 "vy": 0.0,
                 "omega": 0.0,
                 "angle": float(angle_deg),
+            }
+
+        def set_orbit_velocity_correction(self, vx: float, vy: float) -> None:
+            events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
+            self.control_state["vx"] = float(vx)
+            self.control_state["vy"] = float(vy)
+            self.last_chassis_target = {
+                "source": "master_orbit_vision",
+                "vx": float(vx),
+                "vy": float(vy),
+                "omega": self.control_state.get("omega", 0.0),
+                "has_omega": False,
             }
 
         def set_heading_target(self, angle_deg: float) -> None:
@@ -237,9 +252,6 @@ def install_fake_transport_car(monkeypatch):
                 "y": float(dy),
             }
 
-        def _handle_uart_line(self, line: str, source: str) -> None:
-            events.append(("handle_uart_line", source, line))
-
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
     monkeypatch.setitem(sys.modules, "core.runtime", core_module)
@@ -263,6 +275,21 @@ def install_fake_uart6_factory(monkeypatch, uart6=None):
     monkeypatch.setitem(sys.modules, "hardware", hardware_package)
     monkeypatch.setitem(sys.modules, "hardware.uart_bus", uart_bus_module)
     return calls, uart6
+
+
+def install_fake_startup_log(monkeypatch):
+    """注入启动日志桩并收集日志文本."""
+
+    logs = []
+    startup_log_module = ModuleType("utils.startup_log")
+
+    def _log(stage, detail=""):
+        logs.append("%s|%s" % (stage, detail))
+        return logs[-1]
+
+    setattr(startup_log_module, "log", _log)
+    monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
+    return logs
 
 
 def test_master_forward_runtime_keeps_remote_control_surface(monkeypatch) -> None:
@@ -314,74 +341,6 @@ def test_master_package_entry_builds_forward_runtime(monkeypatch) -> None:
     assert runtime.imu == "imu"
 
 
-def test_master_forward_runtime_applies_remote_v_packet_to_local_chassis(monkeypatch) -> None:
-    """UART3 收到速度短包后, 主车本地速度目标与遥控输入保持一致."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1.0,-2.5,0.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert runtime._transport_car.last_chassis_target == {
-        "source": "uart3",
-        "vx": 1.0,
-        "vy": -2.5,
-        "omega": 0.5,
-        "has_omega": True,
-    }
-    assert ("handle_velocity", "uart3", 1.0, -2.5, 0.5) in events
-    assert ("handle_uart_line", "uart3", "v,1.0,-2.5,0.5") not in events
-
-
-def test_master_forward_runtime_requires_structured_velocity_entry(monkeypatch) -> None:
-    """主车速度短包只调用共享底盘结构化速度入口."""
-
-    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1.0,-2.5,0.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-    runtime = forward_runtime_module.MasterForwardRuntime()
-    delattr(type(runtime._transport_car), "handle_velocity_packet")
-
-    runtime.step()
-
-    assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-    assert _reliable_messages(uart8) == []
-    assert runtime._transport_car.last_exception_text == "master role cycle failed"
-
-
-def test_master_forward_runtime_ignores_non_short_packet_text(monkeypatch) -> None:
-    """主车角色层只处理正式短包, 非短包文本不进入控制入口."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"omega=0.5\nx=1.0,y=2.0\ntext\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert _reliable_messages(uart8) == []
-    assert ("handle_uart_line", "uart3", "omega=0.5") not in events
-    assert ("handle_uart_line", "uart3", "x=1.0,y=2.0") not in events
-    assert ("handle_uart_line", "uart3", "text") not in events
-
-
-def test_master_forward_runtime_forwards_remote_v_packet_to_uart8(monkeypatch) -> None:
-    """UART3 收到速度短包后, 主车 UART8 前馈输出与底盘速度保持一致."""
-
-    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1,-2.50,0.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == ["v,1.0,-2.5,0.5\r\n"]
-
 def test_master_forward_runtime_forwards_zero_chassis_velocity_without_input(monkeypatch) -> None:
     """主车没有速度输入时, UART8 仍转发当前零底盘速度."""
 
@@ -393,78 +352,6 @@ def test_master_forward_runtime_forwards_zero_chassis_velocity_without_input(mon
     runtime.step()
 
     assert uart8.messages == ["v,0.0,0.0,0.0\r\n"]
-
-def test_master_forward_runtime_repeats_latest_uart3_forward_without_new_input(monkeypatch) -> None:
-    """UART3 无新速度短包时, 主车继续向 UART8 转发当前底盘速度."""
-
-    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1,-2.50,0.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-    runtime.step()
-
-    assert uart8.messages == ["v,1.0,-2.5,0.5\r\n", "v,1.0,-2.5,0.5\r\n"]
-
-def test_master_forward_runtime_accepts_v_packet_without_omega(monkeypatch) -> None:
-    """无 omega 的速度短包本地角速度按零量执行."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1.0,-2.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == ["v,1.0,-2.5,0.0\r\n"]
-    assert ("handle_velocity", "uart3", 1.0, -2.5, 0.0) in events
-
-def test_master_forward_runtime_rejects_non_short_packet_velocity_forward(monkeypatch) -> None:
-    """非短包速度文本不能作为主车正式转发入口."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"vx=1.0,vy=2.0\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == ["v,0.0,0.0,0.0\r\n"]
-    assert ("handle_velocity", "uart3", 1.0, 2.0, 0.0) not in events
-
-def test_master_forward_runtime_does_not_derive_angle_from_omega(monkeypatch) -> None:
-    """主车不会把角速度字段派生为 angle 转发."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"omega=0.5\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == ["v,0.0,0.0,0.0\r\n"]
-    assert ("handle_uart_line", "uart3", "omega=0.5") not in events
-
-def test_master_forward_runtime_ignores_non_short_packet_text(monkeypatch) -> None:
-    """主车角色层只处理正式短包, 非短包文本不进入控制入口."""
-
-    events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"omega=0.5\nx=1.0,y=2.0\ntext\n"
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert uart8.messages == ["v,0.0,0.0,0.0\r\n"]
-    assert ("handle_uart_line", "uart3", "omega=0.5") not in events
-    assert ("handle_uart_line", "uart3", "x=1.0,y=2.0") not in events
-    assert ("handle_uart_line", "uart3", "text") not in events
 
 def test_master_forward_runtime_forwards_uart6_velocity_when_uart6_controls_chassis(monkeypatch) -> None:
     """UART6 视觉速度控制主车底盘时, UART8 前馈同步转发底盘速度."""
@@ -488,8 +375,8 @@ def test_master_forward_runtime_forwards_uart6_velocity_when_uart6_controls_chas
     }
     assert uart8.messages == ["v,1.0,-2.0,0.0\r\n"]
 
-def test_master_forward_runtime_prefers_uart3_when_uart3_and_uart6_velocity_arrive_same_tick(monkeypatch) -> None:
-    """同一控制拍同时存在 UART3 与 UART6 速度时, UART3 控制本地底盘并决定前馈."""
+def test_master_forward_runtime_ignores_uart3_when_uart6_velocity_arrives(monkeypatch) -> None:
+    """UART3 作为 REPL 输入时, 主车本地速度使用 UART6 视觉输入."""
 
     _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -502,16 +389,17 @@ def test_master_forward_runtime_prefers_uart3_when_uart3_and_uart6_velocity_arri
     runtime.step()
 
     assert runtime._transport_car.last_chassis_target == {
-        "source": "uart3",
-        "vx": 3.0,
-        "vy": 4.0,
-        "omega": 0.7,
-        "has_omega": True,
+        "source": "uart6",
+        "vx": 1.0,
+        "vy": -2.0,
+        "omega": 0.0,
+        "has_omega": False,
     }
-    assert uart8.messages == ["v,3.0,4.0,0.7\r\n"]
+    assert uart3.any() > 0
+    assert uart8.messages == ["v,1.0,-2.0,0.0\r\n"]
 
-def test_master_forward_runtime_reuses_latest_uart6_velocity_without_new_uart3_input(monkeypatch) -> None:
-    """UART6 新文本非法且无 UART3 输入时, 底盘与前馈继续使用上一条合法视觉速度."""
+def test_master_forward_runtime_reuses_latest_uart6_velocity_without_new_input(monkeypatch) -> None:
+    """UART6 新文本非法时, 底盘与前馈继续使用上一条合法视觉速度."""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -639,13 +527,34 @@ def test_master_forward_runtime_repeats_state_sync_until_ack(monkeypatch) -> Non
     assert _reliable_messages(uart8) == ["s,0,3,1,0\r\n", "s,0,3,1,0\r\n"]
 
 
+def test_master_forward_runtime_logs_generic_sync_start_and_done(monkeypatch) -> None:
+    """主车对辅车的通用同步在首次发起和确认完成时各记一次日志."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+
+    seq = runtime.request_state_sync(3, 1, 0)
+    runtime.step()
+    uart8._buffer = ("a,%d\n" % seq).encode()
+    runtime.step()
+
+    sync_logs = [
+        message for message in logs if message.startswith("sync|master->assistant")
+    ]
+    assert sync_logs == [
+        "sync|master->assistant sync start seq=0 state=3 target=1 arg=0",
+        "sync|master->assistant sync done seq=0 state=3 target=1 arg=0",
+    ]
+
+
 def test_master_forward_runtime_skips_uart8_velocity_when_sync_is_sent(
     monkeypatch,
 ) -> None:
     """主车同一拍发 UART8 可靠同步时不再发速度前馈."""
 
-    _events, uart3, uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"v,1.0,2.0,0.5\n"
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
     runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0))
 
@@ -735,6 +644,39 @@ def test_master_forward_runtime_stops_resending_uart6_hook_after_ack(monkeypatch
 
     expected_message = _hook_sync_message(forward_runtime_module)
     assert uart6.messages == [expected_message, expected_message]
+
+
+def test_master_forward_runtime_logs_hook_sync_start_and_done(monkeypatch) -> None:
+    """主车对摄像头的 hook 同步在首次发起和确认完成时各记一次日志."""
+
+    _events, _uart3, _uart8 = install_fake_transport_car(monkeypatch)
+    logs = install_fake_startup_log(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+
+    runtime.step()
+    uart6._buffer = b"a,1\n"
+    runtime.step()
+
+    sync_logs = [message for message in logs if message.startswith("sync|")]
+    assert sync_logs == [
+        (
+            "sync|master->camera sync start seq=1 context=1 state=%d target=1 arg=%d"
+            % (
+                forward_runtime_module.STATE_SEARCH_OBJECT,
+                forward_runtime_module.MASTER_SEARCH_HOOK_CONFIG_ID,
+            )
+        ),
+        (
+            "sync|master->camera sync done seq=1 context=1 state=%d target=1 arg=%d"
+            % (
+                forward_runtime_module.STATE_SEARCH_OBJECT,
+                forward_runtime_module.MASTER_SEARCH_HOOK_CONFIG_ID,
+            )
+        ),
+    ]
 
 
 def test_master_forward_runtime_old_uart6_ack_does_not_cancel_unsent_new_hook(monkeypatch) -> None:
@@ -933,7 +875,7 @@ def test_master_forward_runtime_stops_search_velocity_while_waiting_assistant_id
     }
 
     event_count = len(events)
-    uart6._buffer = b"v,3.0,4.0\n"
+    uart6._buffer = b"a,128\nv,3.0,4.0\n"
     runtime.step()
 
     assert ("handle_velocity", "uart6", 3.0, 4.0, 0.0) not in events[event_count:]
@@ -1044,12 +986,13 @@ def test_master_forward_runtime_assistant_orbit_sync_does_not_stop_assistant(mon
     }
     assert runtime.last_report == {"type": "r", "seq": 9, "event": 6, "value": 300}
 
-def test_master_forward_runtime_ignores_uart6_search_velocity_after_orbiting(monkeypatch) -> None:
-    """进入绕行态后, 主车不再应用 UART6 搜索速度."""
+def test_master_forward_runtime_applies_uart6_velocity_as_orbit_correction(monkeypatch) -> None:
+    """进入绕行态后, UART6 速度作为绕行视觉修正生效."""
 
     events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    forward_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = True
 
     runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
     runtime.step()
@@ -1065,22 +1008,118 @@ def test_master_forward_runtime_ignores_uart6_search_velocity_after_orbiting(mon
         "omega": 0.0,
         "has_omega": False,
     }
-    uart6._buffer = b"v,3.0,4.0\n"
+    uart6._buffer = b"a,128\nv,3.0,4.0\n"
 
     runtime.step()
 
     assert runtime._transport_car.last_chassis_target == {
-        "source": None,
-        "vx": 0.0,
-        "vy": 0.0,
+        "source": "master_orbit_vision",
+        "vx": 3.0,
+        "vy": 4.0,
         "omega": 0.0,
         "has_omega": False,
     }
     assert ("handle_velocity", "uart6", 3.0, 4.0, 0.0) not in events[event_count:]
+    assert ("set_orbit_velocity_correction", 3.0, 4.0) in events[event_count:]
 
 
-def test_master_forward_runtime_ignores_uart3_velocity_during_orbiting(monkeypatch) -> None:
-    """绕行期间不接受新的 UART3 速度覆盖绕行控制."""
+def test_master_forward_runtime_sends_orbit_vision_hook_when_orbit_starts(monkeypatch) -> None:
+    """主车进入绕行态时向本车视觉同步绕行修正配置."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+
+    runtime.step()
+
+    assert _orbit_hook_sync_message(forward_runtime_module) in uart6.messages
+
+
+def test_master_forward_runtime_orbit_vision_hook_uses_new_context(monkeypatch) -> None:
+    """主车绕行视觉同步使用新上下文, 避免被 OpenART 当作搜索同步重复包."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+    runtime.step()
+    search_sync = _reliable_messages(uart6)[-1]
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+
+    runtime.step()
+
+    orbit_sync = [message for message in _reliable_messages(uart6) if message.startswith("s,128,")][-1]
+    search_context = int(search_sync.strip().split(",")[2])
+    orbit_context = int(orbit_sync.strip().split(",")[2])
+    assert orbit_context == (search_context + 1) % 256
+
+
+def test_master_forward_runtime_orbit_vision_switch_only_disables_motion_correction(monkeypatch) -> None:
+    """关闭绕行视觉修正时, 主车仍建立视觉 hook, 但不写入运动修正."""
+
+    events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    forward_runtime_module.ORBIT_VISION_CORRECTION_ENABLED = False
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    event_count = len(events)
+    uart6._buffer = b"a,128\nv,3.0,4.0\n"
+
+    runtime.step()
+
+    assert _orbit_hook_sync_message(forward_runtime_module) in uart6.messages
+    assert not any(event[0] == "set_orbit_velocity_correction" for event in events[event_count:])
+    assert runtime._latest_uart6_velocity == {
+        "type": "v",
+        "vx": 3.0,
+        "vy": 4.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_forward_runtime_stale_orbit_hook_ack_does_not_ack_post_orbit_hook(
+    monkeypatch,
+) -> None:
+    """绕行视觉 ACK 不能误确认绕行后的搜索 hook."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60))
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    uart6._buffer = b"a,128\n"
+
+    runtime.step()
+
+    assert runtime._pending_hook is not None
+    assert runtime._pending_hook["state"] == forward_runtime_module.STATE_SEARCH_OBJECT
+    assert runtime._pending_hook["reliable_seq"] == 2
+
+
+def test_master_forward_runtime_keeps_orbiting_when_uart3_has_repl_input(monkeypatch) -> None:
+    """绕行期间 UART3 输入只留给 REPL."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1098,6 +1137,7 @@ def test_master_forward_runtime_ignores_uart3_velocity_during_orbiting(monkeypat
     runtime.step()
 
     assert ("handle_velocity", "uart3", 3.0, 4.0, 0.7) not in events[event_count:]
+    assert uart3.any() > 0
     assert runtime._transport_car.command_lock is True
     assert runtime._transport_car.orbit_mode is True
 
@@ -1204,7 +1244,9 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
     forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
 
-    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120, 140))
+    runtime = forward_runtime_module.MasterForwardRuntime(
+        now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120, 140, 160)
+    )
     runtime.step()
     uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
     runtime.step()
@@ -1332,7 +1374,7 @@ def test_master_forward_runtime_uses_configured_transport_hook_id_after_orbit(
 
     runtime.step()
 
-    assert "s,2,2,1,1,9\r\n" in uart6.messages
+    assert "s,2,3,1,1,9\r\n" in uart6.messages
 
 
 def test_master_forward_runtime_reapplies_uart6_search_velocity_after_orbit_finishes(
@@ -1514,23 +1556,6 @@ def test_master_forward_runtime_limits_single_uart6_read_size(monkeypatch) -> No
     assert max(uart6.read_sizes) <= 128
 
 
-def test_master_forward_runtime_clears_oversized_uart3_input_buffer_and_records_invalid_input(
-    monkeypatch,
-) -> None:
-    """UART3 输入缓存超过固定上限时会被清空并记录输入无效。"""
-
-    _events, uart3, _uart8 = install_fake_transport_car(monkeypatch)
-    uart3._buffer = b"x" * 129
-    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
-
-    runtime = forward_runtime_module.MasterForwardRuntime()
-
-    runtime.step()
-
-    assert runtime._rx_buf3 == ""
-    assert runtime._transport_car.last_exception_text == "invalid uart3 input"
-
-
 def test_master_forward_runtime_clears_oversized_uart8_input_buffer_and_records_invalid_input(
     monkeypatch,
 ) -> None:
@@ -1567,7 +1592,7 @@ def test_master_forward_runtime_keeps_transport_step_when_uart6_read_fails(monke
 
 
 def test_master_forward_runtime_does_not_emit_uart3_debug_line(monkeypatch) -> None:
-    """主车运行时不再额外输出调试行到 UART3."""
+    """主车运行时不向 UART3 输出调试行."""
 
     _events, uart3, _uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, _uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1577,11 +1602,11 @@ def test_master_forward_runtime_does_not_emit_uart3_debug_line(monkeypatch) -> N
 
     runtime.step()
 
-    assert uart3.messages == ["start\r\n"]
+    assert uart3.messages == []
 
 
-def test_master_forward_runtime_prints_start_to_uart3_on_boot(monkeypatch) -> None:
-    """主车运行时初始化时向 UART3 输出 start."""
+def test_master_forward_runtime_does_not_print_start_to_uart3_on_boot(monkeypatch) -> None:
+    """主车运行时初始化不写 UART3."""
 
     _events, uart3, _uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, _uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1589,7 +1614,7 @@ def test_master_forward_runtime_prints_start_to_uart3_on_boot(monkeypatch) -> No
 
     forward_runtime_module.MasterForwardRuntime()
 
-    assert uart3.messages[0] == "start\r\n"
+    assert uart3.messages == []
 
 
 def test_master_forward_runtime_does_not_enter_transport_before_front_half_finishes(
@@ -1644,7 +1669,7 @@ def test_master_forward_runtime_enters_transport_after_both_aligned_and_applies_
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
 
     runtime.step()
@@ -1700,7 +1725,7 @@ def test_master_forward_runtime_transport_adds_uart6_visual_correction(
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
@@ -1721,10 +1746,10 @@ def test_master_forward_runtime_transport_adds_uart6_visual_correction(
     assert uart8.messages[-1] == "v,0.5,2.75,0.0\r\n"
 
 
-def test_master_forward_runtime_transport_ignores_uart3_override(
+def test_master_forward_runtime_transport_ignores_uart3_repl_input(
     monkeypatch,
 ) -> None:
-    """搬运态忽略新的 UART3 速度覆盖."""
+    """搬运态 UART3 输入只留给 REPL."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -1743,7 +1768,7 @@ def test_master_forward_runtime_transport_ignores_uart3_override(
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
@@ -1756,6 +1781,7 @@ def test_master_forward_runtime_transport_ignores_uart3_override(
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_TRANSPORT_OBJECT
     assert ("handle_velocity", "uart3", 9.0, 8.0, 0.7) not in events[event_count:]
+    assert uart3.any() > 0
     assert runtime._transport_car.last_chassis_target == {
         "source": "master_transport",
         "vx": 0.0,
@@ -1789,7 +1815,7 @@ def test_master_forward_runtime_transport_clears_stale_uart6_velocity_before_tra
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
 
@@ -1820,7 +1846,7 @@ def test_master_forward_runtime_transport_sync_sent_before_first_transport_feedf
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
 
@@ -1851,7 +1877,7 @@ def test_master_forward_runtime_master_aligned_stops_before_transport(
     runtime.step()
     runtime._transport_car.command_lock = False
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
 
     runtime.step()
 
@@ -1883,7 +1909,7 @@ def test_master_forward_runtime_master_aligned_ignores_new_uart6_search_velocity
     runtime.step()
     runtime._transport_car.command_lock = False
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     event_count = len(events)
     uart6._buffer = b"v,0.5,-0.25\n"
@@ -1922,7 +1948,7 @@ def test_master_forward_runtime_transport_ready_sends_finish_hook(
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
@@ -1956,13 +1982,13 @@ def test_master_forward_runtime_arrived_event_enters_clear_phase_and_syncs_assis
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
     runtime.step()
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
 
     runtime.step()
 
@@ -2007,13 +2033,13 @@ def test_master_forward_runtime_clear_sync_ack_starts_master_retreat_step(
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
     runtime.step()
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     uart8._buffer = b"a,9\n"
 
@@ -2049,13 +2075,13 @@ def test_master_forward_runtime_retreat_completion_waits_assistant_cleared_befor
     runtime.step()
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
     runtime.step()
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     uart8._buffer = b"a,9\n"
     runtime.step()
@@ -2105,7 +2131,7 @@ def test_master_forward_runtime_both_retreats_complete_then_start_turn_back(
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2113,7 +2139,7 @@ def test_master_forward_runtime_both_retreats_complete_then_start_turn_back(
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2182,7 +2208,7 @@ def test_master_forward_runtime_turn_back_completion_syncs_forward_phase(
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2190,7 +2216,7 @@ def test_master_forward_runtime_turn_back_completion_syncs_forward_phase(
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2278,7 +2304,7 @@ def test_master_forward_runtime_forward_sync_ack_starts_master_forward_step(
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2286,7 +2312,7 @@ def test_master_forward_runtime_forward_sync_ack_starts_master_forward_step(
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2354,7 +2380,7 @@ def test_master_forward_runtime_forward_step_keeps_turn_back_target_heading(
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2362,7 +2388,7 @@ def test_master_forward_runtime_forward_step_keeps_turn_back_target_heading(
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2433,7 +2459,7 @@ def test_master_forward_runtime_waits_after_master_forward_done_without_restarti
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2441,7 +2467,7 @@ def test_master_forward_runtime_waits_after_master_forward_done_without_restarti
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2512,7 +2538,7 @@ def test_master_forward_runtime_forward_completion_restarts_search_and_waits_fol
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2520,7 +2546,7 @@ def test_master_forward_runtime_forward_completion_restarts_search_and_waits_fol
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2580,7 +2606,7 @@ def test_master_forward_runtime_forward_completion_restarts_search_and_waits_fol
     runtime.step()
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
-    assert _hook_sync_message(forward_runtime_module, seq=5, context_id=4) in uart6.messages
+    assert _hook_sync_message(forward_runtime_module, seq=5, context_id=5) in uart6.messages
     assert _assistant_sync_message(
         13,
         forward_runtime_module.ASSISTANT_FOLLOW_SYNC_STATE,
@@ -2640,7 +2666,7 @@ def test_master_forward_runtime_turn_back_wait_is_non_blocking(monkeypatch) -> N
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2648,7 +2674,7 @@ def test_master_forward_runtime_turn_back_wait_is_non_blocking(monkeypatch) -> N
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2676,10 +2702,10 @@ def test_master_forward_runtime_turn_back_wait_is_non_blocking(monkeypatch) -> N
     )
 
 
-def test_master_forward_runtime_prints_turn_heading_to_uart3_while_turn_back_active(
+def test_master_forward_runtime_does_not_print_turn_heading_to_uart3_while_turn_back_active(
     monkeypatch,
 ) -> None:
-    """主车转身阶段持续向 UART3 输出当前角度调试信息."""
+    """主车转身阶段不向 UART3 输出当前角度调试信息."""
 
     events, uart3, uart8 = install_fake_transport_car(monkeypatch)
     _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
@@ -2702,7 +2728,7 @@ def test_master_forward_runtime_prints_turn_heading_to_uart3_while_turn_back_act
     uart8._buffer = b"a,3\nr,11,6,300\n"
     runtime.step()
     clock.value = 100
-    uart6._buffer = ("a,2\nr,13,2,%d,0\n" % EVENT_ALIGNED).encode()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
     clock.value = 120
@@ -2710,7 +2736,7 @@ def test_master_forward_runtime_prints_turn_heading_to_uart3_while_turn_back_act
     uart6._buffer = b"a,3\n"
     runtime.step()
     clock.value = 140
-    uart6._buffer = ("a,4\nr,17,3,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
+    uart6._buffer = ("a,4\nr,17,4,%d,0\n" % forward_runtime_module.EVENT_ARRIVED).encode()
     runtime.step()
     clock.value = 160
     uart8._buffer = b"a,9\n"
@@ -2732,10 +2758,10 @@ def test_master_forward_runtime_prints_turn_heading_to_uart3_while_turn_back_act
     clock.value = 240
     runtime.step()
 
-    assert uart3.messages[-1] == "turn_heading,33.50\r\n"
+    assert uart3.messages == []
 
     runtime._transport_car.heading_est = 35.0
     clock.value = 260
     runtime.step()
 
-    assert uart3.messages[-1] == "turn_heading,35.00\r\n"
+    assert uart3.messages == []

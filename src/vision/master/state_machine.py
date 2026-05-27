@@ -4,6 +4,7 @@
 """
 
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
+from utils.startup_log import log
 
 ASSISTANT_IDLE_SYNC_STATE = 0
 ASSISTANT_IDLE_SYNC_TARGET = 0
@@ -25,6 +26,14 @@ STATE_ORBITING = 2
 STATE_STOP = 3
 STATE_TRANSPORT_OBJECT = 4
 STATE_CLEAR_OBJECT = 5
+_STATE_NAMES = (
+    "IDLE",
+    "SEARCH_OBJECT",
+    "ORBITING",
+    "STOP",
+    "TRANSPORT_OBJECT",
+    "CLEAR_OBJECT",
+)
 
 # 主车目标编号
 TARGET_NONE = 0
@@ -81,6 +90,15 @@ class MasterStateMachine:
         self._master_cleared = False
         self._assistant_cleared = False
 
+    def _enter_state(self, state):
+        """进入主车全局状态并输出一次跳转日志"""
+
+        state = int(state)
+        if self.state == state:
+            return
+        self.state = state
+        log("master_state", _STATE_NAMES[state])
+
     def step(self, orbit_finished):
         """推进单拍状态机"""
 
@@ -90,7 +108,7 @@ class MasterStateMachine:
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
-            self.state = STATE_SEARCH_OBJECT
+            self._enter_state(STATE_SEARCH_OBJECT)
             self._orbit_completed = True
             self._master_aligned = False
             self._assistant_aligned = False
@@ -144,7 +162,7 @@ class MasterStateMachine:
         if self.state == STATE_TRANSPORT_OBJECT:
             if event != EVENT_ARRIVED:
                 return
-            self.state = STATE_CLEAR_OBJECT
+            self._enter_state(STATE_CLEAR_OBJECT)
             self._enter_clear_phase(CLEAR_PHASE_RETREAT)
             return
         if self.state == STATE_CLEAR_OBJECT:
@@ -155,7 +173,8 @@ class MasterStateMachine:
 
         if self._waiting_assistant_idle_ack:
             self._waiting_assistant_idle_ack = False
-            self.state = STATE_ORBITING
+            self._current_context_id = (self._current_context_id + 1) % 256
+            self._enter_state(STATE_ORBITING)
             self._pending_orbit_command = {
                 "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
             }
@@ -220,7 +239,7 @@ class MasterStateMachine:
         if not self._master_aligned or not self._assistant_aligned:
             return
         self._transport_ready = True
-        self.state = STATE_TRANSPORT_OBJECT
+        self._enter_state(STATE_TRANSPORT_OBJECT)
         self._current_context_id = (self._current_context_id + 1) % 256
         self._pending_hook_request = {
             "kind": "finish_hook",
@@ -298,7 +317,7 @@ class MasterStateMachine:
         self._clear_phase = CLEAR_PHASE_NONE
         self._master_cleared = False
         self._assistant_cleared = False
-        self.state = STATE_SEARCH_OBJECT
+        self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_hook(self._hook_arg)
         self._pending_assistant_request = {
             "kind": "assistant_follow",
@@ -343,7 +362,7 @@ class MasterStateMachine:
     def _enter_search_with_hook(self, hook_arg):
         """创建新一轮主车找物体 hook 上下文"""
 
-        self.state = STATE_SEARCH_OBJECT
+        self._enter_state(STATE_SEARCH_OBJECT)
         self._current_context_id = (self._current_context_id + 1) % 256
         self._pending_hook_request = {
             "context_id": self._current_context_id,

@@ -220,7 +220,7 @@ def install_transport_car_stubs() -> None:
     sys.modules["utils.quaternion"] = utils_quaternion
 
     utils_startup_log = ModuleType("utils.startup_log")
-    setattr(utils_startup_log, "startup_log", lambda *_args, **_kwargs: None)
+    setattr(utils_startup_log, "log", lambda *_args, **_kwargs: None)
     sys.modules["utils.startup_log"] = utils_startup_log
 
     hardware_uart_bus = ModuleType("hardware.uart_bus")
@@ -317,8 +317,11 @@ def install_transport_car_stubs() -> None:
         "MASTER_SEARCH_HOOK_CONFIG_ID": 1,
         "MASTER_TRANSPORT_HOOK_CONFIG_ID": 2,
         "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID": 3,
+        "MASTER_ORBIT_HOOK_CONFIG_ID": 4,
         "ASSISTANT_APPROACH_OBJECT_CONFIG_ID": 1,
         "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID": 2,
+        "ASSISTANT_ORBIT_OBJECT_CONFIG_ID": 3,
+        "ORBIT_VISION_CORRECTION_ENABLED": True,
         "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE": 1.0,
         "ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS": 20,
     }
@@ -333,7 +336,6 @@ def install_transport_car_stubs() -> None:
         "UART3_PORT_ID": 2,
         "UART6_PORT_ID": 5,
         "UART8_PORT_ID": 7,
-        "MASTER_UART3_INPUT_LIMIT": 128,
         "MASTER_UART6_INPUT_LIMIT": 128,
         "MASTER_UART8_INPUT_LIMIT": 128,
         "ASSISTANT_UART_INPUT_LIMIT": 32,
