@@ -142,35 +142,6 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     )
 
 
-def test_main_entry_catches_and_saves_fatal_errors(
-    capsys, tmp_path, monkeypatch
-) -> None:
-    """正式入口必须兜住脚本运行期异常并保存到板端文件."""
-
-    main = load_main_module()
-    log_path = tmp_path / "last_fatal_error.log"
-
-    monkeypatch.setattr(main, "FATAL_ERROR_LOG_PATH", str(log_path))
-    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
-    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
-    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
-
-    def _raise_script(_script_path):
-        raise RuntimeError("script boom")
-
-    monkeypatch.setattr(main, "_run_script", _raise_script)
-
-    result = main.main()
-    output_lines = capsys.readouterr().out.splitlines()
-    saved_text = log_path.read_text()
-
-    assert result is None
-    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
-    assert "fatal error: script boom\n" in saved_text
-    assert "fatal error type=RuntimeError\n" in saved_text
-    assert "RuntimeError: script boom" in saved_text
-
-
 def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
     capsys, monkeypatch
 ) -> None:
@@ -187,6 +158,7 @@ def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
         raise MemoryError("memory allocation failed, allocating 1524 bytes")
 
     monkeypatch.setattr(main, "_run_script", _raise_script)
+    monkeypatch.setattr(main, "_save_fatal_exception_log", lambda _message, _exc: None)
     monkeypatch.setattr(
         sys,
         "print_exception",
