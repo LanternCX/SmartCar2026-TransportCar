@@ -9,7 +9,8 @@
 ## 主要入口
 
 - 启动入口: [src/main.py](src/main.py)
-- 运行脚本: [src/script/remote_control.py](src/script/remote_control.py)
+- 正式运行脚本: [src/script/remote_control.py](src/script/remote_control.py)
+- 板端测试入口: [src/script/test.py](src/script/test.py)
 - 共享底盘: [src/core/runtime.py](src/core/runtime.py)
 - 主车角色: [src/vision/master/](src/vision/master/)
 - 辅车角色: [src/vision/assistant/](src/vision/assistant/)

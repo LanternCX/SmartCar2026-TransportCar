@@ -6,8 +6,9 @@
 
 ## 外部约定
 
-- 正式入口是 [src/main.py](../../src/main.py)，默认运行脚本是 [src/script/remote_control.py](../../src/script/remote_control.py)。
-- 长按 `C8` 上电进入参数辨识脚本，长按 `C9` 上电进入陀螺仪校准脚本，不按按钮进入正式运行脚本。
+- 正式入口是 [src/main.py](../../src/main.py)，不按按钮进入 [src/script/remote_control.py](../../src/script/remote_control.py)。
+- 长按 `C8` 上电进入参数辨识脚本，长按 `C9` 上电进入陀螺仪校准脚本。
+- `src/config/startup.py` 开启测试模式时，不按按钮进入 [src/script/test.py](../../src/script/test.py)。
 - 主车和辅车身份由车号读取结果决定，不由启动按钮决定。
 - `UART3` 用作 REPL 与现场调试链路，`UART8` 用作主辅直连链路，两台车各自用本车 `UART6` 连接本车 OpenART。
 - 陀螺仪零飘结果保存到 `/flash/gyro_offset.txt`，电机辨识结果保存到 `/flash/ident_params.txt`。
@@ -16,11 +17,12 @@
 
 1. 入口分发: [src/main.py](../../src/main.py)
 2. 正式控制循环: [src/script/remote_control.py](../../src/script/remote_control.py)
-3. 角色选择: [src/vision/vehicle_role.py](../../src/vision/vehicle_role.py)
-4. 共享底盘执行内核: [src/core/runtime.py](../../src/core/runtime.py)
-5. 主车角色运行时: [src/vision/master/forward_runtime.py](../../src/vision/master/forward_runtime.py)
-6. 辅车角色运行时: [src/vision/assistant/follow_runtime.py](../../src/vision/assistant/follow_runtime.py)
-7. 运动、通信、视觉、安全和存储参数: [src/config/](../../src/config/)
+3. 板端测试入口: [src/script/test.py](../../src/script/test.py)
+4. 角色选择: [src/vision/vehicle_role.py](../../src/vision/vehicle_role.py)
+5. 共享底盘执行内核: [src/core/runtime.py](../../src/core/runtime.py)
+6. 主车角色运行时: [src/vision/master/forward_runtime.py](../../src/vision/master/forward_runtime.py)
+7. 辅车角色运行时: [src/vision/assistant/follow_runtime.py](../../src/vision/assistant/follow_runtime.py)
+8. 运动、通信、视觉、安全和存储参数: [src/config/](../../src/config/)
 
 ## 行为事实入口
 

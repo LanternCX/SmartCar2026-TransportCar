@@ -24,6 +24,7 @@ def _allocate_emergency_exception_buffer() -> bool:
 _allocate_emergency_exception_buffer()
 
 from config import safety as safety_params
+from config import startup as startup_params
 from utils.startup_log import log
 
 # 启动后等待时间, 等待外设稳定
@@ -41,6 +42,8 @@ SCRIPT_PID_IDENTIFY = "script/pid_identify.py"
 SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
 # 遥控主脚本路径
 SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
+# 板端测试入口脚本路径
+SCRIPT_TEST_ENTRY = "script/test.py"
 # 致命异常保存路径
 FATAL_ERROR_LOG_PATH = "last_fatal_error.log"
 
@@ -97,6 +100,8 @@ def resolve_startup_script(key_states):
         return SCRIPT_PID_IDENTIFY
     if key2_held:
         return SCRIPT_CALIBRATE_GYRO
+    if bool(startup_params.STARTUP_TEST_MODE):
+        return SCRIPT_TEST_ENTRY
     return SCRIPT_REMOTE_CONTROL
 
 

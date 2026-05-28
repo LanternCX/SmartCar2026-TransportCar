@@ -20,6 +20,7 @@ def load_main_module():
 
     sys.modules.pop("config", None)
     sys.modules.pop("config.safety", None)
+    sys.modules.pop("config.startup", None)
     sys.modules.pop("utils.startup_log", None)
     spec = spec_from_file_location("transport_main_entry", MAIN_PATH)
     assert spec is not None
@@ -87,6 +88,16 @@ def test_resolve_startup_script_defaults_to_remote_control() -> None:
     main = load_main_module()
 
     assert main.resolve_startup_script([0, 0, 0, 0]) == "script/remote_control.py"
+
+
+def test_resolve_startup_script_uses_test_entry_when_config_enabled() -> None:
+    """配置开启测试模式时进入测试入口."""
+
+    main = load_main_module()
+
+    main.startup_params.STARTUP_TEST_MODE = True
+
+    assert main.resolve_startup_script([0, 0, 0, 0]) == "script/test.py"
 
 
 def test_resolve_startup_script_rejects_dual_long_press() -> None:
