@@ -49,3 +49,19 @@ uv sync --group board
 uv run --group board mpy-cli plan
 bash build.sh
 ```
+
+## 板端版本备忘
+
+`/dev/cu.usbmodem101` 实测为 RT1021 MicroPython 板端：
+
+- MicroPython: `v1.20.0`
+- 固件标识: `RT1021 MicroPython by NXP & SeekFree with CoreBoard-144Pin-BTB V3.1.0`
+- 平台: `mimxrt`
+- `.mpy` 版本: `version=6`, `sub-version=1`
+- `.mpy` native 架构: `armv7emdp`
+
+因此交叉编译配置应使用：
+
+```toml
+mpy_cross_arch = "armv7emdp"
+```
