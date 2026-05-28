@@ -167,6 +167,19 @@ def test_master_uart8_packet_has_dedicated_ack_and_event_parser() -> None:
     }
 
 
+def test_uart8_turn_packet_is_dedicated_half_duplex_turn_signal() -> None:
+    """! @brief UART8 轮转包只表达主车让出辅车回话窗口"""
+
+    format_master_uart8_turn_packet = getattr(
+        _master_uart8_module, "format_turn_packet", None
+    )
+    assert format_master_uart8_turn_packet is not None
+    assert format_master_uart8_turn_packet() == "t"
+    assert parse_assistant_uart8_short_packet("t") == {"type": "t"}
+    assert parse_master_uart8_short_packet("t") is None
+    assert parse_short_packet("t") is None
+
+
 def test_non_short_packet_velocity_text_is_outside_short_packet_protocol() -> None:
     """! @brief 非短包速度文本不属于正式短包协议"""
 

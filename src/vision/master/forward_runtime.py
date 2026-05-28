@@ -16,6 +16,7 @@ from protocol.packet import (
     parse_short_packet,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
+from vision.master.uart8_packet import format_turn_packet
 from vision.master.uart8_packet import parse_short_packet as parse_uart8_short_packet
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
@@ -549,8 +550,10 @@ class MasterForwardRuntime:
                     state.get("vy", 0.0),
                     omega,
                 )
+        elif self._state_machine.needs_assistant_report_turn():
+            line = format_turn_packet()
         elif self._state_machine.state == STATE_CLEAR_OBJECT:
-            line = format_velocity_packet(0.0, 0.0, 0.0)
+            line = format_turn_packet()
         else:
             return
         self._write_forward_line(line, expects_reply=True)

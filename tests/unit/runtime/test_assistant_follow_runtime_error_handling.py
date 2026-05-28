@@ -181,6 +181,7 @@ def test_assistant_follow_runtime_catches_uart8_reliable_ack_write_error(
     runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=lambda: 100)
 
     runtime.step()
+    runtime.step()
     snapshot = runtime.build_follow_snapshot()
 
     assert runtime._sync_apply_count == 1
@@ -258,6 +259,8 @@ def test_assistant_follow_runtime_parses_reliable_packet_before_uart8_overflow_t
     snapshot = runtime.build_follow_snapshot()
 
     assert runtime._sync_apply_count == 1
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
     assert uart8._buffer == b""
     assert snapshot["assistant_state"] == follow_runtime_module.ASSISTANT_STATE_FOLLOW

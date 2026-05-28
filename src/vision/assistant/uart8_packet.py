@@ -25,6 +25,8 @@ def parse_short_packet(line):
         return _parse_ack(fields)
     if packet_type == "r":
         return _parse_event(fields)
+    if packet_type == "t":
+        return _parse_turn(fields)
     return None
 
 
@@ -77,6 +79,14 @@ def _parse_event(fields):
     if seq is None or event is None or value is None:
         return None
     return {"type": "r", "seq": seq, "event": event, "value": value}
+
+
+def _parse_turn(fields):
+    """解析 UART8 半双工轮转短包"""
+
+    if len(fields) != 1:
+        return None
+    return {"type": "t"}
 
 
 def format_state_sync_packet(seq, state, target, arg):

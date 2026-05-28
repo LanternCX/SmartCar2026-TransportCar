@@ -25,6 +25,12 @@ def parse_short_packet(line):
     return None
 
 
+def format_turn_packet():
+    """格式化 UART8 半双工轮转短包"""
+
+    return "t"
+
+
 def _parse_ack(fields):
     """解析主车 UART8 确认短包
 

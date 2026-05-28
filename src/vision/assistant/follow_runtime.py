@@ -120,6 +120,8 @@ class AssistantFollowRuntime:
         self._clear_completed = False
         self._clear_stop_ticks = 0
         self._uart8_sent_this_cycle = False
+        self._pending_forward_ack_line = None
+        self._pending_forward_report_turn = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -154,6 +156,8 @@ class AssistantFollowRuntime:
         """执行角色层单拍流程"""
 
         self._uart8_sent_this_cycle = False
+        self._send_pending_forward_ack_if_idle()
+        self._send_pending_target_found_report_if_turn_idle()
         self._process_input("uart6")
         self._process_input("uart8")
         self._send_pending_local_vision_sync()
@@ -258,7 +262,6 @@ class AssistantFollowRuntime:
             if source == "uart8" and self._handle_uart8_control_packet(line, uart):
                 self._mark_input_valid(source)
                 handled_valid = True
-                self._maybe_send_pending_target_found_report_on_uart8_turn()
                 if input_overflow:
                     self._discard_pending_input(source, uart)
                     state["buffer"] = ""
@@ -280,7 +283,6 @@ class AssistantFollowRuntime:
                 else:
                     self._mark_input_valid(source)
                 if source == "uart8":
-                    self._maybe_send_pending_target_found_report_on_uart8_turn()
                     if input_overflow:
                         self._discard_pending_input(source, uart)
                         state["buffer"] = ""
@@ -336,6 +338,9 @@ class AssistantFollowRuntime:
             return True
         if packet.get("type") == "r":
             return True
+        if packet.get("type") == "t":
+            self._pending_forward_report_turn = True
+            return True
         return False
 
     def _handle_sync_packet(self, line: str, uart) -> bool:
@@ -347,10 +352,10 @@ class AssistantFollowRuntime:
         seq = int(packet["seq"])
         is_new_sync = self._last_sync_seq is None or is_newer_seq(seq, self._last_sync_seq)
         if self._last_sync_seq is not None and seq == self._last_sync_seq:
-            self._write_forward_reliable_line(format_ack_packet(seq))
+            self._schedule_forward_ack(seq)
             return True
         if not is_new_sync and seq != self._last_sync_seq:
-            self._write_forward_reliable_line(format_ack_packet(seq))
+            self._schedule_forward_ack(seq)
             return True
         accepted = self._apply_sync_context(packet)
         if not accepted:
@@ -365,7 +370,7 @@ class AssistantFollowRuntime:
             self._last_sync_seq = seq
             self._sync_apply_count += 1
             self._log_master_sync_done(packet)
-        self._write_forward_reliable_line(format_ack_packet(seq))
+        self._schedule_forward_ack(seq)
         return True
 
     def _apply_sync_context(self, packet: dict) -> bool:
@@ -844,10 +849,44 @@ class AssistantFollowRuntime:
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
-    def _maybe_send_pending_target_found_report_on_uart8_turn(self) -> None:
+    def _send_pending_target_found_report_if_turn_idle(self) -> None:
+        if not self._pending_forward_report_turn:
+            return
         if self._uart8_sent_this_cycle:
             return
+        uart = self._inputs["uart8"]["uart"]
+        if uart is None:
+            self._pending_forward_report_turn = False
+            return
+        try:
+            if uart.any():
+                return
+        except Exception as exc:
+            self._inputs["uart8"]["status"] = "error"
+            self._record_error("uart8 any failed", exc)
+            return
+        self._pending_forward_report_turn = False
         self._send_pending_target_found_report()
+
+    def _schedule_forward_ack(self, seq: int) -> None:
+        self._pending_forward_ack_line = format_ack_packet(seq)
+
+    def _send_pending_forward_ack_if_idle(self) -> None:
+        line = self._pending_forward_ack_line
+        if line is None:
+            return
+        uart = self._inputs["uart8"]["uart"]
+        if uart is None:
+            return
+        try:
+            if uart.any():
+                return
+        except Exception as exc:
+            self._inputs["uart8"]["status"] = "error"
+            self._record_error("uart8 any failed", exc)
+            return
+        if self._write_forward_reliable_line(line):
+            self._pending_forward_ack_line = None
 
     def _write_forward_reliable_line(self, line: str) -> bool:
         uart = self._inputs["uart8"]["uart"]

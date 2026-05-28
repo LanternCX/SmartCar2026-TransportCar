@@ -260,7 +260,7 @@ def test_assistant_follow_runtime_consumes_short_packet_directly(
 
 
 def test_assistant_follow_runtime_records_sync_context_and_replies_ack(monkeypatch) -> None:
-    """! @brief 辅车收到 UART8 状态同步短包后记录上下文并回复 ACK"""
+    """! @brief 辅车收到 UART8 状态同步短包后记录上下文并在下一拍回复 ACK"""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     uart8._buffer = b"s,12,1,1,0\n"
@@ -273,6 +273,10 @@ def test_assistant_follow_runtime_records_sync_context_and_replies_ack(monkeypat
     runtime.step()
 
     assert runtime.sync_context == {"seq": 12, "state": 1, "target": 1, "arg": 0}
+    assert uart8.messages == []
+
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
     assert runtime._sync_apply_count == 1
 
@@ -342,6 +346,8 @@ def test_assistant_follow_runtime_orbit_sync_acks_and_uses_shared_orbit_entry(
     runtime.step()
 
     assert runtime.sync_context == {"seq": 12, "state": 3, "target": 1, "arg": 0}
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
     assert runtime._inputs["uart6"]["velocity"] is None
     assert runtime._inputs["uart8"]["velocity"] is None
@@ -432,6 +438,8 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
     assert runtime._pending_target_found_report is None
     assert runtime._transport_car.command_lock is True
     assert runtime._transport_car.orbit_mode is True
+    runtime.step()
+
     assert uart8.messages == ["a,10\r\n", "a,12\r\n"]
 
     runtime._transport_car.complete_orbit_on_next_step = True
@@ -458,6 +466,8 @@ def test_assistant_follow_runtime_realigns_after_orbit_without_completion_report
     assert runtime._state_machine.state == 2
     assert runtime._pending_target_found_report is None
     assert uart6.messages[-1] == "a,9\r\n"
+    runtime.step()
+
     assert uart8.messages == ["a,10\r\n", "a,12\r\n"]
 
 
@@ -486,6 +496,8 @@ def test_assistant_follow_runtime_enters_idle_and_clears_velocity_inputs(monkeyp
         "has_omega": True,
     }
     assert ("handle_velocity", "assistant_idle", 0.0, 0.0, 0.0) in events
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
 
 
@@ -541,6 +553,8 @@ def test_assistant_follow_runtime_follow_sync_rearms_local_vision_and_clears_mot
     runtime.step()
 
     assert runtime._state_machine.state == follow_runtime_module.ASSISTANT_STATE_FOLLOW
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
     assert uart6.messages == ["s,100,1,0,0\r\n"]
     assert runtime._pending_local_vision_sync == {
@@ -639,6 +653,9 @@ def test_assistant_follow_runtime_repeats_ack_without_reapplying_same_sync(monke
     runtime.step()
     runtime.step()
 
+    assert uart8.messages == ["a,12\r\n"]
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n", "a,12\r\n"]
     assert runtime._sync_apply_count == 1
 
@@ -646,7 +663,7 @@ def test_assistant_follow_runtime_repeats_ack_without_reapplying_same_sync(monke
 def test_assistant_follow_runtime_does_not_recreate_local_sync_for_same_seq(
     monkeypatch,
 ) -> None:
-    """重复相同 seq 的主车同步只回 ACK, 不重新创建新的本地视觉同步."""
+    """重复相同 seq 的主车同步不重新创建新的本地视觉同步."""
 
     _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
     logs = install_fake_startup_log(monkeypatch)
@@ -661,7 +678,10 @@ def test_assistant_follow_runtime_does_not_recreate_local_sync_for_same_seq(
     uart8._buffer += b"s,12,2,1,1\n"
     runtime.step()
 
-    assert uart8.messages == ["a,12\r\n", "a,12\r\n"]
+    runtime.step()
+    runtime.step()
+
+    assert uart8.messages == ["a,12\r\n"]
     assert runtime._sync_apply_count == 1
     assert logs == [
         "sync|master->assistant sync done seq=12 state=2 target=1 arg=1",
@@ -684,6 +704,8 @@ def test_assistant_follow_runtime_ignores_earlier_sync_without_context_rollback(
     runtime.step()
 
     assert runtime.sync_context == {"seq": 12, "state": 1, "target": 1, "arg": 0}
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n", "a,11\r\n"]
     assert runtime._sync_apply_count == 1
 
@@ -757,6 +779,8 @@ def test_assistant_follow_runtime_approach_sync_clears_stale_velocity_and_waits_
     assert runtime._inputs["uart6"]["velocity"] is None
     assert runtime._inputs["uart8"]["velocity"] is None
     assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
     assert uart6.messages == ["s,%d,2,1,1\r\n" % local_sync_seq]
 
@@ -833,21 +857,26 @@ def test_assistant_follow_runtime_reports_local_target_found_until_master_ack(
     assert runtime._transport_car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
     assert runtime._approach_target_found_done is True
     assert runtime._pending_target_found_report is not None
+    runtime.step()
+
     assert uart8.messages == ["a,12\r\n"]
 
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert uart8.messages[-1] == "r,7,6,300\r\n"
 
     sent_count = len(uart8.messages)
     clock.advance(10)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
     assert len(uart8.messages) == sent_count
 
     clock.advance(20)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
     assert uart8.messages[-1] == "r,7,6,300\r\n"
     assert len(uart8.messages) == sent_count + 1
@@ -856,7 +885,8 @@ def test_assistant_follow_runtime_reports_local_target_found_until_master_ack(
     runtime.step()
     sent_count = len(uart8.messages)
     clock.advance(20)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert runtime._pending_target_found_report is None
@@ -885,10 +915,37 @@ def test_assistant_follow_runtime_waits_for_master_uart8_turn_before_reporting_t
     assert runtime._pending_target_found_report is not None
     assert uart8.messages == ["a,12\r\n"]
 
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert uart8.messages[-1] == "r,7,6,300\r\n"
+
+
+def test_assistant_follow_runtime_reports_target_found_on_uart8_turn_packet(
+    monkeypatch,
+) -> None:
+    """! @brief 辅车收到 UART8 轮转包后发送待回报事件, 不把它当作速度输入"""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    clock = FakeClock(100)
+    uart8._buffer = b"s,12,2,1,1\n"
+    uart6 = _FakeUart()
+    install_fake_uart6_factory(monkeypatch, uart6)
+    follow_runtime_module = import_assistant_module("vision.assistant.follow_runtime", monkeypatch)
+
+    runtime = follow_runtime_module.AssistantFollowRuntime(now_ms=clock)
+
+    runtime.step()
+    local_sync_seq = runtime._pending_local_vision_sync["seq"]
+    uart6._buffer = ("a,%d\nr,7,6,300\n" % local_sync_seq).encode()
+    runtime.step()
+    uart8._buffer = b"t\n"
+    runtime.step()
+    runtime.step()
+
+    assert uart8.messages[-1] == "r,7,6,300\r\n"
+    assert runtime._inputs["uart8"]["velocity"] is None
 
 
 def test_assistant_follow_runtime_does_not_reconsume_same_uart6_event_seq(
@@ -908,7 +965,8 @@ def test_assistant_follow_runtime_does_not_reconsume_same_uart6_event_seq(
     uart6._buffer = ("a,%d\nr,7,6,300\nr,7,6,300\n" % local_sync_seq).encode()
 
     runtime.step()
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert uart6.messages.count("a,7\r\n") == 2
@@ -982,7 +1040,8 @@ def test_assistant_follow_runtime_realign_phase_reports_aligned_after_orbit(
     rearm_sync_seq = runtime._pending_local_vision_sync["seq"]
     uart6._buffer = ("a,%d\nr,9,7,0\n" % rearm_sync_seq).encode()
     runtime.step()
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert uart6.messages[-1] == "a,9\r\n"
@@ -1014,17 +1073,20 @@ def test_assistant_follow_runtime_realign_phase_repeats_aligned_until_master_ack
     rearm_sync_seq = runtime._pending_local_vision_sync["seq"]
     uart6._buffer = ("a,%d\nr,9,7,0\n" % rearm_sync_seq).encode()
     runtime.step()
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     sent_count = len(uart8.messages)
     clock.advance(10)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
     assert len(uart8.messages) == sent_count
 
     clock.advance(20)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
     assert uart8.messages[-1] == "r,9,7,0\r\n"
 
@@ -1032,7 +1094,8 @@ def test_assistant_follow_runtime_realign_phase_repeats_aligned_until_master_ack
     runtime.step()
     sent_count = len(uart8.messages)
     clock.advance(20)
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert runtime._pending_target_found_report is None
@@ -1219,6 +1282,8 @@ def test_assistant_follow_runtime_clear_sync_starts_retreat_step(
         0.0,
         -float(follow_runtime_module._TRANSPORT_CLEAR_STEP_DISTANCE_M) * 0.5,
     ) in events
+    runtime.step()
+
     assert "a,12\r\n" in uart8.messages
 
 
@@ -1242,6 +1307,8 @@ def test_assistant_follow_runtime_clear_sync_starts_forward_step_after_turn_back
         0.0,
         float(follow_runtime_module._TRANSPORT_CLEAR_STEP_DISTANCE_M),
     ) in events
+    runtime.step()
+
     assert "a,12\r\n" in uart8.messages
 
 
@@ -1278,7 +1345,8 @@ def test_assistant_follow_runtime_clear_completion_reports_phase_cleared(
 
     assert uart8.messages == ["a,12\r\n"]
 
-    uart8._buffer = b"v,0.0,0.0,0.0\n"
+    uart8._buffer = b"t\n"
+    runtime.step()
     runtime.step()
 
     assert uart8.messages[-1] == "r,140,9,2\r\n"

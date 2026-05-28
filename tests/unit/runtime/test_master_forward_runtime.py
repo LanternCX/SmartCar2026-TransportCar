@@ -1393,6 +1393,36 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 1
 
 
+def test_master_forward_runtime_keeps_uart8_turns_after_master_alignment(
+    monkeypatch,
+) -> None:
+    """主车对正后发送 UART8 轮转包, 给辅车可靠回报留出回话窗口."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    _uart6_calls, uart6 = install_fake_uart6_factory(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+
+    runtime = forward_runtime_module.MasterForwardRuntime(
+        now_ms=_FakeNowMs(0, 20, 40, 60, 80, 100, 120)
+    )
+    runtime.step()
+    uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
+    runtime.step()
+    uart8._buffer = b"a,1\n"
+    runtime.step()
+    runtime._transport_car.command_lock = False
+    runtime.step()
+    uart8._buffer = b"a,3\n"
+    runtime.step()
+    uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
+    uart8.messages = []
+
+    runtime.step()
+
+    assert uart8.messages == ["t\r\n"]
+
+
 def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_order(monkeypatch) -> None:
     """主车寻找、停辅车、绕行、绕行完成后下发找物体的顺序保持不变."""
 
@@ -2198,6 +2228,12 @@ def test_master_forward_runtime_clear_sync_ack_starts_master_retreat_step(
         -float(forward_runtime_module.TRANSPORT_CLEAR_RETREAT_DISTANCE_M),
         float(forward_runtime_module.TRANSPORT_CLEAR_RETREAT_MAX_SPEED),
     ) in events
+    uart8.messages = []
+
+    runtime.step()
+    runtime.step()
+
+    assert uart8.messages[-1] == "t\r\n"
 
 
 def test_master_forward_runtime_retreat_completion_waits_assistant_cleared_before_turn_back(
