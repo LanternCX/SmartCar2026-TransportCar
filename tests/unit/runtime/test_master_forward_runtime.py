@@ -422,6 +422,7 @@ def test_master_forward_runtime_reuses_latest_uart6_velocity_without_new_input(m
         "has_omega": False,
     }
     runtime.step()
+    runtime.step()
 
     assert uart6.any() == 0
     assert runtime._transport_car.last_chassis_target == {
@@ -500,6 +501,7 @@ def test_master_forward_runtime_ignores_uart6_non_velocity_without_overwriting_l
         "has_omega": False,
     }
     runtime.step()
+    runtime.step()
 
     second_step_events = events[event_count_before_second_step:]
     assert uart6.any() == 0
@@ -529,6 +531,25 @@ def test_master_forward_runtime_repeats_state_sync_until_ack(monkeypatch) -> Non
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,0,3,1,0\r\n", "s,0,3,1,0\r\n"]
+
+
+def test_master_forward_runtime_waits_one_cycle_for_uart8_reply_after_velocity_forward(
+    monkeypatch,
+) -> None:
+    """主车发出一条 UART8 前馈后要先留出一个回话窗口, 再继续发下一条."""
+
+    _events, _uart3, uart8 = install_fake_transport_car(monkeypatch)
+    forward_runtime_module = import_master_module("vision.master.forward_runtime", monkeypatch)
+    runtime = forward_runtime_module.MasterForwardRuntime(now_ms=_FakeNowMs(0, 20, 40))
+
+    runtime.step()
+    runtime.step()
+    runtime.step()
+
+    assert _velocity_messages(uart8) == [
+        "v,0.0,0.0,0.0\r\n",
+        "v,0.0,0.0,0.0\r\n",
+    ]
 
 
 def test_master_forward_runtime_logs_generic_sync_start_and_done(monkeypatch) -> None:
@@ -815,8 +836,9 @@ def test_master_forward_runtime_does_not_reconsume_same_uart8_report_seq(
     uart8._buffer = b"r,11,6,300\nr,11,6,300\n"
 
     runtime.step()
+    runtime.step()
 
-    assert _reliable_messages(uart8).count("a,11\r\n") == 2
+    assert _reliable_messages(uart8).count("a,11\r\n") == 1
     assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 1
     assert events.count(_default_orbit_target_event(forward_runtime_module)) == 1
 
@@ -898,6 +920,7 @@ def test_master_forward_runtime_old_uart8_ack_does_not_cancel_unsent_assistant_i
     uart6._buffer = ("a,1\nr,7,1,%d,300\n" % EVENT_TARGET_FOUND).encode()
     uart8._buffer = b"a,1\n"
 
+    runtime.step()
     runtime.step()
 
     assert _reliable_messages(uart8) == ["s,1,0,0,0\r\n"]
@@ -1061,8 +1084,8 @@ def test_master_forward_runtime_assistant_orbit_sync_does_not_stop_assistant(mon
         "state": 3,
         "target": 1,
         "arg": 0,
-        "last_sent_ms": 100,
-        "sent_once": True,
+        "last_sent_ms": None,
+        "sent_once": False,
     }
     assert not any(
         event[0] == "handle_velocity" and event[1] == "master_wait_assistant_idle"
@@ -1349,6 +1372,7 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
     uart8.messages = []
 
     runtime.step()
+    runtime.step()
     uart6._buffer = b"a,2\n"
     runtime.step()
 
@@ -1360,13 +1384,13 @@ def test_master_forward_runtime_acknowledges_assistant_target_found_report_and_r
 
     runtime.step()
 
-    assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 2
+    assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 1
 
     uart8._buffer = b"a,5\n"
     runtime.step()
     runtime.step()
 
-    assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 2
+    assert _reliable_messages(uart8).count("s,5,3,1,0\r\n") == 1
 
 
 def test_master_forward_runtime_keeps_search_stop_orbit_and_assistant_object_order(monkeypatch) -> None:
@@ -1785,6 +1809,7 @@ def test_master_forward_runtime_enters_transport_after_both_aligned_and_applies_
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
 
     runtime.step()
+    runtime.step()
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_SEARCH_OBJECT
     assert uart8.messages[-1] == "s,7,4,1,2\r\n"
@@ -1840,11 +1865,13 @@ def test_master_forward_runtime_transport_adds_uart6_visual_correction(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
     runtime.step()
     uart6._buffer = b"v,0.5,-0.25\n"
 
+    runtime.step()
     runtime.step()
 
     assert ("handle_velocity", "master_transport", 0.5, 2.75, 0.0) in events
@@ -1882,6 +1909,7 @@ def test_master_forward_runtime_transport_ignores_uart3_repl_input(
     runtime.step()
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -1961,6 +1989,7 @@ def test_master_forward_runtime_transport_sync_sent_before_first_transport_feedf
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    runtime.step()
 
     assert uart8.messages[-1] == "s,7,4,1,2\r\n"
 
@@ -1969,6 +1998,8 @@ def test_master_forward_runtime_transport_sync_sent_before_first_transport_feedf
     runtime.step()
 
     assert runtime._state_machine.state == forward_runtime_module.STATE_TRANSPORT_OBJECT
+    runtime.step()
+    runtime.step()
     assert uart8.messages[-1] == "v,0.0,3.0,0.0\r\n"
 
 
@@ -2063,6 +2094,7 @@ def test_master_forward_runtime_transport_ready_sends_finish_hook(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
 
@@ -2096,6 +2128,7 @@ def test_master_forward_runtime_arrived_event_enters_clear_phase_and_syncs_assis
     runtime.step()
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2148,6 +2181,7 @@ def test_master_forward_runtime_clear_sync_ack_starts_master_retreat_step(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
     runtime.step()
@@ -2189,6 +2223,7 @@ def test_master_forward_runtime_retreat_completion_waits_assistant_cleared_befor
     runtime.step()
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
     runtime.step()
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2245,6 +2280,8 @@ def test_master_forward_runtime_both_retreats_complete_then_start_turn_back(
     clock.value = 100
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
+    runtime.step()
+    clock.value = 110
     runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
@@ -2323,6 +2360,8 @@ def test_master_forward_runtime_turn_back_completion_syncs_forward_phase(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2339,6 +2378,8 @@ def test_master_forward_runtime_turn_back_completion_syncs_forward_phase(
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2419,6 +2460,8 @@ def test_master_forward_runtime_forward_sync_ack_starts_master_forward_step(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2435,6 +2478,8 @@ def test_master_forward_runtime_forward_sync_ack_starts_master_forward_step(
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2495,6 +2540,8 @@ def test_master_forward_runtime_forward_step_keeps_turn_back_target_heading(
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2511,6 +2558,8 @@ def test_master_forward_runtime_forward_step_keeps_turn_back_target_heading(
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2574,6 +2623,8 @@ def test_master_forward_runtime_waits_after_master_forward_done_without_restarti
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2590,6 +2641,8 @@ def test_master_forward_runtime_waits_after_master_forward_done_without_restarti
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2653,6 +2706,8 @@ def test_master_forward_runtime_forward_completion_restarts_search_and_waits_fol
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2669,6 +2724,8 @@ def test_master_forward_runtime_forward_completion_restarts_search_and_waits_fol
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2781,6 +2838,8 @@ def test_master_forward_runtime_turn_back_wait_is_non_blocking(monkeypatch) -> N
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2797,6 +2856,8 @@ def test_master_forward_runtime_turn_back_wait_is_non_blocking(monkeypatch) -> N
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200
@@ -2843,6 +2904,8 @@ def test_master_forward_runtime_does_not_print_turn_heading_to_uart3_while_turn_
     uart6._buffer = ("a,2\nr,13,3,%d,0\n" % EVENT_ALIGNED).encode()
     uart8._buffer = ("r,15,%d,0\n" % EVENT_ALIGNED).encode()
     runtime.step()
+    clock.value = 110
+    runtime.step()
     clock.value = 120
     uart8._buffer = b"a,7\n"
     uart6._buffer = b"a,3\n"
@@ -2859,6 +2922,8 @@ def test_master_forward_runtime_does_not_print_turn_heading_to_uart3_while_turn_
         EVENT_CLEARED,
         forward_runtime_module.CLEAR_PHASE_RETREAT,
     )).encode()
+    runtime.step()
+    clock.value = 190
     runtime.step()
     _set_filtered_speeds(runtime._transport_car, 0.0, 0.0, 0.0)
     clock.value = 200

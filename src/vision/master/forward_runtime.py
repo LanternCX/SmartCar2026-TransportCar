@@ -121,6 +121,9 @@ class MasterForwardRuntime:
         self._clear_sync_acknowledged = False
         self._pending_hook_created_this_cycle = False
         self._pending_assistant_sync_created_this_cycle = False
+        self._uart8_received_this_cycle = False
+        self._uart8_sent_this_cycle = False
+        self._uart8_wait_reply_turn = False
         self._clear_motion_started = False
         self._clear_master_completed_phase = None
         self._clear_motion_stop_ticks = 0
@@ -194,6 +197,8 @@ class MasterForwardRuntime:
 
         self._pending_hook_created_this_cycle = False
         self._pending_assistant_sync_created_this_cycle = False
+        self._uart8_received_this_cycle = False
+        self._uart8_sent_this_cycle = False
         self._advance_state_machine()
         self._drain_state_machine_outputs()
         self._process_uart6()
@@ -231,13 +236,18 @@ class MasterForwardRuntime:
             and self._pending_assistant_sync.get("kind") == "assistant_object"
         )
         if delay_transport_hook_for_assistant_object:
-            sent_reliable = self._send_pending_sync()
+            sent_reliable = False
+            if self._can_send_uart8_now():
+                sent_reliable = self._send_pending_sync()
             if not sent_reliable:
                 self._send_pending_hook()
         else:
             self._send_pending_hook()
-            self._send_pending_sync()
-        self._forward_current_chassis_velocity()
+            sent_reliable = False
+            if self._can_send_uart8_now():
+                sent_reliable = self._send_pending_sync()
+            if not sent_reliable and self._can_send_uart8_data_now():
+                self._forward_current_chassis_velocity()
 
     def _process_uart6(self) -> None:
         """接管 UART6 按行读取本车视觉速度输入"""
@@ -276,10 +286,19 @@ class MasterForwardRuntime:
         read_error_text: str = "uart read failed",
         overflow_error_text=None,
         input_limit=None,
+        max_lines=None,
     ) -> None:
         while True:
             buf_len = uart.any()
             if not buf_len:
+                if self._drain_uart_lines(
+                    buffer_name,
+                    handler,
+                    overflow_error_text,
+                    input_limit,
+                    max_lines=max_lines,
+                ):
+                    return
                 return
             input_overflow = input_limit is not None and buf_len > input_limit
             if input_overflow:
@@ -296,7 +315,13 @@ class MasterForwardRuntime:
                 if overflow_error_text is not None:
                     self._record_error(overflow_error_text)
                 return
-            if self._drain_uart_lines(buffer_name, handler, overflow_error_text, input_limit):
+            if self._drain_uart_lines(
+                buffer_name,
+                handler,
+                overflow_error_text,
+                input_limit,
+                max_lines=max_lines,
+            ):
                 return
 
     def _discard_pending_input(self, uart, input_limit, read_error_text: str) -> bool:
@@ -316,7 +341,15 @@ class MasterForwardRuntime:
                 self._record_error(read_error_text)
                 return False
 
-    def _drain_uart_lines(self, buffer_name: str, handler, overflow_error_text, input_limit) -> bool:
+    def _drain_uart_lines(
+        self,
+        buffer_name: str,
+        handler,
+        overflow_error_text,
+        input_limit,
+        max_lines=None,
+    ) -> bool:
+        processed_lines = 0
         while True:
             buffer = getattr(self, buffer_name)
             if input_limit is not None and len(buffer) > input_limit:
@@ -335,6 +368,9 @@ class MasterForwardRuntime:
             line = buffer[:idx].rstrip("\r").strip()
             setattr(self, buffer_name, buffer[idx + 1 :])
             handler(line)
+            processed_lines += 1
+            if max_lines is not None and processed_lines >= int(max_lines):
+                return True
 
     def _handle_uart6_line(self, line: str) -> None:
         """处理单条 UART6 视觉速度输入行
@@ -406,6 +442,7 @@ class MasterForwardRuntime:
         @param line 原始输入行
         """
 
+        self._uart8_received_this_cycle = True
         packet = parse_uart8_short_packet(line)
         if packet is None:
             return
@@ -440,7 +477,10 @@ class MasterForwardRuntime:
                 self._pending_sync = None
         elif packet.get("type") == "r":
             report_seq = int(packet["seq"])
-            self._write_forward_reliable_line(format_ack_packet(report_seq))
+            self._write_forward_reliable_line(
+                format_ack_packet(report_seq),
+                expects_reply=False,
+            )
             if self._last_uart8_report_seq == report_seq:
                 return
             self._last_uart8_report_seq = report_seq
@@ -493,17 +533,27 @@ class MasterForwardRuntime:
         )
 
     def _forward_current_chassis_velocity(self) -> None:
-        if not self._state_machine.allows_assistant_velocity_forward():
-            return
         if self._pending_assistant_sync is not None or self._pending_sync is not None:
             return
-        state = self._transport_car.control_state
-        omega = state.get("omega")
-        if omega is None:
-            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0))
+        if self._state_machine.allows_assistant_velocity_forward():
+            state = self._transport_car.control_state
+            omega = state.get("omega")
+            if omega is None:
+                line = format_velocity_packet(
+                    state.get("vx", 0.0),
+                    state.get("vy", 0.0),
+                )
+            else:
+                line = format_velocity_packet(
+                    state.get("vx", 0.0),
+                    state.get("vy", 0.0),
+                    omega,
+                )
+        elif self._state_machine.state == STATE_CLEAR_OBJECT:
+            line = format_velocity_packet(0.0, 0.0, 0.0)
         else:
-            line = format_velocity_packet(state.get("vx", 0.0), state.get("vy", 0.0), omega)
-        self._write_forward_line(line)
+            return
+        self._write_forward_line(line, expects_reply=True)
 
     def _apply_velocity_packet(self, packet: dict, source: str, force_no_omega: bool = False) -> None:
         omega = 0.0 if force_no_omega else float(packet.get("omega", 0.0))
@@ -524,7 +574,7 @@ class MasterForwardRuntime:
             return False
         wrote_all = self._write_forward_reliable_line(
             "s,%d,%d,%d,%d"
-            % (pending["seq"], pending["state"], pending["target"], pending["arg"])
+            % (pending["seq"], pending["state"], pending["target"], pending["arg"]),
         )
         if wrote_all:
             if not pending.get("sent_once"):
@@ -543,26 +593,42 @@ class MasterForwardRuntime:
             return self._pending_sync
         return self._pending_sync
 
-    def _write_forward_line(self, line: str) -> None:
+    def _write_forward_line(self, line: str, expects_reply: bool = False) -> bool:
         """把短包写到 UART8 主辅通信链路
 
         @param line 要转发的短包文本
         """
 
+        if self._uart8_sent_this_cycle:
+            return False
         try:
             if not write_data_line(self._transport_car.uart8, line):
                 self._record_error("uart8 forward write failed")
-        except Exception:
-            self._record_error("uart8 forward write failed")
-
-    def _write_forward_reliable_line(self, line: str) -> bool:
-        """把可靠短包写到 UART8 主辅通信链路"""
-
-        try:
-            return bool(write_reliable_line(self._transport_car.uart8, line))
+                return False
         except Exception:
             self._record_error("uart8 forward write failed")
             return False
+        self._uart8_sent_this_cycle = True
+        if expects_reply:
+            self._uart8_wait_reply_turn = True
+        return True
+
+    def _write_forward_reliable_line(self, line: str, expects_reply: bool = False) -> bool:
+        """把可靠短包写到 UART8 主辅通信链路"""
+
+        if self._uart8_sent_this_cycle:
+            return False
+        try:
+            wrote_all = bool(write_reliable_line(self._transport_car.uart8, line))
+        except Exception:
+            self._record_error("uart8 forward write failed")
+            return False
+        if not wrote_all:
+            return False
+        self._uart8_sent_this_cycle = True
+        if expects_reply:
+            self._uart8_wait_reply_turn = True
+        return True
 
     def _write_uart6_data_line(self, line: str) -> None:
         """把短包写到本车 UART6 视觉链路
@@ -904,3 +970,18 @@ class MasterForwardRuntime:
 
         self._last_error_text = text
         self._transport_car.last_exception_text = text
+
+    def _can_send_uart8_now(self) -> bool:
+        if self._uart8_sent_this_cycle:
+            return False
+        if self._uart8_received_this_cycle:
+            return False
+        return True
+
+    def _can_send_uart8_data_now(self) -> bool:
+        if not self._can_send_uart8_now():
+            return False
+        if self._uart8_wait_reply_turn:
+            self._uart8_wait_reply_turn = False
+            return False
+        return True

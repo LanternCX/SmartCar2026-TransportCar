@@ -119,6 +119,7 @@ class AssistantFollowRuntime:
         self._post_orbit_realign_active = False
         self._clear_completed = False
         self._clear_stop_ticks = 0
+        self._uart8_sent_this_cycle = False
         self._ensure_uart_ready()
 
     def mark_tick(self, tick=None) -> None:
@@ -141,7 +142,6 @@ class AssistantFollowRuntime:
         keep_running = self._transport_car.step()
         try:
             self._finish_clear_if_needed()
-            self._send_pending_target_found_report()
         except Exception as exc:
             self._record_error("clear_finish failed", exc)
         try:
@@ -153,10 +153,10 @@ class AssistantFollowRuntime:
     def _run_role_cycle(self) -> None:
         """执行角色层单拍流程"""
 
+        self._uart8_sent_this_cycle = False
         self._process_input("uart6")
         self._process_input("uart8")
         self._send_pending_local_vision_sync()
-        self._send_pending_target_found_report()
         self._write_effective_velocity()
 
     def build_follow_snapshot(self) -> dict:
@@ -211,25 +211,27 @@ class AssistantFollowRuntime:
             state["status"] = "error"
             self._record_error("%s any failed" % source, exc)
             return False
-        if not buf_len:
+        if not buf_len and "\n" not in state["buffer"]:
             state["status"] = self._resolve_input_status(source)
             return False
 
         has_velocity = False
 
-        input_overflow = buf_len > _INPUT_LIMIT
-        if input_overflow:
-            buf_len = _INPUT_LIMIT
+        input_overflow = False
+        if buf_len:
+            input_overflow = buf_len > _INPUT_LIMIT
+            if input_overflow:
+                buf_len = _INPUT_LIMIT
 
-        try:
-            state["buffer"] += uart.read(buf_len).decode()
-        except Exception as exc:
-            state["status"] = "error"
-            if exc.__class__.__name__ == "UnicodeDecodeError":
-                self._record_error("%s decode failed" % source, exc)
-            else:
-                self._record_error("%s read failed" % source, exc)
-            return False
+            try:
+                state["buffer"] += uart.read(buf_len).decode()
+            except Exception as exc:
+                state["status"] = "error"
+                if exc.__class__.__name__ == "UnicodeDecodeError":
+                    self._record_error("%s decode failed" % source, exc)
+                else:
+                    self._record_error("%s read failed" % source, exc)
+                return False
         handled_valid = False
 
         while True:
@@ -256,7 +258,11 @@ class AssistantFollowRuntime:
             if source == "uart8" and self._handle_uart8_control_packet(line, uart):
                 self._mark_input_valid(source)
                 handled_valid = True
-                continue
+                self._maybe_send_pending_target_found_report_on_uart8_turn()
+                if input_overflow:
+                    self._discard_pending_input(source, uart)
+                    state["buffer"] = ""
+                return has_velocity
             if source == "uart6" and self._handle_uart6_control_packet(line):
                 self._mark_input_valid(source)
                 handled_valid = True
@@ -273,6 +279,12 @@ class AssistantFollowRuntime:
                     has_velocity = True
                 else:
                     self._mark_input_valid(source)
+                if source == "uart8":
+                    self._maybe_send_pending_target_found_report_on_uart8_turn()
+                    if input_overflow:
+                        self._discard_pending_input(source, uart)
+                        state["buffer"] = ""
+                    return has_velocity
             elif consume_result == CONSUME_INVALID:
                 state["status"] = "invalid"
             else:
@@ -832,16 +844,26 @@ class AssistantFollowRuntime:
             pending["last_sent_ms"] = now_ms
             pending["sent_once"] = True
 
+    def _maybe_send_pending_target_found_report_on_uart8_turn(self) -> None:
+        if self._uart8_sent_this_cycle:
+            return
+        self._send_pending_target_found_report()
+
     def _write_forward_reliable_line(self, line: str) -> bool:
         uart = self._inputs["uart8"]["uart"]
         if uart is None:
             return False
+        if self._uart8_sent_this_cycle:
+            return False
         try:
             wrote_all = bool(write_reliable_line(uart, line))
-            return wrote_all
         except Exception as exc:
             self._record_error("uart8 write failed", exc)
             return False
+        if not wrote_all:
+            return False
+        self._uart8_sent_this_cycle = True
+        return True
 
     def _log_master_sync_done(self, packet: dict) -> None:
         log(
