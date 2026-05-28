@@ -257,11 +257,74 @@ def _run_script(script_path):
     return execfile(script_path)
 
 
-def _save_fatal_error_log(message: str) -> None:
-    """保存最近一次致命异常文本."""
+def _write_exception_trace(output, exc: Exception) -> None:
+    """将异常调用链写入输出对象."""
+
+    import sys
+
+    print_exception = getattr(sys, "print_exception", None)
+    if print_exception is not None:
+        print_exception(exc, output)
+        return
+
+    import traceback
+
+    traceback.print_exception(type(exc), exc, exc.__traceback__, file=output)
+
+
+def _read_memory_snapshot():
+    """读取当前可用内存快照."""
+
+    try:
+        import gc
+    except ImportError:
+        return None
+
+    mem_free = getattr(gc, "mem_free", None)
+    mem_alloc = getattr(gc, "mem_alloc", None)
+    if mem_free is None and mem_alloc is None:
+        return None
+
+    free_value = "n/a"
+    alloc_value = "n/a"
+    if mem_free is not None:
+        try:
+            free_value = mem_free()
+        except Exception:
+            free_value = "err"
+    if mem_alloc is not None:
+        try:
+            alloc_value = mem_alloc()
+        except Exception:
+            alloc_value = "err"
+    return (free_value, alloc_value)
+
+
+def _emit_fatal_exception(exc: Exception) -> str:
+    """打印尽可能完整的致命异常信息."""
+
+    fatal_message = "fatal error: %s" % exc
+    log("main", fatal_message)
+    print("main: fatal error type=%s" % type(exc).__name__)
+    snapshot = _read_memory_snapshot()
+    if snapshot is not None:
+        print("main: fatal mem_free=%s mem_alloc=%s" % snapshot)
+    print("main: fatal traceback start")
+    _write_exception_trace(None, exc)
+    print("main: fatal traceback end")
+    return fatal_message
+
+
+def _save_fatal_exception_log(fatal_message: str, exc: Exception) -> None:
+    """保存包含调用链的致命异常日志."""
 
     with open(FATAL_ERROR_LOG_PATH, "w") as log_file:
-        log_file.write("%s\n" % message)
+        log_file.write("%s\n" % fatal_message)
+        log_file.write("fatal error type=%s\n" % type(exc).__name__)
+        snapshot = _read_memory_snapshot()
+        if snapshot is not None:
+            log_file.write("fatal mem_free=%s mem_alloc=%s\n" % snapshot)
+        _write_exception_trace(log_file, exc)
 
 
 def _run_main_body():
@@ -294,10 +357,9 @@ def main():
     try:
         return _run_main_body()
     except Exception as exc:
-        fatal_message = "fatal error: %s" % exc
-        log("main", fatal_message)
+        fatal_message = _emit_fatal_exception(exc)
         try:
-            _save_fatal_error_log(fatal_message)
+            _save_fatal_exception_log(fatal_message, exc)
         except Exception as save_exc:
             log("main", "fatal log save failed: %s" % save_exc)
         return None

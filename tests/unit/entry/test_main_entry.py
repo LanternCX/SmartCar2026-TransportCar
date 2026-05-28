@@ -151,10 +151,60 @@ def test_main_entry_catches_and_saves_fatal_errors(
 
     result = main.main()
     output_lines = capsys.readouterr().out.splitlines()
+    saved_text = log_path.read_text()
 
     assert result is None
     assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
-    assert log_path.read_text() == "fatal error: script boom\n"
+    assert "fatal error: script boom\n" in saved_text
+    assert "fatal error type=RuntimeError\n" in saved_text
+    assert "RuntimeError: script boom" in saved_text
+
+
+def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
+    capsys, monkeypatch
+) -> None:
+    """正式入口发生致命异常时必须输出完整异常类型、调用链和内存快照."""
+
+    main = load_main_module()
+    trace_calls = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+
+    def _raise_script(_script_path):
+        raise MemoryError("memory allocation failed, allocating 1524 bytes")
+
+    monkeypatch.setattr(main, "_run_script", _raise_script)
+    monkeypatch.setattr(
+        sys,
+        "print_exception",
+        lambda exc, file=None: (
+            trace_calls.append((type(exc).__name__, file)),
+            print(
+                "Traceback (most recent call last):\n  File \"script/remote_control.py\", line 1, in main\nMemoryError: %s"
+                % exc,
+                file=file,
+            ),
+        )[-1],
+        raising=False,
+    )
+
+    gc_module = ModuleType("gc")
+    gc_module.mem_free = lambda: 4096
+    gc_module.mem_alloc = lambda: 2048
+    monkeypatch.setitem(sys.modules, "gc", gc_module)
+
+    result = main.main()
+    output = capsys.readouterr().out
+
+    assert result is None
+    assert "main: fatal error: memory allocation failed, allocating 1524 bytes" in output
+    assert "main: fatal error type=MemoryError" in output
+    assert "main: fatal mem_free=4096 mem_alloc=2048" in output
+    assert "Traceback (most recent call last):" in output
+    assert "MemoryError: memory allocation failed, allocating 1524 bytes" in output
+    assert trace_calls
 
 
 def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> None:
@@ -172,8 +222,8 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         main,
-        "_save_fatal_error_log",
-        lambda _message: (_ for _ in ()).throw(OSError("flash full")),
+        "_save_fatal_exception_log",
+        lambda _message, _exc: (_ for _ in ()).throw(OSError("flash full")),
     )
 
     result = main.main()
