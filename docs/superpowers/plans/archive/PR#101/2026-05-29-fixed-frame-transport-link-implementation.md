@@ -6,7 +6,7 @@
 
 ## 目标
 
-按 `docs/superpowers/specs/2026-05-29-fixed-frame-transport-link-design.md` 重构主车、辅车和本地视觉通信链路, 让 UART6 与 UART8 的正式通信全部通过 `src/protocol/` 下的固定长度 bytes 帧、统一 TCP / UDP API、统一 RX / TX 调度和固定槽可靠通信完成。
+按 `docs/superpowers/specs/archive/PR#101/2026-05-29-fixed-frame-transport-link-design.md` 重构主车、辅车和本地视觉通信链路, 让 UART6 与 UART8 的正式通信全部通过 `src/protocol/` 下的固定长度 bytes 帧、统一 TCP / UDP API、统一 RX / TX 调度和固定槽可靠通信完成。
 
 ## 架构边界
 
