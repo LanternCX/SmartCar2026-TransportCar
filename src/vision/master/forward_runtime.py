@@ -3,6 +3,8 @@
 @file src/vision/master/forward_runtime.py
 """
 
+import time
+
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
@@ -84,8 +86,6 @@ MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG"
 
 
 def _default_now_ms():
-    import time
-
     ticks_ms = getattr(time, "ticks_ms", None)
     if ticks_ms is not None:
         return int(ticks_ms())
