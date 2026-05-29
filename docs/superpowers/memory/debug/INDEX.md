@@ -7,6 +7,8 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-05-30-1 | 2026-05-30 | 用帧头和 CRC8 收敛固定短帧错位假包问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-1.md` | 记录车端与 OpenART 视觉端固定短帧在丢字节、粘包和错位假包下的根因, 以及通过 13 字节帧头/CRC8 格式和双仓库回归测试完成的修复闭环。 | transport, openart, protocol, frame-head, crc8, uart6, resync, udp, ack, debug |
+| 2026-05-29-1 | 2026-05-29 | 收敛主辅车新协议联调中的板端兼容写法与分段 ACK 丢失问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-29-1.md` | 记录固定短帧联调中“速度链通但状态链不闭环”的多层根因，以及通过板端完整异常打印、板端兼容字节编解码和 RX 残片拼帧完成的修复闭环。 | master, assistant, openart, protocol, uart6, ack, fragmented-frame, micropython, debug |
 | 2026-05-27-1 | 2026-05-27 | 修复绕行视觉同步沿用搜索上下文导致 OpenART 继续输出搜索速度 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-27-1.md` | 记录主车绕行视觉修正阶段持续收到搜索速度的问题, 以及通过为绕行同步分配独立上下文编号完成的修复闭环。 | master, orbit, vision, uart6, context-id, openart, search-velocity, debug |
 | 2026-05-08-1 | 2026-05-08 | 修复状态跳转沿用未完成目标角度导致的航向保持错误 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-08-1.md` | 记录主辅车多阶段状态跳转中未完成目标角度被后续阶段沿用的问题, 以及通过持续保持理论目标角度完成的修复闭环。 | master, assistant, heading-hold, position-control, state-transition, target-heading, debug |
 | 2026-05-02-1 | 2026-05-02 | 收敛主车视觉 hook 底边判据与纵向速度饱和问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-02-1.md` | 记录主车单车视觉 hook、归一化底边判据、纵向速度饱和和 rear only 绕行链路的调试闭环。 | master, vision, hook, object-bottom, orbiting, rear-only, saturation, debug |

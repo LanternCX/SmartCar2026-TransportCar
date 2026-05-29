@@ -8,12 +8,18 @@
 
 # 串口统一波特率
 UART_BAUDRATE = 115200
-# 主车运行时 UART6 输入缓冲上限
-MASTER_UART6_INPUT_LIMIT = 32
-# 主车运行时 UART8 输入缓冲上限
-MASTER_UART8_INPUT_LIMIT = 32
-# 辅车运行时 UART6 与 UART8 输入缓冲上限
-ASSISTANT_UART_INPUT_LIMIT = 32
+# 固定帧 BODY 槽位长度
+TRANSPORT_FRAME_BODY_SIZE = 8
+# 固定帧头
+TRANSPORT_FRAME_HEAD = 0xA5
+# 固定帧总长度
+TRANSPORT_FRAME_SIZE = 13
+# UDP 发送节奏, 单位毫秒
+UDP_SEND_INTERVAL_MS = 20
+# TCP 发送与重发节奏, 单位毫秒
+TCP_SEND_INTERVAL_MS = 150
+# 单次 RX 读取上限
+TRANSPORT_RX_READ_LIMIT = 32
 # 待确认可靠短包重发间隔, 单位毫秒
 RELIABLE_RESEND_INTERVAL_MS = 20
 # 辅车向本地视觉重发状态同步的间隔, 单位毫秒

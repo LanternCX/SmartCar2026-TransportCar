@@ -420,3 +420,16 @@ class MasterStateMachine:
         if self.state == STATE_TRANSPORT_OBJECT:
             return True
         return self.allows_search_velocity()
+
+    def needs_assistant_report_turn(self):
+        """当前是否需要给辅车可靠回报保留 UART8 回话窗口"""
+
+        if self.state != STATE_SEARCH_OBJECT:
+            return False
+        if not self._orbit_completed:
+            return False
+        if not self._assistant_object_request_emitted:
+            return False
+        if self._assistant_transport_request_emitted:
+            return False
+        return not self._assistant_aligned

@@ -29,6 +29,15 @@
   - [ ] 正文没有维护其他格式兼容层或多套字段双轨说明
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
+### `wireless_uart` 参考文档
+
+- 正式落点：`docs/reference/wireless_uart/README.md`
+- 维护检查项：
+  - [ ] 原始项目链接与说明书链接仍然可用或已替换为新的有效来源
+  - [ ] 本地只保留整理后的 Markdown 与配图, 不再恢复 PDF 副本
+  - [ ] 配图目录与正文引用保持一致, 没有失效链接
+  - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
+
 ### `docs/superpowers` 协作文档归档规则
 
 - 正式落点：`.agents/skills/reference-sync/references/superpowers-doc-archive.md`

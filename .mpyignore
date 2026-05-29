@@ -34,5 +34,3 @@ pyrightconfig.json
 seekfree_demo/
 stubs/
 tests/
-src/script/test.py
-script/test.py

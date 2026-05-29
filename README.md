@@ -9,7 +9,8 @@
 ## 主要入口
 
 - 启动入口: [src/main.py](src/main.py)
-- 运行脚本: [src/script/remote_control.py](src/script/remote_control.py)
+- 正式运行脚本: [src/script/remote_control.py](src/script/remote_control.py)
+- 板端测试入口: [src/script/test.py](src/script/test.py)
 - 共享底盘: [src/core/runtime.py](src/core/runtime.py)
 - 主车角色: [src/vision/master/](src/vision/master/)
 - 辅车角色: [src/vision/assistant/](src/vision/assistant/)
@@ -48,4 +49,20 @@ uv run --group test python -m pytest tests/unit tests/contract/serial_protocol -
 uv sync --group board
 uv run --group board mpy-cli plan
 bash build.sh
+```
+
+## 板端版本备忘
+
+`/dev/cu.usbmodem101` 实测为 RT1021 MicroPython 板端：
+
+- MicroPython: `v1.20.0`
+- 固件标识: `RT1021 MicroPython by NXP & SeekFree with CoreBoard-144Pin-BTB V3.1.0`
+- 平台: `mimxrt`
+- `.mpy` 版本: `version=6`, `sub-version=1`
+- `.mpy` native 架构: `armv7emdp`
+
+因此交叉编译配置应使用：
+
+```toml
+mpy_cross_arch = "armv7emdp"
 ```

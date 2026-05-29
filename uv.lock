@@ -78,6 +78,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "questionary", specifier = ">=2.0.1" },
     { name = "rich", specifier = ">=13.7.0" },

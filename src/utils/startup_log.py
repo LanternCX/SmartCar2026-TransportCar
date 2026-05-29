@@ -26,3 +26,31 @@ def log(stage: str, detail: str = "") -> str:
     print(message)
     cnt += 1
     return message
+
+
+def write_exception_trace(output, exc: Exception) -> None:
+    """输出完整异常调用链."""
+
+    import sys
+
+    print_exception = getattr(sys, "print_exception", None)
+    if print_exception is not None:
+        if output is None:
+            print_exception(exc)
+            return
+        print_exception(exc, output)
+        return
+
+    import traceback
+
+    traceback.print_exception(type(exc), exc, exc.__traceback__, file=output)
+
+
+def log_exception(stage: str, detail: str, exc: Exception) -> str:
+    """打印异常摘要和完整调用链."""
+
+    message = log(stage, detail)
+    print("%s: traceback start" % stage)
+    write_exception_trace(None, exc)
+    print("%s: traceback end" % stage)
+    return message

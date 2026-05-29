@@ -20,6 +20,7 @@ def load_main_module():
 
     sys.modules.pop("config", None)
     sys.modules.pop("config.safety", None)
+    sys.modules.pop("config.startup", None)
     sys.modules.pop("utils.startup_log", None)
     spec = spec_from_file_location("transport_main_entry", MAIN_PATH)
     assert spec is not None
@@ -89,6 +90,16 @@ def test_resolve_startup_script_defaults_to_remote_control() -> None:
     assert main.resolve_startup_script([0, 0, 0, 0]) == "script/remote_control.py"
 
 
+def test_resolve_startup_script_uses_test_entry_when_config_enabled() -> None:
+    """配置开启测试模式时进入测试入口."""
+
+    main = load_main_module()
+
+    main.startup_params.STARTUP_TEST_MODE = True
+
+    assert main.resolve_startup_script([0, 0, 0, 0]) == "script/test.py"
+
+
 def test_resolve_startup_script_rejects_dual_long_press() -> None:
     """两个维护按键同时长按时必须拒绝进入正常脚本."""
 
@@ -131,30 +142,52 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     )
 
 
-def test_main_entry_catches_and_saves_fatal_errors(
-    capsys, tmp_path, monkeypatch
+def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
+    capsys, monkeypatch
 ) -> None:
-    """正式入口必须兜住脚本运行期异常并保存到板端文件."""
+    """正式入口发生致命异常时必须输出完整异常类型、调用链和内存快照."""
 
     main = load_main_module()
-    log_path = tmp_path / "last_fatal_error.log"
+    trace_calls = []
 
-    monkeypatch.setattr(main, "FATAL_ERROR_LOG_PATH", str(log_path))
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
 
     def _raise_script(_script_path):
-        raise RuntimeError("script boom")
+        raise MemoryError("memory allocation failed, allocating 1524 bytes")
 
     monkeypatch.setattr(main, "_run_script", _raise_script)
+    monkeypatch.setattr(main, "_save_fatal_exception_log", lambda _message, _exc: None)
+    monkeypatch.setattr(
+        sys,
+        "print_exception",
+        lambda exc, file=None: (
+            trace_calls.append((type(exc).__name__, file)),
+            print(
+                "Traceback (most recent call last):\n  File \"script/remote_control.py\", line 1, in main\nMemoryError: %s"
+                % exc,
+                file=file,
+            ),
+        )[-1],
+        raising=False,
+    )
+
+    gc_module = ModuleType("gc")
+    setattr(gc_module, "mem_free", lambda: 4096)
+    setattr(gc_module, "mem_alloc", lambda: 2048)
+    monkeypatch.setitem(sys.modules, "gc", gc_module)
 
     result = main.main()
-    output_lines = capsys.readouterr().out.splitlines()
+    output = capsys.readouterr().out
 
     assert result is None
-    assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
-    assert log_path.read_text() == "fatal error: script boom\n"
+    assert "main: fatal error: memory allocation failed, allocating 1524 bytes" in output
+    assert "main: fatal error type=MemoryError" in output
+    assert "main: fatal mem_free=4096 mem_alloc=2048" in output
+    assert "Traceback (most recent call last):" in output
+    assert "MemoryError: memory allocation failed, allocating 1524 bytes" in output
+    assert trace_calls
 
 
 def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> None:
@@ -172,8 +205,15 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         main,
-        "_save_fatal_error_log",
-        lambda _message: (_ for _ in ()).throw(OSError("flash full")),
+        "_save_fatal_exception_log",
+        lambda _message, _exc: (_ for _ in ()).throw(OSError("flash full")),
+    )
+    trace_calls = []
+    monkeypatch.setattr(
+        main,
+        "log_exception",
+        lambda stage, detail, exc: trace_calls.append((stage, detail, str(exc))),
+        raising=False,
     )
 
     result = main.main()
@@ -181,10 +221,7 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
 
     assert result is None
     assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
-    assert any(
-        line.endswith("main: fatal log save failed: flash full")
-        for line in output_lines
-    )
+    assert trace_calls == [("main", "fatal log save failed: flash full", "flash full")]
 
 
 def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
@@ -290,3 +327,24 @@ def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
 
     assert main._run_script("script/remote_control.mpy") == "ok"
     assert calls == ["chdir", "script.remote_control", "main-called"]
+
+
+def test_run_python_script_uses_machine_execfile(monkeypatch) -> None:
+    """普通脚本必须通过板端脚本执行能力运行."""
+
+    main = load_main_module()
+    calls = []
+    machine_module = ModuleType("machine")
+    setattr(
+        machine_module,
+        "execfile",
+        lambda script_path: calls.append(("execfile", script_path)) or "ok",
+    )
+    monkeypatch.setitem(sys.modules, "machine", machine_module)
+    monkeypatch.setattr(main, "_chdir_flash", lambda: calls.append(("chdir", None)))
+
+    assert main._run_script("script/remote_control.py") == "ok"
+    assert calls == [
+        ("chdir", None),
+        ("execfile", "script/remote_control.py"),
+    ]
