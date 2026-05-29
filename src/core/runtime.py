@@ -22,7 +22,6 @@ from utils.startup_log import log
 from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
-from hardware.uart_bus import create_uart8
 from hardware.motors import create_motors
 from hardware.encoders import create_encoders
 from hardware.imu import create_imu
@@ -202,10 +201,6 @@ class TransportCar:
         self.led = Pin("C4", Pin.OUT, value=True)
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
-
-        # 运行时持有 UART8 主辅通信链路
-        self.uart8 = create_uart8()
-        log("transport_car", "uart ready")
 
         # IMU 传感器(陀螺仪+加速度计), 用于姿态估计与航向角反馈
         # 诊断模式下使用空占位对象避免硬件依赖
@@ -703,7 +698,7 @@ class TransportCar:
         @param has_omega 本包是否显式携带角速度
         """
 
-        self.set_velocity_target(vx, vy, omega, has_omega=has_omega)
+        self.set_velocity_target(vx, vy, omega, has_omega)
 
     def _get_active_position_targets(self):
         """

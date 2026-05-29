@@ -174,8 +174,8 @@ def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
     )
 
     gc_module = ModuleType("gc")
-    gc_module.mem_free = lambda: 4096
-    gc_module.mem_alloc = lambda: 2048
+    setattr(gc_module, "mem_free", lambda: 4096)
+    setattr(gc_module, "mem_alloc", lambda: 2048)
     monkeypatch.setitem(sys.modules, "gc", gc_module)
 
     result = main.main()
@@ -208,16 +208,20 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
         "_save_fatal_exception_log",
         lambda _message, _exc: (_ for _ in ()).throw(OSError("flash full")),
     )
+    trace_calls = []
+    monkeypatch.setattr(
+        main,
+        "log_exception",
+        lambda stage, detail, exc: trace_calls.append((stage, detail, str(exc))),
+        raising=False,
+    )
 
     result = main.main()
     output_lines = capsys.readouterr().out.splitlines()
 
     assert result is None
     assert any(line.endswith("main: fatal error: script boom") for line in output_lines)
-    assert any(
-        line.endswith("main: fatal log save failed: flash full")
-        for line in output_lines
-    )
+    assert trace_calls == [("main", "fatal log save failed: flash full", "flash full")]
 
 
 def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:

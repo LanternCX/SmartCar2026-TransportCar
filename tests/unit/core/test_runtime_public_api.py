@@ -149,9 +149,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(comm_params.UART3_PORT_ID) >= 0
     assert int(comm_params.UART6_PORT_ID) >= 0
     assert int(comm_params.UART8_PORT_ID) >= 0
-    assert int(comm_params.MASTER_UART6_INPUT_LIMIT) > 0
-    assert int(comm_params.MASTER_UART8_INPUT_LIMIT) > 0
-    assert int(comm_params.ASSISTANT_UART_INPUT_LIMIT) > 0
+    assert int(comm_params.TRANSPORT_RX_READ_LIMIT) > 0
     assert int(comm_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
     assert int(comm_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
     assert int(comm_params.SEQ_MIN) == 0

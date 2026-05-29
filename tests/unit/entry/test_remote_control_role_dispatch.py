@@ -51,6 +51,7 @@ def load_remote_control_module(monkeypatch):
 
     startup_log_module = ModuleType("utils.startup_log")
     setattr(startup_log_module, "log", lambda *_args, **_kwargs: None)
+    setattr(startup_log_module, "log_exception", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
     vehicle_role_module = ModuleType("vision.vehicle_role")
@@ -247,8 +248,38 @@ def test_remote_control_main_stops_runtime_and_reraises_fatal_error(
     setattr(module, "read_vehicle_role", lambda: "master")
     setattr(module, "create_role_transport_car", lambda role: _Car())
     setattr(module, "_create_ticker", lambda: _Ticker())
+    trace_calls = []
+    monkeypatch.setattr(
+        module,
+        "log_exception",
+        lambda stage, detail, exc: trace_calls.append((stage, detail, str(exc))),
+        raising=False,
+    )
 
     with pytest.raises(RuntimeError, match="loop boom"):
         module.main()
     assert "ticker_stop" in events
     assert "car_stop" in events
+    assert trace_calls == [("remote_control", "fatal error: loop boom", "loop boom")]
+
+
+def test_run_control_loop_polls_transport_around_runtime_step(monkeypatch) -> None:
+    """主循环在运行时外部调度通信 RX 和 TX."""
+
+    module, _state = load_remote_control_module(monkeypatch)
+    events = []
+
+    class _Car:
+        def poll_transport_rx(self) -> None:
+            events.append("rx")
+
+        def step(self) -> bool:
+            events.append("step")
+            return False
+
+        def poll_transport_tx(self) -> None:
+            events.append("tx")
+
+    module._run_control_loop(_Car())
+
+    assert events == ["rx", "step", "tx"]

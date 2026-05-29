@@ -25,7 +25,7 @@ _allocate_emergency_exception_buffer()
 
 from config import safety as safety_params
 from config import startup as startup_params
-from utils.startup_log import log
+from utils.startup_log import log, log_exception, write_exception_trace
 
 # 启动后等待时间, 等待外设稳定
 STARTUP_SETTLE_MS = 100
@@ -262,21 +262,6 @@ def _run_script(script_path):
     return execfile(script_path)
 
 
-def _write_exception_trace(output, exc: Exception) -> None:
-    """将异常调用链写入输出对象."""
-
-    import sys
-
-    print_exception = getattr(sys, "print_exception", None)
-    if print_exception is not None:
-        print_exception(exc, output)
-        return
-
-    import traceback
-
-    traceback.print_exception(type(exc), exc, exc.__traceback__, file=output)
-
-
 def _read_memory_snapshot():
     """读取当前可用内存快照."""
 
@@ -315,7 +300,7 @@ def _emit_fatal_exception(exc: Exception) -> str:
     if snapshot is not None:
         print("main: fatal mem_free=%s mem_alloc=%s" % snapshot)
     print("main: fatal traceback start")
-    _write_exception_trace(None, exc)
+    write_exception_trace(None, exc)
     print("main: fatal traceback end")
     return fatal_message
 
@@ -329,7 +314,7 @@ def _save_fatal_exception_log(fatal_message: str, exc: Exception) -> None:
         snapshot = _read_memory_snapshot()
         if snapshot is not None:
             log_file.write("fatal mem_free=%s mem_alloc=%s\n" % snapshot)
-        _write_exception_trace(log_file, exc)
+        write_exception_trace(log_file, exc)
 
 
 def _run_main_body():
@@ -366,7 +351,7 @@ def main():
         try:
             _save_fatal_exception_log(fatal_message, exc)
         except Exception as save_exc:
-            log("main", "fatal log save failed: %s" % save_exc)
+            log_exception("main", "fatal log save failed: %s" % save_exc, save_exc)
         return None
 
 

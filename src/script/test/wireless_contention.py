@@ -82,7 +82,7 @@ def _read_memory_usage():
 
     import gc
 
-    return (gc.mem_free(), gc.mem_alloc())
+    return (getattr(gc, "mem_free")(), getattr(gc, "mem_alloc")())
 
 
 def create_memory_pressure(

@@ -8,7 +8,7 @@
 
 from smartcar import ticker
 from config import motion as motion_params
-from utils.startup_log import log
+from utils.startup_log import log, log_exception
 from vision import create_role_transport_car
 from vision.vehicle_role import read_vehicle_role
 
@@ -66,7 +66,14 @@ def _run_control_loop(car) -> None:
         if not loop_logged:
             log("remote_control", "main loop first iteration")
             loop_logged = True
-        if not car.step():
+        poll_rx = getattr(car, "poll_transport_rx", None)
+        if poll_rx is not None:
+            poll_rx()
+        keep_running = car.step()
+        poll_tx = getattr(car, "poll_transport_tx", None)
+        if poll_tx is not None:
+            poll_tx()
+        if not keep_running:
             break
 
 
@@ -77,12 +84,20 @@ def _stop_runtime_after_fatal(car, pit1) -> None:
         try:
             pit1.stop()
         except Exception as exc:
-            log("remote_control", "fatal ticker stop failed: %s" % exc)
+            log_exception(
+                "remote_control",
+                "fatal ticker stop failed: %s" % exc,
+                exc,
+            )
     if car is not None:
         try:
             car.stop()
         except Exception as exc:
-            log("remote_control", "fatal car stop failed: %s" % exc)
+            log_exception(
+                "remote_control",
+                "fatal car stop failed: %s" % exc,
+                exc,
+            )
 
 
 def main():
@@ -117,6 +132,7 @@ def main():
         _run_control_loop(car)
         return role
     except Exception as exc:
+        log_exception("remote_control", "fatal error: %s" % exc, exc)
         _stop_runtime_after_fatal(car, pit1)
         raise
 
