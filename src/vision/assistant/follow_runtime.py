@@ -3,6 +3,8 @@
 @file src/vision/assistant/follow_runtime.py
 """
 
+import time
+
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
@@ -66,8 +68,6 @@ MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 
 
 def _default_now_ms() -> int:
-    import time
-
     ticks_ms = getattr(time, "ticks_ms", None)
     if ticks_ms is not None:
         return int(ticks_ms())

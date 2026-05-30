@@ -3,6 +3,8 @@
 @file src/vision/master/forward_runtime.py
 """
 
+import time
+
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
@@ -84,8 +86,6 @@ MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG"
 
 
 def _default_now_ms():
-    import time
-
     ticks_ms = getattr(time, "ticks_ms", None)
     if ticks_ms is not None:
         return int(ticks_ms())
@@ -258,12 +258,14 @@ class MasterForwardRuntime:
             }
 
     def _clear_local_velocity_for_reliable_event(self, source: str) -> None:
-        """可靠业务事件到达时, 丢弃旧 UDP 速度并写入零速度语义."""
+        """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
 
         self._latest_uart6_velocity = None
         self._uart6_reset_version = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
+        if bool(getattr(self._transport_car, "command_lock", False)):
+            return
         self._transport_car.handle_velocity_packet(
             0.0,
             0.0,

@@ -3,6 +3,8 @@
 @brief 统一通信调度服务
 """
 
+import time
+
 from config import comm as comm_params
 from protocol.frame import FRAME_SIZE, MODE_ACK, MODE_TCP, MODE_UDP, decode_frame, encode_frame
 from protocol.topic import (
@@ -42,8 +44,6 @@ DELIVERY_INVALID = "invalid"
 
 
 def _default_now_ms():
-    import time
-
     ticks_ms = getattr(time, "ticks_ms", None)
     if ticks_ms is not None:
         return int(ticks_ms())
