@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-05-30-3 | 2026-05-30 | 修复 CLEAR 后退位置锁被可靠事件零速度覆盖的问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-3.md` | 记录主车 CLEAR 后退目标已下发但被可靠事件零速度覆盖导致锁定目标清空的问题, 以及通过保留锁定动作完成的修复闭环。 | clear, retreat, command-lock, reliable-event, zero-velocity, master, runtime, debug |
 | 2026-05-30-2 | 2026-05-30 | 修复通信发送热路径重复导入导致的控制周期拉长 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-2.md` | 记录固定短帧通信发送路径中函数内重复导入 time 导致板端控制周期拉长的问题, 以及通过模块级导入完成的修复闭环。 | transport, poll-tx, micropython, time-import, hot-path, control-period, uart8, debug |
 | 2026-05-30-1 | 2026-05-30 | 用帧头和 CRC8 收敛固定短帧错位假包问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-1.md` | 记录车端与 OpenART 视觉端固定短帧在丢字节、粘包和错位假包下的根因, 以及通过 13 字节帧头/CRC8 格式和双仓库回归测试完成的修复闭环。 | transport, openart, protocol, frame-head, crc8, uart6, resync, udp, ack, debug |
 | 2026-05-29-1 | 2026-05-29 | 收敛主辅车新协议联调中的板端兼容写法与分段 ACK 丢失问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-29-1.md` | 记录固定短帧联调中“速度链通但状态链不闭环”的多层根因，以及通过板端完整异常打印、板端兼容字节编解码和 RX 残片拼帧完成的修复闭环。 | master, assistant, openart, protocol, uart6, ack, fragmented-frame, micropython, debug |
