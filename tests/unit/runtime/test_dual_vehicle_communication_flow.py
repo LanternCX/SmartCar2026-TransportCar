@@ -245,6 +245,22 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         lambda: master._state_machine.state == master_module.STATE_CLEAR_OBJECT
         and assistant._state_machine.state == assistant_module.ASSISTANT_STATE_CLEAR_OBJECT,
     )
+    _pump_until(
+        clock,
+        master,
+        assistant,
+        master_car,
+        assistant_car,
+        master_uart6,
+        assistant_uart6,
+        lambda: (
+            "set_relative_translation_target",
+            0.0,
+            -float(master_module.TRANSPORT_CLEAR_RETREAT_DISTANCE_M),
+            float(master_module.TRANSPORT_CLEAR_RETREAT_MAX_SPEED),
+        )
+        in master_car.events,
+    )
 
     _pump_until(
         clock,

@@ -191,10 +191,12 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert isinstance(storage_params.GYRO_OFFSET_FILE, str)
 
 
-def test_transport_clear_retreat_distance_matches_pre_turn_back_request() -> None:
-    """主车转身前后退距离按调试要求保持 0.1m."""
+def test_transport_clear_retreat_distance_exceeds_position_tolerance() -> None:
+    """主车转身前后退距离应大于位置锁定容差."""
 
-    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) == pytest.approx(0.1)
+    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > float(
+        motion_params.POS_TOLERANCE
+    )
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:
@@ -478,6 +480,30 @@ def test_transport_car_set_relative_translation_target_accepts_command_speed_lim
 
     assert vx_cmd == pytest.approx(0.09)
     assert vy_cmd == pytest.approx(0.0)
+
+
+def test_transport_car_clear_retreat_target_generates_negative_y_command() -> None:
+    """收尾后退目标应生成车体系 Y 负方向的非零控制命令."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=0.0,
+        odometry=_Odom(x=0.0, y=0.0),
+    )
+
+    car.set_relative_translation_target(
+        0.0,
+        -float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M),
+        None,
+        float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED),
+    )
+    vx_cmd, vy_cmd = car._compute_planar_targets(
+        float(motion_params.TICK_MS) / 1000.0,
+        0.0,
+    )
+
+    assert vx_cmd == pytest.approx(0.0)
+    assert vy_cmd < 0.0
+    assert abs(vy_cmd) <= float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED)
 
 
 def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:

@@ -161,6 +161,47 @@ def test_master_runtime_clears_local_velocity_when_assistant_event_arrives(monke
     assert ("handle_velocity", "assistant_event", 0.0, 0.0, 0.0) in cars[0].events
 
 
+def test_master_runtime_keeps_locked_pose_when_assistant_event_arrives(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_ASSISTANT_EVENT_REPORT,
+            7,
+            encode_assistant_event_report_body(6, 9),
+        )
+    )
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._latest_uart6_velocity = {"vx": 1.0, "vy": -2.0, "omega": 0.0}
+    cars[0].command_lock = True
+    cars[0].control_state = {
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "x": 1.0,
+        "y": 2.0,
+        "angle": 90.0,
+    }
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._latest_uart6_velocity is None
+    assert cars[0].command_lock is True
+    assert cars[0].control_state["x"] == 1.0
+    assert cars[0].control_state["y"] == 2.0
+    assert ("handle_velocity", "assistant_event", 0.0, 0.0, 0.0) not in cars[0].events
+
+
 def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)

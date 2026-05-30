@@ -258,12 +258,14 @@ class MasterForwardRuntime:
             }
 
     def _clear_local_velocity_for_reliable_event(self, source: str) -> None:
-        """可靠业务事件到达时, 丢弃旧 UDP 速度并写入零速度语义."""
+        """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
 
         self._latest_uart6_velocity = None
         self._uart6_reset_version = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
+        if bool(getattr(self._transport_car, "command_lock", False)):
+            return
         self._transport_car.handle_velocity_packet(
             0.0,
             0.0,

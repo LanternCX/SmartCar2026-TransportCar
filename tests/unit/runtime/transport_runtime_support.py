@@ -83,6 +83,7 @@ def import_module_clean(module_name: str, monkeypatch):
         "vision.master.forward_runtime",
         "vision.assistant",
         "vision.assistant.follow_runtime",
+        "utils.startup_log",
         module_name,
     ):
         sys.modules.pop(loaded_name, None)
