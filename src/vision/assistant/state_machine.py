@@ -12,6 +12,8 @@ ASSISTANT_STATE_APPROACH_OBJECT = 2
 ASSISTANT_STATE_ORBIT = 3
 ASSISTANT_STATE_TRANSPORT_OBJECT = 4
 ASSISTANT_STATE_CLEAR_OBJECT = 5
+ASSISTANT_STATE_RETURN_FOLLOW = 6
+ASSISTANT_STATE_FINISHED = 7
 _STATE_NAMES = (
     "IDLE",
     "FOLLOW",
@@ -19,6 +21,8 @@ _STATE_NAMES = (
     "ORBIT",
     "TRANSPORT_OBJECT",
     "CLEAR_OBJECT",
+    "RETURN_FOLLOW",
+    "FINISHED",
 )
 
 # 辅车目标编号
@@ -61,6 +65,13 @@ class AssistantStateMachine:
             and state != ASSISTANT_STATE_ORBIT
             and state != ASSISTANT_STATE_TRANSPORT_OBJECT
             and state != ASSISTANT_STATE_CLEAR_OBJECT
+            and state != ASSISTANT_STATE_RETURN_FOLLOW
+            and state != ASSISTANT_STATE_FINISHED
+        ):
+            return False
+        if (
+            (state == ASSISTANT_STATE_RETURN_FOLLOW or state == ASSISTANT_STATE_FINISHED)
+            and target != ASSISTANT_TARGET_NONE
         ):
             return False
         if (
@@ -82,3 +93,8 @@ class AssistantStateMachine:
         """判断辅车是否处于 idle 子状态"""
 
         return self.state == ASSISTANT_STATE_IDLE
+
+    def is_finished(self):
+        """判断辅车是否处于完成停止态"""
+
+        return self.state == ASSISTANT_STATE_FINISHED

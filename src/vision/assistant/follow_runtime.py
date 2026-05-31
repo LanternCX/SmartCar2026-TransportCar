@@ -36,8 +36,10 @@ from vision.assistant.diagnostics import build_follow_snapshot
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
+    ASSISTANT_STATE_FINISHED,
     ASSISTANT_STATE_FOLLOW,
     ASSISTANT_STATE_ORBIT,
+    ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
@@ -227,6 +229,21 @@ class AssistantFollowRuntime:
         elif self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             self._post_orbit_realign_active = False
             self._enter_clear_object_state()
+        elif self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            self._clear_motion_inputs()
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
+            self._enter_return_follow_state()
+        elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            self._clear_motion_inputs()
+            self._pending_local_vision_sync = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
+            self._write_zero_velocity("assistant_finished")
         return True
 
     def _consume_local_vision_event(self) -> None:
@@ -303,6 +320,9 @@ class AssistantFollowRuntime:
             self._write_orbit_velocity_correction()
             return
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
+            return
+        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            self._write_zero_velocity("assistant_finished")
             return
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
@@ -383,6 +403,8 @@ class AssistantFollowRuntime:
             return source == "uart6" and self._pending_local_vision_sync is None
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
+        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            return False
         if source == "uart6" and self._pending_local_vision_sync is not None:
             return False
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
@@ -412,6 +434,15 @@ class AssistantFollowRuntime:
 
     def _enter_follow_state(self) -> None:
         self._write_zero_velocity("assistant_follow")
+        self._pending_local_vision_sync = {
+            "state": ASSISTANT_STATE_FOLLOW,
+            "target": 0,
+            "arg": 0,
+            "queued": False,
+        }
+
+    def _enter_return_follow_state(self) -> None:
+        self._write_zero_velocity("assistant_return_follow")
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_FOLLOW,
             "target": 0,

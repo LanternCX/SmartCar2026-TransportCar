@@ -6,6 +6,7 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
+import builtins
 import sys
 
 import pytest
@@ -34,6 +35,7 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
     """只有长按才触发维护脚本."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
 
     assert main.resolve_startup_script([1, 0, 0, 0]) == "script/remote_control.py"
     assert main.resolve_startup_script([0, 1, 0, 0]) == "script/remote_control.py"
@@ -86,6 +88,7 @@ def test_resolve_startup_script_defaults_to_remote_control() -> None:
     """没有长按时进入默认运行脚本."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
 
     assert main.resolve_startup_script([0, 0, 0, 0]) == "script/remote_control.py"
 
@@ -113,6 +116,7 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     """入口阶段必须输出关键启动日志, 便于定位卡住位置."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
     launched_scripts = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
@@ -307,6 +311,17 @@ def test_resolve_existing_startup_script_prefers_compiled_file(monkeypatch) -> N
     )
 
 
+def test_resolve_existing_startup_script_keeps_test_entry_source(monkeypatch) -> None:
+    """板端测试入口使用源码文件, 避免旧编译产物遮蔽调试脚本."""
+
+    main = load_main_module()
+    existing = {"script/test.mpy"}
+
+    monkeypatch.setattr(main, "_path_exists", lambda path: path in existing)
+
+    assert main.resolve_existing_startup_script("script/test.py") == "script/test.py"
+
+
 def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
     """编译后的启动脚本必须通过模块导入执行."""
 
@@ -329,22 +344,23 @@ def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
     assert calls == ["chdir", "script.remote_control", "main-called"]
 
 
-def test_run_python_script_uses_machine_execfile(monkeypatch) -> None:
-    """普通脚本必须通过板端脚本执行能力运行."""
+def test_run_python_script_uses_global_execfile(monkeypatch) -> None:
+    """普通脚本必须通过板端全局脚本执行能力运行."""
 
     main = load_main_module()
     calls = []
-    machine_module = ModuleType("machine")
     setattr(
-        machine_module,
+        builtins,
         "execfile",
         lambda script_path: calls.append(("execfile", script_path)) or "ok",
     )
-    monkeypatch.setitem(sys.modules, "machine", machine_module)
     monkeypatch.setattr(main, "_chdir_flash", lambda: calls.append(("chdir", None)))
 
-    assert main._run_script("script/remote_control.py") == "ok"
-    assert calls == [
-        ("chdir", None),
-        ("execfile", "script/remote_control.py"),
-    ]
+    try:
+        assert main._run_script("script/remote_control.py") == "ok"
+        assert calls == [
+            ("chdir", None),
+            ("execfile", "script/remote_control.py"),
+        ]
+    finally:
+        delattr(builtins, "execfile")

@@ -18,6 +18,10 @@ ASSISTANT_TRANSPORT_SYNC_STATE = 4
 ASSISTANT_TRANSPORT_SYNC_TARGET = 1
 ASSISTANT_CLEAR_SYNC_STATE = 5
 ASSISTANT_CLEAR_SYNC_TARGET = 1
+ASSISTANT_RETURN_FOLLOW_SYNC_STATE = 6
+ASSISTANT_RETURN_FOLLOW_SYNC_TARGET = 0
+ASSISTANT_FINISHED_SYNC_STATE = 7
+ASSISTANT_FINISHED_SYNC_TARGET = 0
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -26,6 +30,10 @@ STATE_ORBITING = 2
 STATE_STOP = 3
 STATE_TRANSPORT_OBJECT = 4
 STATE_CLEAR_OBJECT = 5
+STATE_RETURN_GARAGE_RETREAT = 6
+STATE_RETURN_GARAGE_LINE = 7
+STATE_RETURN_GARAGE_MARKER = 8
+STATE_FINISHED = 9
 _STATE_NAMES = (
     "IDLE",
     "SEARCH_OBJECT",
@@ -33,6 +41,10 @@ _STATE_NAMES = (
     "STOP",
     "TRANSPORT_OBJECT",
     "CLEAR_OBJECT",
+    "RETURN_GARAGE_RETREAT",
+    "RETURN_GARAGE_LINE",
+    "RETURN_GARAGE_MARKER",
+    "FINISHED",
 )
 
 # 主车目标编号
@@ -45,6 +57,9 @@ EVENT_TARGET_FOUND = 6
 EVENT_ALIGNED = 7
 EVENT_ARRIVED = 8
 EVENT_CLEARED = 9
+EVENT_RETURN_LINE_ALIGNED = 10
+EVENT_RETURN_MARKER_FOUND = 11
+EVENT_RETURN_GARAGE_FINISHED = 12
 
 _CLEAR_STAGE_TURN_BACK = 3
 
@@ -61,6 +76,9 @@ class MasterStateMachine:
         assistant_transport_arg=1,
         transport_hook_arg=2,
         finish_hook_arg=3,
+        return_line_hook_arg=5,
+        return_marker_hook_arg=6,
+        total_object_count=999,
         initial_context_id=0,
     ):
         self.state = STATE_IDLE
@@ -71,6 +89,10 @@ class MasterStateMachine:
         self._assistant_transport_arg = int(assistant_transport_arg)
         self._transport_hook_arg = int(transport_hook_arg)
         self._finish_hook_arg = int(finish_hook_arg)
+        self._return_line_hook_arg = int(return_line_hook_arg)
+        self._return_marker_hook_arg = int(return_marker_hook_arg)
+        self._required_object_count = int(total_object_count)
+        self.completed_object_count = 0
         self._current_context_id = int(initial_context_id) % 256
         self._pending_hook_request = None
         self._pending_assistant_request = None
@@ -166,6 +188,18 @@ class MasterStateMachine:
             self._enter_clear_phase(CLEAR_PHASE_RETREAT)
             return
         if self.state == STATE_CLEAR_OBJECT:
+            return
+        if self.state == STATE_RETURN_GARAGE_RETREAT:
+            if event == EVENT_RETURN_LINE_ALIGNED:
+                self._enter_state(STATE_RETURN_GARAGE_LINE)
+            return
+        if self.state == STATE_RETURN_GARAGE_LINE:
+            if event == EVENT_RETURN_MARKER_FOUND:
+                self._enter_return_marker()
+            return
+        if self.state == STATE_RETURN_GARAGE_MARKER:
+            if event == EVENT_RETURN_GARAGE_FINISHED:
+                self._enter_finished()
             return
 
     def mark_assistant_idle_acknowledged(self):
@@ -304,6 +338,10 @@ class MasterStateMachine:
     def _restart_search_after_clear(self):
         """在搬运收尾完成后重启寻找阶段"""
 
+        self.completed_object_count += 1
+        if self.completed_object_count >= self._required_object_count:
+            self._enter_return_retreat()
+            return
         self._orbit_completed = False
         self._waiting_assistant_idle_ack = False
         self._waiting_assistant_follow_ack = True
@@ -323,6 +361,67 @@ class MasterStateMachine:
             "kind": "assistant_follow",
             "state": ASSISTANT_FOLLOW_SYNC_STATE,
             "target": ASSISTANT_FOLLOW_SYNC_TARGET,
+            "arg": 0,
+        }
+
+    def _reset_round_flags(self):
+        """清理单轮找物体、搬运和收尾阶段标记"""
+
+        self._orbit_completed = False
+        self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_follow_ack = False
+        self._waiting_restart_search_hook_ack = False
+        self._assistant_object_request_emitted = False
+        self._assistant_orbit_request_emitted = False
+        self._assistant_transport_request_emitted = False
+        self._master_aligned = False
+        self._assistant_aligned = False
+        self._transport_ready = False
+        self._clear_phase = CLEAR_PHASE_NONE
+        self._master_cleared = False
+        self._assistant_cleared = False
+
+    def _enter_return_retreat(self):
+        """进入主车回库后退找黄线段"""
+
+        self._reset_round_flags()
+        self._enter_state(STATE_RETURN_GARAGE_RETREAT)
+        self._current_context_id = (self._current_context_id + 1) % 256
+        self._pending_hook_request = {
+            "kind": "return_line_hook",
+            "context_id": self._current_context_id,
+            "state": STATE_RETURN_GARAGE_RETREAT,
+            "target": TARGET_EDGE_LINE,
+            "arg": self._return_line_hook_arg,
+        }
+        self._pending_assistant_request = {
+            "kind": "assistant_return_follow",
+            "state": ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
+            "target": ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
+            "arg": 0,
+        }
+
+    def _enter_return_marker(self):
+        """进入主车回库色标跟随段"""
+
+        self._enter_state(STATE_RETURN_GARAGE_MARKER)
+        self._current_context_id = (self._current_context_id + 1) % 256
+        self._pending_hook_request = {
+            "kind": "return_marker_hook",
+            "context_id": self._current_context_id,
+            "state": STATE_RETURN_GARAGE_MARKER,
+            "target": TARGET_EDGE_LINE,
+            "arg": self._return_marker_hook_arg,
+        }
+
+    def _enter_finished(self):
+        """进入全部任务完成态并请求辅车停止"""
+
+        self._enter_state(STATE_FINISHED)
+        self._pending_assistant_request = {
+            "kind": "assistant_finished",
+            "state": ASSISTANT_FINISHED_SYNC_STATE,
+            "target": ASSISTANT_FINISHED_SYNC_TARGET,
             "arg": 0,
         }
 
@@ -418,6 +517,12 @@ class MasterStateMachine:
         """当前状态是否允许向辅车转发速度前馈"""
 
         if self.state == STATE_TRANSPORT_OBJECT:
+            return True
+        if (
+            self.state == STATE_RETURN_GARAGE_RETREAT
+            or self.state == STATE_RETURN_GARAGE_LINE
+            or self.state == STATE_RETURN_GARAGE_MARKER
+        ):
             return True
         return self.allows_search_velocity()
 
