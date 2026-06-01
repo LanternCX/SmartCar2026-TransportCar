@@ -20,8 +20,6 @@ ASSISTANT_CLEAR_SYNC_STATE = 5
 ASSISTANT_CLEAR_SYNC_TARGET = 1
 ASSISTANT_RETURN_FOLLOW_SYNC_STATE = 6
 ASSISTANT_RETURN_FOLLOW_SYNC_TARGET = 0
-ASSISTANT_FINISHED_SYNC_STATE = 7
-ASSISTANT_FINISHED_SYNC_TARGET = 0
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -308,6 +306,13 @@ class MasterStateMachine:
             self._clear_phase = _CLEAR_STAGE_TURN_BACK
             self._master_cleared = False
             self._assistant_cleared = False
+            if self.completed_object_count + 1 >= self._required_object_count:
+                self._pending_assistant_request = {
+                    "kind": "assistant_return_line",
+                    "state": ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
+                    "target": ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
+                    "arg": 0,
+                }
             return
         if self._clear_phase == CLEAR_PHASE_FORWARD:
             self._restart_search_after_clear()
@@ -318,11 +323,15 @@ class MasterStateMachine:
         return self.state == STATE_CLEAR_OBJECT and self._clear_phase == _CLEAR_STAGE_TURN_BACK
 
     def mark_turn_back_completed(self):
-        """标记主车回身完成并进入前进阶段"""
+        """标记主车回身完成并推进下一阶段"""
 
         if self.state != STATE_CLEAR_OBJECT:
             return
         if self._clear_phase != _CLEAR_STAGE_TURN_BACK:
+            return
+        if self.completed_object_count + 1 >= self._required_object_count:
+            self.completed_object_count += 1
+            self._enter_return_retreat()
             return
         self._enter_clear_phase(CLEAR_PHASE_FORWARD)
 
@@ -385,12 +394,6 @@ class MasterStateMachine:
             "target": TARGET_EDGE_LINE,
             "arg": self._return_line_hook_arg,
         }
-        self._pending_assistant_request = {
-            "kind": "assistant_return_line",
-            "state": ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
-            "target": ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
-            "arg": 0,
-        }
 
     def _enter_return_line(self):
         """进入主车回库黄线平移段"""
@@ -406,15 +409,9 @@ class MasterStateMachine:
         }
 
     def _enter_finished(self):
-        """进入全部任务完成态并请求辅车停止"""
+        """进入全部任务完成态"""
 
         self._enter_state(STATE_FINISHED)
-        self._pending_assistant_request = {
-            "kind": "assistant_finished",
-            "state": ASSISTANT_FINISHED_SYNC_STATE,
-            "target": ASSISTANT_FINISHED_SYNC_TARGET,
-            "arg": 0,
-        }
 
     def mark_assistant_follow_acknowledged(self):
         """标记辅车 follow 同步已确认"""

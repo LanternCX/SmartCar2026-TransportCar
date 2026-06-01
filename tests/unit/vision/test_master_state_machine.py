@@ -748,10 +748,13 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
     machine.poll_assistant_request()
     machine.mark_master_cleared()
     machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_return_line",
+        "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
+        "arg": 0,
+    }
     machine.mark_turn_back_completed()
-    machine.poll_assistant_request()
-    machine.mark_master_cleared()
-    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_FORWARD)
 
     assert machine.completed_object_count == 1
     assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
@@ -762,12 +765,7 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
         "target": MasterStateMachine.TARGET_EDGE_LINE,
         "arg": 5,
     }
-    assert machine.poll_assistant_request() == {
-        "kind": "assistant_return_line",
-        "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
-        "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
-        "arg": 0,
-    }
+    assert machine.poll_assistant_request() is None
     assert machine.allows_search_velocity() is False
     assert machine.allows_assistant_velocity_forward() is False
 
@@ -818,12 +816,7 @@ def test_master_state_machine_return_garage_events_advance_to_finished() -> None
     )
 
     assert machine.state == MasterStateMachine.STATE_FINISHED
-    assert machine.poll_assistant_request() == {
-        "kind": "assistant_finished",
-        "state": MasterStateMachine.ASSISTANT_FINISHED_SYNC_STATE,
-        "target": MasterStateMachine.ASSISTANT_FINISHED_SYNC_TARGET,
-        "arg": 0,
-    }
+    assert machine.poll_assistant_request() is None
 
 
 def test_master_state_machine_restart_search_waits_both_follow_and_local_hook_ack() -> None:

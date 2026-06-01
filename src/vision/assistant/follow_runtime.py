@@ -43,6 +43,7 @@ from vision.assistant.state_machine import (
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
+    EVENT_RETURN_GARAGE_FINISHED,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 
@@ -50,7 +51,7 @@ from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
-_RETURN_GARAGE_FINISHED_EVENT = 12
+_RETURN_GARAGE_FINISHED_EVENT = EVENT_RETURN_GARAGE_FINISHED
 _ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
@@ -69,6 +70,10 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+ASSISTANT_RETURN_GARAGE_LEFT_SPEED = getattr(
+    motion_params,
+    "ASSISTANT_RETURN_GARAGE_LEFT_SPEED",
+)
 MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
 MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 
@@ -279,7 +284,9 @@ class AssistantFollowRuntime:
             self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW
             and event == _RETURN_GARAGE_FINISHED_EVENT
         ):
-            self._handle_return_garage_finished()
+            self._state_machine.handle_event(event, packet["value"])
+            if self._state_machine.is_finished():
+                self._handle_return_garage_finished()
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
@@ -388,7 +395,7 @@ class AssistantFollowRuntime:
         if uart6_velocity is None:
             return
         self._apply_effective_velocity(
-            float(uart6_velocity.get("vx", 0.0)),
+            float(ASSISTANT_RETURN_GARAGE_LEFT_SPEED),
             float(uart6_velocity.get("vy", 0.0)),
             0.0,
             False,
@@ -535,7 +542,7 @@ class AssistantFollowRuntime:
     def _handle_return_garage_finished(self) -> None:
         self._clear_motion_inputs()
         self._pending_local_vision_sync = None
-        self._write_zero_velocity("assistant_return_finished")
+        self._write_zero_velocity("assistant_finished")
 
     def _enter_transport_state(self, packet: dict) -> None:
         self._approach_target_found_done = False

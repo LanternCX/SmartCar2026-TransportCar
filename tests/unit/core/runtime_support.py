@@ -310,6 +310,7 @@ def install_transport_car_stubs() -> None:
         "MASTER_ORBIT_RADIUS_SCALE": 1.20,
         "MASTER_RETURN_GARAGE_RETREAT_SPEED": -2.0,
         "MASTER_RETURN_GARAGE_LEFT_SPEED": -2.0,
+        "ASSISTANT_RETURN_GARAGE_LEFT_SPEED": -2.0,
         "ASSISTANT_ORBIT_TARGET_DEG": -90,
         "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
         "ACTIVE_WHEELS": ("m", "l", "r"),

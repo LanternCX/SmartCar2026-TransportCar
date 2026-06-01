@@ -18,6 +18,8 @@ TRANSPORT_CLEAR_RETREAT_MAX_SPEED = 3.0
 MASTER_RETURN_GARAGE_RETREAT_SPEED = -2.0
 # 主车回库黄线段固定左移速度
 MASTER_RETURN_GARAGE_LEFT_SPEED = -3.0
+# 辅车回库黄线段固定左移速度
+ASSISTANT_RETURN_GARAGE_LEFT_SPEED = -3.0
 # 状态收尾判定时三轮接近静止的默认轮速阈值, 单位脉冲/控制拍
 MOTION_STOP_SPEED_THRESHOLD = 0.5
 # 状态收尾判定时三轮接近静止需要连续满足的默认拍数
