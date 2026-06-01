@@ -763,12 +763,13 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
         "arg": 5,
     }
     assert machine.poll_assistant_request() == {
-        "kind": "assistant_return_follow",
+        "kind": "assistant_return_line",
         "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         "arg": 0,
     }
     assert machine.allows_search_velocity() is False
+    assert machine.allows_assistant_velocity_forward() is False
 
 
 def test_master_state_machine_return_garage_events_advance_to_finished() -> None:

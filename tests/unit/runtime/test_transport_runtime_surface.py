@@ -5,6 +5,7 @@
 
 from protocol.codec import (
     decode_assistant_vision_task_sync_body,
+    encode_assistant_vision_event_report_body,
     encode_assistant_event_report_body,
     encode_assistant_state_sync_body,
     decode_velocity_body,
@@ -18,6 +19,7 @@ from protocol.topic import (
     ROLE_MASTER,
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_ASSISTANT_STATE_SYNC,
+    TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
@@ -700,7 +702,7 @@ def test_assistant_runtime_reports_role_cycle_failure_via_full_trace_helper(monk
     assert calls == [("assistant_error", "role_cycle failed: boom", "boom")]
 
 
-def test_assistant_runtime_return_follow_uses_normal_follow_velocity_fusion(monkeypatch) -> None:
+def test_assistant_runtime_return_follow_uses_local_yellow_line_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
@@ -721,9 +723,83 @@ def test_assistant_runtime_return_follow_uses_normal_follow_velocity_fusion(monk
 
     assert cars[0].last_chassis_target == {
         "source": "assistant",
-        "vx": 0.5,
-        "vy": 5.0,
-        "omega": 0.25,
+        "vx": 1.0,
+        "vy": 2.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    accepted = runtime._apply_sync_context(
+        {"state": module.ASSISTANT_STATE_RETURN_FOLLOW, "target": 0, "arg": 0}
+    )
+
+    assert accepted is True
+    assert runtime._pending_local_vision_sync == {
+        "state": module.ASSISTANT_STATE_RETURN_FOLLOW,
+        "target": 0,
+        "arg": module.ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID,
+        "queued": False,
+    }
+    assert cars[0].last_chassis_target == {
+        "source": "assistant_return_line",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
+def test_assistant_runtime_return_follow_finished_event_stops_locally(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.ASSISTANT_STATE_RETURN_FOLLOW
+    runtime._uart6_velocity = {"vx": 1.0, "vy": 2.0, "omega": 0.0, "has_omega": False}
+    uart6.push(
+        encode_frame(
+            0x02,
+            TOPIC_ASSISTANT_VISION_EVENT_REPORT,
+            9,
+            encode_assistant_vision_event_report_body(
+                module._RETURN_GARAGE_FINISHED_EVENT,
+                0,
+            ),
+        )
+    )
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._uart6_velocity is None
+    assert cars[0].last_chassis_target == {
+        "source": "assistant_return_finished",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
         "has_omega": True,
     }
 

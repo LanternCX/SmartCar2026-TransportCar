@@ -386,7 +386,7 @@ class MasterStateMachine:
             "arg": self._return_line_hook_arg,
         }
         self._pending_assistant_request = {
-            "kind": "assistant_return_follow",
+            "kind": "assistant_return_line",
             "state": ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
             "target": ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
             "arg": 0,
@@ -508,11 +508,6 @@ class MasterStateMachine:
         """当前状态是否允许向辅车转发速度前馈"""
 
         if self.state == STATE_TRANSPORT_OBJECT:
-            return True
-        if (
-            self.state == STATE_RETURN_GARAGE_RETREAT
-            or self.state == STATE_RETURN_GARAGE_LINE
-        ):
             return True
         return self.allows_search_velocity()
 
