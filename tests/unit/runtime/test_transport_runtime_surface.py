@@ -627,7 +627,24 @@ def test_master_runtime_return_line_combines_fixed_left_and_yellow_line_y(monkey
     }
 
 
-def test_master_runtime_return_marker_uses_marker_velocity_and_finished_stops(monkeypatch) -> None:
+def test_master_runtime_does_not_expose_return_marker_motion_state(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    assert not hasattr(module, "STATE_RETURN_GARAGE_MARKER")
+
+
+def test_master_runtime_finished_stops_without_consuming_local_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("vision.master.forward_runtime", monkeypatch)
@@ -640,18 +657,6 @@ def test_master_runtime_return_marker_uses_marker_velocity_and_finished_stops(mo
             now_ms=clock,
         ),
     )
-    runtime._state_machine.state = module.STATE_RETURN_GARAGE_MARKER
-    runtime._latest_uart6_velocity = {"vx": 1.5, "vy": -0.5}
-
-    runtime._apply_motion_outputs()
-
-    assert cars[0].last_chassis_target == {
-        "source": "master_return_marker",
-        "vx": 1.5,
-        "vy": -0.5,
-        "omega": 0.0,
-        "has_omega": False,
-    }
 
     runtime._state_machine.state = module.STATE_FINISHED
     runtime._latest_uart6_velocity = {"vx": 2.0, "vy": 2.0}

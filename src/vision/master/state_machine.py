@@ -32,8 +32,7 @@ STATE_TRANSPORT_OBJECT = 4
 STATE_CLEAR_OBJECT = 5
 STATE_RETURN_GARAGE_RETREAT = 6
 STATE_RETURN_GARAGE_LINE = 7
-STATE_RETURN_GARAGE_MARKER = 8
-STATE_FINISHED = 9
+STATE_FINISHED = 8
 _STATE_NAMES = (
     "IDLE",
     "SEARCH_OBJECT",
@@ -43,7 +42,6 @@ _STATE_NAMES = (
     "CLEAR_OBJECT",
     "RETURN_GARAGE_RETREAT",
     "RETURN_GARAGE_LINE",
-    "RETURN_GARAGE_MARKER",
     "FINISHED",
 )
 
@@ -58,7 +56,6 @@ EVENT_ALIGNED = 7
 EVENT_ARRIVED = 8
 EVENT_CLEARED = 9
 EVENT_RETURN_LINE_ALIGNED = 10
-EVENT_RETURN_MARKER_FOUND = 11
 EVENT_RETURN_GARAGE_FINISHED = 12
 
 _CLEAR_STAGE_TURN_BACK = 3
@@ -77,7 +74,6 @@ class MasterStateMachine:
         transport_hook_arg=2,
         finish_hook_arg=3,
         return_line_hook_arg=5,
-        return_marker_hook_arg=6,
         total_object_count=999,
         initial_context_id=0,
     ):
@@ -90,7 +86,6 @@ class MasterStateMachine:
         self._transport_hook_arg = int(transport_hook_arg)
         self._finish_hook_arg = int(finish_hook_arg)
         self._return_line_hook_arg = int(return_line_hook_arg)
-        self._return_marker_hook_arg = int(return_marker_hook_arg)
         self._required_object_count = int(total_object_count)
         self.completed_object_count = 0
         self._current_context_id = int(initial_context_id) % 256
@@ -191,13 +186,9 @@ class MasterStateMachine:
             return
         if self.state == STATE_RETURN_GARAGE_RETREAT:
             if event == EVENT_RETURN_LINE_ALIGNED:
-                self._enter_state(STATE_RETURN_GARAGE_LINE)
+                self._enter_return_line()
             return
         if self.state == STATE_RETURN_GARAGE_LINE:
-            if event == EVENT_RETURN_MARKER_FOUND:
-                self._enter_return_marker()
-            return
-        if self.state == STATE_RETURN_GARAGE_MARKER:
             if event == EVENT_RETURN_GARAGE_FINISHED:
                 self._enter_finished()
             return
@@ -401,17 +392,17 @@ class MasterStateMachine:
             "arg": 0,
         }
 
-    def _enter_return_marker(self):
-        """进入主车回库色标跟随段"""
+    def _enter_return_line(self):
+        """进入主车回库黄线平移段"""
 
-        self._enter_state(STATE_RETURN_GARAGE_MARKER)
+        self._enter_state(STATE_RETURN_GARAGE_LINE)
         self._current_context_id = (self._current_context_id + 1) % 256
         self._pending_hook_request = {
-            "kind": "return_marker_hook",
+            "kind": "return_line_hook",
             "context_id": self._current_context_id,
-            "state": STATE_RETURN_GARAGE_MARKER,
+            "state": STATE_RETURN_GARAGE_LINE,
             "target": TARGET_EDGE_LINE,
-            "arg": self._return_marker_hook_arg,
+            "arg": self._return_line_hook_arg,
         }
 
     def _enter_finished(self):
@@ -521,7 +512,6 @@ class MasterStateMachine:
         if (
             self.state == STATE_RETURN_GARAGE_RETREAT
             or self.state == STATE_RETURN_GARAGE_LINE
-            or self.state == STATE_RETURN_GARAGE_MARKER
         ):
             return True
         return self.allows_search_velocity()

@@ -779,7 +779,6 @@ def test_master_state_machine_return_garage_events_advance_to_finished() -> None
         orbit_delta_deg=90.0,
         total_object_count=1,
         return_line_hook_arg=5,
-        return_marker_hook_arg=6,
         initial_context_id=4,
     )
     machine._restart_search_after_clear()
@@ -793,34 +792,26 @@ def test_master_state_machine_return_garage_events_advance_to_finished() -> None
     )
 
     assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
-    assert machine.poll_hook_request() is None
-
-    machine.handle_event(
-        context_id=line_hook["context_id"],
-        event=MasterStateMachine.EVENT_RETURN_MARKER_FOUND,
-        value=0,
-    )
-    marker_hook = machine.poll_hook_request()
-
-    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_MARKER
-    assert marker_hook == {
-        "kind": "return_marker_hook",
+    line_move_hook = machine.poll_hook_request()
+    assert line_move_hook == {
+        "kind": "return_line_hook",
         "context_id": 6,
-        "state": MasterStateMachine.STATE_RETURN_GARAGE_MARKER,
+        "state": MasterStateMachine.STATE_RETURN_GARAGE_LINE,
         "target": MasterStateMachine.TARGET_EDGE_LINE,
-        "arg": 6,
+        "arg": 5,
     }
 
     machine.handle_event(
         context_id=line_hook["context_id"],
-        event=MasterStateMachine.EVENT_RETURN_GARAGE_FINISHED,
+        event=11,
         value=0,
     )
 
-    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_MARKER
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
+    assert machine.poll_hook_request() is None
 
     machine.handle_event(
-        context_id=marker_hook["context_id"],
+        context_id=line_move_hook["context_id"],
         event=MasterStateMachine.EVENT_RETURN_GARAGE_FINISHED,
         value=0,
     )

@@ -43,7 +43,6 @@ from vision.master.state_machine import (
     STATE_FINISHED,
     STATE_ORBITING,
     STATE_RETURN_GARAGE_LINE,
-    STATE_RETURN_GARAGE_MARKER,
     STATE_RETURN_GARAGE_RETREAT,
     STATE_SEARCH_OBJECT,
     STATE_STOP,
@@ -72,10 +71,6 @@ MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_I
 MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID = getattr(
     vision_params,
     "MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID",
-)
-MASTER_RETURN_GARAGE_MARKER_HOOK_CONFIG_ID = getattr(
-    vision_params,
-    "MASTER_RETURN_GARAGE_MARKER_HOOK_CONFIG_ID",
 )
 TRANSPORT_OBJECT_TOTAL_COUNT = getattr(vision_params, "TRANSPORT_OBJECT_TOTAL_COUNT")
 ORBIT_VISION_CORRECTION_ENABLED = bool(
@@ -138,7 +133,6 @@ class MasterForwardRuntime:
             transport_hook_arg=MASTER_TRANSPORT_HOOK_CONFIG_ID,
             finish_hook_arg=MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID,
             return_line_hook_arg=MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID,
-            return_marker_hook_arg=MASTER_RETURN_GARAGE_MARKER_HOOK_CONFIG_ID,
             total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
         )
@@ -236,10 +230,6 @@ class MasterForwardRuntime:
                     )
                     or (
                         self._state_machine.state == STATE_RETURN_GARAGE_LINE
-                        and self._pending_hook is None
-                    )
-                    or (
-                        self._state_machine.state == STATE_RETURN_GARAGE_MARKER
                         and self._pending_hook is None
                     )
                 ):
@@ -379,18 +369,6 @@ class MasterForwardRuntime:
                 vy,
                 0.0,
                 "master_return_line",
-                False,
-            )
-            return
-        if self._state_machine.state == STATE_RETURN_GARAGE_MARKER:
-            packet = self._latest_uart6_velocity
-            if packet is None:
-                return
-            self._transport_car.handle_velocity_packet(
-                float(packet.get("vx", 0.0)),
-                float(packet.get("vy", 0.0)),
-                0.0,
-                "master_return_marker",
                 False,
             )
             return
