@@ -540,6 +540,7 @@ class MasterForwardRuntime:
             request_kind = assistant_request.get("kind")
             if request_kind == "assistant_idle":
                 stop_source = "master_wait_assistant_idle"
+                # STATE_STOP: 暂不启用，详细原因见 docs/developer/vision.md。
                 if self._state_machine.state == STATE_STOP:
                     stop_source = "master_transport_finish_stop"
                 self._latest_uart6_velocity = None

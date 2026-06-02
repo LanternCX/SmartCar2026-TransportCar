@@ -28,6 +28,15 @@
 6. 辅车状态机: [src/vision/assistant/state_machine.py](../../src/vision/assistant/state_machine.py)
 7. 视觉相关配置: [src/config/vision.py](../../src/config/vision.py)
 
+## 主车全局状态
+
+主车状态机共定义 9 个状态。当前实际参与主流程的状态为：
+
+- `IDLE` (0) → `SEARCH_OBJECT` (1) → `ORBITING` (2) → `SEARCH_OBJECT` (1) → `TRANSPORT_OBJECT` (4) → `CLEAR_OBJECT` (5)
+- 全部物体搬运完成后：`CLEAR_OBJECT` (5) → `RETURN_GARAGE_RETREAT` (6) → `RETURN_GARAGE_LINE` (7) → `FINISHED` (8)
+
+`STATE_STOP` (3) 停车状态虽然在状态机中有编号定义并在运行时 `assistant_idle` 处理分支中预留了不同 `stop_source` 语义，但状态机没有任何路径通过 `_enter_state` 进入该状态，因此当前不参与主流程。未启用的原因是基于视觉固定列采样的停车判定算法在场地上不够稳定。待算法稳定后可直接把回库完成后的 `FINISHED` 路径替换为进入 `STOP` 收尾链路。
+
 ## 行为事实入口
 
 - 主车运行时视觉链路: [tests/unit/runtime/test_master_forward_runtime.py](../../tests/unit/runtime/test_master_forward_runtime.py)
