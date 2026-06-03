@@ -6,7 +6,7 @@
 
 ## 目标
 
-按 `docs/superpowers/specs/2026-05-31-return-garage-yellow-line-stop-design.md` 取消回库色标状态, 让主车只通过回库黄线完成横移入库和停车。
+按 `docs/superpowers/specs/archive/PR#107/2026-05-31-return-garage-yellow-line-stop-design.md` 取消回库色标状态, 让主车只通过回库黄线完成横移入库和停车。
 
 ## 架构边界
 
@@ -195,8 +195,8 @@
 - `docs/developer/state.md`
 - `docs/developer/vision.md`
 - `../SmartCar2026-Vision/README.md`
-- `docs/superpowers/specs/2026-05-31-return-garage-yellow-line-stop-design.md`
-- `docs/superpowers/plans/2026-05-31-return-garage-yellow-line-stop-implementation-plan.md`
+- `docs/superpowers/specs/archive/PR#107/2026-05-31-return-garage-yellow-line-stop-design.md`
+- `docs/superpowers/plans/archive/PR#107/2026-05-31-return-garage-yellow-line-stop-implementation-plan.md`
 
 **任务目标:**
 

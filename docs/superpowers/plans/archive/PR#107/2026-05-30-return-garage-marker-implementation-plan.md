@@ -6,7 +6,7 @@
 
 ## 目标
 
-按 `docs/superpowers/specs/2026-05-30-return-garage-marker-design.md` 完成“全部物体推完后主车循黄线回库、发现绿色色标后切换色标跟随、到位后进入完成态并同步辅车”的闭环。
+按 `docs/superpowers/specs/archive/PR#107/2026-05-30-return-garage-marker-design.md` 完成“全部物体推完后主车循黄线回库、发现绿色色标后切换色标跟随、到位后进入完成态并同步辅车”的闭环。
 
 ## 架构边界
 
@@ -210,8 +210,8 @@
 
 **修改范围:**
 
-- `docs/superpowers/specs/2026-05-30-return-garage-marker-design.md`
-- `docs/superpowers/plans/2026-05-30-return-garage-marker-implementation-plan.md`
+- `docs/superpowers/specs/archive/PR#107/2026-05-30-return-garage-marker-design.md`
+- `docs/superpowers/plans/archive/PR#107/2026-05-30-return-garage-marker-implementation-plan.md`
 
 **任务目标:**
 

@@ -4,7 +4,7 @@
 
 ## 目标
 
-按 `docs/superpowers/specs/2026-05-31-return-garage-x50-stop-sample-design.md` 将回库平移停车判据调整为 Y=160 有黄色且 X=270 连续 5 帧无黄色。
+按 `docs/superpowers/specs/archive/PR#107/2026-05-31-return-garage-x50-stop-sample-design.md` 将回库平移停车判据调整为 Y=160 有黄色且 X=270 连续 5 帧无黄色。
 
 ## 修改范围
 
