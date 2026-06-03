@@ -7,6 +7,8 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-05-31-2 | 2026-05-31 | 收口主车回库为黄线采样停车 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-31-2.md` | 记录主车回库取消色标状态, 以 Y=160 有黄色且 X=270 连续 5 帧无黄色完成停车收口回库主线。 | return-garage, yellow-line, fixed-sample, master, vision, state-machine, milestone |
+| 2026-05-30-1 | 2026-05-30 | 完成全部物体后黄线与色标回库闭环 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-30-1.md` | 记录车端和 OpenART 主车视觉共同完成全部物体后后退对正黄线、黄线左移、绿色色标跟随、完成同步辅车停止的回库闭环。 | return-garage, yellow-line, green-marker, master, assistant, vision, state-machine, milestone |
 | 2026-05-25-1 | 2026-05-25 | 接入主辅绕行阶段视觉平移修正 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-25-1.md` | 记录主车和辅车绕行阶段通过 OpenART 输出 `v,<vx>,<vy>` 平移修正, 并在车端统一绕行基准运动上叠加修正量。 | orbit, vision, uart6, master, assistant, correction, milestone |
 | 2026-05-08-2 | 2026-05-08 | 完成主辅车联动搬运状态闭环 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-08-2.md` | 记录 PR#64、PR#68、PR#70、PR#76 和 PR#80 将主车和辅车状态机串成搜索、绕行、对正、搬运、收尾和下一轮搜索的完整协同搬运闭环。 | PR64, PR68, PR70, PR76, PR80, state-machine, master, assistant, transport, milestone |
 | 2026-05-08-1 | 2026-05-08 | 确立 UDP 数据流与 TCP 可靠同步双模式控制协议 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-08-1.md` | 记录 PR#60 和 PR#61 将控制协议收口为高频 UDP 数据流与低频 TCP 可靠同步的短包通信基线。 | PR60, PR61, protocol, UDP, TCP, reliable-sync, high-frequency, short-packet, milestone |

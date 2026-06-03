@@ -13,8 +13,8 @@
 
 ## 外部职责
 
-- 主车 OpenART 负责目标物体识别、主车搜索速度、搬运入口对正、搬运结束判定和绕行视觉修正。
-- 辅车 OpenART 负责主车色标跟随、辅车找物体、辅车搬运入口对正和辅车绕行视觉修正。
+- 主车 OpenART 负责目标物体识别、主车搜索速度、搬运入口对正、搬运结束判定、绕行视觉修正和回库黄线停车判定。
+- 辅车 OpenART 负责主车色标跟随、辅车找物体、辅车搬运入口对正、辅车绕行视觉修正和辅车自主回库黄线巡线。
 - 主车 RT1021 负责本车 `UART6` 视觉 hook 编排、主车视觉速度接入、主车状态机调度和 `UART8` 主辅同步。
 - 辅车 RT1021 负责 `UART8` 前馈输入、`UART8` 子状态同步、本车 `UART6` 视觉任务同步、本车 `UART6` 视觉输入和共享底盘写回。
 
@@ -27,6 +27,15 @@
 5. 辅车角色运行时: [src/vision/assistant/follow_runtime.py](../../src/vision/assistant/follow_runtime.py)
 6. 辅车状态机: [src/vision/assistant/state_machine.py](../../src/vision/assistant/state_machine.py)
 7. 视觉相关配置: [src/config/vision.py](../../src/config/vision.py)
+
+## 主车全局状态
+
+主车状态机共定义 9 个状态。当前实际参与主流程的状态为：
+
+- `IDLE` (0) → `SEARCH_OBJECT` (1) → `ORBITING` (2) → `SEARCH_OBJECT` (1) → `TRANSPORT_OBJECT` (4) → `CLEAR_OBJECT` (5)
+- 全部物体搬运完成后：`CLEAR_OBJECT` (5) → `RETURN_GARAGE_RETREAT` (6) → `RETURN_GARAGE_LINE` (7) → `FINISHED` (8)
+
+`STATE_STOP` (3) 停车状态虽然在状态机中有编号定义并在运行时 `assistant_idle` 处理分支中预留了不同 `stop_source` 语义，但状态机没有任何路径通过 `_enter_state` 进入该状态，因此当前不参与主流程。未启用的原因是基于视觉固定列采样的停车判定算法在场地上不够稳定。待算法稳定后可直接把回库完成后的 `FINISHED` 路径替换为进入 `STOP` 收尾链路。
 
 ## 行为事实入口
 

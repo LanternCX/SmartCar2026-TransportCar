@@ -78,6 +78,8 @@ def _bind_uart3_repl() -> bool:
 def resolve_existing_startup_script(script_path):
     """根据板端实际文件选择启动脚本路径."""
 
+    if script_path == SCRIPT_TEST_ENTRY:
+        return script_path
     if script_path.endswith(".py"):
         compiled_path = script_path[:-3] + ".mpy"
         if _path_exists(compiled_path):
@@ -257,9 +259,8 @@ def _run_script(script_path):
     if script_path.endswith(".mpy"):
         module = _import_module(_script_path_to_module_name(script_path))
         return module.main()
-    from machine import execfile
 
-    return execfile(script_path)
+    return execfile(script_path)  # pyright: ignore[reportUndefinedVariable]
 
 
 def _read_memory_snapshot():

@@ -36,11 +36,14 @@ from vision.assistant.diagnostics import build_follow_snapshot
 from vision.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
+    ASSISTANT_STATE_FINISHED,
     ASSISTANT_STATE_FOLLOW,
     ASSISTANT_STATE_ORBIT,
+    ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
+    EVENT_RETURN_GARAGE_FINISHED,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 
@@ -48,6 +51,7 @@ from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
+_RETURN_GARAGE_FINISHED_EVENT = EVENT_RETURN_GARAGE_FINISHED
 _ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
@@ -56,6 +60,9 @@ _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = getattr(
     vision_params, "ASSISTANT_ORBIT_OBJECT_CONFIG_ID"
 )
+ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = getattr(
+    vision_params, "ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID"
+)
 ORBIT_VISION_CORRECTION_ENABLED = bool(
     getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
 )
@@ -63,6 +70,10 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
+ASSISTANT_RETURN_GARAGE_LEFT_SPEED = getattr(
+    motion_params,
+    "ASSISTANT_RETURN_GARAGE_LEFT_SPEED",
+)
 MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
 MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 
@@ -227,6 +238,21 @@ class AssistantFollowRuntime:
         elif self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             self._post_orbit_realign_active = False
             self._enter_clear_object_state()
+        elif self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            self._clear_motion_inputs()
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
+            self._enter_return_follow_state()
+        elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            self._clear_motion_inputs()
+            self._pending_local_vision_sync = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
+            self._write_zero_velocity("assistant_finished")
         return True
 
     def _consume_local_vision_event(self) -> None:
@@ -254,6 +280,13 @@ class AssistantFollowRuntime:
             and not self._approach_target_found_done
         ):
             self._handle_local_aligned(packet["value"])
+        elif (
+            self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW
+            and event == _RETURN_GARAGE_FINISHED_EVENT
+        ):
+            self._state_machine.handle_event(event, packet["value"])
+            if self._state_machine.is_finished():
+                self._handle_return_garage_finished()
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
@@ -304,6 +337,12 @@ class AssistantFollowRuntime:
             return
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return
+        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            self._write_zero_velocity("assistant_finished")
+            return
+        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            self._write_return_line_velocity()
+            return
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
             return
@@ -351,6 +390,17 @@ class AssistantFollowRuntime:
             vy += float(uart6_velocity.get("vy", 0.0))
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
+    def _write_return_line_velocity(self) -> None:
+        uart6_velocity = self._uart6_velocity
+        if uart6_velocity is None:
+            return
+        self._apply_effective_velocity(
+            float(ASSISTANT_RETURN_GARAGE_LEFT_SPEED),
+            float(uart6_velocity.get("vy", 0.0)),
+            0.0,
+            False,
+        )
+
     def _write_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
             return
@@ -383,6 +433,10 @@ class AssistantFollowRuntime:
             return source == "uart6" and self._pending_local_vision_sync is None
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
+        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            return False
+        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            return source == "uart6" and self._pending_local_vision_sync is None
         if source == "uart6" and self._pending_local_vision_sync is not None:
             return False
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
@@ -416,6 +470,15 @@ class AssistantFollowRuntime:
             "state": ASSISTANT_STATE_FOLLOW,
             "target": 0,
             "arg": 0,
+            "queued": False,
+        }
+
+    def _enter_return_follow_state(self) -> None:
+        self._write_zero_velocity("assistant_return_line")
+        self._pending_local_vision_sync = {
+            "state": ASSISTANT_STATE_RETURN_FOLLOW,
+            "target": 0,
+            "arg": int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
             "queued": False,
         }
 
@@ -475,6 +538,11 @@ class AssistantFollowRuntime:
             "value": int(value),
             "queued": False,
         }
+
+    def _handle_return_garage_finished(self) -> None:
+        self._clear_motion_inputs()
+        self._pending_local_vision_sync = None
+        self._write_zero_velocity("assistant_finished")
 
     def _enter_transport_state(self, packet: dict) -> None:
         self._approach_target_found_done = False

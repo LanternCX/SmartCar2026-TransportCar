@@ -728,6 +728,97 @@ def test_master_state_machine_forward_completion_restarts_search_and_assistant_f
     assert machine.allows_search_velocity() is True
 
 
+def test_master_state_machine_forward_completion_enters_return_garage_when_all_objects_done() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
+    machine._required_object_count = 1
+    machine._return_line_hook_arg = 5
+    machine._return_marker_hook_arg = 6
+
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+    machine.poll_assistant_request()
+    machine.mark_transport_ready()
+    machine.poll_hook_request()
+    machine.handle_event(
+        context_id=4, event=MasterStateMachine.EVENT_ARRIVED, value=0
+    )
+    machine.poll_assistant_request()
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_return_line",
+        "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
+        "arg": 0,
+    }
+    machine.mark_turn_back_completed()
+
+    assert machine.completed_object_count == 1
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
+    assert machine.poll_hook_request() == {
+        "kind": "return_line_hook",
+        "context_id": 5,
+        "state": MasterStateMachine.STATE_RETURN_GARAGE_RETREAT,
+        "target": MasterStateMachine.TARGET_EDGE_LINE,
+        "arg": 5,
+    }
+    assert machine.poll_assistant_request() is None
+    assert machine.allows_search_velocity() is False
+    assert machine.allows_assistant_velocity_forward() is False
+
+
+def test_master_state_machine_return_garage_events_advance_to_finished() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        hook_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+        total_object_count=1,
+        return_line_hook_arg=5,
+        initial_context_id=4,
+    )
+    machine._restart_search_after_clear()
+    machine.poll_assistant_request()
+    line_hook = machine.poll_hook_request()
+
+    machine.handle_event(
+        context_id=line_hook["context_id"],
+        event=MasterStateMachine.EVENT_RETURN_LINE_ALIGNED,
+        value=0,
+    )
+
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
+    line_move_hook = machine.poll_hook_request()
+    assert line_move_hook == {
+        "kind": "return_line_hook",
+        "context_id": 6,
+        "state": MasterStateMachine.STATE_RETURN_GARAGE_LINE,
+        "target": MasterStateMachine.TARGET_EDGE_LINE,
+        "arg": 5,
+    }
+
+    machine.handle_event(
+        context_id=line_hook["context_id"],
+        event=11,
+        value=0,
+    )
+
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
+    assert machine.poll_hook_request() is None
+
+    machine.handle_event(
+        context_id=line_move_hook["context_id"],
+        event=MasterStateMachine.EVENT_RETURN_GARAGE_FINISHED,
+        value=0,
+    )
+
+    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert machine.poll_assistant_request() is None
+
+
 def test_master_state_machine_restart_search_waits_both_follow_and_local_hook_ack() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)

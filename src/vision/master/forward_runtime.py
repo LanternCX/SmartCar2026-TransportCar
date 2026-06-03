@@ -40,7 +40,10 @@ from vision.master.state_machine import (
     EVENT_CLEARED,
     EVENT_TARGET_FOUND,
     STATE_CLEAR_OBJECT,
+    STATE_FINISHED,
     STATE_ORBITING,
+    STATE_RETURN_GARAGE_LINE,
+    STATE_RETURN_GARAGE_RETREAT,
     STATE_SEARCH_OBJECT,
     STATE_STOP,
     STATE_TRANSPORT_OBJECT,
@@ -65,6 +68,11 @@ MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
     "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
 )
 MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_ID")
+MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID = getattr(
+    vision_params,
+    "MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID",
+)
+TRANSPORT_OBJECT_TOTAL_COUNT = getattr(vision_params, "TRANSPORT_OBJECT_TOTAL_COUNT")
 ORBIT_VISION_CORRECTION_ENABLED = bool(
     getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
 )
@@ -83,6 +91,14 @@ TRANSPORT_CLEAR_RETREAT_MAX_SPEED = getattr(
 MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
 MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG")
+MASTER_RETURN_GARAGE_RETREAT_SPEED = getattr(
+    motion_params,
+    "MASTER_RETURN_GARAGE_RETREAT_SPEED",
+)
+MASTER_RETURN_GARAGE_LEFT_SPEED = getattr(
+    motion_params,
+    "MASTER_RETURN_GARAGE_LEFT_SPEED",
+)
 
 
 def _default_now_ms():
@@ -116,6 +132,8 @@ class MasterForwardRuntime:
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_hook_arg=MASTER_TRANSPORT_HOOK_CONFIG_ID,
             finish_hook_arg=MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID,
+            return_line_hook_arg=MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID,
+            total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
         )
         self._last_error_text = "none"
@@ -208,6 +226,10 @@ class MasterForwardRuntime:
                     or self._state_machine.state == STATE_TRANSPORT_OBJECT
                     or (
                         self._state_machine.state == STATE_ORBITING
+                        and self._pending_hook is None
+                    )
+                    or (
+                        self._state_machine.state == STATE_RETURN_GARAGE_LINE
                         and self._pending_hook is None
                     )
                 ):
@@ -327,6 +349,37 @@ class MasterForwardRuntime:
             return
         if self._state_machine.state == STATE_ORBITING:
             self._apply_orbit_velocity_correction()
+            return
+        if self._state_machine.state == STATE_RETURN_GARAGE_RETREAT:
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                float(MASTER_RETURN_GARAGE_RETREAT_SPEED),
+                0.0,
+                "master_return_retreat",
+                False,
+            )
+            return
+        if self._state_machine.state == STATE_RETURN_GARAGE_LINE:
+            packet = self._latest_uart6_velocity
+            vy = 0.0
+            if packet is not None:
+                vy = float(packet.get("vy", 0.0))
+            self._transport_car.handle_velocity_packet(
+                float(MASTER_RETURN_GARAGE_LEFT_SPEED),
+                vy,
+                0.0,
+                "master_return_line",
+                False,
+            )
+            return
+        if self._state_machine.state == STATE_FINISHED:
+            self._transport_car.handle_velocity_packet(
+                0.0,
+                0.0,
+                0.0,
+                "master_finished",
+                True,
+            )
             return
         if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
             self._state_machine, "_master_aligned", False
@@ -487,6 +540,7 @@ class MasterForwardRuntime:
             request_kind = assistant_request.get("kind")
             if request_kind == "assistant_idle":
                 stop_source = "master_wait_assistant_idle"
+                # STATE_STOP: 暂不启用，详细原因见 docs/developer/vision.md。
                 if self._state_machine.state == STATE_STOP:
                     stop_source = "master_transport_finish_stop"
                 self._latest_uart6_velocity = None
