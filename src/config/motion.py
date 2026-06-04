@@ -24,6 +24,8 @@ ASSISTANT_RETURN_GARAGE_LEFT_SPEED = -3.0
 MOTION_STOP_SPEED_THRESHOLD = 0.5
 # 状态收尾判定时三轮接近静止需要连续满足的默认拍数
 MOTION_STOP_CONFIRM_TICKS = 3
+# 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
+WHEEL_DIAMETER_M = 0.038
 # 位置控制最大速度, 单位 m/s, 在 P 控制中作为饱和限幅
 POS_MAX_SPEED = 0.05
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
