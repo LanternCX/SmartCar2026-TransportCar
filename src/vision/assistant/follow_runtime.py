@@ -46,6 +46,7 @@ from vision.assistant.state_machine import (
     EVENT_RETURN_GARAGE_FINISHED,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
+from vision.task_sync import pack_task_arg, unpack_task_arg_object_id
 
 
 _TARGET_FOUND_EVENT = 6
@@ -117,6 +118,7 @@ class AssistantFollowRuntime:
         self._pending_target_found_report = None
         self._approach_target_found_done = False
         self._last_approach_arg = 0
+        self._current_object_id = 0
         self._post_orbit_realign_active = False
         self._clear_completed = False
         self._clear_stop_ticks = 0
@@ -209,6 +211,7 @@ class AssistantFollowRuntime:
         if not accepted:
             return False
         if self._state_machine.is_idle():
+            self._current_object_id = 0
             self._clear_motion_inputs()
             self._pending_local_vision_sync = None
             self._pending_target_found_report = None
@@ -217,6 +220,7 @@ class AssistantFollowRuntime:
             self._clear_completed = False
             self._write_zero_velocity("assistant_idle")
         elif self._state_machine.state == ASSISTANT_STATE_FOLLOW:
+            self._current_object_id = 0
             self._clear_motion_inputs()
             self._pending_target_found_report = None
             self._approach_target_found_done = False
@@ -239,6 +243,7 @@ class AssistantFollowRuntime:
             self._post_orbit_realign_active = False
             self._enter_clear_object_state()
         elif self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            self._current_object_id = 0
             self._clear_motion_inputs()
             self._pending_target_found_report = None
             self._approach_target_found_done = False
@@ -246,6 +251,7 @@ class AssistantFollowRuntime:
             self._clear_completed = False
             self._enter_return_follow_state()
         elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
+            self._current_object_id = 0
             self._clear_motion_inputs()
             self._pending_local_vision_sync = None
             self._pending_target_found_report = None
@@ -493,6 +499,7 @@ class AssistantFollowRuntime:
 
     def _enter_approach_object_state(self, packet: dict) -> None:
         self._last_approach_arg = int(packet["arg"])
+        self._current_object_id = unpack_task_arg_object_id(packet["arg"])
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._clear_motion_inputs()
@@ -511,7 +518,10 @@ class AssistantFollowRuntime:
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_ORBIT,
             "target": ASSISTANT_TARGET_OBJECT,
-            "arg": int(_ASSISTANT_ORBIT_OBJECT_CONFIG_ID),
+            "arg": pack_task_arg(
+                _ASSISTANT_ORBIT_OBJECT_CONFIG_ID,
+                self._current_object_id,
+            ),
             "queued": False,
         }
         self._transport_car.set_orbit_target(
@@ -545,6 +555,7 @@ class AssistantFollowRuntime:
         self._write_zero_velocity("assistant_finished")
 
     def _enter_transport_state(self, packet: dict) -> None:
+        self._current_object_id = unpack_task_arg_object_id(packet["arg"])
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._post_orbit_realign_active = False
@@ -554,7 +565,10 @@ class AssistantFollowRuntime:
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_APPROACH_OBJECT,
             "target": int(packet["target"]),
-            "arg": int(_ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID),
+            "arg": pack_task_arg(
+                _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+                self._current_object_id,
+            ),
             "queued": False,
         }
 
@@ -591,13 +605,19 @@ class AssistantFollowRuntime:
         self._state_machine.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,
             ASSISTANT_TARGET_OBJECT,
-            _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+            pack_task_arg(
+                _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+                self._current_object_id,
+            ),
         )
         self._enter_approach_object_state(
             {
                 "state": ASSISTANT_STATE_APPROACH_OBJECT,
                 "target": ASSISTANT_TARGET_OBJECT,
-                "arg": _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+                "arg": pack_task_arg(
+                    _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+                    self._current_object_id,
+                ),
             }
         )
         self._post_orbit_realign_active = True

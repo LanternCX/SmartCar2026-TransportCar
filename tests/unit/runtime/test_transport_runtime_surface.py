@@ -38,6 +38,13 @@ from tests.unit.runtime.transport_runtime_support import (
 )
 
 
+def _pack_task_arg(config_id, object_id):
+    packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
+    if packed >= 0x8000:
+        packed -= 0x10000
+    return packed
+
+
 def test_master_runtime_exposes_external_transport_cycle(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -301,7 +308,7 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
                 encode_assistant_state_sync_body(
                     module.ASSISTANT_STATE_APPROACH_OBJECT,
                     module.ASSISTANT_TARGET_OBJECT,
-                    1,
+                    _pack_task_arg(1, 2),
                 ),
             )
         )
@@ -320,6 +327,12 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
 
     assert runtime._uart6_velocity is None
     assert runtime._uart8_velocity is None
+    assert runtime._pending_local_vision_sync == {
+        "state": module.ASSISTANT_STATE_APPROACH_OBJECT,
+        "target": module.ASSISTANT_TARGET_OBJECT,
+        "arg": _pack_task_arg(1, 2),
+        "queued": False,
+    }
     assert cars[0].last_chassis_target == {
         "source": "assistant_approach_object",
         "vx": 0.0,

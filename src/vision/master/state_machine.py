@@ -4,10 +4,9 @@
 """
 
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
+from vision.task_sync import pack_task_arg
 from utils.startup_log import log
 
-ASSISTANT_IDLE_SYNC_STATE = 0
-ASSISTANT_IDLE_SYNC_TARGET = 0
 ASSISTANT_FOLLOW_SYNC_STATE = 1
 ASSISTANT_FOLLOW_SYNC_TARGET = 0
 ASSISTANT_OBJECT_SYNC_STATE = 2
@@ -93,10 +92,11 @@ class MasterStateMachine:
         self._pending_orbit_command = None
         self._search_started = False
         self._orbit_completed = False
-        self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = False
         self._waiting_restart_search_hook_ack = False
         self._assistant_object_request_emitted = False
+        self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
         self._assistant_transport_request_emitted = False
         self._master_aligned = False
@@ -105,6 +105,7 @@ class MasterStateMachine:
         self._clear_phase = CLEAR_PHASE_NONE
         self._master_cleared = False
         self._assistant_cleared = False
+        self._current_object_id = 0
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -135,25 +136,25 @@ class MasterStateMachine:
                 "target": TARGET_OBJECT,
                 "arg": self._transport_hook_arg,
             }
-            if not self._assistant_object_request_emitted:
-                self._assistant_object_request_emitted = True
+            if self._assistant_target_found_pending and not self._assistant_orbit_request_emitted:
+                self._assistant_target_found_pending = False
+                self._assistant_orbit_request_emitted = True
                 self._pending_assistant_request = {
-                    "kind": "assistant_object",
-                    "state": ASSISTANT_OBJECT_SYNC_STATE,
-                    "target": ASSISTANT_OBJECT_SYNC_TARGET,
-                    "arg": self._assistant_object_arg,
+                    "kind": "assistant_orbit",
+                    "state": ASSISTANT_ORBIT_SYNC_STATE,
+                    "target": ASSISTANT_ORBIT_SYNC_TARGET,
+                    "arg": pack_task_arg(0, self._current_object_id),
                 }
 
     def handle_event(self, context_id, event, value):
         """消费视觉事件"""
 
-        _ = value
         if int(context_id) != self._current_context_id:
             return
         event = int(event)
         if self.state == STATE_SEARCH_OBJECT:
             if (
-                self._waiting_assistant_idle_ack
+                self._waiting_assistant_object_ack
                 or self._waiting_assistant_follow_ack
                 or self._waiting_restart_search_hook_ack
             ):
@@ -161,12 +162,17 @@ class MasterStateMachine:
             if event == EVENT_TARGET_FOUND:
                 if self._orbit_completed:
                     return
-                self._waiting_assistant_idle_ack = True
+                self._current_object_id = int(value) & 0xFF
+                self._waiting_assistant_object_ack = True
+                self._assistant_object_request_emitted = True
                 self._pending_assistant_request = {
-                    "kind": "assistant_idle",
-                    "state": ASSISTANT_IDLE_SYNC_STATE,
-                    "target": ASSISTANT_IDLE_SYNC_TARGET,
-                    "arg": 0,
+                    "kind": "assistant_object",
+                    "state": ASSISTANT_OBJECT_SYNC_STATE,
+                    "target": ASSISTANT_OBJECT_SYNC_TARGET,
+                    "arg": pack_task_arg(
+                        self._assistant_object_arg,
+                        self._current_object_id,
+                    ),
                 }
                 return
             if event == EVENT_ALIGNED:
@@ -192,11 +198,11 @@ class MasterStateMachine:
                 self._enter_finished()
             return
 
-    def mark_assistant_idle_acknowledged(self):
-        """标记辅车 idle 同步已确认"""
+    def mark_assistant_object_acknowledged(self):
+        """标记辅车找物体同步已确认并开始主车绕行"""
 
-        if self._waiting_assistant_idle_ack:
-            self._waiting_assistant_idle_ack = False
+        if self._waiting_assistant_object_ack:
+            self._waiting_assistant_object_ack = False
             self._current_context_id = (self._current_context_id + 1) % 256
             self._enter_state(STATE_ORBITING)
             self._pending_orbit_command = {
@@ -207,6 +213,10 @@ class MasterStateMachine:
         """消费辅车目标命中回报"""
 
         _ = value
+        if self.state == STATE_ORBITING:
+            if self._assistant_object_request_emitted and not self._assistant_orbit_request_emitted:
+                self._assistant_target_found_pending = True
+            return
         if self.state != STATE_SEARCH_OBJECT:
             return
         if not self._assistant_object_request_emitted:
@@ -218,7 +228,7 @@ class MasterStateMachine:
             "kind": "assistant_orbit",
             "state": ASSISTANT_ORBIT_SYNC_STATE,
             "target": ASSISTANT_ORBIT_SYNC_TARGET,
-            "arg": 0,
+            "arg": pack_task_arg(0, self._current_object_id),
         }
 
     def handle_assistant_aligned(self, value):
@@ -250,7 +260,10 @@ class MasterStateMachine:
             "kind": "assistant_transport",
             "state": ASSISTANT_TRANSPORT_SYNC_STATE,
             "target": ASSISTANT_TRANSPORT_SYNC_TARGET,
-            "arg": self._assistant_transport_arg,
+            "arg": pack_task_arg(
+                self._assistant_transport_arg,
+                self._current_object_id,
+            ),
         }
 
     def mark_transport_ready(self):
@@ -344,10 +357,11 @@ class MasterStateMachine:
             self._enter_return_retreat()
             return
         self._orbit_completed = False
-        self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = True
         self._waiting_restart_search_hook_ack = True
         self._assistant_object_request_emitted = False
+        self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
         self._assistant_transport_request_emitted = False
         self._master_aligned = False
@@ -356,6 +370,7 @@ class MasterStateMachine:
         self._clear_phase = CLEAR_PHASE_NONE
         self._master_cleared = False
         self._assistant_cleared = False
+        self._current_object_id = 0
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_hook(self._hook_arg)
         self._pending_assistant_request = {
@@ -369,10 +384,11 @@ class MasterStateMachine:
         """清理单轮找物体、搬运和收尾阶段标记"""
 
         self._orbit_completed = False
-        self._waiting_assistant_idle_ack = False
+        self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = False
         self._waiting_restart_search_hook_ack = False
         self._assistant_object_request_emitted = False
+        self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
         self._assistant_transport_request_emitted = False
         self._master_aligned = False
@@ -381,6 +397,7 @@ class MasterStateMachine:
         self._clear_phase = CLEAR_PHASE_NONE
         self._master_cleared = False
         self._assistant_cleared = False
+        self._current_object_id = 0
 
     def _enter_return_retreat(self):
         """进入主车回库后退找黄线段"""
@@ -480,17 +497,17 @@ class MasterStateMachine:
         self._pending_orbit_command = None
         return pending
 
-    def is_waiting_assistant_idle_ack(self):
-        """当前是否正在等待辅车 idle 确认"""
+    def is_waiting_assistant_object_ack(self):
+        """当前是否正在等待辅车找物体同步确认"""
 
-        return self._waiting_assistant_idle_ack
+        return self._waiting_assistant_object_ack
 
     def allows_search_velocity(self):
         """当前状态是否允许主车视觉搜索速度生效"""
 
         if self.state != STATE_SEARCH_OBJECT:
             return False
-        if self._waiting_assistant_idle_ack:
+        if self._waiting_assistant_object_ack:
             return False
         if self._waiting_assistant_follow_ack:
             return False
