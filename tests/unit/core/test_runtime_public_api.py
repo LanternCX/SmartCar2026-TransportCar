@@ -12,6 +12,7 @@ from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
 from config import vision as vision_params
+from control.kinematics import OmniKinematics
 from tests.unit.core.runtime_support import (
     CaptureUart,
     DummyMotor,
@@ -172,6 +173,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
+    assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
     assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
     assert float(safety_params.V_CMD_MAX) > 0.0
@@ -196,6 +198,16 @@ def test_transport_clear_retreat_distance_exceeds_position_tolerance() -> None:
 
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > float(
         motion_params.POS_TOLERANCE
+    )
+
+
+def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
+    """全向轮运动学使用运动配置中的轮径计算脉冲距离."""
+
+    kinematics = OmniKinematics()
+
+    assert kinematics.wheel_diameter == pytest.approx(
+        float(motion_params.WHEEL_DIAMETER_M)
     )
 
 

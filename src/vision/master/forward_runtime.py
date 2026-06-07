@@ -322,8 +322,8 @@ class MasterForwardRuntime:
                 == DELIVERY_DELIVERED
             ):
                 self._log_sync_done("master->assistant", pending)
-                if pending.get("kind") == "assistant_idle":
-                    self._state_machine.mark_assistant_idle_acknowledged()
+                if pending.get("kind") == "assistant_object":
+                    self._state_machine.mark_assistant_object_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
                     self._state_machine.mark_assistant_follow_acknowledged()
                 elif pending.get("kind") == "assistant_transport":
@@ -538,21 +538,10 @@ class MasterForwardRuntime:
         assistant_request = self._state_machine.poll_assistant_request()
         if assistant_request is not None:
             request_kind = assistant_request.get("kind")
-            if request_kind == "assistant_idle":
-                stop_source = "master_wait_assistant_idle"
-                # STATE_STOP: 暂不启用，详细原因见 docs/developer/vision.md。
-                if self._state_machine.state == STATE_STOP:
-                    stop_source = "master_transport_finish_stop"
+            if request_kind == "assistant_object":
                 self._latest_uart6_velocity = None
                 self._uart6_reset_version = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
-                )
-                self._transport_car.handle_velocity_packet(
-                    0.0,
-                    0.0,
-                    0.0,
-                    stop_source,
-                    True,
                 )
             elif request_kind == "assistant_follow":
                 self._latest_uart6_velocity = None

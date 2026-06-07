@@ -325,6 +325,15 @@ assistant_state_sync, 4 bytes
 assistant_event_report, 3 bytes
   0   : event, u8
   1..2: value, i16
+
+其中 `assistant_vision_task_sync.arg` 与 `assistant_state_sync.arg` 在找物体、绕行修正和搬运对正阶段共用同一打包语义：
+
+```text
+arg low byte  : 本地视觉配置编号
+arg high byte : 物体编号
+```
+
+主车搜索阶段的 `MASTER_VISION_EVENT_REPORT / EVENT_TARGET_FOUND` 在正式主线中使用 `value` 回传主车当前选中的物体编号，车端再把该编号同步到辅车与辅车本地视觉。
 ```
 
 ## 业务读写入口
