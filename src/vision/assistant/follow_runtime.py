@@ -389,7 +389,6 @@ class AssistantFollowRuntime:
         vy = 0.0
         if uart8_velocity is not None:
             scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
-            vx += -float(uart8_velocity.get("vx", 0.0)) * scale
             vy += -float(uart8_velocity.get("vy", 0.0)) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity.get("vx", 0.0))
