@@ -674,12 +674,6 @@ class MasterForwardRuntime:
             if bool(getattr(self._transport_car, "command_lock", False)):
                 self._turn_back_stop_ticks = 0
                 return
-            if not self._are_all_wheels_near_stop():
-                self._turn_back_stop_ticks = 0
-                return
-            self._turn_back_stop_ticks += 1
-            if self._turn_back_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
-                return
             self._turn_back_rotation_started = False
             self._turn_back_stop_ticks = 0
             self._state_machine.mark_turn_back_completed()

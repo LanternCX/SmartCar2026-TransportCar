@@ -686,6 +686,35 @@ def test_master_runtime_final_turn_back_enters_return_without_forward_sync(monke
     )
 
 
+def test_master_runtime_turn_back_completes_immediately_after_lock_release(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    runtime._state_machine._clear_phase = state_module._CLEAR_STAGE_TURN_BACK
+    runtime._state_machine._required_object_count = 1
+    runtime._turn_back_rotation_started = True
+    cars[0].command_lock = False
+    for state in cars[0].wheel_states:
+        state["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) + 1.0
+
+    runtime._run_turn_back_phase()
+    runtime._drain_state_machine_outputs()
+
+    assert runtime._turn_back_rotation_started is False
+    assert runtime._state_machine.state == module.STATE_RETURN_GARAGE_RETREAT
+
+
 def test_master_runtime_return_line_combines_fixed_left_and_yellow_line_y(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
