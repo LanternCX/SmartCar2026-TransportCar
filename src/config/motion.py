@@ -58,6 +58,8 @@ MASTER_ORBIT_TARGET_DEG = 180
 MASTER_ORBIT_RADIUS_SCALE = 3.0
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
+# 主车搬运收尾回身阶段放行角度容差, 单位度
+MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = 8.0
 # 辅车绕行的绝对目标角度, 单位度
 ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准

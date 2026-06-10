@@ -181,6 +181,9 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.POS_MAX_SPEED) > 0.0
     assert float(motion_params.POS_TOLERANCE) >= 0.0
     assert float(motion_params.ANGLE_TOLERANCE) >= 0.0
+    assert float(motion_params.MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG) >= float(
+        motion_params.ANGLE_TOLERANCE
+    )
     assert set(motion_params.ACTIVE_WHEELS).issubset({"m", "l", "r"})
     assert 0.0 <= float(motion_params.GYRO_LPF_ALPHA) <= 1.0
     assert float(motion_params.GYRO_SCALE) > 0.0
