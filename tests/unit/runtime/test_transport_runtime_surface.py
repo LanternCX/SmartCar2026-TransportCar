@@ -946,6 +946,37 @@ def test_assistant_transport_discards_feedforward_x_and_uses_full_feedforward_y(
     }
 
 
+def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    accepted = runtime._apply_sync_context(
+        {
+            "state": module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+            "target": module.ASSISTANT_TARGET_OBJECT,
+            "arg": _pack_task_arg(2, 1),
+        }
+    )
+
+    assert accepted is True
+    assert runtime._pending_local_vision_sync == {
+        "state": module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+        "target": module.ASSISTANT_TARGET_OBJECT,
+        "arg": _pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 1),
+        "queued": False,
+    }
+
+
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)

@@ -562,7 +562,7 @@ class AssistantFollowRuntime:
         self._clear_motion_inputs()
         self._write_zero_velocity("assistant_transport")
         self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_APPROACH_OBJECT,
+            "state": ASSISTANT_STATE_TRANSPORT_OBJECT,
             "target": int(packet["target"]),
             "arg": pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
