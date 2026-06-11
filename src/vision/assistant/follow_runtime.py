@@ -389,7 +389,6 @@ class AssistantFollowRuntime:
         vy = 0.0
         if uart8_velocity is not None:
             scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
-            vx += -float(uart8_velocity.get("vx", 0.0)) * scale
             vy += -float(uart8_velocity.get("vy", 0.0)) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity.get("vx", 0.0))
@@ -563,7 +562,7 @@ class AssistantFollowRuntime:
         self._clear_motion_inputs()
         self._write_zero_velocity("assistant_transport")
         self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_APPROACH_OBJECT,
+            "state": ASSISTANT_STATE_TRANSPORT_OBJECT,
             "target": int(packet["target"]),
             "arg": pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,

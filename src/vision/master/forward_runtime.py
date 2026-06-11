@@ -91,6 +91,10 @@ TRANSPORT_CLEAR_RETREAT_MAX_SPEED = getattr(
 MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
 MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 MASTER_TURN_BACK_DELTA_DEG = getattr(motion_params, "MASTER_TURN_BACK_DELTA_DEG")
+MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = getattr(
+    motion_params,
+    "MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG",
+)
 MASTER_RETURN_GARAGE_RETREAT_SPEED = getattr(
     motion_params,
     "MASTER_RETURN_GARAGE_RETREAT_SPEED",
@@ -672,13 +676,19 @@ class MasterForwardRuntime:
             return
         if self._turn_back_rotation_started:
             if bool(getattr(self._transport_car, "command_lock", False)):
+                if self._is_turn_back_within_unlock_tolerance():
+                    self._transport_car.handle_velocity_packet(
+                        0.0,
+                        0.0,
+                        0.0,
+                        "master_turn_back_tolerance",
+                        True,
+                    )
+                    self._turn_back_rotation_started = False
+                    self._turn_back_stop_ticks = 0
+                    self._state_machine.mark_turn_back_completed()
+                    return
                 self._turn_back_stop_ticks = 0
-                return
-            if not self._are_all_wheels_near_stop():
-                self._turn_back_stop_ticks = 0
-                return
-            self._turn_back_stop_ticks += 1
-            if self._turn_back_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
                 return
             self._turn_back_rotation_started = False
             self._turn_back_stop_ticks = 0
@@ -694,6 +704,19 @@ class MasterForwardRuntime:
         self._transport_car.set_heading_transition_target(target_heading_deg)
         self._turn_back_rotation_started = True
         self._turn_back_stop_ticks = 0
+
+    def _is_turn_back_within_unlock_tolerance(self) -> bool:
+        target_deg = self._turn_back_target_heading_deg
+        if target_deg is None:
+            return False
+        err_deg = float(target_deg) - float(
+            getattr(self._transport_car, "heading_est", 0.0)
+        )
+        while err_deg >= 180.0:
+            err_deg -= 360.0
+        while err_deg < -180.0:
+            err_deg += 360.0
+        return abs(err_deg) <= float(MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG)
 
     def _are_all_wheels_near_stop(self) -> bool:
         wheel_states = getattr(self._transport_car, "wheel_states", ())

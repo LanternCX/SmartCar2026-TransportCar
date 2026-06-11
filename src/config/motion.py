@@ -7,7 +7,7 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 3.0
+TRANSPORT_FORWARD_SPEED = 5.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -37,9 +37,9 @@ ANGLE_TOLERANCE = 5.0
 # 陀螺仪低通滤波系数, 范围 0 ~ 1
 GYRO_LPF_ALPHA = 0.2
 # 偏航角位置环 P 增益, 单位为 ω / rad
-YAW_KP = 0.16
+YAW_KP = 0.20
 # 偏航角位置环 I 增益, 用于消除稳态偏差
-YAW_KI = 0.1
+YAW_KI = 0.5
 # 偏航角位置环 D 增益, 用于阻尼控制
 YAW_KD = 0.008
 # 积分项饱和限幅, 防止积分超调
@@ -47,9 +47,9 @@ YAW_I_MAX = 100.0
 # 朝向保持最大角速度, 对应轮速分量
 AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
-HEADING_TRANSITION_OMEGA_MAX = 1.50
+HEADING_TRANSITION_OMEGA_MAX = 5
 # 绕行阶段最大角速度, 对应轮速分量
-ORBIT_AUTO_OMEGA_MAX = 1
+ORBIT_AUTO_OMEGA_MAX = 1.5
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
 # 主车绕行的绝对目标角度增量, 单位度
@@ -58,6 +58,8 @@ MASTER_ORBIT_TARGET_DEG = 180
 MASTER_ORBIT_RADIUS_SCALE = 3.0
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
+# 主车搬运收尾回身阶段放行角度容差, 单位度
+MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = 8.0
 # 辅车绕行的绝对目标角度, 单位度
 ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
