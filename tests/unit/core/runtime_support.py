@@ -307,6 +307,7 @@ def install_transport_car_stubs() -> None:
         "HOLD_SPEED_EPS": 0.1,
         "MASTER_ORBIT_TARGET_DEG": 90,
         "MASTER_TURN_BACK_DELTA_DEG": 180,
+        "MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG": 8.0,
         "MASTER_ORBIT_RADIUS_SCALE": 1.20,
         "MASTER_RETURN_GARAGE_RETREAT_SPEED": -2.0,
         "MASTER_RETURN_GARAGE_LEFT_SPEED": -2.0,

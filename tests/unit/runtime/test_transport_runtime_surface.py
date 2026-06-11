@@ -915,7 +915,7 @@ def test_assistant_runtime_return_follow_combines_fixed_left_and_yellow_line_y(
     }
 
 
-def test_assistant_transport_discards_feedforward_x_and_uses_full_feedforward_y(
+def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
@@ -937,10 +937,11 @@ def test_assistant_transport_discards_feedforward_x_and_uses_full_feedforward_y(
 
     runtime._write_effective_velocity()
 
+    feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
     assert cars[0].last_chassis_target == {
         "source": "assistant",
         "vx": 1.0,
-        "vy": -2.0,
+        "vy": 2.0 - 4.0 * feedforward_scale,
         "omega": 0.0,
         "has_omega": False,
     }
