@@ -21,7 +21,7 @@ from protocol.topic import (  # noqa: E402
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     TOPIC_VISION_OBSERVATION,
     UART6,
     UART8,
@@ -53,8 +53,8 @@ def test_all_formal_topics_are_registered_with_expected_metadata() -> None:
         "port": UART6,
         "body_size": 7,
     }
-    assert get_topic_spec(TOPIC_MASTER_VISION_HOOK_SYNC) == {
-        "name": "MASTER_VISION_HOOK_SYNC",
+    assert get_topic_spec(TOPIC_MASTER_VISION_TASK_SYNC) == {
+        "name": "MASTER_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
         "body_size": 5,
@@ -110,4 +110,3 @@ def test_topic_registry_rejects_wrong_body_type_and_length() -> None:
     assert validate_body_bytes(TOPIC_LOCAL_VISION_VELOCITY, "abc") is False
     assert validate_body_bytes(TOPIC_LOCAL_VISION_VELOCITY, b"\x00" * 6) is False
     assert validate_body_bytes(TOPIC_LOCAL_VISION_VELOCITY, b"\x00" * 8) is False
-

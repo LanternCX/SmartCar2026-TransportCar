@@ -18,13 +18,13 @@ if str(SRC_ROOT) in sys.path:
 sys.path.insert(0, str(SRC_ROOT))
 
 from protocol.codec import (  # noqa: E402
-    decode_master_vision_hook_sync_body,
+    decode_master_vision_task_sync_body,
     encode_velocity_body,
 )
 from protocol.frame import decode_frame, encode_frame  # noqa: E402
 from protocol.topic import (  # noqa: E402
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
 )
 
 
@@ -82,8 +82,8 @@ def test_probe_is_registered_in_board_test_entry() -> None:
     )
 
 
-def test_probe_sends_return_line_hook_sync_and_prints_visual_velocity() -> None:
-    """调试入口只同步回库黄线上下文并打印视觉速度."""
+def test_probe_sends_return_line_task_sync_and_prints_visual_velocity() -> None:
+    """调试入口只同步回库黄线任务并打印视觉速度."""
 
     module = load_probe_module()
     velocity_body = encode_velocity_body(1.25, -2.5, 0.0, False)
@@ -101,11 +101,11 @@ def test_probe_sends_return_line_hook_sync_and_prints_visual_velocity() -> None:
 
     sync_frame = decode_frame(uart6.messages[0])
     assert sync_frame is not None
-    assert sync_frame["topic"] == TOPIC_MASTER_VISION_HOOK_SYNC
-    sync_body = decode_master_vision_hook_sync_body(sync_frame["body"][:5])
+    assert sync_frame["topic"] == TOPIC_MASTER_VISION_TASK_SYNC
+    sync_body = decode_master_vision_task_sync_body(sync_frame["body"][:5])
     assert sync_body["state"] == module.STATE_RETURN_GARAGE_RETREAT
     assert sync_body["target"] == module.TARGET_EDGE_LINE
-    assert sync_body["arg"] == module.MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID
+    assert sync_body["arg"] == module.MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID
     assert result == {"vx": 1.25, "vy": -2.5, "omega": 0.0, "has_omega": False}
     assert output_lines[-1] == (
         "return_line_velocity vx=1.250 vy=-2.500 omega=0.000 has_omega=0"

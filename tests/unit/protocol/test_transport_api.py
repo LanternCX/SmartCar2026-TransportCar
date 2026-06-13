@@ -16,7 +16,7 @@ from protocol.topic import (  # noqa: E402
     ROLE_MASTER,
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
     UART8,
 )
@@ -105,17 +105,17 @@ def test_tcp_write_busy_and_delivery_lifecycle() -> None:
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
     body = bytes([7, 1, 3, 0, 0])
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body) == "accepted"
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC) == "pending"
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body) == "overwritten"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "accepted"
+    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "pending"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "overwritten"
 
     transport.poll_tx()
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body) == "dropped_busy"
-    ack_frame = encode_frame(0x03, TOPIC_MASTER_VISION_HOOK_SYNC, 0, b"")
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "dropped_busy"
+    ack_frame = encode_frame(0x03, TOPIC_MASTER_VISION_TASK_SYNC, 0, b"")
     uart6._incoming.extend(ack_frame)
     transport.poll_rx()
 
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC) == "delivered"
+    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "delivered"
 
 
 def test_diagnostics_and_delivery_do_not_write_frames() -> None:
@@ -153,7 +153,7 @@ def test_tcp_write_returns_dropped_priority_when_ack_is_pending() -> None:
 
     transport.poll_rx()
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([7, 1, 3, 0, 0])) == "dropped_priority"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([7, 1, 3, 0, 0])) == "dropped_priority"
 
 
 def test_udp_write_still_accepts_latest_value_while_tcp_waits_for_ack() -> None:
@@ -162,7 +162,7 @@ def test_udp_write_still_accepts_latest_value_while_tcp_waits_for_ack() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([7, 1, 3, 0, 0])) == "accepted"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([7, 1, 3, 0, 0])) == "accepted"
     transport.poll_tx()
 
     assert (

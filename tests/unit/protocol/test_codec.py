@@ -16,7 +16,7 @@ from protocol.codec import (  # noqa: E402
     decode_assistant_vision_event_report_body,
     decode_assistant_vision_task_sync_body,
     decode_master_vision_event_report_body,
-    decode_master_vision_hook_sync_body,
+    decode_master_vision_task_sync_body,
     decode_velocity_body,
     decode_vision_observation_body,
     encode_assistant_event_report_body,
@@ -24,7 +24,7 @@ from protocol.codec import (  # noqa: E402
     encode_assistant_vision_event_report_body,
     encode_assistant_vision_task_sync_body,
     encode_master_vision_event_report_body,
-    encode_master_vision_hook_sync_body,
+    encode_master_vision_task_sync_body,
     encode_velocity_body,
     encode_vision_observation_body,
 )
@@ -71,11 +71,11 @@ def test_vision_observation_body_roundtrip() -> None:
     }
 
 
-def test_master_hook_sync_body_roundtrip() -> None:
-    body = encode_master_vision_hook_sync_body(9, 1, 3, -2)
+def test_master_task_sync_body_roundtrip() -> None:
+    body = encode_master_vision_task_sync_body(9, 1, 3, -2)
 
     assert body == bytes([9, 1, 3, 0xFE, 0xFF])
-    assert decode_master_vision_hook_sync_body(body) == {
+    assert decode_master_vision_task_sync_body(body) == {
         "context_id": 9,
         "state": 1,
         "target": 3,

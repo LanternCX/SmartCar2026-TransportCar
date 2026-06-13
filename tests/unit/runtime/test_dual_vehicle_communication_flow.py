@@ -30,6 +30,13 @@ from tests.unit.runtime.transport_runtime_support import (
 )
 
 
+def _pack_task_arg(config_id, object_id):
+    packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
+    if packed >= 0x8000:
+        packed -= 0x10000
+    return packed
+
+
 def _ack_latest_tcp_if_needed(uart):
     if not uart.messages:
         return
@@ -104,7 +111,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_hook_context_id is not None,
+        lambda: master._active_task_context_id is not None,
     )
 
     master_uart6.push(
@@ -113,9 +120,9 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             1,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_TARGET_FOUND,
-                300,
+                2,
             ),
         )
     )
@@ -183,7 +190,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             2,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_ALIGNED,
                 0,
             ),
@@ -219,7 +226,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_hook_context_id is not None,
+        lambda: master._active_task_context_id is not None,
     )
 
     master_uart6.push(
@@ -228,7 +235,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             3,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_ARRIVED,
                 0,
             ),
@@ -301,18 +308,18 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     frame = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         7,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
-            300,
+            2,
         ),
     )
     master_uart6.push(frame)
@@ -357,7 +364,11 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
         0x02,
         TOPIC_ASSISTANT_STATE_SYNC,
         9,
-        encode_assistant_state_sync_body(assistant_module.ASSISTANT_STATE_APPROACH_OBJECT, 1, 1),
+        encode_assistant_state_sync_body(
+            assistant_module.ASSISTANT_STATE_APPROACH_OBJECT,
+            1,
+            _pack_task_arg(1, 2),
+        ),
     )
     assistant_uart8.push(frame)
     run_runtime_cycle(assistant)
@@ -401,18 +412,18 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
-            300,
+            2,
         ),
     )
     master_uart6.push(target_found)
@@ -450,7 +461,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
     )
     master_uart8.push(report)
     run_runtime_cycle(master)
-    orbit_sync_body = encode_assistant_state_sync_body(3, 1, 0)
+    orbit_sync_body = encode_assistant_state_sync_body(3, 1, _pack_task_arg(0, 2))
     for _ in range(10):
         orbit_sync_count = 0
         for message in master_uart8.messages:
@@ -505,7 +516,11 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
 
     assert sender.tcp(UART8).write(
         TOPIC_ASSISTANT_STATE_SYNC,
-        encode_assistant_state_sync_body(assistant_module.ASSISTANT_STATE_APPROACH_OBJECT, 1, 1),
+        encode_assistant_state_sync_body(
+            assistant_module.ASSISTANT_STATE_APPROACH_OBJECT,
+            1,
+            _pack_task_arg(1, 2),
+        ),
     ) == "accepted"
     sender.poll_tx()
     assistant.poll_transport_rx()
@@ -545,18 +560,18 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
-            300,
+            2,
         ),
     )
     master_uart6.push(target_found)

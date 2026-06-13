@@ -6,6 +6,8 @@
 """
 import math
 
+from config import motion as motion_params
+
 
 class OmniKinematics:
     """@class OmniKinematics
@@ -19,12 +21,12 @@ class OmniKinematics:
         """@brief 初始化运动学参数
 
         根据硬件参数计算脉冲到米的转换系数, 包括:
-        - wheel_diameter: 轮子直径 60mm
+        - wheel_diameter: 轮子直径, 单位米
         - gear_ratio: 电机减速比 30: 1
         - encoder_ppr: 编码器每圈脉冲数 7 PPR
         - counts_per_rev: 轮子一圈的编码器总计数(多路四倍频)
         """
-        self.wheel_diameter = 0.060
+        self.wheel_diameter = float(motion_params.WHEEL_DIAMETER_M)
         self.gear_ratio = 30
         self.encoder_ppr = 7
         self.counts_per_rev = self.encoder_ppr * self.gear_ratio * 4

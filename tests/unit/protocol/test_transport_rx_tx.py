@@ -17,7 +17,7 @@ from protocol.topic import (  # noqa: E402
     TOPIC_ASSISTANT_EVENT_REPORT,
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
     UART8,
 )
@@ -159,7 +159,7 @@ def test_poll_tx_allows_only_one_frame_per_call_globally() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([1, 2, 3, 4, 5]))
+    transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([1, 2, 3, 4, 5]))
     transport.udp(UART8).write(
         TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
         encode_velocity_body(1.0, 0.0, 0.0, False),
@@ -211,14 +211,14 @@ def test_poll_rx_reassembles_fragmented_ack_frame_across_cycles() -> None:
     uart6 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body) == "accepted"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "accepted"
     transport.poll_tx()
-    ack_frame = encode_frame(0x03, TOPIC_MASTER_VISION_HOOK_SYNC, 0, b"")
+    ack_frame = encode_frame(0x03, TOPIC_MASTER_VISION_TASK_SYNC, 0, b"")
 
     uart6.push(ack_frame[:4])
     transport.poll_rx()
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC) == "pending"
+    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "pending"
 
     uart6.push(ack_frame[4:])
     transport.poll_rx()
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC) == "delivered"
+    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "delivered"
