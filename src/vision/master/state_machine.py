@@ -64,37 +64,37 @@ class MasterStateMachine:
 
     def __init__(
         self,
-        hook_arg,
+        search_task_arg,
         boot_heading_deg,
         orbit_delta_deg,
         assistant_object_arg=1,
         assistant_transport_arg=1,
-        transport_hook_arg=2,
-        finish_hook_arg=3,
-        return_line_hook_arg=5,
+        transport_task_arg=2,
+        finish_task_arg=3,
+        return_line_task_arg=5,
         total_object_count=999,
         initial_context_id=0,
     ):
         self.state = STATE_IDLE
-        self._hook_arg = int(hook_arg)
+        self._search_task_arg = int(search_task_arg)
         self._boot_heading_deg = float(boot_heading_deg)
         self._orbit_delta_deg = float(orbit_delta_deg)
         self._assistant_object_arg = int(assistant_object_arg)
         self._assistant_transport_arg = int(assistant_transport_arg)
-        self._transport_hook_arg = int(transport_hook_arg)
-        self._finish_hook_arg = int(finish_hook_arg)
-        self._return_line_hook_arg = int(return_line_hook_arg)
+        self._transport_task_arg = int(transport_task_arg)
+        self._finish_task_arg = int(finish_task_arg)
+        self._return_line_task_arg = int(return_line_task_arg)
         self._required_object_count = int(total_object_count)
         self.completed_object_count = 0
         self._current_context_id = int(initial_context_id) % 256
-        self._pending_hook_request = None
+        self._pending_task_request = None
         self._pending_assistant_request = None
         self._pending_orbit_command = None
         self._search_started = False
         self._orbit_completed = False
         self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = False
-        self._waiting_restart_search_hook_ack = False
+        self._waiting_restart_search_task_ack = False
         self._assistant_object_request_emitted = False
         self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
@@ -121,7 +121,7 @@ class MasterStateMachine:
 
         if not self._search_started and self.state == STATE_IDLE:
             self._search_started = True
-            self._enter_search_with_hook(self._hook_arg)
+            self._enter_search_with_task(self._search_task_arg)
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
@@ -130,11 +130,11 @@ class MasterStateMachine:
             self._master_aligned = False
             self._assistant_aligned = False
             self._current_context_id = (self._current_context_id + 1) % 256
-            self._pending_hook_request = {
+            self._pending_task_request = {
                 "context_id": self._current_context_id,
                 "state": STATE_SEARCH_OBJECT,
                 "target": TARGET_OBJECT,
-                "arg": self._transport_hook_arg,
+                "arg": self._transport_task_arg,
             }
             if self._assistant_target_found_pending and not self._assistant_orbit_request_emitted:
                 self._assistant_target_found_pending = False
@@ -156,7 +156,7 @@ class MasterStateMachine:
             if (
                 self._waiting_assistant_object_ack
                 or self._waiting_assistant_follow_ack
-                or self._waiting_restart_search_hook_ack
+                or self._waiting_restart_search_task_ack
             ):
                 return
             if event == EVENT_TARGET_FOUND:
@@ -278,12 +278,12 @@ class MasterStateMachine:
         self._transport_ready = True
         self._enter_state(STATE_TRANSPORT_OBJECT)
         self._current_context_id = (self._current_context_id + 1) % 256
-        self._pending_hook_request = {
-            "kind": "finish_hook",
+        self._pending_task_request = {
+            "kind": "finish_task",
             "context_id": self._current_context_id,
             "state": STATE_TRANSPORT_OBJECT,
             "target": TARGET_EDGE_LINE,
-            "arg": self._finish_hook_arg,
+            "arg": self._finish_task_arg,
         }
 
     def mark_master_cleared(self):
@@ -359,7 +359,7 @@ class MasterStateMachine:
         self._orbit_completed = False
         self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = True
-        self._waiting_restart_search_hook_ack = True
+        self._waiting_restart_search_task_ack = True
         self._assistant_object_request_emitted = False
         self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
@@ -372,7 +372,7 @@ class MasterStateMachine:
         self._assistant_cleared = False
         self._current_object_id = 0
         self._enter_state(STATE_SEARCH_OBJECT)
-        self._enter_search_with_hook(self._hook_arg)
+        self._enter_search_with_task(self._search_task_arg)
         self._pending_assistant_request = {
             "kind": "assistant_follow",
             "state": ASSISTANT_FOLLOW_SYNC_STATE,
@@ -386,7 +386,7 @@ class MasterStateMachine:
         self._orbit_completed = False
         self._waiting_assistant_object_ack = False
         self._waiting_assistant_follow_ack = False
-        self._waiting_restart_search_hook_ack = False
+        self._waiting_restart_search_task_ack = False
         self._assistant_object_request_emitted = False
         self._assistant_target_found_pending = False
         self._assistant_orbit_request_emitted = False
@@ -405,12 +405,12 @@ class MasterStateMachine:
         self._reset_round_flags()
         self._enter_state(STATE_RETURN_GARAGE_RETREAT)
         self._current_context_id = (self._current_context_id + 1) % 256
-        self._pending_hook_request = {
-            "kind": "return_line_hook",
+        self._pending_task_request = {
+            "kind": "return_line_task",
             "context_id": self._current_context_id,
             "state": STATE_RETURN_GARAGE_RETREAT,
             "target": TARGET_EDGE_LINE,
-            "arg": self._return_line_hook_arg,
+            "arg": self._return_line_task_arg,
         }
 
     def _enter_return_line(self):
@@ -418,12 +418,12 @@ class MasterStateMachine:
 
         self._enter_state(STATE_RETURN_GARAGE_LINE)
         self._current_context_id = (self._current_context_id + 1) % 256
-        self._pending_hook_request = {
-            "kind": "return_line_hook",
+        self._pending_task_request = {
+            "kind": "return_line_task",
             "context_id": self._current_context_id,
             "state": STATE_RETURN_GARAGE_LINE,
             "target": TARGET_EDGE_LINE,
-            "arg": self._return_line_hook_arg,
+            "arg": self._return_line_task_arg,
         }
 
     def _enter_finished(self):
@@ -436,10 +436,10 @@ class MasterStateMachine:
 
         self._waiting_assistant_follow_ack = False
 
-    def mark_restart_search_hook_acknowledged(self):
-        """标记回身后主车本车视觉搜索 hook 已确认"""
+    def mark_restart_search_task_acknowledged(self):
+        """标记回身后主车本车视觉搜索 task 已确认"""
 
-        self._waiting_restart_search_hook_ack = False
+        self._waiting_restart_search_task_ack = False
 
     def is_post_clear_turn_back_pending(self):
         """当前是否处于收尾阶段中的主车转身段"""
@@ -464,23 +464,23 @@ class MasterStateMachine:
             "arg": int(clear_phase),
         }
 
-    def _enter_search_with_hook(self, hook_arg):
-        """创建新一轮主车找物体 hook 上下文"""
+    def _enter_search_with_task(self, task_arg):
+        """创建新一轮主车找物体 task 上下文"""
 
         self._enter_state(STATE_SEARCH_OBJECT)
         self._current_context_id = (self._current_context_id + 1) % 256
-        self._pending_hook_request = {
+        self._pending_task_request = {
             "context_id": self._current_context_id,
             "state": STATE_SEARCH_OBJECT,
             "target": TARGET_OBJECT,
-            "arg": int(hook_arg),
+            "arg": int(task_arg),
         }
 
-    def poll_hook_request(self):
-        """取出一次性 hook 请求"""
+    def poll_task_request(self):
+        """取出一次性 task 请求"""
 
-        pending = self._pending_hook_request
-        self._pending_hook_request = None
+        pending = self._pending_task_request
+        self._pending_task_request = None
         return pending
 
     def poll_assistant_request(self):
@@ -511,7 +511,7 @@ class MasterStateMachine:
             return False
         if self._waiting_assistant_follow_ack:
             return False
-        if self._waiting_restart_search_hook_ack:
+        if self._waiting_restart_search_task_ack:
             return False
         if self._master_aligned:
             return False

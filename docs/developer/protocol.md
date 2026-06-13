@@ -237,12 +237,12 @@ topic 注册表在 [src/protocol/topic.py](../../src/protocol/topic.py) 中维�
   direction: OpenART -> 主车 / 辅车
   body: vision_observation
 
-0x10 MASTER_VISION_HOOK_SYNC
+0x10 MASTER_VISION_TASK_SYNC
   mode: TCP
   port: UART6
   body_size: 5
   direction: 主车 -> 本车 OpenART
-  body: master_vision_hook_sync
+  body: master_vision_task_sync
 
 0x11 ASSISTANT_VISION_TASK_SYNC
   mode: TCP
@@ -297,7 +297,7 @@ vision_observation, 7 bytes
   3..4: y, i16, scale 1000
   5..6: value, i16, scale 1000
 
-master_vision_hook_sync, 5 bytes
+master_vision_task_sync, 5 bytes
   0   : context_id, u8
   1   : state, u8
   2   : target, u8
@@ -350,7 +350,7 @@ poll_tx()
 
 ```text
 UART6 UDP read  LOCAL_VISION_VELOCITY
-UART6 TCP write MASTER_VISION_HOOK_SYNC
+UART6 TCP write MASTER_VISION_TASK_SYNC
 UART6 TCP read  MASTER_VISION_EVENT_REPORT
 
 UART8 UDP write ASSISTANT_FEEDFORWARD_VELOCITY

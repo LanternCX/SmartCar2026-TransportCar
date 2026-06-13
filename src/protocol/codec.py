@@ -77,11 +77,11 @@ def decode_vision_observation_body(body):
     }
 
 
-def encode_master_vision_hook_sync_body(context_id, state, target, arg):
+def encode_master_vision_task_sync_body(context_id, state, target, arg):
     return bytes([_require_u8(context_id), _require_u8(state), _require_u8(target)]) + _pack_i16(arg)
 
 
-def decode_master_vision_hook_sync_body(body):
+def decode_master_vision_task_sync_body(body):
     return {
         "context_id": int(body[0]),
         "state": int(body[1]),

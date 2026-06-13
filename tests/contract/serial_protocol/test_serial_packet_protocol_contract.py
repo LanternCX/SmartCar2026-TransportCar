@@ -30,7 +30,7 @@ from protocol.topic import (  # noqa: E402
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     TOPIC_VISION_OBSERVATION,
     UART6,
     UART8,
@@ -82,8 +82,8 @@ def test_formal_topic_registry_matches_transport_contract() -> None:
         "port": UART6,
         "body_size": 7,
     }
-    assert get_topic_spec(TOPIC_MASTER_VISION_HOOK_SYNC) == {
-        "name": "MASTER_VISION_HOOK_SYNC",
+    assert get_topic_spec(TOPIC_MASTER_VISION_TASK_SYNC) == {
+        "name": "MASTER_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
         "body_size": 5,
@@ -129,8 +129,8 @@ def test_formal_transport_body_rejects_strings_and_wrong_lengths() -> None:
 def test_formal_transport_role_directions_are_fixed() -> None:
     assert can_role_read(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is True
     assert can_role_write(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is False
-    assert can_role_write(TOPIC_MASTER_VISION_HOOK_SYNC, ROLE_MASTER) is True
-    assert can_role_read(TOPIC_MASTER_VISION_HOOK_SYNC, ROLE_MASTER) is False
+    assert can_role_write(TOPIC_MASTER_VISION_TASK_SYNC, ROLE_MASTER) is True
+    assert can_role_read(TOPIC_MASTER_VISION_TASK_SYNC, ROLE_MASTER) is False
     assert can_role_write(TOPIC_ASSISTANT_VISION_TASK_SYNC, ROLE_ASSISTANT) is True
     assert can_role_read(TOPIC_ASSISTANT_VISION_TASK_SYNC, ROLE_ASSISTANT) is False
     assert can_role_write(TOPIC_ASSISTANT_EVENT_REPORT, ROLE_ASSISTANT) is True

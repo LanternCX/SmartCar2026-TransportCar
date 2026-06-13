@@ -23,7 +23,7 @@ from protocol.topic import (
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
     UART8,
 )
@@ -63,11 +63,11 @@ def test_master_runtime_exposes_external_transport_cycle(monkeypatch) -> None:
     assert hasattr(runtime, "poll_transport_tx")
     frame = decode_frame(uart6.messages[-1])
     assert frame is not None
-    assert frame["topic"] == TOPIC_MASTER_VISION_HOOK_SYNC
+    assert frame["topic"] == TOPIC_MASTER_VISION_TASK_SYNC
     assert "transport_step" in cars[0].events
 
 
-def test_master_runtime_applies_local_velocity_after_hook_delivery(monkeypatch) -> None:
+def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("vision.master.forward_runtime", monkeypatch)
@@ -124,11 +124,11 @@ def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypa
             now_ms=clock,
         ),
     )
-    runtime._active_hook_context_id = 7
+    runtime._active_task_context_id = 7
     runtime._latest_uart6_velocity = {"vx": 1.0, "vy": -2.0, "omega": 0.0}
     cars[0].handle_velocity_packet(1.0, -2.0, 0.0, "uart6", False)
 
-    runtime._handle_hook_event({"context_id": 7, "event": 6, "value": 9})
+    runtime._handle_task_event({"context_id": 7, "event": 6, "value": 9})
 
     assert runtime._latest_uart6_velocity is None
     assert cars[0].last_chassis_target == {
@@ -554,9 +554,9 @@ def test_master_runtime_calls_handle_event_without_keyword_args(monkeypatch) -> 
         calls.append(args)
 
     runtime._state_machine.handle_event = _positional_handle_event
-    runtime._active_hook_context_id = 7
+    runtime._active_task_context_id = 7
 
-    runtime._handle_hook_event({"context_id": 7, "event": 6, "value": 9})
+    runtime._handle_task_event({"context_id": 7, "event": 6, "value": 9})
 
     assert calls == [(7, 6, 9)]
 
