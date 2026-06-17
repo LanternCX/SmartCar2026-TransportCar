@@ -20,6 +20,7 @@ from protocol.topic import (  # noqa: E402
     TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
+    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
     TOPIC_VISION_OBSERVATION,
@@ -53,6 +54,12 @@ def test_all_formal_topics_are_registered_with_expected_metadata() -> None:
         "port": UART6,
         "body_size": 7,
     }
+    assert get_topic_spec(TOPIC_LOCAL_VISION_CONTROL) == {
+        "name": "LOCAL_VISION_CONTROL",
+        "mode": MODE_TCP,
+        "port": UART6,
+        "body_size": 1,
+    }
     assert get_topic_spec(TOPIC_MASTER_VISION_TASK_SYNC) == {
         "name": "MASTER_VISION_TASK_SYNC",
         "mode": MODE_TCP,
@@ -63,13 +70,13 @@ def test_all_formal_topics_are_registered_with_expected_metadata() -> None:
         "name": "ASSISTANT_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_MASTER_VISION_EVENT_REPORT) == {
         "name": "MASTER_VISION_EVENT_REPORT",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_ASSISTANT_VISION_EVENT_REPORT) == {
         "name": "ASSISTANT_VISION_EVENT_REPORT",
@@ -81,7 +88,7 @@ def test_all_formal_topics_are_registered_with_expected_metadata() -> None:
         "name": "ASSISTANT_STATE_SYNC",
         "mode": MODE_TCP,
         "port": UART8,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_ASSISTANT_EVENT_REPORT) == {
         "name": "ASSISTANT_EVENT_REPORT",
@@ -97,6 +104,9 @@ def test_topic_registry_rejects_unregistered_mode_port_and_role_direction() -> N
     assert validate_port_for_topic(TOPIC_LOCAL_VISION_VELOCITY, UART8) is False
     assert can_role_write(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is False
     assert can_role_read(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is True
+    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is False
+    assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is True
+    assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_ASSISTANT) is True
     assert can_role_write(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is True
     assert can_role_read(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is False
     assert can_role_write(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_ASSISTANT) is False

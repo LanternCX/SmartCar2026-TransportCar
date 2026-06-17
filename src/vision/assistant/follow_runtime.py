@@ -8,8 +8,11 @@ import time
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
+    LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
+    decode_local_vision_control_body,
     decode_velocity_body,
     encode_assistant_event_report_body,
     encode_assistant_vision_task_sync_body,
@@ -21,6 +24,7 @@ from protocol.topic import (
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
+    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_LOCAL_VISION_VELOCITY,
     UART6,
     UART8,
@@ -119,16 +123,20 @@ class AssistantFollowRuntime:
         self._approach_target_found_done = False
         self._last_approach_arg = 0
         self._current_object_id = 0
+        self._current_object_threshold = (0, 0, 0, 0, 0, 0)
         self._post_orbit_realign_active = False
         self._clear_completed = False
         self._clear_stop_ticks = 0
         self._velocity_body = bytearray(7)
-        self._sync_body = bytearray(4)
+        self._local_vision_control_body = bytearray(1)
+        self._sync_body = bytearray(10)
         self._event_body = bytearray(3)
+        self._local_vision_control_paused = False
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_FOLLOW,
             "target": 0,
             "arg": 0,
+            "threshold": (0, 0, 0, 0, 0, 0),
             "queued": False,
         }
 
@@ -212,6 +220,7 @@ class AssistantFollowRuntime:
             return False
         if self._state_machine.is_idle():
             self._current_object_id = 0
+            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
             self._pending_local_vision_sync = None
             self._pending_target_found_report = None
@@ -221,6 +230,7 @@ class AssistantFollowRuntime:
             self._write_zero_velocity("assistant_idle")
         elif self._state_machine.state == ASSISTANT_STATE_FOLLOW:
             self._current_object_id = 0
+            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
             self._pending_target_found_report = None
             self._approach_target_found_done = False
@@ -244,6 +254,7 @@ class AssistantFollowRuntime:
             self._enter_clear_object_state()
         elif self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
             self._current_object_id = 0
+            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
             self._pending_target_found_report = None
             self._approach_target_found_done = False
@@ -252,6 +263,7 @@ class AssistantFollowRuntime:
             self._enter_return_follow_state()
         elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
             self._current_object_id = 0
+            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
             self._pending_local_vision_sync = None
             self._pending_target_found_report = None
@@ -302,13 +314,21 @@ class AssistantFollowRuntime:
         self._uart6_status = "idle"
         self._uart8_status = "idle"
         if (
+            self.transport_service.tcp(UART6).read(
+                TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
+            )
+            == "ok"
+        ):
+            packet = decode_local_vision_control_body(self._local_vision_control_body)
+            self._handle_local_vision_control(packet)
+        if (
             self.transport_service.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body)
             == "ok"
         ):
             version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._uart6_reset_version:
+            if version > self._uart6_reset_version and not self._local_vision_control_paused:
                 self._uart6_velocity = decode_velocity_body(self._velocity_body)
                 self._uart6_velocity["omega"] = 0.0
                 self._uart6_velocity["has_omega"] = False
@@ -323,7 +343,7 @@ class AssistantFollowRuntime:
             version = self.transport_service.get_udp_version(
                 UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
             )
-            if version > self._uart8_reset_version:
+            if version > self._uart8_reset_version and not self._local_vision_control_paused:
                 self._uart8_velocity = decode_velocity_body(self._velocity_body)
                 self._uart8_status = "active"
 
@@ -334,7 +354,29 @@ class AssistantFollowRuntime:
             self._uart8_velocity = None
             self._uart8_status = "idle"
 
+    def _handle_local_vision_control(self, packet: dict) -> None:
+        """处理 OpenART 慢帧前后的可靠暂停控制."""
+
+        action = int(packet.get("action", 0))
+        self._uart6_velocity = None
+        self._uart8_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
+        self._uart8_reset_version = self.transport_service.get_udp_version(
+            UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
+        )
+        if action == LOCAL_VISION_CONTROL_PAUSE:
+            self._local_vision_control_paused = True
+            self._write_zero_velocity("local_vision_pause")
+            return
+        if action == LOCAL_VISION_CONTROL_RESUME:
+            self._local_vision_control_paused = False
+
     def _write_effective_velocity(self) -> None:
+        if self._local_vision_control_paused:
+            self._write_zero_velocity("local_vision_pause")
+            return
         if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._write_approach_object_velocity()
             return
@@ -475,6 +517,7 @@ class AssistantFollowRuntime:
             "state": ASSISTANT_STATE_FOLLOW,
             "target": 0,
             "arg": 0,
+            "threshold": (0, 0, 0, 0, 0, 0),
             "queued": False,
         }
 
@@ -484,6 +527,7 @@ class AssistantFollowRuntime:
             "state": ASSISTANT_STATE_RETURN_FOLLOW,
             "target": 0,
             "arg": int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
+            "threshold": (0, 0, 0, 0, 0, 0),
             "queued": False,
         }
 
@@ -499,6 +543,9 @@ class AssistantFollowRuntime:
     def _enter_approach_object_state(self, packet: dict) -> None:
         self._last_approach_arg = int(packet["arg"])
         self._current_object_id = unpack_task_arg_object_id(packet["arg"])
+        self._current_object_threshold = tuple(
+            packet.get("threshold", self._current_object_threshold)
+        )
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._clear_motion_inputs()
@@ -507,6 +554,7 @@ class AssistantFollowRuntime:
             "state": int(packet["state"]),
             "target": int(packet["target"]),
             "arg": int(packet["arg"]),
+            "threshold": self._current_object_threshold,
             "queued": False,
         }
 
@@ -521,6 +569,7 @@ class AssistantFollowRuntime:
                 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID,
                 self._current_object_id,
             ),
+            "threshold": self._current_object_threshold,
             "queued": False,
         }
         self._transport_car.set_orbit_target(
@@ -555,6 +604,9 @@ class AssistantFollowRuntime:
 
     def _enter_transport_state(self, packet: dict) -> None:
         self._current_object_id = unpack_task_arg_object_id(packet["arg"])
+        self._current_object_threshold = tuple(
+            packet.get("threshold", self._current_object_threshold)
+        )
         self._approach_target_found_done = False
         self._pending_target_found_report = None
         self._post_orbit_realign_active = False
@@ -568,6 +620,7 @@ class AssistantFollowRuntime:
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
                 self._current_object_id,
             ),
+            "threshold": self._current_object_threshold,
             "queued": False,
         }
 
@@ -617,6 +670,7 @@ class AssistantFollowRuntime:
                     _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
                     self._current_object_id,
                 ),
+                "threshold": self._current_object_threshold,
             }
         )
         self._post_orbit_realign_active = True
@@ -664,6 +718,7 @@ class AssistantFollowRuntime:
             pending["state"],
             pending["target"],
             pending["arg"],
+            pending.get("threshold"),
         )
         status = self.transport_service.tcp(UART6).write(TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:

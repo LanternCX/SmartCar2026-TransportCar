@@ -7,6 +7,7 @@ milestone
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-06-17-1 | 2026-06-17 | 收口 YOLO 慢帧前后本地视觉可靠暂停控制 | `docs/superpowers/memory/milestone/entries/2026-06/2026-06-17-1.md` | 记录 OpenART 在 YOLO 慢帧前后通过可靠本地视觉控制请求车端暂停和恢复, 车端暂停期间写零速度并在恢复时丢弃旧速度缓存。 | yolo, local-vision-control, reliable-sync, udp, runtime, master, assistant, milestone |
 | 2026-06-03-1 | 2026-06-03 | 接入 OpenART 物体 YOLO 识别链路 | `docs/superpowers/memory/milestone/entries/2026-06/2026-06-03-1.md` | 记录 OpenART 物体识别切到 YOLO, 黄线和辅车色标保留原算法, 部署脚本按参数同步模型文件的闭环。 | openart, yolo, object-detection, master, assistant, vision, milestone |
 | 2026-05-31-2 | 2026-05-31 | 收口主车回库为黄线采样停车 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-31-2.md` | 记录主车回库取消色标状态, 以 Y=160 有黄色且 X=270 连续 5 帧无黄色完成停车收口回库主线。 | return-garage, yellow-line, fixed-sample, master, vision, state-machine, milestone |
 | 2026-05-30-1 | 2026-05-30 | 完成全部物体后黄线与色标回库闭环 | `docs/superpowers/memory/milestone/entries/2026-05/2026-05-30-1.md` | 记录车端和 OpenART 主车视觉共同完成全部物体后后退对正黄线、黄线左移、绿色色标跟随、完成同步辅车停止的回库闭环。 | return-garage, yellow-line, green-marker, master, assistant, vision, state-machine, milestone |

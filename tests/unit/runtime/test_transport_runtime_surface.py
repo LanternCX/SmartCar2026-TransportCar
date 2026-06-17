@@ -4,7 +4,11 @@
 """
 
 from protocol.codec import (
+    LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RESUME,
+    decode_assistant_state_sync_body,
     decode_assistant_vision_task_sync_body,
+    encode_local_vision_control_body,
     encode_assistant_vision_event_report_body,
     encode_assistant_event_report_body,
     encode_assistant_state_sync_body,
@@ -21,6 +25,7 @@ from protocol.topic import (
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
+    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
@@ -140,6 +145,185 @@ def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypa
     }
 
 
+def test_master_runtime_forwards_target_threshold_to_assistant(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    threshold = (12, 80, -30, 40, -20, 60)
+    runtime._state_machine.state = module.STATE_SEARCH_OBJECT
+    runtime._active_task_context_id = int(runtime._state_machine._current_context_id)
+
+    runtime._handle_task_event(
+        {
+            "context_id": int(runtime._state_machine._current_context_id),
+            "event": module.EVENT_TARGET_FOUND,
+            "value": 2,
+            "threshold": threshold,
+        }
+    )
+    runtime._drain_state_machine_outputs()
+    runtime._queue_pending_sync()
+    runtime.poll_transport_tx()
+
+    frame = decode_frame(uart8.messages[-1])
+    assert frame is not None
+    assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
+    assert decode_assistant_state_sync_body(frame["body"][:10]) == {
+        "state": state_module.ASSISTANT_OBJECT_SYNC_STATE,
+        "target": state_module.ASSISTANT_OBJECT_SYNC_TARGET,
+        "arg": _pack_task_arg(module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID, 2),
+        "threshold": threshold,
+    }
+
+
+def test_master_runtime_encodes_latest_threshold_when_sending_assistant_sync(
+    monkeypatch,
+) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    old_threshold = (10, 70, -20, 30, -10, 50)
+    latest_threshold = (12, 80, -30, 40, -20, 60)
+    runtime._current_object_threshold = latest_threshold
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_object",
+        "state": state_module.ASSISTANT_OBJECT_SYNC_STATE,
+        "target": state_module.ASSISTANT_OBJECT_SYNC_TARGET,
+        "arg": _pack_task_arg(module.ASSISTANT_APPROACH_OBJECT_CONFIG_ID, 2),
+        "threshold": old_threshold,
+        "queued": False,
+    }
+
+    runtime._queue_pending_sync()
+    runtime.poll_transport_tx()
+
+    frame = decode_frame(uart8.messages[-1])
+    assert frame is not None
+    assert decode_assistant_state_sync_body(frame["body"][:10])["threshold"] == latest_threshold
+
+
+def test_master_runtime_pauses_local_vision_control_from_reliable_packet(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_LOCAL_VISION_CONTROL,
+            9,
+            encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+        )
+    )
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_SEARCH_OBJECT
+    runtime._latest_uart6_velocity = {"vx": 1.0, "vy": -2.0, "omega": 0.0}
+    cars[0].handle_velocity_packet(1.0, -2.0, 0.0, "uart6", False)
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is True
+    assert runtime._latest_uart6_velocity is None
+    assert cars[0].last_chassis_target == {
+        "source": "local_vision_pause",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+    ack_frame = decode_frame(uart6.messages[-1])
+    assert ack_frame is not None
+    assert ack_frame["mode"] == 0x03
+    assert ack_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
+
+
+def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=(
+            encode_frame(
+                0x02,
+                TOPIC_LOCAL_VISION_CONTROL,
+                9,
+                encode_local_vision_control_body(LOCAL_VISION_CONTROL_RESUME),
+            )
+            + encode_frame(
+                0x01,
+                TOPIC_LOCAL_VISION_VELOCITY,
+                0,
+                encode_velocity_body(2.0, 3.0, 0.0, False),
+            )
+        )
+    )
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_SEARCH_OBJECT
+    runtime._local_vision_control_paused = True
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is False
+    assert runtime._latest_uart6_velocity is None
+    assert cars[0].last_chassis_target["source"] is None
+
+    uart6.push(
+        encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(2.0, 3.0, 0.0, False),
+        )
+    )
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+
+    assert cars[0].last_chassis_target == {
+        "source": "uart6",
+        "vx": 2.0,
+        "vy": 3.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_master_runtime_clears_local_velocity_when_assistant_event_arrives(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -242,6 +426,7 @@ def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     )
 
     run_runtime_cycle(runtime)
+    runtime.poll_transport_tx()
     uart6.push(ack_last_frame(uart6))
     clock.advance(20)
     run_runtime_cycle(runtime)
@@ -270,14 +455,61 @@ def test_assistant_runtime_announces_follow_to_local_vision_on_startup(monkeypat
     )
 
     run_runtime_cycle(runtime)
+    runtime._queue_pending_local_vision_sync()
+    runtime.poll_transport_tx()
 
     frame = decode_frame(uart6.messages[-1])
     assert frame is not None
     assert frame["topic"] == TOPIC_ASSISTANT_VISION_TASK_SYNC
-    assert decode_assistant_vision_task_sync_body(frame["body"][:4]) == {
+    assert decode_assistant_vision_task_sync_body(frame["body"][:10]) == {
         "state": module.ASSISTANT_STATE_FOLLOW,
         "target": 0,
         "arg": 0,
+        "threshold": (0, 0, 0, 0, 0, 0),
+    }
+
+
+def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    threshold = (12, 80, -30, 40, -20, 60)
+    uart6 = BufferedUart()
+    uart8 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_ASSISTANT_STATE_SYNC,
+            7,
+            encode_assistant_state_sync_body(
+                module.ASSISTANT_STATE_APPROACH_OBJECT,
+                module.ASSISTANT_TARGET_OBJECT,
+                _pack_task_arg(1, 2),
+                threshold,
+            ),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+
+    run_runtime_cycle(runtime)
+    runtime._queue_pending_local_vision_sync()
+    runtime.poll_transport_tx()
+
+    frame = decode_frame(uart6.messages[-1])
+    assert frame is not None
+    assert frame["topic"] == TOPIC_ASSISTANT_VISION_TASK_SYNC
+    assert decode_assistant_vision_task_sync_body(frame["body"][:10]) == {
+        "state": module.ASSISTANT_STATE_APPROACH_OBJECT,
+        "target": module.ASSISTANT_TARGET_OBJECT,
+        "arg": _pack_task_arg(1, 2),
+        "threshold": threshold,
     }
 
 
@@ -331,6 +563,7 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
         "state": module.ASSISTANT_STATE_APPROACH_OBJECT,
         "target": module.ASSISTANT_TARGET_OBJECT,
         "arg": _pack_task_arg(1, 2),
+        "threshold": (0, 0, 0, 0, 0, 0),
         "queued": False,
     }
     assert cars[0].last_chassis_target == {
@@ -339,6 +572,107 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
         "vy": 0.0,
         "omega": 0.0,
         "has_omega": True,
+    }
+
+
+def test_assistant_runtime_pauses_chassis_from_local_vision_control(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_LOCAL_VISION_CONTROL,
+            9,
+            encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._uart6_velocity = {"vx": 1.0, "vy": 2.0, "omega": 0.0, "has_omega": False}
+    runtime._uart8_velocity = {"vx": 3.0, "vy": 4.0, "omega": 0.0, "has_omega": False}
+    cars[0].handle_velocity_packet(4.0, 6.0, 0.0, "assistant", False)
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is True
+    assert runtime._uart6_velocity is None
+    assert runtime._uart8_velocity is None
+    assert cars[0].last_chassis_target == {
+        "source": "local_vision_pause",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+    ack_frame = decode_frame(uart6.messages[-1])
+    assert ack_frame is not None
+    assert ack_frame["mode"] == 0x03
+    assert ack_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
+
+
+def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=(
+            encode_frame(
+                0x02,
+                TOPIC_LOCAL_VISION_CONTROL,
+                9,
+                encode_local_vision_control_body(LOCAL_VISION_CONTROL_RESUME),
+            )
+            + encode_frame(
+                0x01,
+                TOPIC_LOCAL_VISION_VELOCITY,
+                0,
+                encode_velocity_body(2.0, 3.0, 0.0, False),
+            )
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._local_vision_control_paused = True
+    runtime._pending_local_vision_sync = None
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is False
+    assert runtime._uart6_velocity is None
+    assert cars[0].last_chassis_target["source"] is None
+
+    uart6.push(
+        encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(2.0, 3.0, 0.0, False),
+        )
+    )
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+
+    assert cars[0].last_chassis_target == {
+        "source": "assistant",
+        "vx": 2.0,
+        "vy": 3.0,
+        "omega": 0.0,
+        "has_omega": False,
     }
 
 
@@ -643,7 +977,7 @@ def test_master_runtime_queues_assistant_return_sync_during_turn_back(monkeypatc
     frame = decode_frame(uart8.messages[-1])
     assert frame is not None
     assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
-    assert frame["body"][:4] == encode_assistant_state_sync_body(
+    assert frame["body"][:10] == encode_assistant_state_sync_body(
         state_module.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         state_module.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         0,
@@ -974,6 +1308,7 @@ def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypat
         "state": module.ASSISTANT_STATE_TRANSPORT_OBJECT,
         "target": module.ASSISTANT_TARGET_OBJECT,
         "arg": _pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 1),
+        "threshold": (0, 0, 0, 0, 0, 0),
         "queued": False,
     }
 
@@ -1001,6 +1336,7 @@ def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatc
         "state": module.ASSISTANT_STATE_RETURN_FOLLOW,
         "target": 0,
         "arg": module.ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID,
+        "threshold": (0, 0, 0, 0, 0, 0),
         "queued": False,
     }
     assert cars[0].last_chassis_target == {

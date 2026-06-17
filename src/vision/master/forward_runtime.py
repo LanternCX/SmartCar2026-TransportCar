@@ -8,7 +8,10 @@ import time
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
+    LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_event_report_body,
+    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_velocity_body,
     encode_assistant_state_sync_body,
@@ -21,6 +24,7 @@ from protocol.topic import (
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
+    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
@@ -146,6 +150,7 @@ class MasterForwardRuntime:
         self._active_task_context_id = None
         self._pending_task_sync = None
         self._pending_task_event = None
+        self._current_object_threshold = (0, 0, 0, 0, 0, 0)
         self._pending_sync = None
         self._pending_assistant_sync = None
         self._orbit_command_active = False
@@ -160,8 +165,10 @@ class MasterForwardRuntime:
         self._turn_back_target_heading_deg = None
         self._last_task_sync_status = None
         self._velocity_body = bytearray(7)
-        self._task_event_body = bytearray(4)
+        self._local_vision_control_body = bytearray(1)
+        self._task_event_body = bytearray(10)
         self._assistant_event_body = bytearray(3)
+        self._local_vision_control_paused = False
         self.last_report = None
 
     def mark_tick(self, tick=None) -> None:
@@ -189,6 +196,7 @@ class MasterForwardRuntime:
             "state": int(state),
             "target": int(target),
             "arg": int(arg),
+            "threshold": (0, 0, 0, 0, 0, 0),
             "queued": False,
         }
         self._pending_sync = pending
@@ -215,6 +223,14 @@ class MasterForwardRuntime:
     def _consume_uart6_inputs(self) -> None:
         """消费本车视觉链路上的 UDP 速度与 TCP 事件."""
         if (
+            self.transport_service.tcp(UART6).read(
+                TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
+            )
+            == "ok"
+        ):
+            packet = decode_local_vision_control_body(self._local_vision_control_body)
+            self._handle_local_vision_control(packet)
+        if (
             self.transport_service.udp(UART6).read(
                 TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body
             )
@@ -223,7 +239,7 @@ class MasterForwardRuntime:
             version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._uart6_reset_version:
+            if version > self._uart6_reset_version and not self._local_vision_control_paused:
                 packet = decode_velocity_body(self._velocity_body)
                 if (
                     self._state_machine.allows_search_velocity()
@@ -247,6 +263,28 @@ class MasterForwardRuntime:
             packet = decode_master_vision_event_report_body(self._task_event_body)
             self._handle_task_event(packet)
 
+    def _handle_local_vision_control(self, packet: dict) -> None:
+        """处理 OpenART 慢帧前后的可靠暂停控制."""
+
+        action = int(packet.get("action", 0))
+        self._latest_uart6_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
+        if action == LOCAL_VISION_CONTROL_PAUSE:
+            self._local_vision_control_paused = True
+            if not bool(getattr(self._transport_car, "command_lock", False)):
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "local_vision_pause",
+                    True,
+                )
+            return
+        if action == LOCAL_VISION_CONTROL_RESUME:
+            self._local_vision_control_paused = False
+
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
         if (
@@ -269,6 +307,7 @@ class MasterForwardRuntime:
         context_id = int(packet["context_id"])
         if self._active_task_context_id == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
+            self._remember_task_event_threshold(packet)
             self._state_machine.handle_event(
                 context_id,
                 packet["event"],
@@ -281,7 +320,19 @@ class MasterForwardRuntime:
                 "context_id": context_id,
                 "event": int(packet["event"]),
                 "value": int(packet["value"]),
+                "threshold": tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0))),
             }
+
+    def _remember_task_event_threshold(self, packet: dict) -> None:
+        threshold = tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0)))
+        if self._threshold_has_value(threshold):
+            self._current_object_threshold = threshold
+
+    def _threshold_has_value(self, threshold: tuple) -> bool:
+        for value in threshold:
+            if int(value) != 0:
+                return True
+        return False
 
     def _clear_local_velocity_for_reliable_event(self, source: str) -> None:
         """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
@@ -348,6 +399,16 @@ class MasterForwardRuntime:
                 self._pending_sync = None
 
     def _apply_motion_outputs(self) -> None:
+        if self._local_vision_control_paused:
+            if not bool(getattr(self._transport_car, "command_lock", False)):
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "local_vision_pause",
+                    True,
+                )
+            return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             self._apply_transport_velocity()
             return
@@ -482,6 +543,7 @@ class MasterForwardRuntime:
             pending["state"],
             pending["target"],
             pending["arg"],
+            self._threshold_for_assistant_sync(pending),
         )
         status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
@@ -597,6 +659,7 @@ class MasterForwardRuntime:
                 "state": int(assistant_request["state"]),
                 "target": int(assistant_request["target"]),
                 "arg": int(assistant_request["arg"]),
+                "threshold": self._threshold_for_assistant_request(assistant_request),
                 "queued": False,
             }
 
@@ -733,11 +796,22 @@ class MasterForwardRuntime:
         if pending_event is None:
             return
         self._pending_task_event = None
+        self._remember_task_event_threshold(pending_event)
         self._state_machine.handle_event(
             pending_event["context_id"],
             pending_event["event"],
             pending_event["value"],
         )
+
+    def _threshold_for_assistant_request(self, assistant_request: dict) -> tuple:
+        if int(assistant_request.get("target", 0)) == TARGET_OBJECT:
+            return tuple(self._current_object_threshold)
+        return (0, 0, 0, 0, 0, 0)
+
+    def _threshold_for_assistant_sync(self, pending: dict) -> tuple:
+        if int(pending.get("target", 0)) == TARGET_OBJECT:
+            return tuple(self._current_object_threshold)
+        return tuple(pending.get("threshold", (0, 0, 0, 0, 0, 0)))
 
     def _log_sync_start(self, link_name: str, pending: dict) -> None:
         log(

@@ -92,13 +92,13 @@ def test_formal_topic_registry_matches_transport_contract() -> None:
         "name": "ASSISTANT_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_MASTER_VISION_EVENT_REPORT) == {
         "name": "MASTER_VISION_EVENT_REPORT",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_ASSISTANT_VISION_EVENT_REPORT) == {
         "name": "ASSISTANT_VISION_EVENT_REPORT",
@@ -110,7 +110,7 @@ def test_formal_topic_registry_matches_transport_contract() -> None:
         "name": "ASSISTANT_STATE_SYNC",
         "mode": MODE_TCP,
         "port": UART8,
-        "body_size": 4,
+        "body_size": 10,
     }
     assert get_topic_spec(TOPIC_ASSISTANT_EVENT_REPORT) == {
         "name": "ASSISTANT_EVENT_REPORT",
