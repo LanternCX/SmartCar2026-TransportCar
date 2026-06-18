@@ -389,7 +389,11 @@ class AssistantFollowRuntime:
             self._local_vision_control_paused = False
 
     def _allows_local_vision_control(self) -> bool:
+        if self._state_machine.state == ASSISTANT_STATE_FOLLOW:
+            return True
         if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            return True
+        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
             return True
         if self._state_machine.state != ASSISTANT_STATE_ORBIT:
             return False
