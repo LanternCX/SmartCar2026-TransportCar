@@ -145,6 +145,26 @@ def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypa
     }
 
 
+def test_master_runtime_logs_when_task_event_arrives(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._handle_task_event({"context_id": 7, "event": 8, "value": 0})
+
+    captured = capsys.readouterr().out
+    assert "master_event: received context=7 event=8 value=0" in captured
+
+
 def test_master_runtime_forwards_target_threshold_to_assistant(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
@@ -266,6 +286,41 @@ def test_master_runtime_pauses_local_vision_control_from_reliable_packet(monkeyp
     assert ack_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
 
 
+def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_LOCAL_VISION_CONTROL,
+            9,
+            encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+        )
+    )
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -319,6 +374,38 @@ def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypat
         "source": "uart6",
         "vx": 2.0,
         "vy": 3.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._local_vision_control_paused = True
+    runtime._latest_uart6_velocity = {"vx": 1.5, "vy": -0.5, "omega": 0.0}
+    runtime._state_machine.state = module.STATE_SEARCH_OBJECT
+    runtime._last_role_state = module.STATE_SEARCH_OBJECT
+
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+
+    runtime._run_role_cycle()
+
+    assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
         "has_omega": False,
     }
@@ -618,6 +705,43 @@ def test_assistant_runtime_pauses_chassis_from_local_vision_control(monkeypatch)
     assert ack_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
 
 
+def test_assistant_runtime_ignores_stale_pause_after_entering_transport(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_LOCAL_VISION_CONTROL,
+            9,
+            encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.ASSISTANT_STATE_TRANSPORT_OBJECT
+    runtime._uart8_velocity = {"vx": 0.0, "vy": 4.0, "omega": 0.0, "has_omega": False}
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is False
+    feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
+    assert cars[0].last_chassis_target == {
+        "source": "assistant",
+        "vx": 0.0,
+        "vy": -4.0 * feedforward_scale,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -674,6 +798,33 @@ def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkey
         "omega": 0.0,
         "has_omega": False,
     }
+
+
+def test_assistant_runtime_new_sync_clears_local_vision_pause(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._local_vision_control_paused = True
+
+    accepted = runtime._apply_sync_context(
+        {
+            "state": module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+            "target": module.ASSISTANT_TARGET_OBJECT,
+            "arg": _pack_task_arg(2, 1),
+        }
+    )
+
+    assert accepted is True
+    assert runtime._local_vision_control_paused is False
 
 
 def test_runtime_cycle_requests_each_port_once_for_normal_input(monkeypatch) -> None:

@@ -169,6 +169,7 @@ class MasterForwardRuntime:
         self._task_event_body = bytearray(10)
         self._assistant_event_body = bytearray(3)
         self._local_vision_control_paused = False
+        self._last_role_state = int(self._state_machine.state)
         self.last_report = None
 
     def mark_tick(self, tick=None) -> None:
@@ -208,17 +209,36 @@ class MasterForwardRuntime:
         @details 角色层只消费通信层缓存并提交新的业务意图, 不直接管理 UART 收发
         """
         self._check_transport_deliveries()
+        self._sync_role_state_transition()
         self._advance_state_machine()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._consume_uart6_inputs()
         self._consume_uart8_inputs()
         self._check_transport_deliveries()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._apply_motion_outputs()
         self._run_clear_phase()
+        self._sync_role_state_transition()
         self._run_turn_back_phase()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._queue_transport_outputs()
+
+    def _sync_role_state_transition(self) -> None:
+        current_state = int(self._state_machine.state)
+        if current_state == int(self._last_role_state):
+            return
+        self._clear_local_vision_pause_residue()
+        self._last_role_state = current_state
+
+    def _clear_local_vision_pause_residue(self) -> None:
+        self._local_vision_control_paused = False
+        self._latest_uart6_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
 
     def _consume_uart6_inputs(self) -> None:
         """消费本车视觉链路上的 UDP 速度与 TCP 事件."""
@@ -267,6 +287,9 @@ class MasterForwardRuntime:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
 
         action = int(packet.get("action", 0))
+        if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
+            self._local_vision_control_paused = False
+            return
         self._latest_uart6_velocity = None
         self._uart6_reset_version = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
@@ -284,6 +307,9 @@ class MasterForwardRuntime:
             return
         if action == LOCAL_VISION_CONTROL_RESUME:
             self._local_vision_control_paused = False
+
+    def _allows_local_vision_control(self) -> bool:
+        return int(self._state_machine.state) == int(STATE_SEARCH_OBJECT)
 
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
@@ -305,6 +331,15 @@ class MasterForwardRuntime:
 
     def _handle_task_event(self, packet: dict) -> None:
         context_id = int(packet["context_id"])
+        log(
+            "master_event",
+            "received context=%d event=%d value=%d"
+            % (
+                context_id,
+                int(packet["event"]),
+                int(packet["value"]),
+            ),
+        )
         if self._active_task_context_id == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
             self._remember_task_event_threshold(packet)

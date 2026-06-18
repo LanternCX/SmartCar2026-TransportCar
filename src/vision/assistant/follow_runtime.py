@@ -50,7 +50,7 @@ from vision.assistant.state_machine import (
     EVENT_RETURN_GARAGE_FINISHED,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from vision.task_sync import pack_task_arg, unpack_task_arg_object_id
+from vision.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
 
 
 _TARGET_FOUND_EVENT = 6
@@ -218,6 +218,7 @@ class AssistantFollowRuntime:
         )
         if not accepted:
             return False
+        self._clear_local_vision_pause_residue()
         if self._state_machine.is_idle():
             self._current_object_id = 0
             self._current_object_threshold = (0, 0, 0, 0, 0, 0)
@@ -272,6 +273,17 @@ class AssistantFollowRuntime:
             self._clear_completed = False
             self._write_zero_velocity("assistant_finished")
         return True
+
+    def _clear_local_vision_pause_residue(self) -> None:
+        self._local_vision_control_paused = False
+        self._uart6_velocity = None
+        self._uart8_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
+        self._uart8_reset_version = self.transport_service.get_udp_version(
+            UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
+        )
 
     def _consume_local_vision_event(self) -> None:
         """消费本地视觉的可靠事件回报."""
@@ -358,6 +370,9 @@ class AssistantFollowRuntime:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
 
         action = int(packet.get("action", 0))
+        if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
+            self._local_vision_control_paused = False
+            return
         self._uart6_velocity = None
         self._uart8_velocity = None
         self._uart6_reset_version = self.transport_service.get_udp_version(
@@ -372,6 +387,15 @@ class AssistantFollowRuntime:
             return
         if action == LOCAL_VISION_CONTROL_RESUME:
             self._local_vision_control_paused = False
+
+    def _allows_local_vision_control(self) -> bool:
+        if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            return True
+        if self._state_machine.state != ASSISTANT_STATE_ORBIT:
+            return False
+        return int(unpack_task_arg_config(self._state_machine.arg)) == int(
+            _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
+        )
 
     def _write_effective_velocity(self) -> None:
         if self._local_vision_control_paused:
