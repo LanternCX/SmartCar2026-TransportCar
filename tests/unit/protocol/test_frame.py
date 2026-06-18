@@ -28,7 +28,7 @@ def test_encode_frame_uses_fixed_layout_and_zero_padding() -> None:
     frame = encode_frame(MODE_UDP, 0x02, 0x7F, b"\x01\x02\x03")
 
     assert frame[0] == FRAME_HEAD
-    assert frame[1:12] == bytes([MODE_UDP, 0x02, 0x7F, 0x01, 0x02, 0x03, 0, 0, 0, 0, 0])
+    assert frame[1:-1] == bytes([MODE_UDP, 0x02, 0x7F, 0x01, 0x02, 0x03, 0, 0, 0, 0, 0, 0, 0])
     assert len(frame) == FRAME_SIZE
 
 
@@ -39,7 +39,7 @@ def test_decode_frame_returns_header_and_fixed_body_bytes() -> None:
         "mode": MODE_TCP,
         "topic": 0x20,
         "seq": 0x33,
-        "body": bytes([10, 11, 12, 0, 0, 0, 0, 0]),
+        "body": bytes([10, 11, 12, 0, 0, 0, 0, 0, 0, 0]),
     }
 
 

@@ -11,11 +11,12 @@ if str(SRC) in sys.path:
 sys.path.insert(0, str(SRC))
 
 from protocol.frame import encode_frame  # noqa: E402
+from protocol.codec import encode_assistant_state_sync_body  # noqa: E402
 from protocol.topic import (  # noqa: E402
     ROLE_MASTER,
     TOPIC_ASSISTANT_EVENT_REPORT,
     TOPIC_ASSISTANT_STATE_SYNC,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
     UART8,
 )
@@ -56,7 +57,7 @@ def test_tcp_resends_same_seq_until_ack() -> None:
     uart6 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([1, 2, 3, 4, 5])) == "accepted"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([1, 2, 3, 4, 5])) == "accepted"
     transport.poll_tx()
     first = uart6.messages[-1]
 
@@ -93,12 +94,18 @@ def test_active_seq_is_unique_per_port_until_ack() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([1, 2, 3, 4, 5])) == "accepted"
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([5, 4, 3, 2, 1])) == "overwritten"
-    assert transport.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, bytes([2, 1, 0, 0])) == "accepted"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([1, 2, 3, 4, 5])) == "accepted"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([5, 4, 3, 2, 1])) == "overwritten"
+    assert (
+        transport.tcp(UART8).write(
+            TOPIC_ASSISTANT_STATE_SYNC,
+            encode_assistant_state_sync_body(2, 1, 0),
+        )
+        == "accepted"
+    )
 
     transport.poll_tx()
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, bytes([1, 2, 3, 4, 5])) == "dropped_busy"
+    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([1, 2, 3, 4, 5])) == "dropped_busy"
     transport.poll_tx()
 
     assert len(uart6.messages) + len(uart8.messages) == 2

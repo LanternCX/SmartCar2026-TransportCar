@@ -15,7 +15,8 @@ UART8 = "uart8"
 TOPIC_LOCAL_VISION_VELOCITY = 0x01
 TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY = 0x02
 TOPIC_VISION_OBSERVATION = 0x03
-TOPIC_MASTER_VISION_HOOK_SYNC = 0x10
+TOPIC_LOCAL_VISION_CONTROL = 0x04
+TOPIC_MASTER_VISION_TASK_SYNC = 0x10
 TOPIC_ASSISTANT_VISION_TASK_SYNC = 0x11
 TOPIC_MASTER_VISION_EVENT_REPORT = 0x12
 TOPIC_ASSISTANT_VISION_EVENT_REPORT = 0x13
@@ -47,8 +48,16 @@ _TOPIC_TABLE = {
         "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
         "write_roles": (),
     },
-    TOPIC_MASTER_VISION_HOOK_SYNC: {
-        "name": "MASTER_VISION_HOOK_SYNC",
+    TOPIC_LOCAL_VISION_CONTROL: {
+        "name": "LOCAL_VISION_CONTROL",
+        "mode": MODE_TCP,
+        "port": UART6,
+        "body_size": 1,
+        "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
+        "write_roles": (),
+    },
+    TOPIC_MASTER_VISION_TASK_SYNC: {
+        "name": "MASTER_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
         "body_size": 5,
@@ -59,7 +68,7 @@ _TOPIC_TABLE = {
         "name": "ASSISTANT_VISION_TASK_SYNC",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
         "read_roles": (),
         "write_roles": (ROLE_ASSISTANT,),
     },
@@ -67,7 +76,7 @@ _TOPIC_TABLE = {
         "name": "MASTER_VISION_EVENT_REPORT",
         "mode": MODE_TCP,
         "port": UART6,
-        "body_size": 4,
+        "body_size": 10,
         "read_roles": (ROLE_MASTER,),
         "write_roles": (),
     },
@@ -83,7 +92,7 @@ _TOPIC_TABLE = {
         "name": "ASSISTANT_STATE_SYNC",
         "mode": MODE_TCP,
         "port": UART8,
-        "body_size": 4,
+        "body_size": 10,
         "read_roles": (ROLE_ASSISTANT,),
         "write_roles": (ROLE_MASTER,),
     },

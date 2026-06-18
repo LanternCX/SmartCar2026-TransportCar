@@ -159,10 +159,10 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(comm_params.SEQ_HALF_RING) == 128
     assert int(motion_params.TICK_MS) > 0
     assert not hasattr(comm_params, "RELIABLE_PACKET_SEND_DELAY_MS")
-    assert 0 <= int(vision_params.MASTER_SEARCH_HOOK_CONFIG_ID) <= 255
-    assert 0 <= int(vision_params.MASTER_TRANSPORT_HOOK_CONFIG_ID) <= 255
-    assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID) <= 255
-    assert 0 <= int(vision_params.MASTER_ORBIT_HOOK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_SEARCH_TASK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_TRANSPORT_TASK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID) <= 255
+    assert 0 <= int(vision_params.MASTER_ORBIT_TASK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID) <= 255

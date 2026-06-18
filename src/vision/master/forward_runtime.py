@@ -8,11 +8,14 @@ import time
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
+    LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_event_report_body,
+    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_velocity_body,
     encode_assistant_state_sync_body,
-    encode_master_vision_hook_sync_body,
+    encode_master_vision_task_sync_body,
     encode_velocity_body,
 )
 from protocol.topic import (
@@ -21,8 +24,9 @@ from protocol.topic import (
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
+    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_MASTER_VISION_EVENT_REPORT,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
     UART8,
 )
@@ -53,7 +57,7 @@ from vision.master.state_machine import (
 from utils.startup_log import log, log_exception
 
 
-MASTER_SEARCH_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_HOOK_CONFIG_ID")
+MASTER_SEARCH_TASK_CONFIG_ID = getattr(vision_params, "MASTER_SEARCH_TASK_CONFIG_ID")
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = getattr(
     vision_params,
     "ASSISTANT_APPROACH_OBJECT_CONFIG_ID",
@@ -62,15 +66,15 @@ ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
     vision_params,
     "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID",
 )
-MASTER_TRANSPORT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_TRANSPORT_HOOK_CONFIG_ID")
-MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID = getattr(
+MASTER_TRANSPORT_TASK_CONFIG_ID = getattr(vision_params, "MASTER_TRANSPORT_TASK_CONFIG_ID")
+MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID = getattr(
     vision_params,
-    "MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID",
+    "MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID",
 )
-MASTER_ORBIT_HOOK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_HOOK_CONFIG_ID")
-MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID = getattr(
+MASTER_ORBIT_TASK_CONFIG_ID = getattr(vision_params, "MASTER_ORBIT_TASK_CONFIG_ID")
+MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = getattr(
     vision_params,
-    "MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID",
+    "MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID",
 )
 TRANSPORT_OBJECT_TOTAL_COUNT = getattr(vision_params, "TRANSPORT_OBJECT_TOTAL_COUNT")
 ORBIT_VISION_CORRECTION_ENABLED = bool(
@@ -129,28 +133,29 @@ class MasterForwardRuntime:
         )
         seed_value = int(self._now_ms()) % 256
         self._state_machine = MasterStateMachine(
-            hook_arg=MASTER_SEARCH_HOOK_CONFIG_ID,
+            search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
-            transport_hook_arg=MASTER_TRANSPORT_HOOK_CONFIG_ID,
-            finish_hook_arg=MASTER_TRANSPORT_FINISH_HOOK_CONFIG_ID,
-            return_line_hook_arg=MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID,
+            transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
+            finish_task_arg=MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+            return_line_task_arg=MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID,
             total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
         )
         self._last_error_text = "none"
         self._latest_uart6_velocity = None
         self._uart6_reset_version = 0
-        self._active_hook_context_id = None
-        self._pending_hook = None
-        self._pending_hook_event = None
+        self._active_task_context_id = None
+        self._pending_task_sync = None
+        self._pending_task_event = None
+        self._current_object_threshold = (0, 0, 0, 0, 0, 0)
         self._pending_sync = None
         self._pending_assistant_sync = None
         self._orbit_command_active = False
         self._transport_sync_acknowledged = False
-        self._transport_hook_acknowledged = False
+        self._transport_task_acknowledged = False
         self._clear_sync_acknowledged = False
         self._clear_motion_started = False
         self._clear_master_completed_phase = None
@@ -158,10 +163,13 @@ class MasterForwardRuntime:
         self._turn_back_rotation_started = False
         self._turn_back_stop_ticks = 0
         self._turn_back_target_heading_deg = None
-        self._last_hook_sync_status = None
+        self._last_task_sync_status = None
         self._velocity_body = bytearray(7)
-        self._hook_event_body = bytearray(4)
+        self._local_vision_control_body = bytearray(1)
+        self._task_event_body = bytearray(10)
         self._assistant_event_body = bytearray(3)
+        self._local_vision_control_paused = False
+        self._last_role_state = int(self._state_machine.state)
         self.last_report = None
 
     def mark_tick(self, tick=None) -> None:
@@ -189,6 +197,7 @@ class MasterForwardRuntime:
             "state": int(state),
             "target": int(target),
             "arg": int(arg),
+            "threshold": (0, 0, 0, 0, 0, 0),
             "queued": False,
         }
         self._pending_sync = pending
@@ -200,20 +209,47 @@ class MasterForwardRuntime:
         @details 角色层只消费通信层缓存并提交新的业务意图, 不直接管理 UART 收发
         """
         self._check_transport_deliveries()
+        self._sync_role_state_transition()
         self._advance_state_machine()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._consume_uart6_inputs()
         self._consume_uart8_inputs()
         self._check_transport_deliveries()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._apply_motion_outputs()
         self._run_clear_phase()
+        self._sync_role_state_transition()
         self._run_turn_back_phase()
+        self._sync_role_state_transition()
         self._drain_state_machine_outputs()
         self._queue_transport_outputs()
 
+    def _sync_role_state_transition(self) -> None:
+        current_state = int(self._state_machine.state)
+        if current_state == int(self._last_role_state):
+            return
+        self._clear_local_vision_pause_residue()
+        self._last_role_state = current_state
+
+    def _clear_local_vision_pause_residue(self) -> None:
+        self._local_vision_control_paused = False
+        self._latest_uart6_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
+
     def _consume_uart6_inputs(self) -> None:
         """消费本车视觉链路上的 UDP 速度与 TCP 事件."""
+        if (
+            self.transport_service.tcp(UART6).read(
+                TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
+            )
+            == "ok"
+        ):
+            packet = decode_local_vision_control_body(self._local_vision_control_body)
+            self._handle_local_vision_control(packet)
         if (
             self.transport_service.udp(UART6).read(
                 TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body
@@ -223,29 +259,57 @@ class MasterForwardRuntime:
             version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._uart6_reset_version:
+            if version > self._uart6_reset_version and not self._local_vision_control_paused:
                 packet = decode_velocity_body(self._velocity_body)
                 if (
                     self._state_machine.allows_search_velocity()
                     or self._state_machine.state == STATE_TRANSPORT_OBJECT
                     or (
                         self._state_machine.state == STATE_ORBITING
-                        and self._pending_hook is None
+                        and self._pending_task_sync is None
                     )
                     or (
                         self._state_machine.state == STATE_RETURN_GARAGE_LINE
-                        and self._pending_hook is None
+                        and self._pending_task_sync is None
                     )
                 ):
                     self._latest_uart6_velocity = packet
         if (
             self.transport_service.tcp(UART6).read(
-                TOPIC_MASTER_VISION_EVENT_REPORT, self._hook_event_body
+                TOPIC_MASTER_VISION_EVENT_REPORT, self._task_event_body
             )
             == "ok"
         ):
-            packet = decode_master_vision_event_report_body(self._hook_event_body)
-            self._handle_hook_event(packet)
+            packet = decode_master_vision_event_report_body(self._task_event_body)
+            self._handle_task_event(packet)
+
+    def _handle_local_vision_control(self, packet: dict) -> None:
+        """处理 OpenART 慢帧前后的可靠暂停控制."""
+
+        action = int(packet.get("action", 0))
+        if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
+            self._local_vision_control_paused = False
+            return
+        self._latest_uart6_velocity = None
+        self._uart6_reset_version = self.transport_service.get_udp_version(
+            UART6, TOPIC_LOCAL_VISION_VELOCITY
+        )
+        if action == LOCAL_VISION_CONTROL_PAUSE:
+            self._local_vision_control_paused = True
+            if not bool(getattr(self._transport_car, "command_lock", False)):
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "local_vision_pause",
+                    True,
+                )
+            return
+        if action == LOCAL_VISION_CONTROL_RESUME:
+            self._local_vision_control_paused = False
+
+    def _allows_local_vision_control(self) -> bool:
+        return int(self._state_machine.state) == int(STATE_SEARCH_OBJECT)
 
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
@@ -265,23 +329,45 @@ class MasterForwardRuntime:
             elif int(packet["event"]) == EVENT_CLEARED:
                 self._state_machine.handle_assistant_cleared(packet["value"])
 
-    def _handle_hook_event(self, packet: dict) -> None:
+    def _handle_task_event(self, packet: dict) -> None:
         context_id = int(packet["context_id"])
-        if self._active_hook_context_id == context_id:
+        log(
+            "master_event",
+            "received context=%d event=%d value=%d"
+            % (
+                context_id,
+                int(packet["event"]),
+                int(packet["value"]),
+            ),
+        )
+        if self._active_task_context_id == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
+            self._remember_task_event_threshold(packet)
             self._state_machine.handle_event(
                 context_id,
                 packet["event"],
                 packet["value"],
             )
             return
-        if self._pending_hook is not None and context_id == int(self._pending_hook["context_id"]):
+        if self._pending_task_sync is not None and context_id == int(self._pending_task_sync["context_id"]):
             self._clear_local_velocity_for_reliable_event("master_vision_event")
-            self._pending_hook_event = {
+            self._pending_task_event = {
                 "context_id": context_id,
                 "event": int(packet["event"]),
                 "value": int(packet["value"]),
+                "threshold": tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0))),
             }
+
+    def _remember_task_event_threshold(self, packet: dict) -> None:
+        threshold = tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0)))
+        if self._threshold_has_value(threshold):
+            self._current_object_threshold = threshold
+
+    def _threshold_has_value(self, threshold: tuple) -> bool:
+        for value in threshold:
+            if int(value) != 0:
+                return True
+        return False
 
     def _clear_local_velocity_for_reliable_event(self, source: str) -> None:
         """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
@@ -302,22 +388,22 @@ class MasterForwardRuntime:
 
     def _check_transport_deliveries(self) -> None:
         """把通信层的交付结果映射回角色状态机."""
-        pending = self._pending_hook
+        pending = self._pending_task_sync
         if pending is not None and pending.get("queued"):
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC)
+                self.transport_service.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
-                self._log_hook_sync_done(pending)
-                self._active_hook_context_id = int(pending["context_id"])
-                if pending.get("kind") == "transport_hook":
-                    self._transport_hook_acknowledged = True
+                self._log_task_sync_done(pending)
+                self._active_task_context_id = int(pending["context_id"])
+                if pending.get("kind") == "transport_task":
+                    self._transport_task_acknowledged = True
                     if self._transport_sync_acknowledged:
                         self._state_machine.mark_transport_ready()
                 elif self._state_machine.state == STATE_SEARCH_OBJECT:
-                    self._state_machine.mark_restart_search_hook_acknowledged()
-                self._pending_hook = None
-                self._drain_pending_hook_event()
+                    self._state_machine.mark_restart_search_task_acknowledged()
+                self._pending_task_sync = None
+                self._drain_pending_task_event()
 
         pending = self._pending_assistant_sync
         if pending is not None and pending.get("queued"):
@@ -332,7 +418,7 @@ class MasterForwardRuntime:
                     self._state_machine.mark_assistant_follow_acknowledged()
                 elif pending.get("kind") == "assistant_transport":
                     self._transport_sync_acknowledged = True
-                    if self._transport_hook_acknowledged:
+                    if self._transport_task_acknowledged:
                         self._state_machine.mark_transport_ready()
                 elif pending.get("kind") == "assistant_clear":
                     self._clear_sync_acknowledged = True
@@ -348,6 +434,16 @@ class MasterForwardRuntime:
                 self._pending_sync = None
 
     def _apply_motion_outputs(self) -> None:
+        if self._local_vision_control_paused:
+            if not bool(getattr(self._transport_car, "command_lock", False)):
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "local_vision_pause",
+                    True,
+                )
+            return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             self._apply_transport_velocity()
             return
@@ -446,31 +542,31 @@ class MasterForwardRuntime:
         )
 
     def _queue_transport_outputs(self) -> None:
-        """提交本拍要发送的 hook、状态同步和前馈速度."""
-        self._queue_pending_hook()
+        """提交本拍要发送的 task、状态同步和前馈速度."""
+        self._queue_pending_task_sync()
         self._queue_pending_sync()
         self._queue_feedforward_velocity()
 
-    def _queue_pending_hook(self) -> None:
-        pending = self._pending_hook
+    def _queue_pending_task_sync(self) -> None:
+        pending = self._pending_task_sync
         if pending is None or pending.get("queued"):
             return
-        body = encode_master_vision_hook_sync_body(
+        body = encode_master_vision_task_sync_body(
             pending["context_id"],
             pending["state"],
             pending["target"],
             pending["arg"],
         )
-        status = self.transport_service.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body)
+        status = self.transport_service.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            self._log_hook_sync_start(pending)
-            self._last_hook_sync_status = None
+            self._log_task_sync_start(pending)
+            self._last_task_sync_status = None
             pending["queued"] = True
             return
-        if self._last_hook_sync_status == status:
+        if self._last_task_sync_status == status:
             return
-        self._last_hook_sync_status = status
-        self._log_hook_sync_blocked(pending, status)
+        self._last_task_sync_status = status
+        self._log_task_sync_blocked(pending, status)
 
     def _queue_pending_sync(self) -> None:
         pending = self._pending_assistant_sync
@@ -482,6 +578,7 @@ class MasterForwardRuntime:
             pending["state"],
             pending["target"],
             pending["arg"],
+            self._threshold_for_assistant_sync(pending),
         )
         status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
@@ -522,21 +619,21 @@ class MasterForwardRuntime:
 
     def _drain_state_machine_outputs(self) -> None:
         """消费状态机一次性输出并刷新本拍业务意图."""
-        hook_request = self._state_machine.poll_hook_request()
-        if hook_request is not None:
-            self._active_hook_context_id = None
+        task_request = self._state_machine.poll_task_request()
+        if task_request is not None:
+            self._active_task_context_id = None
             self._latest_uart6_velocity = None
             self._uart6_reset_version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            self._pending_hook_event = None
-            self._transport_hook_acknowledged = False
-            self._pending_hook = {
-                "kind": hook_request.get("kind"),
-                "context_id": int(hook_request["context_id"]),
-                "state": int(hook_request["state"]),
-                "target": int(hook_request["target"]),
-                "arg": int(hook_request["arg"]),
+            self._pending_task_event = None
+            self._transport_task_acknowledged = False
+            self._pending_task_sync = {
+                "kind": task_request.get("kind"),
+                "context_id": int(task_request["context_id"]),
+                "state": int(task_request["state"]),
+                "target": int(task_request["target"]),
+                "arg": int(task_request["arg"]),
                 "queued": False,
             }
         assistant_request = self._state_machine.poll_assistant_request()
@@ -553,14 +650,14 @@ class MasterForwardRuntime:
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
             elif request_kind == "assistant_transport":
-                self._active_hook_context_id = None
+                self._active_task_context_id = None
                 self._latest_uart6_velocity = None
                 self._uart6_reset_version = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
-                self._pending_hook_event = None
+                self._pending_task_event = None
                 self._transport_sync_acknowledged = False
-                self._transport_hook_acknowledged = False
+                self._transport_task_acknowledged = False
                 self._transport_car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -568,12 +665,12 @@ class MasterForwardRuntime:
                     "master_wait_transport_ready",
                     True,
                 )
-                self._pending_hook = {
-                    "kind": "transport_hook",
+                self._pending_task_sync = {
+                    "kind": "transport_task",
                     "context_id": int(self._state_machine._current_context_id),
                     "state": STATE_SEARCH_OBJECT,
                     "target": int(assistant_request["target"]),
-                    "arg": int(MASTER_TRANSPORT_HOOK_CONFIG_ID),
+                    "arg": int(MASTER_TRANSPORT_TASK_CONFIG_ID),
                     "queued": False,
                 }
             elif request_kind == "assistant_clear":
@@ -597,23 +694,24 @@ class MasterForwardRuntime:
                 "state": int(assistant_request["state"]),
                 "target": int(assistant_request["target"]),
                 "arg": int(assistant_request["arg"]),
+                "threshold": self._threshold_for_assistant_request(assistant_request),
                 "queued": False,
             }
 
         orbit_command = self._state_machine.poll_orbit_command()
         if orbit_command is not None:
-            self._active_hook_context_id = None
+            self._active_task_context_id = None
             self._latest_uart6_velocity = None
             self._uart6_reset_version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            self._pending_hook_event = None
-            self._pending_hook = {
-                "kind": "orbit_hook",
+            self._pending_task_event = None
+            self._pending_task_sync = {
+                "kind": "orbit_task",
                 "context_id": int(self._state_machine._current_context_id),
                 "state": STATE_ORBITING,
                 "target": TARGET_OBJECT,
-                "arg": int(MASTER_ORBIT_HOOK_CONFIG_ID),
+                "arg": int(MASTER_ORBIT_TASK_CONFIG_ID),
                 "queued": False,
             }
             self._transport_car.set_orbit_target(
@@ -728,16 +826,27 @@ class MasterForwardRuntime:
                 return False
         return True
 
-    def _drain_pending_hook_event(self) -> None:
-        pending_event = self._pending_hook_event
+    def _drain_pending_task_event(self) -> None:
+        pending_event = self._pending_task_event
         if pending_event is None:
             return
-        self._pending_hook_event = None
+        self._pending_task_event = None
+        self._remember_task_event_threshold(pending_event)
         self._state_machine.handle_event(
             pending_event["context_id"],
             pending_event["event"],
             pending_event["value"],
         )
+
+    def _threshold_for_assistant_request(self, assistant_request: dict) -> tuple:
+        if int(assistant_request.get("target", 0)) == TARGET_OBJECT:
+            return tuple(self._current_object_threshold)
+        return (0, 0, 0, 0, 0, 0)
+
+    def _threshold_for_assistant_sync(self, pending: dict) -> tuple:
+        if int(pending.get("target", 0)) == TARGET_OBJECT:
+            return tuple(self._current_object_threshold)
+        return tuple(pending.get("threshold", (0, 0, 0, 0, 0, 0)))
 
     def _log_sync_start(self, link_name: str, pending: dict) -> None:
         log(
@@ -763,7 +872,7 @@ class MasterForwardRuntime:
             ),
         )
 
-    def _log_hook_sync_start(self, pending: dict) -> None:
+    def _log_task_sync_start(self, pending: dict) -> None:
         log(
             "sync",
             "master->camera sync start context=%d state=%d target=%d arg=%d"
@@ -775,7 +884,7 @@ class MasterForwardRuntime:
             ),
         )
 
-    def _log_hook_sync_done(self, pending: dict) -> None:
+    def _log_task_sync_done(self, pending: dict) -> None:
         log(
             "sync",
             "master->camera sync done context=%d state=%d target=%d arg=%d"
@@ -787,7 +896,7 @@ class MasterForwardRuntime:
             ),
         )
 
-    def _log_hook_sync_blocked(self, pending: dict, status: str) -> None:
+    def _log_task_sync_blocked(self, pending: dict, status: str) -> None:
         log(
             "sync",
             "master->camera sync blocked status=%s context=%d state=%d target=%d arg=%d"

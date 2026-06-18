@@ -1,27 +1,27 @@
 """回库黄线速度调试脚本.
 
 @file src/script/test/return_line_velocity_probe.py
-@brief 仅同步视觉到主车回库黄线识别上下文, 打印视觉返回速度
+@brief 仅同步视觉到主车回库黄线识别任务, 打印视觉返回速度
 """
 
 from config import vision as vision_params
-from protocol.codec import decode_velocity_body, encode_master_vision_hook_sync_body
+from protocol.codec import decode_velocity_body, encode_master_vision_task_sync_body
 from protocol.topic import (
     ROLE_MASTER,
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_MASTER_VISION_HOOK_SYNC,
+    TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
 )
 from protocol.transport import DELIVERY_DELIVERED, create_transport
 from vision.master.state_machine import STATE_RETURN_GARAGE_RETREAT, TARGET_EDGE_LINE
 
 
-MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID = getattr(
+MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = getattr(
     vision_params,
-    "MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID",
+    "MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID",
 )
 
-# 调试脚本固定使用一个独立上下文号, 只用于切换视觉端 hook。
+# 调试脚本固定使用一个独立上下文号, 只用于切换视觉端 task。
 PROBE_CONTEXT_ID = 1
 # 调试循环间隔, 单位毫秒。
 PROBE_POLL_INTERVAL_MS = 20
@@ -71,16 +71,16 @@ def _format_velocity_line(packet):
     )
 
 
-def _request_return_line_context(transport):
-    """通过正式同步包请求视觉进入回库黄线识别上下文."""
+def _request_return_line_task(transport):
+    """通过正式同步包请求视觉进入回库黄线识别任务."""
 
-    body = encode_master_vision_hook_sync_body(
+    body = encode_master_vision_task_sync_body(
         PROBE_CONTEXT_ID,
         STATE_RETURN_GARAGE_RETREAT,
         TARGET_EDGE_LINE,
-        MASTER_RETURN_GARAGE_LINE_HOOK_CONFIG_ID,
+        MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID,
     )
-    return transport.tcp(UART6).write(TOPIC_MASTER_VISION_HOOK_SYNC, body)
+    return transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body)
 
 
 def run_probe_loop(
@@ -103,14 +103,14 @@ def run_probe_loop(
         uart6=uart6,
         uart8=_NullUart(),
     )
-    status = _request_return_line_context(transport)
+    status = _request_return_line_task(transport)
     log("return_line_probe sync=%s" % status)
     velocity_body = bytearray(7)
     rounds = 0
     last_packet = None
     while max_rounds is None or rounds < int(max_rounds):
         transport.poll_rx()
-        delivery = transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_HOOK_SYNC)
+        delivery = transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC)
         if delivery != DELIVERY_DELIVERED:
             transport.poll_tx()
         if transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, velocity_body) == "ok":

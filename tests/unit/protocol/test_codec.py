@@ -11,20 +11,24 @@ if str(SRC) in sys.path:
 sys.path.insert(0, str(SRC))
 
 from protocol.codec import (  # noqa: E402
+    LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_event_report_body,
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
     decode_assistant_vision_task_sync_body,
+    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
-    decode_master_vision_hook_sync_body,
+    decode_master_vision_task_sync_body,
     decode_velocity_body,
     decode_vision_observation_body,
     encode_assistant_event_report_body,
     encode_assistant_state_sync_body,
     encode_assistant_vision_event_report_body,
     encode_assistant_vision_task_sync_body,
+    encode_local_vision_control_body,
     encode_master_vision_event_report_body,
-    encode_master_vision_hook_sync_body,
+    encode_master_vision_task_sync_body,
     encode_velocity_body,
     encode_vision_observation_body,
 )
@@ -71,11 +75,25 @@ def test_vision_observation_body_roundtrip() -> None:
     }
 
 
-def test_master_hook_sync_body_roundtrip() -> None:
-    body = encode_master_vision_hook_sync_body(9, 1, 3, -2)
+def test_local_vision_control_body_roundtrip() -> None:
+    pause_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE)
+    resume_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RESUME)
+
+    assert pause_body == bytes([1])
+    assert resume_body == bytes([2])
+    assert decode_local_vision_control_body(pause_body) == {
+        "action": LOCAL_VISION_CONTROL_PAUSE,
+    }
+    assert decode_local_vision_control_body(resume_body) == {
+        "action": LOCAL_VISION_CONTROL_RESUME,
+    }
+
+
+def test_master_task_sync_body_roundtrip() -> None:
+    body = encode_master_vision_task_sync_body(9, 1, 3, -2)
 
     assert body == bytes([9, 1, 3, 0xFE, 0xFF])
-    assert decode_master_vision_hook_sync_body(body) == {
+    assert decode_master_vision_task_sync_body(body) == {
         "context_id": 9,
         "state": 1,
         "target": 3,
@@ -84,24 +102,28 @@ def test_master_hook_sync_body_roundtrip() -> None:
 
 
 def test_assistant_vision_task_sync_body_roundtrip() -> None:
-    body = encode_assistant_vision_task_sync_body(2, 1, 17)
+    threshold = (12, 80, -30, 40, -20, 60)
+    body = encode_assistant_vision_task_sync_body(2, 1, 17, threshold)
 
-    assert body == bytes([2, 1, 17, 0])
+    assert body == bytes([2, 1, 17, 0, 12, 80, 226, 40, 236, 60])
     assert decode_assistant_vision_task_sync_body(body) == {
         "state": 2,
         "target": 1,
         "arg": 17,
+        "threshold": threshold,
     }
 
 
 def test_master_vision_event_report_body_roundtrip() -> None:
-    body = encode_master_vision_event_report_body(5, 6, 200)
+    threshold = (10, 90, -15, 30, -25, 70)
+    body = encode_master_vision_event_report_body(5, 6, 200, threshold)
 
-    assert body == bytes([5, 6, 200, 0])
+    assert body == bytes([5, 6, 200, 0, 10, 90, 241, 30, 231, 70])
     assert decode_master_vision_event_report_body(body) == {
         "context_id": 5,
         "event": 6,
         "value": 200,
+        "threshold": threshold,
     }
 
 
@@ -116,13 +138,15 @@ def test_assistant_vision_event_report_body_roundtrip() -> None:
 
 
 def test_assistant_state_sync_body_roundtrip() -> None:
-    body = encode_assistant_state_sync_body(4, 1, 23)
+    threshold = (8, 88, -18, 38, -28, 78)
+    body = encode_assistant_state_sync_body(4, 1, 23, threshold)
 
-    assert body == bytes([4, 1, 23, 0])
+    assert body == bytes([4, 1, 23, 0, 8, 88, 238, 38, 228, 78])
     assert decode_assistant_state_sync_body(body) == {
         "state": 4,
         "target": 1,
         "arg": 23,
+        "threshold": threshold,
     }
 
 

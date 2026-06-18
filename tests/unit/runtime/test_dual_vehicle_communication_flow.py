@@ -111,7 +111,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_hook_context_id is not None,
+        lambda: master._active_task_context_id is not None,
     )
 
     master_uart6.push(
@@ -120,7 +120,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             1,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_TARGET_FOUND,
                 2,
             ),
@@ -190,7 +190,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             2,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_ALIGNED,
                 0,
             ),
@@ -226,7 +226,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_hook_context_id is not None,
+        lambda: master._active_task_context_id is not None,
     )
 
     master_uart6.push(
@@ -235,7 +235,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             3,
             encode_master_vision_event_report_body(
-                master._active_hook_context_id,
+                master._active_task_context_id,
                 master_module.EVENT_ARRIVED,
                 0,
             ),
@@ -308,16 +308,16 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     frame = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         7,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
@@ -412,16 +412,16 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
@@ -470,7 +470,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
             if (
                 frame["mode"] == 0x02
                 and frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
-                and frame["body"][:4] == orbit_sync_body
+                and frame["body"][:10] == orbit_sync_body
             ):
                 orbit_sync_count += 1
         if orbit_sync_count >= 1:
@@ -489,7 +489,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         if (
             frame["mode"] == 0x02
             and frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
-            and frame["body"][:4] == orbit_sync_body
+            and frame["body"][:10] == orbit_sync_body
         ):
             orbit_sync_count_after_duplicate += 1
 
@@ -560,16 +560,16 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_hook_context_id is not None:
+        if master._active_task_context_id is not None:
             break
-    assert master._active_hook_context_id is not None
+    assert master._active_task_context_id is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_hook_context_id,
+            master._active_task_context_id,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
