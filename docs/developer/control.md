@@ -7,9 +7,11 @@
 ## 外部约定
 
 - 正式入口是 [src/main.py](../../src/main.py)，不按按钮进入 [src/script/remote_control.py](../../src/script/remote_control.py)。
-- 长按 `C8` 上电进入参数辨识脚本，长按 `C9` 上电进入陀螺仪校准脚本。
+- 长按 `C14` 上电进入参数辨识脚本，长按 `C15` 上电进入陀螺仪校准脚本。
 - `src/config/startup.py` 开启测试模式时，不按按钮进入 [src/script/test.py](../../src/script/test.py)。
 - 主车和辅车身份由车号读取结果决定，不由启动按钮决定。
+- 主车使用旧硬件接线映射，辅车使用新硬件接线映射，底盘控制内核保持统一。
+- 上电低压保护按车辆身份选择阈值: 主车 `11.5V`，辅车 `3.7V`。
 - `UART3` 用作 REPL 与现场调试链路，`UART8` 用作主辅直连链路，两台车各自用本车 `UART6` 连接本车 OpenART。
 - 陀螺仪零飘结果保存到 `/flash/gyro_offset.txt`，电机辨识结果保存到 `/flash/ident_params.txt`。
 

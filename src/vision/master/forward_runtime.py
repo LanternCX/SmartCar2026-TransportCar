@@ -122,7 +122,7 @@ class MasterForwardRuntime:
     def __init__(self, now_ms=None, transport=None) -> None:
         from core.runtime import TransportCar
 
-        car = TransportCar()
+        car = TransportCar(vehicle_role=ROLE_MASTER)
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu

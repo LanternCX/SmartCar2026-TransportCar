@@ -31,6 +31,12 @@ def load_main_module():
     return module
 
 
+def _set_startup_role(monkeypatch, main, role="assistant") -> None:
+    """指定入口测试使用的车辆角色."""
+
+    monkeypatch.setattr(main, "_read_startup_vehicle_role", lambda: role)
+
+
 def test_resolve_startup_script_uses_long_press_only() -> None:
     """只有长按才触发维护脚本."""
 
@@ -39,8 +45,8 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
 
     assert main.resolve_startup_script([1, 0, 0, 0]) == "script/remote_control.py"
     assert main.resolve_startup_script([0, 1, 0, 0]) == "script/remote_control.py"
-    assert main.resolve_startup_script([2, 0, 0, 0]) == "script/pid_identify.py"
-    assert main.resolve_startup_script([0, 2, 0, 0]) == "script/calibrate_gyro.py"
+    assert main.resolve_startup_script([0, 0, 2, 0]) == "script/pid_identify.py"
+    assert main.resolve_startup_script([0, 0, 0, 2]) == "script/calibrate_gyro.py"
 
 
 def test_main_entry_allocates_emergency_exception_buffer(monkeypatch) -> None:
@@ -69,6 +75,7 @@ def test_main_entry_binds_uart3_to_repl_before_startup_logs(
     events = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
     monkeypatch.setattr(main, "_run_script", lambda _script_path: None)
@@ -109,7 +116,7 @@ def test_resolve_startup_script_rejects_dual_long_press() -> None:
     main = load_main_module()
 
     with pytest.raises(ValueError):
-        main.resolve_startup_script([2, 2, 0, 0])
+        main.resolve_startup_script([0, 0, 2, 2])
 
 
 def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
@@ -120,6 +127,7 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     launched_scripts = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
     monkeypatch.setattr(
@@ -155,6 +163,7 @@ def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
     trace_calls = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
 
@@ -200,6 +209,7 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
     main = load_main_module()
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main)
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
     monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
     monkeypatch.setattr(
@@ -228,14 +238,50 @@ def test_main_entry_logs_when_fatal_error_save_fails(capsys, monkeypatch) -> Non
     assert trace_calls == [("main", "fatal log save failed: flash full", "flash full")]
 
 
-def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> None:
-    """入口阶段电压不足时只进入蜂鸣告警."""
+def test_main_entry_blocks_assistant_script_when_voltage_is_low(
+    capsys, monkeypatch
+) -> None:
+    """辅车入口阶段电压不足时只进入蜂鸣告警."""
 
     main = load_main_module()
     launched_scripts = []
     alarmed = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main, "assistant")
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 3.6)
+    monkeypatch.setattr(
+        main,
+        "_run_low_voltage_alarm",
+        lambda voltage: alarmed.append(voltage) or "alarm",
+    )
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda script_path: launched_scripts.append(script_path),
+    )
+
+    result = main.main()
+    output_lines = capsys.readouterr().out.splitlines()
+
+    assert result == "alarm"
+    assert launched_scripts == []
+    assert alarmed == [3.6]
+    assert any(line.endswith("main: low voltage=3.60V") for line in output_lines)
+
+
+def test_main_entry_blocks_master_script_with_master_voltage_threshold(
+    capsys, monkeypatch
+) -> None:
+    """主车入口阶段按 11.5V 阈值保护."""
+
+    main = load_main_module()
+    launched_scripts = []
+    alarmed = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main, "master")
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 11.4)
     monkeypatch.setattr(
         main,
@@ -258,6 +304,28 @@ def test_main_entry_blocks_script_when_voltage_is_low(capsys, monkeypatch) -> No
     assert any(line.endswith("main: low voltage=11.40V") for line in output_lines)
 
 
+def test_main_entry_allows_assistant_script_above_assistant_voltage_threshold(
+    monkeypatch,
+) -> None:
+    """辅车入口阶段不使用主车 11.5V 阈值."""
+
+    main = load_main_module()
+    launched_scripts = []
+
+    monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main, "assistant")
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 11.4)
+    monkeypatch.setattr(main, "_scan_startup_key_states", lambda: [0, 0, 0, 0])
+    monkeypatch.setattr(
+        main,
+        "_run_script",
+        lambda script_path: launched_scripts.append(script_path),
+    )
+
+    assert main.main() == "script/remote_control.py"
+    assert launched_scripts == ["script/remote_control.py"]
+
+
 def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:
     """入口阶段使用配置阈值判定低电压."""
 
@@ -266,8 +334,9 @@ def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:
     alarmed = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
+    _set_startup_role(monkeypatch, main, "master")
     monkeypatch.setattr(main, "_read_startup_voltage", lambda: 12.0)
-    monkeypatch.setattr(main.safety_params, "POWER_MIN_VOLTAGE_V", 12.1)
+    monkeypatch.setattr(main.safety_params, "MASTER_POWER_MIN_VOLTAGE_V", 12.1)
     monkeypatch.setattr(
         main,
         "_run_low_voltage_alarm",
