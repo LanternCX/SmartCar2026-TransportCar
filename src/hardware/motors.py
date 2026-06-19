@@ -14,13 +14,12 @@ def create_motors():
     @return 字典 {轮子名称 -> 电机对象}, 键为 "m", "l", "r"
     """
     motor_m = MOTOR_CONTROLLER(
-        MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False
-    )
-    motor_l = MOTOR_CONTROLLER(
         MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False
     )
+    motor_l = MOTOR_CONTROLLER(
+        MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=False
+    )
     motor_r = MOTOR_CONTROLLER(
-        MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True
+        MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False
     )
     return {"m": motor_m, "l": motor_l, "r": motor_r}
-

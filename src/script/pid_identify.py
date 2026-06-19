@@ -68,15 +68,19 @@ led = Pin("C4", Pin.OUT, value=True)
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
 state2 = switch2.value()
 
-encoder_m = encoder("D15", "D16", True)
-encoder_l = encoder("C2", "C3", True)
-encoder_r = encoder("C0", "C1", True)
+encoder_m = encoder("D13", "D14", True)
+encoder_l = encoder("D15", "D16", True)
+encoder_r = encoder("C2", "C3", True)
 
 motor_m = MOTOR_CONTROLLER(
+    MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False
+)
+motor_l = MOTOR_CONTROLLER(
+    MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=False
+)
+motor_r = MOTOR_CONTROLLER(
     MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False
 )
-motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True)
-motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False)
 
 
 wheel_states = [

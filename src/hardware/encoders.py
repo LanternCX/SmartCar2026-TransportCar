@@ -13,7 +13,7 @@ def create_encoders():
 
     @return 字典 {轮子名称 -> 编码器对象}, 键为 "m", "l", "r"
     """
-    encoder_m = encoder("D15", "D16", True)
-    encoder_l = encoder("C0", "C1", True)
+    encoder_m = encoder("D13", "D14", True)
+    encoder_l = encoder("D15", "D16", True)
     encoder_r = encoder("C2", "C3", True)
     return {"m": encoder_m, "l": encoder_l, "r": encoder_r}
