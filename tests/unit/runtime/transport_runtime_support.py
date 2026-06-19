@@ -96,7 +96,8 @@ def install_fake_core(monkeypatch):
     core_module = ModuleType("core.runtime")
 
     class FakeTransportCar:
-        def __init__(self) -> None:
+        def __init__(self, vehicle_role=None) -> None:
+            self.vehicle_role = vehicle_role
             self.wheel_states = [
                 {"encoder": "enc-m", "filtered_speed": 0.0},
                 {"encoder": "enc-l", "filtered_speed": 0.0},

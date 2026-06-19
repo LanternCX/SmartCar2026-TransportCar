@@ -96,7 +96,7 @@ class AssistantFollowRuntime:
     def __init__(self, now_ms=None, transport=None, uart6=None, uart8=None) -> None:
         from core.runtime import TransportCar
 
-        car = TransportCar()
+        car = TransportCar(vehicle_role=ROLE_ASSISTANT)
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu

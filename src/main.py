@@ -162,6 +162,14 @@ def _read_startup_voltage():
     return _convert_power_adc_to_voltage(power_adc.read_u16())
 
 
+def _read_startup_vehicle_role():
+    """读取上电阶段车辆角色."""
+
+    from vision.vehicle_role import read_vehicle_role
+
+    return read_vehicle_role()
+
+
 def _run_low_voltage_alarm(voltage):
     """低电压时循环蜂鸣告警."""
 
@@ -180,10 +188,20 @@ def _run_low_voltage_alarm(voltage):
         _sleep_ms(off_ms)
 
 
-def _should_block_startup_for_voltage(voltage):
+def _startup_voltage_threshold(vehicle_role):
+    """按车辆角色选择上电低压保护阈值."""
+
+    if vehicle_role == "master":
+        return float(safety_params.MASTER_POWER_MIN_VOLTAGE_V)
+    if vehicle_role == "assistant":
+        return float(safety_params.ASSISTANT_POWER_MIN_VOLTAGE_V)
+    raise ValueError("unknown vehicle role for startup voltage: %s" % vehicle_role)
+
+
+def _should_block_startup_for_voltage(voltage, vehicle_role="assistant"):
     """判断上电电压是否低于保护阈值."""
 
-    return float(voltage) < float(safety_params.POWER_MIN_VOLTAGE_V)
+    return float(voltage) < _startup_voltage_threshold(vehicle_role)
 
 
 def _noop_ticker_callback(_ticker_obj):
@@ -212,7 +230,7 @@ def _scan_startup_key_states():
         scan_rounds = max(1, KEY_SCAN_TIMEOUT_MS // KEY_SCAN_PERIOD_MS)
         for _ in range(scan_rounds):
             snapshot = _copy_key_states(key_states)
-            if snapshot[0] == LONG_PRESS_VALUE or snapshot[1] == LONG_PRESS_VALUE:
+            if snapshot[2] == LONG_PRESS_VALUE or snapshot[3] == LONG_PRESS_VALUE:
                 return snapshot
             _sleep_ms(KEY_SCAN_PERIOD_MS)
         return _copy_key_states(key_states)
@@ -324,9 +342,11 @@ def _run_main_body():
     _bind_uart3_repl()
     log("main", "entry start")
     _sleep_ms(STARTUP_SETTLE_MS)
+    vehicle_role = _read_startup_vehicle_role()
+    log("main", "vehicle role=%s" % vehicle_role)
     voltage = _read_startup_voltage()
     log("main", "power voltage=%.2fV" % voltage)
-    if _should_block_startup_for_voltage(voltage):
+    if _should_block_startup_for_voltage(voltage, vehicle_role):
         log("main", "low voltage=%.2fV" % voltage)
         return _run_low_voltage_alarm(voltage)
     key_states = _scan_startup_key_states()

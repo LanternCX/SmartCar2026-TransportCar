@@ -184,7 +184,7 @@ class TransportCar:
     @endcode
     """
 
-    def __init__(self, diagnostic_mode=False):
+    def __init__(self, diagnostic_mode=False, vehicle_role="assistant"):
         """
         @brief 初始化搬运车所有组件
 
@@ -193,8 +193,10 @@ class TransportCar:
 
         @param diagnostic_mode 是否启用诊断模式.若为 True, 则跳过真实硬件初始化
                                使用空占位对象替代 IMU、电机和编码器
+        @param vehicle_role 当前车辆角色, 用于选择硬件接线映射
         """
         self.diagnostic_mode = bool(diagnostic_mode)
+        self.vehicle_role = vehicle_role
         log("transport_car", "init start")
 
         # 硬件接口: 板载 LED 用于运行状态指示, switch2 为硬件紧急停止按钮
@@ -250,8 +252,8 @@ class TransportCar:
             self.encoders = _create_null_encoders()
         else:
             log("transport_car", "motor/encoder init start")
-            self.motors = create_motors()
-            self.encoders = create_encoders()
+            self.motors = create_motors(self.vehicle_role)
+            self.encoders = create_encoders(self.vehicle_role)
             log("transport_car", "motor/encoder ready")
 
         # 速度环 PID 参数: 加载电机辨识结果, 包括增益和时间常数
