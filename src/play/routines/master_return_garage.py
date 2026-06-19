@@ -1,8 +1,7 @@
 """主车回库 Play。"""
 
 from play.base import BasePlay
-from play.conditions import yellow_line_ready
-from play.steps import AngleStep, HoldVelocityYStep, PositionYStep, VelocityYStep
+from play.steps import AngleStep, PositionYStep, VelocityYStep
 
 
 MASTER_LEAD_DISTANCE = -0.30
@@ -12,6 +11,10 @@ FINAL_FORWARD_SPEED = 3
 
 def _clear_yellow_line_ready(ctx):
     ctx.clear_yellow_line_ready()
+
+
+def _yellow_line_ready(ctx):
+    return ctx.yellow_line_ready()
 
 
 def _enter_return_line_wait(ctx):
@@ -30,10 +33,10 @@ class MasterReturnGaragePlay(BasePlay):
             AngleStep(+90),
             VelocityYStep(
                 RETURN_FORWARD_SPEED,
-                until=yellow_line_ready,
+                until=_yellow_line_ready,
                 on_enter=_enter_return_line_wait,
                 on_exit=_exit_return_line_wait,
             ),
             AngleStep(-90),
-            HoldVelocityYStep(FINAL_FORWARD_SPEED),
+            VelocityYStep(FINAL_FORWARD_SPEED),
         ]

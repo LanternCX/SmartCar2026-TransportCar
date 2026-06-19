@@ -12,7 +12,7 @@ from play.routines.master_return_garage import (
     RETURN_FORWARD_SPEED as MASTER_RETURN_FORWARD_SPEED,
     MasterReturnGaragePlay,
 )
-from play.steps import AngleStep, HoldVelocityYStep, PositionYStep, VelocityYStep
+from play.steps import AngleStep, PositionYStep, VelocityYStep
 
 
 def test_master_return_garage_play_declares_expected_steps() -> None:
@@ -28,8 +28,9 @@ def test_master_return_garage_play_declares_expected_steps() -> None:
     assert callable(play._steps[2].until)
     assert isinstance(play._steps[3], AngleStep)
     assert play._steps[3].target == -90.0
-    assert isinstance(play._steps[4], HoldVelocityYStep)
+    assert isinstance(play._steps[4], VelocityYStep)
     assert play._steps[4].speed == 3.0
+    assert play._steps[4].until is None
     assert MASTER_LEAD_DISTANCE == -0.3
     assert MASTER_RETURN_FORWARD_SPEED == 5
     assert MASTER_FINAL_FORWARD_SPEED == 3
@@ -48,8 +49,9 @@ def test_assistant_return_garage_play_declares_expected_steps() -> None:
     assert callable(play._steps[2].until)
     assert isinstance(play._steps[3], AngleStep)
     assert play._steps[3].target == -90.0
-    assert isinstance(play._steps[4], HoldVelocityYStep)
+    assert isinstance(play._steps[4], VelocityYStep)
     assert play._steps[4].speed == 3.0
+    assert play._steps[4].until is None
     assert ASSISTANT_LEAD_DISTANCE == 0.3
     assert ASSISTANT_RETURN_FORWARD_SPEED == 5
     assert ASSISTANT_FINAL_FORWARD_SPEED == 3

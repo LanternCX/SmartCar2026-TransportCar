@@ -88,12 +88,13 @@ class VelocityXStep(_BaseStep):
     def tick(self, ctx):
         self._enter_once(ctx)
         ctx.write_velocity_x(self.speed)
-        if self.until is not None and self.until(ctx):
+        if self.until is None:
+            self.state = "holding"
+            return "holding"
+        if self.until(ctx):
             return self._finish(ctx)
         self.state = "running"
         return "running"
-
-
 class VelocityYStep(_BaseStep):
     def __init__(self, speed, until=None, on_enter=None, on_exit=None):
         super().__init__(on_enter=on_enter, on_exit=on_exit)
@@ -103,7 +104,10 @@ class VelocityYStep(_BaseStep):
     def tick(self, ctx):
         self._enter_once(ctx)
         ctx.write_velocity_y(self.speed)
-        if self.until is not None and self.until(ctx):
+        if self.until is None:
+            self.state = "holding"
+            return "holding"
+        if self.until(ctx):
             return self._finish(ctx)
         self.state = "running"
         return "running"
@@ -118,43 +122,10 @@ class VelocityWStep(_BaseStep):
     def tick(self, ctx):
         self._enter_once(ctx)
         ctx.write_omega(self.speed)
-        if self.until is not None and self.until(ctx):
+        if self.until is None:
+            self.state = "holding"
+            return "holding"
+        if self.until(ctx):
             return self._finish(ctx)
         self.state = "running"
         return "running"
-
-
-class HoldVelocityXStep(_BaseStep):
-    def __init__(self, speed, on_enter=None, on_exit=None):
-        super().__init__(on_enter=on_enter, on_exit=on_exit)
-        self.speed = float(speed)
-
-    def tick(self, ctx):
-        self._enter_once(ctx)
-        ctx.write_velocity_x(self.speed)
-        self.state = "holding"
-        return "holding"
-
-
-class HoldVelocityYStep(_BaseStep):
-    def __init__(self, speed, on_enter=None, on_exit=None):
-        super().__init__(on_enter=on_enter, on_exit=on_exit)
-        self.speed = float(speed)
-
-    def tick(self, ctx):
-        self._enter_once(ctx)
-        ctx.write_velocity_y(self.speed)
-        self.state = "holding"
-        return "holding"
-
-
-class HoldVelocityWStep(_BaseStep):
-    def __init__(self, speed, on_enter=None, on_exit=None):
-        super().__init__(on_enter=on_enter, on_exit=on_exit)
-        self.speed = float(speed)
-
-    def tick(self, ctx):
-        self._enter_once(ctx)
-        ctx.write_omega(self.speed)
-        self.state = "holding"
-        return "holding"

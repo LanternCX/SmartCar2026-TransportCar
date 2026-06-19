@@ -2,13 +2,10 @@
 
 from play.steps import (
     AngleStep,
-    HoldVelocityYStep,
     PositionYStep,
     VelocityXStep,
     VelocityYStep,
     VelocityWStep,
-    HoldVelocityXStep,
-    HoldVelocityWStep,
     PositionXStep,
 )
 
@@ -166,17 +163,26 @@ def test_all_base_step_subclasses_accept_enter_and_exit_hooks() -> None:
         VelocityXStep(1, on_enter=enter, on_exit=exit_),
         VelocityYStep(1, on_enter=enter, on_exit=exit_),
         VelocityWStep(1, on_enter=enter, on_exit=exit_),
-        HoldVelocityXStep(1, on_enter=enter, on_exit=exit_),
-        HoldVelocityYStep(1, on_enter=enter, on_exit=exit_),
-        HoldVelocityWStep(1, on_enter=enter, on_exit=exit_),
     )
 
-    assert len(steps) == 9
+    assert len(steps) == 6
 
 
-def test_hold_velocity_y_step_enters_holding_and_keeps_writing_speed() -> None:
+def test_velocity_x_step_without_until_enters_holding_and_keeps_writing_speed() -> None:
     ctx = _FakeContext()
-    step = HoldVelocityYStep(3)
+    step = VelocityXStep(3)
+
+    first = step.tick(ctx)
+    second = step.tick(ctx)
+
+    assert first == "holding"
+    assert second == "holding"
+    assert ctx.events == [("velocity_x", 3.0), ("velocity_x", 3.0)]
+
+
+def test_velocity_y_step_without_until_enters_holding_and_keeps_writing_speed() -> None:
+    ctx = _FakeContext()
+    step = VelocityYStep(3)
 
     first = step.tick(ctx)
     second = step.tick(ctx)
@@ -184,3 +190,15 @@ def test_hold_velocity_y_step_enters_holding_and_keeps_writing_speed() -> None:
     assert first == "holding"
     assert second == "holding"
     assert ctx.events == [("velocity_y", 3.0), ("velocity_y", 3.0)]
+
+
+def test_velocity_w_step_without_until_enters_holding_and_keeps_writing_speed() -> None:
+    ctx = _FakeContext()
+    step = VelocityWStep(3)
+
+    first = step.tick(ctx)
+    second = step.tick(ctx)
+
+    assert first == "holding"
+    assert second == "holding"
+    assert ctx.events == [("omega", 3.0), ("omega", 3.0)]
