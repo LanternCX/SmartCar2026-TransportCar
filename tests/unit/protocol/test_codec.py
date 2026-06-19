@@ -12,6 +12,8 @@ sys.path.insert(0, str(SRC))
 
 from protocol.codec import (  # noqa: E402
     LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_event_report_body,
     decode_assistant_state_sync_body,
@@ -78,14 +80,24 @@ def test_vision_observation_body_roundtrip() -> None:
 def test_local_vision_control_body_roundtrip() -> None:
     pause_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE)
     resume_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RESUME)
+    gate_on_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON)
+    gate_off_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF)
 
     assert pause_body == bytes([1])
     assert resume_body == bytes([2])
+    assert gate_on_body == bytes([3])
+    assert gate_off_body == bytes([4])
     assert decode_local_vision_control_body(pause_body) == {
         "action": LOCAL_VISION_CONTROL_PAUSE,
     }
     assert decode_local_vision_control_body(resume_body) == {
         "action": LOCAL_VISION_CONTROL_RESUME,
+    }
+    assert decode_local_vision_control_body(gate_on_body) == {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
+    }
+    assert decode_local_vision_control_body(gate_off_body) == {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
     }
 
 

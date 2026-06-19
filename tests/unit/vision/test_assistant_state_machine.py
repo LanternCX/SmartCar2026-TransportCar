@@ -155,7 +155,7 @@ def test_assistant_state_machine_accepts_finished_command() -> None:
     assert machine.is_finished() is True
 
 
-def test_assistant_state_machine_return_follow_finished_event_enters_finished() -> None:
+def test_assistant_state_machine_return_follow_ignores_local_return_event() -> None:
     module = _load_assistant_state_machine()
     machine = module.AssistantStateMachine()
     machine.apply_master_state(
@@ -164,10 +164,10 @@ def test_assistant_state_machine_return_follow_finished_event_enters_finished() 
         0,
     )
 
-    machine.handle_event(module.EVENT_RETURN_GARAGE_FINISHED, 0)
+    machine.handle_event(12, 0)
 
-    assert machine.state == module.ASSISTANT_STATE_FINISHED
-    assert machine.is_finished() is True
+    assert machine.state == module.ASSISTANT_STATE_RETURN_FOLLOW
+    assert machine.is_finished() is False
 
 
 def test_assistant_state_machine_rejects_finished_with_object_target() -> None:

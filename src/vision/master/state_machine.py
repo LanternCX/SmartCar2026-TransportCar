@@ -54,7 +54,6 @@ EVENT_ALIGNED = 7
 EVENT_ARRIVED = 8
 EVENT_CLEARED = 9
 EVENT_RETURN_LINE_ALIGNED = 10
-EVENT_RETURN_GARAGE_FINISHED = 12
 
 _CLEAR_STAGE_TURN_BACK = 3
 
@@ -190,12 +189,6 @@ class MasterStateMachine:
         if self.state == STATE_CLEAR_OBJECT:
             return
         if self.state == STATE_RETURN_GARAGE_RETREAT:
-            if event == EVENT_RETURN_LINE_ALIGNED:
-                self._enter_return_line()
-            return
-        if self.state == STATE_RETURN_GARAGE_LINE:
-            if event == EVENT_RETURN_GARAGE_FINISHED:
-                self._enter_finished()
             return
 
     def mark_assistant_object_acknowledged(self):
@@ -317,16 +310,19 @@ class MasterStateMachine:
         if not self._master_cleared or not self._assistant_cleared:
             return
         if self._clear_phase == CLEAR_PHASE_RETREAT:
-            self._clear_phase = _CLEAR_STAGE_TURN_BACK
-            self._master_cleared = False
-            self._assistant_cleared = False
             if self.completed_object_count + 1 >= self._required_object_count:
+                self.completed_object_count += 1
                 self._pending_assistant_request = {
                     "kind": "assistant_return_line",
                     "state": ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
                     "target": ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
                     "arg": 0,
                 }
+                self._enter_return_retreat()
+                return
+            self._clear_phase = _CLEAR_STAGE_TURN_BACK
+            self._master_cleared = False
+            self._assistant_cleared = False
             return
         if self._clear_phase == CLEAR_PHASE_FORWARD:
             self._restart_search_after_clear()

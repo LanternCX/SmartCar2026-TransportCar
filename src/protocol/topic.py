@@ -54,7 +54,7 @@ _TOPIC_TABLE = {
         "port": UART6,
         "body_size": 1,
         "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
-        "write_roles": (),
+        "write_roles": (ROLE_MASTER, ROLE_ASSISTANT),
     },
     TOPIC_MASTER_VISION_TASK_SYNC: {
         "name": "MASTER_VISION_TASK_SYNC",

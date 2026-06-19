@@ -5,7 +5,10 @@
 
 from protocol.codec import (
     LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
+    decode_local_vision_control_body,
     decode_assistant_state_sync_body,
     decode_assistant_vision_task_sync_body,
     encode_local_vision_control_body,
@@ -742,6 +745,37 @@ def test_assistant_runtime_ignores_stale_pause_after_entering_transport(monkeypa
     }
 
 
+def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_LOCAL_VISION_CONTROL,
+            9,
+            encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.ASSISTANT_STATE_RETURN_FOLLOW
+    runtime._pending_local_vision_sync = None
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._local_vision_control_paused is False
+    assert runtime.play.current_play is not None
+    assert ("set_relative_translation_target", 0.0, 0.3) in cars[0].events
+
+
 def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -1073,7 +1107,7 @@ def test_master_runtime_calls_transport_velocity_api_without_keyword_args(monkey
     assert calls == [(1.0, -2.0, 0.0, "uart6", False)]
 
 
-def test_master_runtime_return_retreat_uses_fixed_reverse_speed(monkeypatch) -> None:
+def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("vision.master.forward_runtime", monkeypatch)
@@ -1087,20 +1121,14 @@ def test_master_runtime_return_retreat_uses_fixed_reverse_speed(monkeypatch) -> 
         ),
     )
     runtime._state_machine.state = module.STATE_RETURN_GARAGE_RETREAT
-    runtime._latest_uart6_velocity = {"vx": 9.0, "vy": 8.0}
 
     runtime._apply_motion_outputs()
 
-    assert cars[0].last_chassis_target == {
-        "source": "master_return_retreat",
-        "vx": 0.0,
-        "vy": module.MASTER_RETURN_GARAGE_RETREAT_SPEED,
-        "omega": 0.0,
-        "has_omega": False,
-    }
+    assert runtime.play.current_play is not None
+    assert ("set_relative_translation_target", 0.0, -0.3) in cars[0].events
 
 
-def test_master_runtime_queues_assistant_return_sync_during_turn_back(monkeypatch) -> None:
+def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
     module = import_module_clean("vision.master.forward_runtime", monkeypatch)
@@ -1123,8 +1151,11 @@ def test_master_runtime_queues_assistant_return_sync_during_turn_back(monkeypatc
 
     runtime._drain_state_machine_outputs()
     runtime._queue_pending_sync()
+    runtime._queue_pending_task_sync()
+    runtime.poll_transport_tx()
     runtime.poll_transport_tx()
 
+    assert runtime._state_machine.state == module.STATE_RETURN_GARAGE_RETREAT
     frame = decode_frame(uart8.messages[-1])
     assert frame is not None
     assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
@@ -1132,42 +1163,6 @@ def test_master_runtime_queues_assistant_return_sync_during_turn_back(monkeypatc
         state_module.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         state_module.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         0,
-    )
-
-
-def test_master_runtime_final_turn_back_enters_return_without_forward_sync(monkeypatch) -> None:
-    clock = ManualClock(0)
-    cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
-    uart8 = BufferedUart()
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=uart8,
-            now_ms=clock,
-        ),
-    )
-    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
-    runtime._state_machine._clear_phase = state_module._CLEAR_STAGE_TURN_BACK
-    runtime._state_machine._required_object_count = 1
-    runtime._turn_back_rotation_started = True
-
-    for _ in range(module.MOTION_STOP_CONFIRM_TICKS):
-        runtime._run_turn_back_phase()
-
-    runtime._drain_state_machine_outputs()
-    runtime._queue_pending_sync()
-    runtime.poll_transport_tx()
-
-    assert runtime._state_machine.state == module.STATE_RETURN_GARAGE_RETREAT
-    assert uart8.messages == []
-    assert all(
-        event[0] != "set_relative_translation_target"
-        for event in cars[0].events
-        if isinstance(event, tuple)
     )
 
 
@@ -1269,7 +1264,7 @@ def test_master_runtime_turn_back_keeps_waiting_outside_turn_back_tolerance(monk
     assert runtime._state_machine.state == module.STATE_CLEAR_OBJECT
 
 
-def test_master_runtime_return_line_combines_fixed_left_and_yellow_line_y(monkeypatch) -> None:
+def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("vision.master.forward_runtime", monkeypatch)
@@ -1283,16 +1278,141 @@ def test_master_runtime_return_line_combines_fixed_left_and_yellow_line_y(monkey
         ),
     )
     runtime._state_machine.state = module.STATE_RETURN_GARAGE_LINE
-    runtime._latest_uart6_velocity = {"vx": 9.0, "vy": -1.25}
+    runtime._state_machine.state = module.STATE_RETURN_GARAGE_RETREAT
+    runtime._apply_motion_outputs()
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    cars[0].heading_est = 90.0
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    assert cars[0].last_chassis_target == {
+        "source": "master_play",
+        "vx": 0.0,
+        "vy": 5.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+    runtime._return_line_aligned = True
+    runtime._apply_motion_outputs()
+    cars[0].heading_est = 90.0
+    runtime._apply_motion_outputs()
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
 
+    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    assert cars[0].last_chassis_target == {
+        "source": "master_play",
+        "vx": 0.0,
+        "vy": 3.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_RETURN_GARAGE_RETREAT
+    runtime._return_line_aligned = True
+
+    runtime._apply_motion_outputs()
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    cars[0].heading_est = 90.0
+    cars[0].command_lock = False
+
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+
+    assert runtime._return_line_aligned is False
+    assert runtime.play.current_play is not None
+    assert runtime.play.current_play.step_index == 2
+    assert cars[0].last_chassis_target == {
+        "source": "master_play",
+        "vx": 0.0,
+        "vy": 5.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+    runtime._return_line_aligned = True
     runtime._apply_motion_outputs()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_return_line",
-        "vx": module.MASTER_RETURN_GARAGE_LEFT_SPEED,
-        "vy": -1.25,
+        "source": "master_play",
+        "vx": 0.0,
+        "vy": 5.0,
         "omega": 0.0,
         "has_omega": False,
+    }
+
+
+def test_master_runtime_step_two_queues_return_line_gate_on_and_off(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_RETURN_GARAGE_RETREAT
+
+    runtime._apply_motion_outputs()
+    runtime._queue_transport_outputs()
+    runtime.poll_transport_tx()
+    runtime._transport_car.command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    runtime._queue_transport_outputs()
+    runtime.poll_transport_tx()
+    runtime._transport_car.heading_est = 90.0
+    runtime._transport_car.command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    runtime._queue_transport_outputs()
+    runtime.poll_transport_tx()
+
+    gate_on_frame = decode_frame(uart6.messages[-1])
+    assert gate_on_frame is not None
+    assert gate_on_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
+    assert decode_local_vision_control_body(gate_on_frame["body"]) == {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
+    }
+    uart6.push(ack_last_frame(uart6))
+    runtime.poll_transport_rx()
+    runtime._check_transport_deliveries()
+
+    runtime._return_line_aligned = True
+    runtime._apply_motion_outputs()
+    runtime._queue_transport_outputs()
+    runtime.poll_transport_tx()
+
+    gate_off_frame = decode_frame(uart6.messages[-1])
+    assert gate_off_frame is not None
+    assert gate_off_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
+    assert decode_local_vision_control_body(gate_off_frame["body"]) == {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
     }
 
 
@@ -1369,7 +1489,7 @@ def test_assistant_runtime_reports_role_cycle_failure_via_full_trace_helper(monk
     assert calls == [("assistant_error", "role_cycle failed: boom", "boom")]
 
 
-def test_assistant_runtime_return_follow_combines_fixed_left_and_yellow_line_y(
+def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
@@ -1386,17 +1506,53 @@ def test_assistant_runtime_return_follow_combines_fixed_left_and_yellow_line_y(
     )
     runtime._state_machine.state = module.ASSISTANT_STATE_RETURN_FOLLOW
     runtime._pending_local_vision_sync = None
-    runtime._uart6_velocity = {"vx": 1.0, "vy": 2.0, "omega": 0.0, "has_omega": False}
-    runtime._uart8_velocity = {"vx": -0.5, "vy": 3.0, "omega": 0.25, "has_omega": True}
 
     runtime._write_effective_velocity()
 
-    assert cars[0].last_chassis_target == {
-        "source": "assistant",
-        "vx": module.ASSISTANT_RETURN_GARAGE_LEFT_SPEED,
-        "vy": 2.0,
-        "omega": 0.0,
-        "has_omega": False,
+    assert runtime.play.current_play is not None
+    assert ("set_relative_translation_target", 0.0, 0.3) in cars[0].events
+    cars[0].command_lock = False
+    cars[0].heading_est = 0.0
+    runtime._write_effective_velocity()
+    runtime._write_effective_velocity()
+    assert ("set_heading_transition_target", -90.0) in cars[0].events
+
+
+def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.ASSISTANT_STATE_RETURN_FOLLOW
+    runtime._pending_local_vision_sync = None
+
+    runtime._write_effective_velocity()
+    runtime._queue_return_line_gate_action()
+    runtime.poll_transport_tx()
+    runtime._transport_car.command_lock = False
+    runtime._write_effective_velocity()
+    runtime._write_effective_velocity()
+    runtime._transport_car.heading_est = -90.0
+    runtime._transport_car.command_lock = False
+    runtime._write_effective_velocity()
+    runtime._write_effective_velocity()
+    runtime._queue_return_line_gate_action()
+    runtime.poll_transport_tx()
+
+    gate_on_frame = decode_frame(uart6.messages[-1])
+    assert gate_on_frame is not None
+    assert gate_on_frame["topic"] == TOPIC_LOCAL_VISION_CONTROL
+    assert decode_local_vision_control_body(gate_on_frame["body"]) == {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     }
 
 
@@ -1491,7 +1647,7 @@ def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatc
         "queued": False,
     }
     assert cars[0].last_chassis_target == {
-        "source": "assistant_return_line",
+        "source": "assistant_return_play",
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -1533,9 +1689,9 @@ def test_assistant_runtime_return_follow_sync_uses_standard_logs(capsys, monkeyp
     assert "assistant_return:" not in output
 
 
-def test_assistant_runtime_return_follow_finished_event_enters_finished(monkeypatch) -> None:
+def test_assistant_runtime_return_follow_event_only_marks_alignment(monkeypatch) -> None:
     clock = ManualClock(0)
-    cars = install_fake_core(monkeypatch)
+    install_fake_core(monkeypatch)
     module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
@@ -1549,14 +1705,13 @@ def test_assistant_runtime_return_follow_finished_event_enters_finished(monkeypa
     )
     runtime._state_machine.state = module.ASSISTANT_STATE_RETURN_FOLLOW
     runtime._pending_local_vision_sync = None
-    runtime._uart6_velocity = {"vx": 1.0, "vy": 2.0, "omega": 0.0, "has_omega": False}
     uart6.push(
         encode_frame(
             0x02,
             TOPIC_ASSISTANT_VISION_EVENT_REPORT,
             9,
             encode_assistant_vision_event_report_body(
-                module._RETURN_GARAGE_FINISHED_EVENT,
+                10,
                 0,
             ),
         )
@@ -1564,15 +1719,8 @@ def test_assistant_runtime_return_follow_finished_event_enters_finished(monkeypa
 
     run_runtime_cycle(runtime)
 
-    assert runtime._state_machine.state == module.ASSISTANT_STATE_FINISHED
-    assert runtime._uart6_velocity is None
-    assert cars[0].last_chassis_target == {
-        "source": "assistant_finished",
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "has_omega": True,
-    }
+    assert runtime._state_machine.state == module.ASSISTANT_STATE_RETURN_FOLLOW
+    assert runtime._return_line_aligned is True
 
 
 def test_assistant_runtime_finished_sync_clears_inputs_and_stops(monkeypatch) -> None:

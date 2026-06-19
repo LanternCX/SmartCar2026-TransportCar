@@ -4,7 +4,6 @@ from config import startup as startup_params
 
 
 TEST_MODULES = {
-    "return_line_velocity_probe": "script.test.return_line_velocity_probe",
     "wireless_contention": "script.test.wireless_contention",
 }
 

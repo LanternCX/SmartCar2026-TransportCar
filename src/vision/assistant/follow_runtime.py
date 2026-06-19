@@ -9,6 +9,8 @@ from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
     LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
@@ -16,6 +18,7 @@ from protocol.codec import (
     decode_velocity_body,
     encode_assistant_event_report_body,
     encode_assistant_vision_task_sync_body,
+    encode_local_vision_control_body,
 )
 from protocol.topic import (
     ROLE_ASSISTANT,
@@ -35,6 +38,8 @@ from protocol.transport import (
     WRITE_OVERWRITTEN,
     create_transport,
 )
+from play import PlayContext, PlayRunner
+from play.routines.assistant_return_garage import AssistantReturnGaragePlay
 from utils.startup_log import log, log_exception
 from vision.assistant.diagnostics import build_follow_snapshot
 from vision.assistant.state_machine import (
@@ -47,7 +52,6 @@ from vision.assistant.state_machine import (
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
-    EVENT_RETURN_GARAGE_FINISHED,
 )
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
@@ -56,7 +60,7 @@ from vision.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_
 _TARGET_FOUND_EVENT = 6
 _ALIGNED_EVENT = 7
 _CLEARED_EVENT = 9
-_RETURN_GARAGE_FINISHED_EVENT = EVENT_RETURN_GARAGE_FINISHED
+_RETURN_LINE_ALIGNED_EVENT = 10
 _ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
 _ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
@@ -75,10 +79,6 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
     vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
 )
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
-ASSISTANT_RETURN_GARAGE_LEFT_SPEED = getattr(
-    motion_params,
-    "ASSISTANT_RETURN_GARAGE_LEFT_SPEED",
-)
 MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
 MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
 
@@ -108,6 +108,7 @@ class AssistantFollowRuntime:
             now_ms=self._now_ms,
         )
         self._state_machine = AssistantStateMachine()
+        self.play = PlayRunner()
         self._last_error_text = "none"
         self._uart6_velocity = None
         self._uart8_velocity = None
@@ -132,6 +133,19 @@ class AssistantFollowRuntime:
         self._sync_body = bytearray(10)
         self._event_body = bytearray(3)
         self._local_vision_control_paused = False
+        self._return_line_aligned = False
+        self._return_line_gate_action = None
+        self._return_play_context = PlayContext(
+            set_position_y=self._play_set_position_y,
+            set_angle=self._play_set_angle,
+            write_velocity_y=self._play_write_velocity_y,
+            is_position_y_done=self._play_motion_done,
+            is_angle_done=self._play_motion_done,
+            yellow_line_ready=self._play_yellow_line_ready,
+            clear_yellow_line_ready=self._play_clear_yellow_line_ready,
+            enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
+            disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
+        )
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_FOLLOW,
             "target": 0,
@@ -173,6 +187,7 @@ class AssistantFollowRuntime:
         self._consume_velocity_inputs()
         self._write_effective_velocity()
         self._queue_pending_local_vision_sync()
+        self._queue_return_line_gate_action()
         self._queue_pending_report()
 
     def _check_transport_deliveries(self) -> None:
@@ -185,6 +200,14 @@ class AssistantFollowRuntime:
             ):
                 self._log_local_vision_sync_done(pending)
                 self._pending_local_vision_sync = None
+        pending_gate = self._return_line_gate_action
+        if pending_gate is not None and pending_gate.get("queued"):
+            if (
+                self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
+                == DELIVERY_DELIVERED
+            ):
+                log("assistant_gate", "done action=%d" % int(pending_gate["action"]))
+                self._return_line_gate_action = None
         pending = self._pending_target_found_report
         if pending is not None and pending.get("queued"):
             if (
@@ -218,6 +241,10 @@ class AssistantFollowRuntime:
         )
         if not accepted:
             return False
+        if self._state_machine.state != ASSISTANT_STATE_RETURN_FOLLOW:
+            self.play.current_play = None
+            self._return_line_aligned = False
+            self._return_line_gate_action = None
         self._clear_local_vision_pause_residue()
         if self._state_machine.is_idle():
             self._current_object_id = 0
@@ -261,6 +288,7 @@ class AssistantFollowRuntime:
             self._approach_target_found_done = False
             self._post_orbit_realign_active = False
             self._clear_completed = False
+            self._return_line_aligned = False
             self._enter_return_follow_state()
         elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
             self._current_object_id = 0
@@ -312,11 +340,10 @@ class AssistantFollowRuntime:
             self._handle_local_aligned(packet["value"])
         elif (
             self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW
-            and event == _RETURN_GARAGE_FINISHED_EVENT
+            and event == _RETURN_LINE_ALIGNED_EVENT
         ):
-            self._state_machine.handle_event(event, packet["value"])
-            if self._state_machine.is_finished():
-                self._handle_return_garage_finished()
+            self._return_line_aligned = True
+            log("assistant_gate", "ready_on value=%d" % int(packet["value"]))
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
@@ -393,8 +420,6 @@ class AssistantFollowRuntime:
             return True
         if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             return True
-        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
-            return True
         if self._state_machine.state != ASSISTANT_STATE_ORBIT:
             return False
         return int(unpack_task_arg_config(self._state_machine.arg)) == int(
@@ -417,7 +442,7 @@ class AssistantFollowRuntime:
             self._write_zero_velocity("assistant_finished")
             return
         if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
-            self._write_return_line_velocity()
+            self._run_return_play()
             return
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
@@ -465,17 +490,6 @@ class AssistantFollowRuntime:
             vy += float(uart6_velocity.get("vy", 0.0))
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
-    def _write_return_line_velocity(self) -> None:
-        uart6_velocity = self._uart6_velocity
-        if uart6_velocity is None:
-            return
-        self._apply_effective_velocity(
-            float(ASSISTANT_RETURN_GARAGE_LEFT_SPEED),
-            float(uart6_velocity.get("vy", 0.0)),
-            0.0,
-            False,
-        )
-
     def _write_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
             return
@@ -511,7 +525,7 @@ class AssistantFollowRuntime:
         if self._state_machine.state == ASSISTANT_STATE_FINISHED:
             return False
         if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
-            return source == "uart6" and self._pending_local_vision_sync is None
+            return False
         if source == "uart6" and self._pending_local_vision_sync is not None:
             return False
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
@@ -550,12 +564,57 @@ class AssistantFollowRuntime:
         }
 
     def _enter_return_follow_state(self) -> None:
-        self._write_zero_velocity("assistant_return_line")
+        self._write_zero_velocity("assistant_return_play")
         self._pending_local_vision_sync = {
             "state": ASSISTANT_STATE_RETURN_FOLLOW,
             "target": 0,
             "arg": int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
             "threshold": (0, 0, 0, 0, 0, 0),
+            "queued": False,
+        }
+
+    def _run_return_play(self) -> None:
+        if self.play.current_play is None:
+            self.play.run(AssistantReturnGaragePlay)
+        self.play.tick(self._return_play_context)
+
+    def _play_set_position_y(self, value) -> None:
+        self._transport_car.set_relative_translation_target(
+            0.0,
+            float(value),
+        )
+
+    def _play_set_angle(self, value) -> None:
+        target_heading_deg = float(getattr(self._transport_car, "heading_est", 0.0)) + float(value)
+        self._transport_car.set_heading_transition_target(target_heading_deg)
+
+    def _play_write_velocity_y(self, value) -> None:
+        self._transport_car.handle_velocity_packet(
+            0.0,
+            float(value),
+            0.0,
+            "assistant_play",
+            False,
+        )
+
+    def _play_motion_done(self) -> bool:
+        return not bool(getattr(self._transport_car, "command_lock", False))
+
+    def _play_yellow_line_ready(self) -> bool:
+        return bool(self._return_line_aligned)
+
+    def _play_clear_yellow_line_ready(self) -> None:
+        self._return_line_aligned = False
+
+    def _play_enable_yellow_line_ready_gate(self) -> None:
+        self._return_line_gate_action = {
+            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
+            "queued": False,
+        }
+
+    def _play_disable_yellow_line_ready_gate(self) -> None:
+        self._return_line_gate_action = {
+            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
             "queued": False,
         }
 
@@ -624,11 +683,6 @@ class AssistantFollowRuntime:
             "value": int(value),
             "queued": False,
         }
-
-    def _handle_return_garage_finished(self) -> None:
-        self._clear_motion_inputs()
-        self._pending_local_vision_sync = None
-        self._write_zero_velocity("assistant_finished")
 
     def _enter_transport_state(self, packet: dict) -> None:
         self._current_object_id = unpack_task_arg_object_id(packet["arg"])
@@ -751,6 +805,16 @@ class AssistantFollowRuntime:
         status = self.transport_service.tcp(UART6).write(TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_local_vision_sync_start(pending)
+            pending["queued"] = True
+
+    def _queue_return_line_gate_action(self) -> None:
+        pending = self._return_line_gate_action
+        if pending is None or pending.get("queued"):
+            return
+        body = encode_local_vision_control_body(pending["action"])
+        status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
+        if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
+            log("assistant_gate", "start action=%d" % int(pending["action"]))
             pending["queued"] = True
 
     def _queue_pending_report(self) -> None:
