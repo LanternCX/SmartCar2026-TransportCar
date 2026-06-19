@@ -326,9 +326,9 @@ def _run_main_body():
     _sleep_ms(STARTUP_SETTLE_MS)
     voltage = _read_startup_voltage()
     log("main", "power voltage=%.2fV" % voltage)
-    # if _should_block_startup_for_voltage(voltage):
-    #     log("main", "low voltage=%.2fV" % voltage)
-    #     return _run_low_voltage_alarm(voltage)
+    if _should_block_startup_for_voltage(voltage):
+        log("main", "low voltage=%.2fV" % voltage)
+        return _run_low_voltage_alarm(voltage)
     key_states = _scan_startup_key_states()
     log("main", "startup keys=%s" % key_states)
     try:

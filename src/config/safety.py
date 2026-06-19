@@ -11,6 +11,6 @@ V_CMD_MAX = 1e3
 # 轮速目标限幅, 单位为 Pulses/tick, 防止给速度环的目标值过大
 TARGET_SPEED_MAX = 30.0
 # 上电允许进入核心脚本的最低电池电压, 单位 V
-POWER_MIN_VOLTAGE_V = 11.5
+POWER_MIN_VOLTAGE_V = 3.7
 # PWM 占空比上限, 范围 0 ~ 10000, 对应 0% ~ 100%
 MAX_DUTY = 10000
