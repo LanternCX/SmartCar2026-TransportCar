@@ -1,8 +1,8 @@
 # Play 播放器与回库 Play 实现计划
 
-> 执行状态: Review
+> 执行状态: Archive
 > 日期: 2026-06-19
-> 适用 Spec: `docs/superpowers/specs/2026-06-19-play-runner-return-garage-design.md`
+> 适用 Spec: `docs/superpowers/specs/archive/PR#114/2026-06-19-play-runner-return-garage-design.md`
 > For agentic workers: REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **目标:** 建立 `src/play/` 播放框架, 用主车回库 Play 和辅车回库 Play 接管回库动作, 并把视觉仓库 v2 回库黄线输出收口为 Play 条件输入。
