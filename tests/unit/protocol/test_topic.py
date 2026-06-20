@@ -104,8 +104,9 @@ def test_topic_registry_rejects_unregistered_mode_port_and_role_direction() -> N
     assert validate_port_for_topic(TOPIC_LOCAL_VISION_VELOCITY, UART8) is False
     assert can_role_write(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is False
     assert can_role_read(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is True
-    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is False
+    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is True
     assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is True
+    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_ASSISTANT) is True
     assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_ASSISTANT) is True
     assert can_role_write(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is True
     assert can_role_read(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is False

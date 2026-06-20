@@ -9,12 +9,15 @@ from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
     LOCAL_VISION_CONTROL_PAUSE,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
+    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
     decode_assistant_event_report_body,
     decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_velocity_body,
     encode_assistant_state_sync_body,
+    encode_local_vision_control_body,
     encode_master_vision_task_sync_body,
     encode_velocity_body,
 )
@@ -36,12 +39,15 @@ from protocol.transport import (
     WRITE_OVERWRITTEN,
     create_transport,
 )
+from play import PlayContext, PlayRunner
+from play.routines.master_return_garage import MasterReturnGaragePlay
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
     EVENT_CLEARED,
+    EVENT_RETURN_LINE_ALIGNED,
     EVENT_TARGET_FOUND,
     STATE_CLEAR_OBJECT,
     STATE_FINISHED,
@@ -99,14 +105,6 @@ MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = getattr(
     motion_params,
     "MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG",
 )
-MASTER_RETURN_GARAGE_RETREAT_SPEED = getattr(
-    motion_params,
-    "MASTER_RETURN_GARAGE_RETREAT_SPEED",
-)
-MASTER_RETURN_GARAGE_LEFT_SPEED = getattr(
-    motion_params,
-    "MASTER_RETURN_GARAGE_LEFT_SPEED",
-)
 
 
 def _default_now_ms():
@@ -122,7 +120,7 @@ class MasterForwardRuntime:
     def __init__(self, now_ms=None, transport=None) -> None:
         from core.runtime import TransportCar
 
-        car = TransportCar()
+        car = TransportCar(vehicle_role=ROLE_MASTER)
         self._transport_car = car
         self.wheel_states = car.wheel_states
         self.imu = car.imu
@@ -154,6 +152,7 @@ class MasterForwardRuntime:
         self._pending_sync = None
         self._pending_assistant_sync = None
         self._orbit_command_active = False
+        self.play = PlayRunner()
         self._transport_sync_acknowledged = False
         self._transport_task_acknowledged = False
         self._clear_sync_acknowledged = False
@@ -170,6 +169,19 @@ class MasterForwardRuntime:
         self._assistant_event_body = bytearray(3)
         self._local_vision_control_paused = False
         self._last_role_state = int(self._state_machine.state)
+        self._return_line_aligned = False
+        self._return_line_gate_action = None
+        self._return_play_context = PlayContext(
+            set_position_y=self._play_set_position_y,
+            set_angle=self._play_set_angle,
+            write_velocity_y=self._play_write_velocity_y,
+            is_position_y_done=self._play_motion_done,
+            is_angle_done=self._play_motion_done,
+            yellow_line_ready=self._play_yellow_line_ready,
+            clear_yellow_line_ready=self._play_clear_yellow_line_ready,
+            enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
+            disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
+        )
         self.last_report = None
 
     def mark_tick(self, tick=None) -> None:
@@ -231,6 +243,10 @@ class MasterForwardRuntime:
         if current_state == int(self._last_role_state):
             return
         self._clear_local_vision_pause_residue()
+        self._return_line_aligned = False
+        if current_state != STATE_RETURN_GARAGE_RETREAT:
+            self._return_line_gate_action = None
+            self.play.current_play = None
         self._last_role_state = current_state
 
     def _clear_local_vision_pause_residue(self) -> None:
@@ -266,10 +282,6 @@ class MasterForwardRuntime:
                     or self._state_machine.state == STATE_TRANSPORT_OBJECT
                     or (
                         self._state_machine.state == STATE_ORBITING
-                        and self._pending_task_sync is None
-                    )
-                    or (
-                        self._state_machine.state == STATE_RETURN_GARAGE_LINE
                         and self._pending_task_sync is None
                     )
                 ):
@@ -343,6 +355,16 @@ class MasterForwardRuntime:
         if self._active_task_context_id == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
             self._remember_task_event_threshold(packet)
+            if (
+                self._state_machine.state == STATE_RETURN_GARAGE_RETREAT
+                and int(packet["event"]) == int(EVENT_RETURN_LINE_ALIGNED)
+            ):
+                self._return_line_aligned = True
+                log(
+                    "master_gate",
+                    "ready_on context=%d value=%d"
+                    % (context_id, int(packet["value"])),
+                )
             self._state_machine.handle_event(
                 context_id,
                 packet["event"],
@@ -404,6 +426,14 @@ class MasterForwardRuntime:
                     self._state_machine.mark_restart_search_task_acknowledged()
                 self._pending_task_sync = None
                 self._drain_pending_task_event()
+        pending_gate = self._return_line_gate_action
+        if pending_gate is not None and pending_gate.get("queued"):
+            if (
+                self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
+                == DELIVERY_DELIVERED
+            ):
+                log("master_gate", "done action=%d" % int(pending_gate["action"]))
+                self._return_line_gate_action = None
 
         pending = self._pending_assistant_sync
         if pending is not None and pending.get("queued"):
@@ -451,26 +481,7 @@ class MasterForwardRuntime:
             self._apply_orbit_velocity_correction()
             return
         if self._state_machine.state == STATE_RETURN_GARAGE_RETREAT:
-            self._transport_car.handle_velocity_packet(
-                0.0,
-                float(MASTER_RETURN_GARAGE_RETREAT_SPEED),
-                0.0,
-                "master_return_retreat",
-                False,
-            )
-            return
-        if self._state_machine.state == STATE_RETURN_GARAGE_LINE:
-            packet = self._latest_uart6_velocity
-            vy = 0.0
-            if packet is not None:
-                vy = float(packet.get("vy", 0.0))
-            self._transport_car.handle_velocity_packet(
-                float(MASTER_RETURN_GARAGE_LEFT_SPEED),
-                vy,
-                0.0,
-                "master_return_line",
-                False,
-            )
+            self._run_return_play()
             return
         if self._state_machine.state == STATE_FINISHED:
             self._transport_car.handle_velocity_packet(
@@ -494,6 +505,51 @@ class MasterForwardRuntime:
             return
         if self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
+
+    def _run_return_play(self) -> None:
+        if self.play.current_play is None:
+            self.play.run(MasterReturnGaragePlay)
+        self.play.tick(self._return_play_context)
+
+    def _play_set_position_y(self, value) -> None:
+        self._transport_car.set_relative_translation_target(
+            0.0,
+            float(value),
+        )
+
+    def _play_set_angle(self, value) -> None:
+        target_heading_deg = float(getattr(self._transport_car, "heading_est", 0.0)) + float(value)
+        self._transport_car.set_heading_transition_target(target_heading_deg)
+
+    def _play_write_velocity_y(self, value) -> None:
+        self._transport_car.handle_velocity_packet(
+            0.0,
+            float(value),
+            0.0,
+            "master_play",
+            False,
+        )
+
+    def _play_motion_done(self) -> bool:
+        return not bool(getattr(self._transport_car, "command_lock", False))
+
+    def _play_yellow_line_ready(self) -> bool:
+        return bool(self._return_line_aligned)
+
+    def _play_clear_yellow_line_ready(self) -> None:
+        self._return_line_aligned = False
+
+    def _play_enable_yellow_line_ready_gate(self) -> None:
+        self._return_line_gate_action = {
+            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
+            "queued": False,
+        }
+
+    def _play_disable_yellow_line_ready_gate(self) -> None:
+        self._return_line_gate_action = {
+            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
+            "queued": False,
+        }
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._latest_uart6_velocity
@@ -544,6 +600,7 @@ class MasterForwardRuntime:
     def _queue_transport_outputs(self) -> None:
         """提交本拍要发送的 task、状态同步和前馈速度."""
         self._queue_pending_task_sync()
+        self._queue_return_line_gate_action()
         self._queue_pending_sync()
         self._queue_feedforward_velocity()
 
@@ -583,6 +640,16 @@ class MasterForwardRuntime:
         status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_sync_start("master->assistant", pending)
+            pending["queued"] = True
+
+    def _queue_return_line_gate_action(self) -> None:
+        pending = self._return_line_gate_action
+        if pending is None or pending.get("queued"):
+            return
+        body = encode_local_vision_control_body(pending["action"])
+        status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
+        if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
+            log("master_gate", "start action=%d" % int(pending["action"]))
             pending["queued"] = True
 
     def _queue_feedforward_velocity(self) -> None:

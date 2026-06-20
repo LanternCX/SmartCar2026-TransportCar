@@ -743,16 +743,15 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
     machine.poll_assistant_request()
     machine.mark_master_cleared()
     machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
+
+    assert machine.completed_object_count == 1
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
     assert machine.poll_assistant_request() == {
         "kind": "assistant_return_line",
         "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         "arg": 0,
     }
-    machine.mark_turn_back_completed()
-
-    assert machine.completed_object_count == 1
-    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
     assert machine.poll_task_request() == {
         "kind": "return_line_task",
         "context_id": 5,
@@ -765,7 +764,7 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
     assert machine.allows_assistant_velocity_forward() is False
 
 
-def test_master_state_machine_return_garage_events_advance_to_finished() -> None:
+def test_master_state_machine_return_garage_events_do_not_advance_state() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -785,15 +784,8 @@ def test_master_state_machine_return_garage_events_advance_to_finished() -> None
         value=0,
     )
 
-    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
-    line_move_task = machine.poll_task_request()
-    assert line_move_task == {
-        "kind": "return_line_task",
-        "context_id": 6,
-        "state": MasterStateMachine.STATE_RETURN_GARAGE_LINE,
-        "target": MasterStateMachine.TARGET_EDGE_LINE,
-        "arg": 5,
-    }
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
+    assert machine.poll_task_request() is None
 
     machine.handle_event(
         context_id=line_task["context_id"],
@@ -801,16 +793,16 @@ def test_master_state_machine_return_garage_events_advance_to_finished() -> None
         value=0,
     )
 
-    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_LINE
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
     assert machine.poll_task_request() is None
 
     machine.handle_event(
-        context_id=line_move_task["context_id"],
-        event=MasterStateMachine.EVENT_RETURN_GARAGE_FINISHED,
+        context_id=line_task["context_id"],
+        event=12,
         value=0,
     )
 
-    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
     assert machine.poll_assistant_request() is None
 
 

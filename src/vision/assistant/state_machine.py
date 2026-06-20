@@ -30,9 +30,6 @@ ASSISTANT_TARGET_NONE = 0
 ASSISTANT_TARGET_OBJECT = 1
 
 # 辅车视觉事件编号
-EVENT_RETURN_GARAGE_FINISHED = 12
-
-
 class AssistantStateMachine:
     """维护辅车由主车驱动的子状态"""
 
@@ -98,8 +95,6 @@ class AssistantStateMachine:
         _ = value
         event = int(event)
         if self.state == ASSISTANT_STATE_RETURN_FOLLOW:
-            if event == EVENT_RETURN_GARAGE_FINISHED:
-                self._enter_state(ASSISTANT_STATE_FINISHED)
             return
 
     def is_idle(self):

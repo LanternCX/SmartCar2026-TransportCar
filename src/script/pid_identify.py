@@ -14,8 +14,7 @@
 6. 保存结果到 Flash
 """
 from machine import Pin, UART
-from seekfree import MOTOR_CONTROLLER
-from smartcar import encoder, ticker
+from smartcar import ticker
 from config import comm as comm_params
 from config import motion as motion_params
 from config import safety as safety_params
@@ -30,6 +29,9 @@ from control.ident_tools import (
     get_ident_samples,
     identify_wheel,
 )
+from hardware.encoders import create_encoders
+from hardware.motors import create_motors
+from vision.vehicle_role import read_vehicle_role
 import gc
 
 
@@ -38,7 +40,7 @@ TICK_MS = getattr(motion_params, "TICK_MS")
 # PWM 占空比上限, 范围 0 ~ 10000
 MAX_DUTY = getattr(safety_params, "MAX_DUTY")
 # 辨识阶跃幅值, 单位为占空比值, 施加到电机的激励强度
-IDENT_STEP_DUTY = 5000
+IDENT_STEP_DUTY = 2000
 # 辨识持续时间, 单位毫秒, 每轮的激励持续时长
 IDENT_DURATION_MS = 4000
 # 环形缓存深度, 用于存储速度采样历史
@@ -68,22 +70,16 @@ led = Pin("C4", Pin.OUT, value=True)
 switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
 state2 = switch2.value()
 
-encoder_m = encoder("D15", "D16", True)
-encoder_l = encoder("C2", "C3", True)
-encoder_r = encoder("C0", "C1", True)
-
-motor_m = MOTOR_CONTROLLER(
-    MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False
-)
-motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D6_DIR_D7, 13000, duty=0, invert=True)
-motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_D4_DIR_D5, 13000, duty=0, invert=False)
+vehicle_role = read_vehicle_role()
+encoders = create_encoders(vehicle_role)
+motors = create_motors(vehicle_role)
 
 
 wheel_states = [
     build_wheel_state(
         "m",
-        encoder_m,
-        motor_m,
+        encoders["m"],
+        motors["m"],
         TICK_MS,
         30,
         8,
@@ -91,8 +87,8 @@ wheel_states = [
     ),
     build_wheel_state(
         "l",
-        encoder_l,
-        motor_l,
+        encoders["l"],
+        motors["l"],
         TICK_MS,
         30,
         8,
@@ -100,8 +96,8 @@ wheel_states = [
     ),
     build_wheel_state(
         "r",
-        encoder_r,
-        motor_r,
+        encoders["r"],
+        motors["r"],
         TICK_MS,
         30,
         8,

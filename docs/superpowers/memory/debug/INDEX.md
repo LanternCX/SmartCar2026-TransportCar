@@ -7,6 +7,7 @@ debug
 
 | Page ID | Date | Title | Path | Related Change Unit | Keywords |
 | --- | --- | --- | --- | --- | --- |
+| 2026-06-20-1 | 2026-06-20 | 收敛回库 Play 第 2 步黄线就绪事件早到与 gate 控制失效的问题 | `docs/superpowers/memory/debug/entries/2026-06/2026-06-20-1.md` | 记录回库 Play 第 2 步无法推进到第 3 步的调试闭环, 包括旧事件早到、gate 控制链路失效、ACK topic 修复和视觉 v2 旧回库策略清理。 | return-garage, play, gate, return-line-aligned, uart6, ack, openart, vision-v2, debug |
 | 2026-05-31-1 | 2026-05-31 | 收敛回库黄线状态卡在后退段的问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-31-1.md` | 记录主车回库后退段持续后退的问题, 以及通过复用黄色阈值、统一黄线 Y 坐标口径、删除调试默认上下文和临时输出完成的修复闭环。 | return-garage, yellow-line, context-id, openart, coordinate, debug, master, vision |
 | 2026-05-30-3 | 2026-05-30 | 修复 CLEAR 后退位置锁被可靠事件零速度覆盖的问题 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-3.md` | 记录主车 CLEAR 后退目标已下发但被可靠事件零速度覆盖导致锁定目标清空的问题, 以及通过保留锁定动作完成的修复闭环。 | clear, retreat, command-lock, reliable-event, zero-velocity, master, runtime, debug |
 | 2026-05-30-2 | 2026-05-30 | 修复通信发送热路径重复导入导致的控制周期拉长 | `docs/superpowers/memory/debug/entries/2026-05/2026-05-30-2.md` | 记录固定短帧通信发送路径中函数内重复导入 time 导致板端控制周期拉长的问题, 以及通过模块级导入完成的修复闭环。 | transport, poll-tx, micropython, time-import, hot-path, control-period, uart8, debug |

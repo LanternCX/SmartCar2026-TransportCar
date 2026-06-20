@@ -119,9 +119,11 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     runtime_module = import_runtime_module("vision.master.runtime", monkeypatch)
     core_package = ModuleType("core")
     core_module = ModuleType("core.runtime")
+    created_roles = []
 
     class _TransportCar:
-        def __init__(self) -> None:
+        def __init__(self, vehicle_role=None) -> None:
+            created_roles.append(vehicle_role)
             self.wheel_states = []
             self.imu = "imu"
 
@@ -143,6 +145,7 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     assert not isinstance(car, _TransportCar)
     assert car.imu == "imu"
     assert hasattr(car, "step")
+    assert created_roles == ["master"]
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
@@ -151,9 +154,11 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
     runtime_module = import_runtime_module("vision.assistant.runtime", monkeypatch)
     core_package = ModuleType("core")
     core_module = ModuleType("core.runtime")
+    created_roles = []
 
     class _TransportCar:
-        def __init__(self) -> None:
+        def __init__(self, vehicle_role=None) -> None:
+            created_roles.append(vehicle_role)
             self.wheel_states = []
             self.imu = "imu"
 
@@ -175,3 +180,4 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
     assert not isinstance(car, _TransportCar)
     assert car.imu == "imu"
     assert hasattr(car, "step")
+    assert created_roles == ["assistant"]
