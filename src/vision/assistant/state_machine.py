@@ -14,6 +14,7 @@ ASSISTANT_STATE_TRANSPORT_OBJECT = 4
 ASSISTANT_STATE_CLEAR_OBJECT = 5
 ASSISTANT_STATE_RETURN_FOLLOW = 6
 ASSISTANT_STATE_FINISHED = 7
+ASSISTANT_STATE_STARTUP_MOVE = 8
 _STATE_NAMES = (
     "IDLE",
     "FOLLOW",
@@ -23,6 +24,7 @@ _STATE_NAMES = (
     "CLEAR_OBJECT",
     "RETURN_FOLLOW",
     "FINISHED",
+    "STARTUP_MOVE",
 )
 
 # 辅车目标编号
@@ -34,7 +36,7 @@ class AssistantStateMachine:
     """维护辅车由主车驱动的子状态"""
 
     def __init__(self):
-        self.state = ASSISTANT_STATE_FOLLOW
+        self.state = ASSISTANT_STATE_IDLE
         self.target = ASSISTANT_TARGET_NONE
         self.arg = 0
 
@@ -67,10 +69,15 @@ class AssistantStateMachine:
             and state != ASSISTANT_STATE_CLEAR_OBJECT
             and state != ASSISTANT_STATE_RETURN_FOLLOW
             and state != ASSISTANT_STATE_FINISHED
+            and state != ASSISTANT_STATE_STARTUP_MOVE
         ):
             return False
         if (
-            (state == ASSISTANT_STATE_RETURN_FOLLOW or state == ASSISTANT_STATE_FINISHED)
+            (
+                state == ASSISTANT_STATE_RETURN_FOLLOW
+                or state == ASSISTANT_STATE_FINISHED
+                or state == ASSISTANT_STATE_STARTUP_MOVE
+            )
             and target != ASSISTANT_TARGET_NONE
         ):
             return False
@@ -88,6 +95,15 @@ class AssistantStateMachine:
         self.target = target
         self.arg = int(arg)
         return True
+
+    def mark_startup_move_completed(self):
+        """标记启动动作完成并进入跟随状态"""
+
+        if self.state != ASSISTANT_STATE_STARTUP_MOVE:
+            return
+        self._enter_state(ASSISTANT_STATE_FOLLOW)
+        self.target = ASSISTANT_TARGET_NONE
+        self.arg = 0
 
     def handle_event(self, event, value):
         """消费辅车本地视觉事件"""

@@ -4,9 +4,10 @@ from play.base import BasePlay
 from play.steps import AngleStep, PositionYStep, VelocityYStep
 
 
-ASSISTANT_LEAD_DISTANCE = 0.30
+ASSISTANT_LEAD_DISTANCE = 0.50
 RETURN_FORWARD_SPEED = 5
-FINAL_FORWARD_SPEED = 3
+FINAL_FORWARD_SPEED = 5
+RETURN_POSITION_SPEED = 5
 
 
 def _clear_yellow_line_ready(ctx):
@@ -29,7 +30,7 @@ def _exit_return_line_wait(ctx):
 class AssistantReturnGaragePlay(BasePlay):
     def _create_steps(self):
         return [
-            PositionYStep(ASSISTANT_LEAD_DISTANCE),
+            PositionYStep(ASSISTANT_LEAD_DISTANCE, max_speed_cmd=RETURN_POSITION_SPEED),
             AngleStep(-90),
             VelocityYStep(
                 RETURN_FORWARD_SPEED,

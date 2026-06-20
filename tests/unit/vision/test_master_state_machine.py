@@ -29,13 +29,20 @@ def _load_master_state_machine():
     return module
 
 
+def _enter_initial_search(machine):
+    machine.step(orbit_finished=False)
+    machine.poll_assistant_request()
+    machine.mark_startup_sync_acknowledged()
+    machine.mark_startup_move_completed()
+
+
 def _drive_machine_to_post_assistant_orbit_request(module):
     machine = module.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=module.EVENT_TARGET_FOUND, value=2
     )
@@ -57,7 +64,40 @@ def test_master_state_machine_enters_search_and_builds_task_context() -> None:
         orbit_delta_deg=90.0,
     )
 
+    _enter_initial_search(machine)
+    task_request = machine.poll_task_request()
+
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
+    assert task_request == {
+        "context_id": 1,
+        "state": MasterStateMachine.STATE_SEARCH_OBJECT,
+        "target": MasterStateMachine.TARGET_OBJECT,
+        "arg": 1,
+    }
+
+
+def test_master_state_machine_waits_for_startup_sync_before_startup_move() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+    )
+
     machine.step(orbit_finished=False)
+
+    assert machine.state == MasterStateMachine.STATE_STARTUP_SYNC
+    assert machine.poll_task_request() is None
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_startup",
+        "state": MasterStateMachine.ASSISTANT_STARTUP_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_STARTUP_SYNC_TARGET,
+        "arg": 0,
+    }
+
+    machine.mark_startup_sync_acknowledged()
+    assert machine.state == MasterStateMachine.STATE_STARTUP_MOVE
+    machine.mark_startup_move_completed()
     task_request = machine.poll_task_request()
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
@@ -77,7 +117,7 @@ def test_master_state_machine_prints_when_entering_new_state(capsys) -> None:
         orbit_delta_deg=90.0,
     )
 
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
 
     assert capsys.readouterr().out.endswith("master_state: SEARCH_OBJECT\n")
 
@@ -89,7 +129,7 @@ def test_master_state_machine_matching_target_found_enters_orbiting() -> None:
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
 
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
@@ -114,7 +154,7 @@ def test_master_state_machine_marks_assistant_object_request_kind_before_orbit()
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
 
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
@@ -135,7 +175,7 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -161,7 +201,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -183,7 +223,7 @@ def test_master_state_machine_ignores_mismatched_context_event() -> None:
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
 
     machine.handle_event(
         context_id=9, event=MasterStateMachine.EVENT_TARGET_FOUND, value=300
@@ -201,7 +241,7 @@ def test_master_state_machine_does_not_repeat_orbit_enter_action() -> None:
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
 
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
@@ -228,7 +268,7 @@ def test_master_state_machine_returns_to_search_when_orbit_finishes() -> None:
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -248,7 +288,7 @@ def test_master_state_machine_orbit_finish_does_not_repeat_assistant_object_requ
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -280,7 +320,7 @@ def test_master_state_machine_emits_new_transport_task_request_after_orbit_finis
         assistant_object_arg=1,
         initial_context_id=0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.poll_task_request()
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
@@ -307,7 +347,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
         orbit_delta_deg=90.0,
     )
 
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     assert machine.poll_task_request() == {
         "context_id": 1,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
@@ -346,7 +386,7 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -378,7 +418,7 @@ def test_master_state_machine_exposes_search_velocity_gate() -> None:
         orbit_delta_deg=90.0,
     )
 
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     assert machine.allows_search_velocity() is True
 
     machine.handle_event(
@@ -400,7 +440,7 @@ def test_master_state_machine_does_not_enter_orbiting_before_assistant_ack() -> 
         orbit_delta_deg=90.0,
     )
 
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -418,7 +458,7 @@ def test_master_state_machine_ignores_master_aligned_before_front_half_completes
         assistant_transport_arg=9,
     )
 
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=3, event=MasterStateMachine.EVENT_ALIGNED, value=0
     )
@@ -435,7 +475,7 @@ def test_master_state_machine_ignores_assistant_aligned_before_assistant_orbit_r
         orbit_delta_deg=90.0,
         assistant_transport_arg=9,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -457,7 +497,7 @@ def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishe
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
@@ -554,7 +594,7 @@ def test_master_state_machine_master_aligned_disables_search_velocity_before_tra
         boot_heading_deg=15.0,
         orbit_delta_deg=90.0,
     )
-    machine.step(orbit_finished=False)
+    _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )

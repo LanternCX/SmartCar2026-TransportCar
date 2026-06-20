@@ -40,6 +40,7 @@ from protocol.transport import (
 )
 from play import PlayContext, PlayRunner
 from play.routines.assistant_return_garage import AssistantReturnGaragePlay
+from play.routines.startup_move import StartupMovePlay
 from utils.startup_log import log, log_exception
 from vision.assistant.diagnostics import build_follow_snapshot
 from vision.assistant.state_machine import (
@@ -49,6 +50,7 @@ from vision.assistant.state_machine import (
     ASSISTANT_STATE_FOLLOW,
     ASSISTANT_STATE_ORBIT,
     ASSISTANT_STATE_RETURN_FOLLOW,
+    ASSISTANT_STATE_STARTUP_MOVE,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
@@ -136,9 +138,11 @@ class AssistantFollowRuntime:
         self._return_line_aligned = False
         self._return_line_gate_action = None
         self._return_play_context = PlayContext(
+            set_position_x=self._play_set_position_x,
             set_position_y=self._play_set_position_y,
             set_angle=self._play_set_angle,
             write_velocity_y=self._play_write_velocity_y,
+            is_position_x_done=self._play_motion_done,
             is_position_y_done=self._play_motion_done,
             is_angle_done=self._play_motion_done,
             yellow_line_ready=self._play_yellow_line_ready,
@@ -146,13 +150,6 @@ class AssistantFollowRuntime:
             enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
             disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
         )
-        self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_FOLLOW,
-            "target": 0,
-            "arg": 0,
-            "threshold": (0, 0, 0, 0, 0, 0),
-            "queued": False,
-        }
 
     def mark_tick(self, tick=None) -> None:
         self._transport_car.mark_tick(tick)
@@ -265,6 +262,13 @@ class AssistantFollowRuntime:
             self._post_orbit_realign_active = False
             self._clear_completed = False
             self._enter_follow_state()
+        elif self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+            self._clear_motion_inputs()
+            self._pending_local_vision_sync = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._post_orbit_realign_active = False
             self._clear_completed = False
@@ -444,6 +448,9 @@ class AssistantFollowRuntime:
         if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
             self._run_return_play()
             return
+        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+            self._run_startup_move_play()
+            return
         if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
             return
@@ -578,10 +585,26 @@ class AssistantFollowRuntime:
             self.play.run(AssistantReturnGaragePlay)
         self.play.tick(self._return_play_context)
 
-    def _play_set_position_y(self, value) -> None:
+    def _run_startup_move_play(self) -> None:
+        if self.play.current_play is None:
+            self.play.run(StartupMovePlay)
+        result = self.play.tick(self._return_play_context)
+        if result.status == "finished":
+            self._state_machine.mark_startup_move_completed()
+            self._enter_follow_state()
+
+    def _play_set_position_x(self, value, max_speed_cmd=None) -> None:
+        self._transport_car.set_relative_translation_target(
+            float(value),
+            0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def _play_set_position_y(self, value, max_speed_cmd=None) -> None:
         self._transport_car.set_relative_translation_target(
             0.0,
             float(value),
+            max_speed_cmd=max_speed_cmd,
         )
 
     def _play_set_angle(self, value) -> None:

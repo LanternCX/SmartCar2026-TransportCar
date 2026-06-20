@@ -33,17 +33,38 @@ def test_assistant_state_constants_are_owned_by_vision_layer() -> None:
     assert module.ASSISTANT_STATE_CLEAR_OBJECT == 5
     assert module.ASSISTANT_STATE_RETURN_FOLLOW == 6
     assert module.ASSISTANT_STATE_FINISHED == 7
+    assert module.ASSISTANT_STATE_STARTUP_MOVE == 8
     assert module.ASSISTANT_TARGET_NONE == 0
     assert module.ASSISTANT_TARGET_OBJECT == 1
 
 
-def test_assistant_state_machine_defaults_to_follow() -> None:
+def test_assistant_state_machine_defaults_to_idle_before_master_sync() -> None:
     module = _load_assistant_state_machine()
 
     machine = module.AssistantStateMachine()
 
+    assert machine.state == module.ASSISTANT_STATE_IDLE
+    assert machine.is_idle() is True
+
+
+def test_assistant_state_machine_accepts_startup_move_after_master_sync() -> None:
+    module = _load_assistant_state_machine()
+    machine = module.AssistantStateMachine()
+
+    applied = machine.apply_master_state(
+        module.ASSISTANT_STATE_STARTUP_MOVE,
+        module.ASSISTANT_TARGET_NONE,
+        0,
+    )
+
+    assert applied is True
+    assert machine.state == module.ASSISTANT_STATE_STARTUP_MOVE
+
+    machine.mark_startup_move_completed()
+
     assert machine.state == module.ASSISTANT_STATE_FOLLOW
-    assert machine.is_idle() is False
+    assert machine.target == module.ASSISTANT_TARGET_NONE
+    assert machine.arg == 0
 
 
 def test_assistant_state_machine_accepts_idle_command() -> None:
@@ -66,13 +87,13 @@ def test_assistant_state_machine_prints_when_entering_new_state(capsys) -> None:
     machine = module.AssistantStateMachine()
 
     applied = machine.apply_master_state(
-        module.ASSISTANT_STATE_IDLE,
+        module.ASSISTANT_STATE_STARTUP_MOVE,
         module.ASSISTANT_TARGET_NONE,
         0,
     )
 
     assert applied is True
-    assert capsys.readouterr().out.endswith("assistant_state: IDLE\n")
+    assert capsys.readouterr().out.endswith("assistant_state: STARTUP_MOVE\n")
 
 
 def test_assistant_state_machine_accepts_approach_object_command() -> None:
@@ -181,7 +202,7 @@ def test_assistant_state_machine_rejects_finished_with_object_target() -> None:
     )
 
     assert applied is False
-    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.state == module.ASSISTANT_STATE_IDLE
 
 
 def test_assistant_state_machine_rejects_approach_object_with_non_object_target() -> None:
@@ -195,7 +216,7 @@ def test_assistant_state_machine_rejects_approach_object_with_non_object_target(
     )
 
     assert applied is False
-    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.state == module.ASSISTANT_STATE_IDLE
     assert machine.target == module.ASSISTANT_TARGET_NONE
     assert machine.arg == 0
 
@@ -211,7 +232,7 @@ def test_assistant_state_machine_rejects_transport_object_with_non_object_target
     )
 
     assert applied is False
-    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.state == module.ASSISTANT_STATE_IDLE
     assert machine.target == module.ASSISTANT_TARGET_NONE
     assert machine.arg == 0
 
@@ -223,4 +244,4 @@ def test_assistant_state_machine_ignores_unknown_state() -> None:
     applied = machine.apply_master_state(99, module.ASSISTANT_TARGET_NONE, 0)
 
     assert applied is False
-    assert machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert machine.state == module.ASSISTANT_STATE_IDLE

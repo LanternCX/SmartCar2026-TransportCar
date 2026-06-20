@@ -30,6 +30,12 @@ from tests.unit.runtime.transport_runtime_support import (
 )
 
 
+MASTER_STATE_STARTUP_MOVE = 9
+MASTER_STATE_STARTUP_SYNC = 10
+ASSISTANT_STATE_IDLE = 0
+ASSISTANT_STATE_STARTUP_MOVE = 8
+
+
 def _pack_task_arg(config_id, object_id):
     packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
     if packed >= 0x8000:
@@ -53,6 +59,13 @@ def _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6
         _ack_latest_tcp_if_needed(master_uart6)
         run_runtime_cycle(assistant)
         _ack_latest_tcp_if_needed(assistant_uart6)
+        if master._state_machine.state == MASTER_STATE_STARTUP_MOVE and master_car.command_lock:
+            master_car.command_lock = False
+        if (
+            assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE
+            and assistant_car.command_lock
+        ):
+            assistant_car.command_lock = False
         if master._state_machine.state == 2 and master_car.command_lock:
             master_car.command_lock = False
         if assistant._state_machine.state == 3 and assistant_car.command_lock:
@@ -70,6 +83,69 @@ def _pump_until(clock, master, assistant, master_car, assistant_car, master_uart
             return
         _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6, assistant_uart6)
     raise AssertionError("condition not reached")
+
+
+def _complete_master_startup_move(master, master_car) -> None:
+    master._state_machine.step(False)
+    master._state_machine.poll_assistant_request()
+    master._state_machine.mark_startup_sync_acknowledged()
+    master._pending_assistant_sync = None
+    while master._state_machine.state == MASTER_STATE_STARTUP_MOVE:
+        run_runtime_cycle(master)
+        master_car.command_lock = False
+
+
+def _complete_assistant_startup_move(assistant, assistant_car) -> None:
+    assistant._state_machine.apply_master_state(ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
+    assistant.step()
+    assistant.poll_transport_tx()
+    while assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+        assistant.step()
+        assistant.poll_transport_tx()
+        assistant_car.command_lock = False
+
+
+def test_startup_sync_blocks_formal_start_until_both_cars_are_alive(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+
+    master_uart8, assistant_uart8 = make_linked_uart_pair()
+    master = master_module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=master_uart8,
+            now_ms=clock,
+        ),
+    )
+    assistant = assistant_module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=assistant_uart8,
+            now_ms=clock,
+        ),
+    )
+
+    run_runtime_cycle(master)
+
+    assert master._state_machine.state == MASTER_STATE_STARTUP_SYNC
+    assert assistant._state_machine.state == ASSISTANT_STATE_IDLE
+    frame = decode_frame(master_uart8.messages[-1])
+    assert frame is not None
+    assert frame["mode"] == 0x02
+    assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
+
+    run_runtime_cycle(assistant)
+    assert assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE
+
+    run_runtime_cycle(master)
+    assert master._state_machine.state == MASTER_STATE_STARTUP_MOVE
+    assert cars[0].events[-1] == "transport_step"
 
 
 def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
@@ -269,6 +345,12 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         in master_car.events,
     )
 
+    if int(master_module.TRANSPORT_OBJECT_TOTAL_COUNT) > 1:
+        expected_master_state = master_module.STATE_SEARCH_OBJECT
+        expected_assistant_state = assistant_module.ASSISTANT_STATE_FOLLOW
+    else:
+        expected_master_state = master_module.STATE_RETURN_GARAGE_RETREAT
+        expected_assistant_state = assistant_module.ASSISTANT_STATE_RETURN_FOLLOW
     _pump_until(
         clock,
         master,
@@ -277,13 +359,13 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._state_machine.state == master_module.STATE_SEARCH_OBJECT
-        and assistant._state_machine.state == assistant_module.ASSISTANT_STATE_FOLLOW,
+        lambda: master._state_machine.state == expected_master_state
+        and assistant._state_machine.state == expected_assistant_state,
         max_steps=160,
     )
 
-    assert master._state_machine.state == master_module.STATE_SEARCH_OBJECT
-    assert assistant._state_machine.state == assistant_module.ASSISTANT_STATE_FOLLOW
+    assert master._state_machine.state == expected_master_state
+    assert assistant._state_machine.state == expected_assistant_state
 
 
 def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch) -> None:
@@ -303,6 +385,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)
@@ -346,7 +429,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
 
 def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
-    install_fake_core(monkeypatch)
+    cars = install_fake_core(monkeypatch)
     assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
     assistant_uart6 = BufferedUart()
     assistant_uart8 = BufferedUart()
@@ -359,6 +442,8 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
             now_ms=clock,
         ),
     )
+    assistant_car = cars[0]
+    _complete_assistant_startup_move(assistant, assistant_car)
 
     frame = encode_frame(
         0x02,
@@ -407,6 +492,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)
@@ -499,7 +585,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
 
 def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
-    install_fake_core(monkeypatch)
+    cars = install_fake_core(monkeypatch)
     assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
     sender_uart8, assistant_uart8 = make_linked_uart_pair()
     assistant_uart6 = BufferedUart()
@@ -513,6 +599,8 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
             now_ms=clock,
         ),
     )
+    assistant_car = cars[0]
+    _complete_assistant_startup_move(assistant, assistant_car)
 
     assert sender.tcp(UART8).write(
         TOPIC_ASSISTANT_STATE_SYNC,
@@ -555,6 +643,7 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)

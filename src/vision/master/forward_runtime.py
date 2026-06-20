@@ -41,6 +41,7 @@ from protocol.transport import (
 )
 from play import PlayContext, PlayRunner
 from play.routines.master_return_garage import MasterReturnGaragePlay
+from play.routines.startup_move import StartupMovePlay
 from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from vision.master.state_machine import MasterStateMachine
 from vision.master.state_machine import (
@@ -55,6 +56,7 @@ from vision.master.state_machine import (
     STATE_RETURN_GARAGE_LINE,
     STATE_RETURN_GARAGE_RETREAT,
     STATE_SEARCH_OBJECT,
+    STATE_STARTUP_MOVE,
     STATE_STOP,
     STATE_TRANSPORT_OBJECT,
     TARGET_EDGE_LINE,
@@ -172,8 +174,10 @@ class MasterForwardRuntime:
         self._return_line_aligned = False
         self._return_line_gate_action = None
         self._return_play_context = PlayContext(
+            set_position_x=self._play_set_position_x,
             set_position_y=self._play_set_position_y,
             set_angle=self._play_set_angle,
+            is_position_x_done=self._play_motion_done,
             write_velocity_y=self._play_write_velocity_y,
             is_position_y_done=self._play_motion_done,
             is_angle_done=self._play_motion_done,
@@ -244,7 +248,7 @@ class MasterForwardRuntime:
             return
         self._clear_local_vision_pause_residue()
         self._return_line_aligned = False
-        if current_state != STATE_RETURN_GARAGE_RETREAT:
+        if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
             self._return_line_gate_action = None
             self.play.current_play = None
         self._last_role_state = current_state
@@ -444,6 +448,8 @@ class MasterForwardRuntime:
                 self._log_sync_done("master->assistant", pending)
                 if pending.get("kind") == "assistant_object":
                     self._state_machine.mark_assistant_object_acknowledged()
+                elif pending.get("kind") == "assistant_startup":
+                    self._state_machine.mark_startup_sync_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
                     self._state_machine.mark_assistant_follow_acknowledged()
                 elif pending.get("kind") == "assistant_transport":
@@ -483,6 +489,9 @@ class MasterForwardRuntime:
         if self._state_machine.state == STATE_RETURN_GARAGE_RETREAT:
             self._run_return_play()
             return
+        if self._state_machine.state == STATE_STARTUP_MOVE:
+            self._run_startup_move_play()
+            return
         if self._state_machine.state == STATE_FINISHED:
             self._transport_car.handle_velocity_packet(
                 0.0,
@@ -511,10 +520,25 @@ class MasterForwardRuntime:
             self.play.run(MasterReturnGaragePlay)
         self.play.tick(self._return_play_context)
 
-    def _play_set_position_y(self, value) -> None:
+    def _run_startup_move_play(self) -> None:
+        if self.play.current_play is None:
+            self.play.run(StartupMovePlay)
+        result = self.play.tick(self._return_play_context)
+        if result.status == "finished":
+            self._state_machine.mark_startup_move_completed()
+
+    def _play_set_position_x(self, value, max_speed_cmd=None) -> None:
+        self._transport_car.set_relative_translation_target(
+            float(value),
+            0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def _play_set_position_y(self, value, max_speed_cmd=None) -> None:
         self._transport_car.set_relative_translation_target(
             0.0,
             float(value),
+            max_speed_cmd=max_speed_cmd,
         )
 
     def _play_set_angle(self, value) -> None:

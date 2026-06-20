@@ -1119,9 +1119,9 @@ class TransportCar:
         1. 位置锁定模式(cmd_x 或 cmd_y 有效):
            - 在世界系中计算位置误差 (err_x, err_y) = (target - odometry)
            - 使用 POS_KP 进行 P 控制生成世界系目标速度 (v_world_x, v_world_y)
-           - 限幅最大速度为 POS_MAX_SPEED, 防止快速运动时过冲
            - 通过旋转矩阵变换到车体系(相对当前航向)
            - 最后转换为脉冲/周期单位并扩展 3 倍(适配逆运动学)
+           - 在编码器命令单位上限幅, 防止快速运动时过冲
 
         2. 速度模式(cmd_x/cmd_y 都为 None):
            - 直接使用 vx/vy 控制目标(已为脉冲/周期单位)
@@ -1155,12 +1155,6 @@ class TransportCar:
             v_world_x = err_x * POS_KP
             v_world_y = err_y * POS_KP
 
-            v_speed = math.sqrt(v_world_x * v_world_x + v_world_y * v_world_y)
-            if self._translation_speed_limit_cmd is None and v_speed > POS_MAX_SPEED:
-                scale = POS_MAX_SPEED / v_speed
-                v_world_x *= scale
-                v_world_y *= scale
-
             t_rad = math.radians(self.heading_est)
             cos_t = math.cos(t_rad)
             sin_t = math.sin(t_rad)
@@ -1173,15 +1167,16 @@ class TransportCar:
 
             target_vx_cmd = vx_pulses * 3.0
             target_vy_cmd = vy_pulses * 3.0
+            cmd_limit = float(POS_MAX_SPEED)
             if self._translation_speed_limit_cmd is not None:
                 cmd_limit = float(self._translation_speed_limit_cmd)
-                cmd_speed = math.sqrt(
-                    target_vx_cmd * target_vx_cmd + target_vy_cmd * target_vy_cmd
-                )
-                if cmd_speed > cmd_limit and cmd_speed > 0.0:
-                    scale = cmd_limit / cmd_speed
-                    target_vx_cmd *= scale
-                    target_vy_cmd *= scale
+            cmd_speed = math.sqrt(
+                target_vx_cmd * target_vx_cmd + target_vy_cmd * target_vy_cmd
+            )
+            if cmd_speed > cmd_limit and cmd_speed > 0.0:
+                scale = cmd_limit / cmd_speed
+                target_vx_cmd *= scale
+                target_vy_cmd *= scale
 
         else:
             target_vx_cmd = float(self.control_state.get("vx", 0.0))

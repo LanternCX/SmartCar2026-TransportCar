@@ -34,15 +34,15 @@ class PlayContext:
         self._enable_yellow_line_ready_gate = enable_yellow_line_ready_gate
         self._disable_yellow_line_ready_gate = disable_yellow_line_ready_gate
 
-    def set_position_x(self, value):
+    def set_position_x(self, value, max_speed_cmd=None):
         if self._set_position_x is None:
             raise RuntimeError("set_position_x is not available")
-        self._set_position_x(value)
+        self._set_position_x(value, max_speed_cmd)
 
-    def set_position_y(self, value):
+    def set_position_y(self, value, max_speed_cmd=None):
         if self._set_position_y is None:
             raise RuntimeError("set_position_y is not available")
-        self._set_position_y(value)
+        self._set_position_y(value, max_speed_cmd)
 
     def set_angle(self, value):
         if self._set_angle is None:
