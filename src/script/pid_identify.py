@@ -40,7 +40,7 @@ TICK_MS = getattr(motion_params, "TICK_MS")
 # PWM 占空比上限, 范围 0 ~ 10000
 MAX_DUTY = getattr(safety_params, "MAX_DUTY")
 # 辨识阶跃幅值, 单位为占空比值, 施加到电机的激励强度
-IDENT_STEP_DUTY = 5000
+IDENT_STEP_DUTY = 2000
 # 辨识持续时间, 单位毫秒, 每轮的激励持续时长
 IDENT_DURATION_MS = 4000
 # 环形缓存深度, 用于存储速度采样历史

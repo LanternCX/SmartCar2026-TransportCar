@@ -16,9 +16,9 @@ def _resolve_motor_mapping(vehicle_role):
         }
     if vehicle_role == "assistant":
         return {
-            "m": (MOTOR_CONTROLLER.PWM_D4_DIR_D5, False),
-            "l": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, False),
-            "r": (MOTOR_CONTROLLER.PWM_C30_DIR_C31, False),
+            "m": (MOTOR_CONTROLLER.PWM_D4_DIR_D5, True),
+            "l": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, True),
+            "r": (MOTOR_CONTROLLER.PWM_C30_DIR_C31, True),
         }
     raise ValueError("unknown vehicle role for motors: %s" % vehicle_role)
 

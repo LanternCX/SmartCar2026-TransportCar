@@ -16,9 +16,9 @@ def _resolve_encoder_mapping(vehicle_role):
         }
     if vehicle_role == "assistant":
         return {
-            "m": ("D13", "D14", True),
-            "l": ("D15", "D16", True),
-            "r": ("C2", "C3", True),
+            "m": ("D13", "D14", False),
+            "l": ("D15", "D16", False),
+            "r": ("C2", "C3", False),
         }
     raise ValueError("unknown vehicle role for encoders: %s" % vehicle_role)
 
