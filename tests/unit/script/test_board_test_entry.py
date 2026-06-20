@@ -36,3 +36,21 @@ def test_test_entry_registers_odometry_one_meter_script() -> None:
     assert module.TEST_MODULES["odometry_one_meter"] == (
         "script.test.odometry_one_meter"
     )
+
+
+def test_test_entry_registers_odometry_forward_one_meter_script() -> None:
+    """板端测试入口必须能分发到里程计纵向一米标定脚本."""
+
+    module = load_board_test_entry_module()
+
+    assert module.TEST_MODULES["odometry_forward_one_meter"] == (
+        "script.test.odometry_forward_one_meter"
+    )
+
+
+def test_startup_config_defaults_to_normal_mode() -> None:
+    """启动配置默认不进入板端测试入口."""
+
+    module = load_board_test_entry_module()
+
+    assert module.startup_params.STARTUP_TEST_MODE is False

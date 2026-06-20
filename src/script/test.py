@@ -4,6 +4,7 @@ from config import startup as startup_params
 
 
 TEST_MODULES = {
+    "odometry_forward_one_meter": "script.test.odometry_forward_one_meter",
     "odometry_one_meter": "script.test.odometry_one_meter",
     "wireless_contention": "script.test.wireless_contention",
 }
