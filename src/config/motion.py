@@ -22,8 +22,8 @@ MOTION_STOP_CONFIRM_TICKS = 3
 WHEEL_DIAMETER_M = 0.038
 # 里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
 ODOMETRY_DISTANCE_SCALE = 0.65
-# 位置控制最大速度, 单位 m/s, 在 P 控制中作为饱和限幅
-POS_MAX_SPEED = 0.05
+# 位置控制最大命令速度, 单位脉冲/控制拍
+POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
 POS_KP = 2.0
 # 位置锁定容差, 单位米, 位置偏差小于此值时认为已到达目标

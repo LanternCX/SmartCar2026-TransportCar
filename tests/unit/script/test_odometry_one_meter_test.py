@@ -77,7 +77,7 @@ class _FakeCar:
 
 
 def test_distance_calibration_resets_runs_y_positive_target_and_stops() -> None:
-    """标定脚本复位后只下发车体系 y+ 位移目标并在完成后停车."""
+    """标定脚本复位后只下发车体系 y+ 前进目标并在完成后停车."""
 
     module = load_test_script_module()
     car = _FakeCar()

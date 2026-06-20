@@ -1,7 +1,7 @@
-"""里程计纵向距离标定脚本.
+"""里程计横向距离标定脚本.
 
 @file src/script/test/odometry_forward_one_meter.py
-@brief 让车辆按当前里程计执行一次车体系 x+ 位移动作, 用于现场测量纵向真实距离
+@brief 让车辆按当前里程计执行一次车体系 x+ 位移动作, 用于现场测量右移真实距离
 """
 
 import time

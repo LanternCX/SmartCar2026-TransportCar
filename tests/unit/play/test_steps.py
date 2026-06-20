@@ -17,8 +17,8 @@ class _FakeContext:
         self.angle_done = False
         self.yellow_ready = False
 
-    def set_position_y(self, value):
-        self.events.append(("position_y", float(value)))
+    def set_position_y(self, value, max_speed_cmd=None):
+        self.events.append(("position_y", float(value), max_speed_cmd))
 
     def set_angle(self, value):
         self.events.append(("angle", float(value)))
@@ -35,8 +35,8 @@ class _FakeContext:
     def yellow_line_ready(self):
         return self.yellow_ready
 
-    def set_position_x(self, value):
-        self.events.append(("position_x", float(value)))
+    def set_position_x(self, value, max_speed_cmd=None):
+        self.events.append(("position_x", float(value), max_speed_cmd))
 
     def write_velocity_x(self, value):
         self.events.append(("velocity_x", float(value)))
@@ -57,14 +57,26 @@ def test_position_y_step_writes_target_only_once_and_waits_done() -> None:
 
     assert first == "waiting"
     assert second == "waiting"
-    assert ctx.events == [("position_y", 0.3)]
+    assert ctx.events == [("position_y", 0.3, None)]
 
     ctx.position_y_done = True
 
     third = step.tick(ctx)
 
     assert third == "finished"
-    assert ctx.events == [("position_y", 0.3)]
+    assert ctx.events == [("position_y", 0.3, None)]
+
+
+def test_position_steps_pass_optional_command_speed_limit() -> None:
+    ctx = _FakeContext()
+
+    PositionXStep(0.2, max_speed_cmd=1.5).tick(ctx)
+    PositionYStep(0.3, max_speed_cmd=2.5).tick(ctx)
+
+    assert ctx.events == [
+        ("position_x", 0.2, 1.5),
+        ("position_y", 0.3, 2.5),
+    ]
 
 
 def test_angle_step_writes_target_only_once_and_waits_done() -> None:

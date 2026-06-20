@@ -30,6 +30,10 @@ from tests.unit.runtime.transport_runtime_support import (
 )
 
 
+MASTER_STATE_STARTUP_MOVE = 9
+ASSISTANT_STATE_STARTUP_MOVE = 8
+
+
 def _pack_task_arg(config_id, object_id):
     packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
     if packed >= 0x8000:
@@ -53,6 +57,13 @@ def _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6
         _ack_latest_tcp_if_needed(master_uart6)
         run_runtime_cycle(assistant)
         _ack_latest_tcp_if_needed(assistant_uart6)
+        if master._state_machine.state == MASTER_STATE_STARTUP_MOVE and master_car.command_lock:
+            master_car.command_lock = False
+        if (
+            assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE
+            and assistant_car.command_lock
+        ):
+            assistant_car.command_lock = False
         if master._state_machine.state == 2 and master_car.command_lock:
             master_car.command_lock = False
         if assistant._state_machine.state == 3 and assistant_car.command_lock:
@@ -70,6 +81,20 @@ def _pump_until(clock, master, assistant, master_car, assistant_car, master_uart
             return
         _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6, assistant_uart6)
     raise AssertionError("condition not reached")
+
+
+def _complete_master_startup_move(master, master_car) -> None:
+    run_runtime_cycle(master)
+    while master._state_machine.state == MASTER_STATE_STARTUP_MOVE:
+        run_runtime_cycle(master)
+        master_car.command_lock = False
+
+
+def _complete_assistant_startup_move(assistant, assistant_car) -> None:
+    run_runtime_cycle(assistant)
+    while assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+        run_runtime_cycle(assistant)
+        assistant_car.command_lock = False
 
 
 def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
@@ -303,6 +328,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)
@@ -346,7 +372,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
 
 def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
-    install_fake_core(monkeypatch)
+    cars = install_fake_core(monkeypatch)
     assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
     assistant_uart6 = BufferedUart()
     assistant_uart8 = BufferedUart()
@@ -359,6 +385,8 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
             now_ms=clock,
         ),
     )
+    assistant_car = cars[0]
+    _complete_assistant_startup_move(assistant, assistant_car)
 
     frame = encode_frame(
         0x02,
@@ -407,6 +435,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)
@@ -499,7 +528,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
 
 def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
-    install_fake_core(monkeypatch)
+    cars = install_fake_core(monkeypatch)
     assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
     sender_uart8, assistant_uart8 = make_linked_uart_pair()
     assistant_uart6 = BufferedUart()
@@ -513,6 +542,8 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
             now_ms=clock,
         ),
     )
+    assistant_car = cars[0]
+    _complete_assistant_startup_move(assistant, assistant_car)
 
     assert sender.tcp(UART8).write(
         TOPIC_ASSISTANT_STATE_SYNC,
@@ -555,6 +586,7 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
         ),
     )
     master_car = cars[0]
+    _complete_master_startup_move(master, master_car)
 
     for _ in range(10):
         run_runtime_cycle(master)

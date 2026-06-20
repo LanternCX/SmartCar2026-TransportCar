@@ -528,6 +528,21 @@ def test_transport_car_set_relative_translation_target_accepts_command_speed_lim
     assert vy_cmd == pytest.approx(0.0)
 
 
+def test_transport_car_position_default_speed_limit_uses_command_units() -> None:
+    """默认位置控制速度上限使用编码器命令单位."""
+
+    _transport_car, car = _make_control_car(
+        heading_est=0.0,
+        odometry=_Odom(x=0.0, y=0.0),
+    )
+
+    car.set_relative_translation_target(2.0, 0.0)
+    vx_cmd, vy_cmd = car._compute_planar_targets(0.005, 0.0)
+
+    assert vx_cmd == pytest.approx(_transport_car.POS_MAX_SPEED)
+    assert vy_cmd == pytest.approx(0.0)
+
+
 def test_transport_car_clear_retreat_target_generates_negative_y_command() -> None:
     """收尾后退目标应生成车体系 Y 负方向的非零控制命令."""
 

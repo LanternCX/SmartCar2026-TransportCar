@@ -79,7 +79,7 @@ class _FakeCar:
 
 
 def test_forward_distance_calibration_runs_x_positive_target_and_stops() -> None:
-    """纵向标定脚本复位后只下发车体系 x+ 位移目标并在完成后停车."""
+    """横向标定脚本复位后只下发车体系 x+ 右移目标并在完成后停车."""
 
     module = load_test_script_module()
     car = _FakeCar()

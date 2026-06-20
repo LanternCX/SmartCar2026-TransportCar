@@ -29,13 +29,14 @@ class _BaseStep:
 
 
 class PositionXStep(_BaseStep):
-    def __init__(self, target, on_enter=None, on_exit=None):
+    def __init__(self, target, max_speed_cmd=None, on_enter=None, on_exit=None):
         super().__init__(on_enter=on_enter, on_exit=on_exit)
         self.target = float(target)
+        self.max_speed_cmd = None if max_speed_cmd is None else float(max_speed_cmd)
 
     def _enter(self, ctx):
         super()._enter(ctx)
-        ctx.set_position_x(self.target)
+        ctx.set_position_x(self.target, self.max_speed_cmd)
 
     def tick(self, ctx):
         self._enter_once(ctx)
@@ -46,13 +47,14 @@ class PositionXStep(_BaseStep):
 
 
 class PositionYStep(_BaseStep):
-    def __init__(self, target, on_enter=None, on_exit=None):
+    def __init__(self, target, max_speed_cmd=None, on_enter=None, on_exit=None):
         super().__init__(on_enter=on_enter, on_exit=on_exit)
         self.target = float(target)
+        self.max_speed_cmd = None if max_speed_cmd is None else float(max_speed_cmd)
 
     def _enter(self, ctx):
         super()._enter(ctx)
-        ctx.set_position_y(self.target)
+        ctx.set_position_y(self.target, self.max_speed_cmd)
 
     def tick(self, ctx):
         self._enter_once(ctx)
