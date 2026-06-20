@@ -24,12 +24,12 @@ class OmniKinematics:
         - wheel_diameter: 轮子直径, 单位米
         - gear_ratio: 电机减速比 30: 1
         - encoder_ppr: 编码器每圈脉冲数 7 PPR
-        - counts_per_rev: 轮子一圈的编码器总计数(多路四倍频)
+        - counts_per_rev: 轮子一圈的编码器计数
         """
         self.wheel_diameter = float(motion_params.WHEEL_DIAMETER_M)
         self.gear_ratio = 30
         self.encoder_ppr = 7
-        self.counts_per_rev = self.encoder_ppr * self.gear_ratio * 4
+        self.counts_per_rev = self.encoder_ppr * self.gear_ratio
         self.wheel_circumference = self.wheel_diameter * math.pi
         self.m_per_pulse = self.wheel_circumference / self.counts_per_rev
 
@@ -154,9 +154,10 @@ class Odometry:
 
         v_world_x = vx_robot * cos_t - vy_robot * sin_t
         v_world_y = vx_robot * sin_t + vy_robot * cos_t
+        distance_scale = float(motion_params.ODOMETRY_DISTANCE_SCALE)
 
-        self.x += v_world_x * dt
-        self.y += v_world_y * dt
+        self.x += v_world_x * dt * distance_scale
+        self.y += v_world_y * dt * distance_scale
 
     def reset(self, x=0.0, y=0.0):
         """@brief 重置里程计

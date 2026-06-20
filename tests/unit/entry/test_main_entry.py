@@ -244,6 +244,7 @@ def test_main_entry_blocks_assistant_script_when_voltage_is_low(
     """辅车入口阶段电压不足时只进入蜂鸣告警."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
     launched_scripts = []
     alarmed = []
 
@@ -277,6 +278,7 @@ def test_main_entry_blocks_master_script_with_master_voltage_threshold(
     """主车入口阶段按 11.5V 阈值保护."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
     launched_scripts = []
     alarmed = []
 
@@ -310,6 +312,7 @@ def test_main_entry_allows_assistant_script_above_assistant_voltage_threshold(
     """辅车入口阶段不使用主车 11.5V 阈值."""
 
     main = load_main_module()
+    main.startup_params.STARTUP_TEST_MODE = False
     launched_scripts = []
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)

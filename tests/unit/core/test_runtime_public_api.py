@@ -12,7 +12,7 @@ from config import motion as motion_params
 from config import safety as safety_params
 from config import storage as storage_params
 from config import vision as vision_params
-from control.kinematics import OmniKinematics
+from control.kinematics import Odometry, OmniKinematics
 from tests.unit.core.runtime_support import (
     CaptureUart,
     DummyMotor,
@@ -174,6 +174,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
+    assert float(motion_params.ODOMETRY_DISTANCE_SCALE) > 0.0
     assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
     assert float(safety_params.V_CMD_MAX) > 0.0
@@ -204,6 +205,16 @@ def test_transport_clear_retreat_distance_exceeds_position_tolerance() -> None:
     )
 
 
+def test_position_control_params_compensate_encoder_count_scale() -> None:
+    """位置控制参数保持现场调试后的运动量级."""
+
+    assert float(motion_params.POS_MAX_SPEED) > 0.0
+    assert float(motion_params.POS_TOLERANCE) >= 0.0
+    assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > float(
+        motion_params.POS_TOLERANCE
+    )
+
+
 def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
     """全向轮运动学使用运动配置中的轮径计算脉冲距离."""
 
@@ -212,6 +223,26 @@ def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
     assert kinematics.wheel_diameter == pytest.approx(
         float(motion_params.WHEEL_DIAMETER_M)
     )
+
+
+def test_omni_kinematics_uses_measured_encoder_counts_per_wheel_rev() -> None:
+    """全向轮运动学按编码器实测量级计算轮子单圈计数."""
+
+    kinematics = OmniKinematics()
+
+    assert kinematics.counts_per_rev == pytest.approx(7 * 30)
+
+
+def test_odometry_applies_distance_scale_from_field_measurement() -> None:
+    """里程计按现场标定比例积分平移距离."""
+
+    odometry = Odometry()
+    scale = float(motion_params.ODOMETRY_DISTANCE_SCALE)
+
+    odometry.update(0.0, 1.0, 0.0, 1.0)
+
+    assert odometry.x == pytest.approx(0.0)
+    assert odometry.y == pytest.approx(scale)
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:

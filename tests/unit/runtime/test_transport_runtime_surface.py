@@ -36,6 +36,8 @@ from protocol.topic import (
     UART8,
 )
 from protocol.transport import create_transport
+from play.routines.assistant_return_garage import ASSISTANT_LEAD_DISTANCE
+from play.routines.master_return_garage import MASTER_LEAD_DISTANCE
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -773,7 +775,11 @@ def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) 
 
     assert runtime._local_vision_control_paused is False
     assert runtime.play.current_play is not None
-    assert ("set_relative_translation_target", 0.0, 0.3) in cars[0].events
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        ASSISTANT_LEAD_DISTANCE,
+    ) in cars[0].events
 
 
 def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
@@ -1125,7 +1131,11 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     runtime._apply_motion_outputs()
 
     assert runtime.play.current_play is not None
-    assert ("set_relative_translation_target", 0.0, -0.3) in cars[0].events
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        MASTER_LEAD_DISTANCE,
+    ) in cars[0].events
 
 
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
@@ -1510,7 +1520,11 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     runtime._write_effective_velocity()
 
     assert runtime.play.current_play is not None
-    assert ("set_relative_translation_target", 0.0, 0.3) in cars[0].events
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        ASSISTANT_LEAD_DISTANCE,
+    ) in cars[0].events
     cars[0].command_lock = False
     cars[0].heading_est = 0.0
     runtime._write_effective_velocity()

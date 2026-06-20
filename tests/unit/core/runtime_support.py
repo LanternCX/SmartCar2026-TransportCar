@@ -292,6 +292,7 @@ def install_transport_car_stubs() -> None:
         "MOTION_STOP_CONFIRM_TICKS": 3,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
+        "ODOMETRY_DISTANCE_SCALE": 1.0,
         "POS_TOLERANCE": 0.01,
         "ANGLE_TOLERANCE": 1.0,
         "ACTIVE_WHEELS": ("m", "l", "r"),
