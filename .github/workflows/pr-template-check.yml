@@ -57,9 +57,6 @@ jobs:
               if (!checklist.match(/^- \[[xX]\] 相关文档已更新$/m)) {
                 errors.push('检查清单未勾选 "相关文档已更新"');
               }
-              if (!checklist.match(/^- \[[xX]\] 已归档 PR 有关 spec\/plan$/m)) {
-                errors.push('检查清单未勾选 "已归档 PR 有关 spec/plan"');
-              }
               if (isBoardRelated && !checklist.match(/^- \[[xX]\] 已进行板端测试$/m)) {
                 errors.push('PR 涉及 src 目录改动，检查清单未勾选 "已进行板端测试"');
               }

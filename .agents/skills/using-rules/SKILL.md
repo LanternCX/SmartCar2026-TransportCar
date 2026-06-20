@@ -42,4 +42,4 @@ description: Use when implementing or refactoring code in this repository and ne
 
 - `using-rules` 只服务实现前和实现中的规则查询。
 - 完成前收口评审使用 `project-extension-requesting-code-review`。
-- `docs/superpowers/specs/` 与 `docs/superpowers/plans/` 的归档整理使用 `reference-sync`。
+- 长期协作记忆由 Serena memory 维护。

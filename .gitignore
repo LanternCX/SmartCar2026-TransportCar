@@ -15,4 +15,6 @@ __pycache__/
 
 # agent
 PROMPT.md
-.serena/
+.serena/cache/
+.serena/project.local.yml
+docs/superpowers/
