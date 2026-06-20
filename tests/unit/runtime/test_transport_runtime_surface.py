@@ -66,16 +66,22 @@ def _pack_task_arg(config_id, object_id):
 
 
 def _complete_master_startup_move(runtime, car) -> None:
-    run_runtime_cycle(runtime)
+    runtime._state_machine.step(False)
+    runtime._state_machine.poll_assistant_request()
+    runtime._state_machine.mark_startup_sync_acknowledged()
+    runtime._pending_assistant_sync = None
     while runtime._state_machine.state == MASTER_STATE_STARTUP_MOVE:
         run_runtime_cycle(runtime)
         car.command_lock = False
 
 
 def _complete_assistant_startup_move(runtime, car) -> None:
-    run_runtime_cycle(runtime)
+    runtime._state_machine.apply_master_state(ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
+    runtime.step()
+    runtime.poll_transport_tx()
     while runtime._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
-        run_runtime_cycle(runtime)
+        runtime.step()
+        runtime.poll_transport_tx()
         car.command_lock = False
 
 

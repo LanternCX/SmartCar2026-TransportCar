@@ -31,6 +31,8 @@ def _load_master_state_machine():
 
 def _enter_initial_search(machine):
     machine.step(orbit_finished=False)
+    machine.poll_assistant_request()
+    machine.mark_startup_sync_acknowledged()
     machine.mark_startup_move_completed()
 
 
@@ -74,7 +76,7 @@ def test_master_state_machine_enters_search_and_builds_task_context() -> None:
     }
 
 
-def test_master_state_machine_runs_startup_move_before_search() -> None:
+def test_master_state_machine_waits_for_startup_sync_before_startup_move() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -84,9 +86,17 @@ def test_master_state_machine_runs_startup_move_before_search() -> None:
 
     machine.step(orbit_finished=False)
 
-    assert machine.state == MasterStateMachine.STATE_STARTUP_MOVE
+    assert machine.state == MasterStateMachine.STATE_STARTUP_SYNC
     assert machine.poll_task_request() is None
+    assert machine.poll_assistant_request() == {
+        "kind": "assistant_startup",
+        "state": MasterStateMachine.ASSISTANT_STARTUP_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_STARTUP_SYNC_TARGET,
+        "arg": 0,
+    }
 
+    machine.mark_startup_sync_acknowledged()
+    assert machine.state == MasterStateMachine.STATE_STARTUP_MOVE
     machine.mark_startup_move_completed()
     task_request = machine.poll_task_request()
 

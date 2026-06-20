@@ -36,7 +36,7 @@ class AssistantStateMachine:
     """维护辅车由主车驱动的子状态"""
 
     def __init__(self):
-        self.state = ASSISTANT_STATE_STARTUP_MOVE
+        self.state = ASSISTANT_STATE_IDLE
         self.target = ASSISTANT_TARGET_NONE
         self.arg = 0
 
@@ -69,10 +69,15 @@ class AssistantStateMachine:
             and state != ASSISTANT_STATE_CLEAR_OBJECT
             and state != ASSISTANT_STATE_RETURN_FOLLOW
             and state != ASSISTANT_STATE_FINISHED
+            and state != ASSISTANT_STATE_STARTUP_MOVE
         ):
             return False
         if (
-            (state == ASSISTANT_STATE_RETURN_FOLLOW or state == ASSISTANT_STATE_FINISHED)
+            (
+                state == ASSISTANT_STATE_RETURN_FOLLOW
+                or state == ASSISTANT_STATE_FINISHED
+                or state == ASSISTANT_STATE_STARTUP_MOVE
+            )
             and target != ASSISTANT_TARGET_NONE
         ):
             return False

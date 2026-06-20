@@ -215,8 +215,6 @@ class AssistantFollowRuntime:
 
     def _consume_master_sync(self) -> None:
         """消费主车下发的辅车状态同步."""
-        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
-            return
         if (
             self.transport_service.tcp(UART8).read(
                 TOPIC_ASSISTANT_STATE_SYNC, self._sync_body
@@ -264,6 +262,13 @@ class AssistantFollowRuntime:
             self._post_orbit_realign_active = False
             self._clear_completed = False
             self._enter_follow_state()
+        elif self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+            self._clear_motion_inputs()
+            self._pending_local_vision_sync = None
+            self._pending_target_found_report = None
+            self._approach_target_found_done = False
+            self._post_orbit_realign_active = False
+            self._clear_completed = False
         elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._post_orbit_realign_active = False
             self._clear_completed = False

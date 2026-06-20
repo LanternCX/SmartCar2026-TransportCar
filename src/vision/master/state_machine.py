@@ -19,6 +19,8 @@ ASSISTANT_CLEAR_SYNC_STATE = 5
 ASSISTANT_CLEAR_SYNC_TARGET = 1
 ASSISTANT_RETURN_FOLLOW_SYNC_STATE = 6
 ASSISTANT_RETURN_FOLLOW_SYNC_TARGET = 0
+ASSISTANT_STARTUP_SYNC_STATE = 8
+ASSISTANT_STARTUP_SYNC_TARGET = 0
 
 # 主车全局状态编号
 STATE_IDLE = 0
@@ -32,6 +34,7 @@ STATE_RETURN_GARAGE_RETREAT = 6
 STATE_RETURN_GARAGE_LINE = 7
 STATE_FINISHED = 8
 STATE_STARTUP_MOVE = 9
+STATE_STARTUP_SYNC = 10
 _STATE_NAMES = (
     "IDLE",
     "SEARCH_OBJECT",
@@ -43,6 +46,7 @@ _STATE_NAMES = (
     "RETURN_GARAGE_LINE",
     "FINISHED",
     "STARTUP_MOVE",
+    "STARTUP_SYNC",
 )
 
 # 主车目标编号
@@ -122,7 +126,13 @@ class MasterStateMachine:
 
         if not self._search_started and self.state == STATE_IDLE:
             self._search_started = True
-            self._enter_state(STATE_STARTUP_MOVE)
+            self._enter_state(STATE_STARTUP_SYNC)
+            self._pending_assistant_request = {
+                "kind": "assistant_startup",
+                "state": ASSISTANT_STARTUP_SYNC_STATE,
+                "target": ASSISTANT_STARTUP_SYNC_TARGET,
+                "arg": 0,
+            }
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
@@ -153,6 +163,13 @@ class MasterStateMachine:
         if self.state != STATE_STARTUP_MOVE:
             return
         self._enter_search_with_task(self._search_task_arg)
+
+    def mark_startup_sync_acknowledged(self):
+        """标记辅车启动同步已确认并进入启动动作状态"""
+
+        if self.state != STATE_STARTUP_SYNC:
+            return
+        self._enter_state(STATE_STARTUP_MOVE)
 
     def handle_event(self, context_id, event, value):
         """消费视觉事件"""

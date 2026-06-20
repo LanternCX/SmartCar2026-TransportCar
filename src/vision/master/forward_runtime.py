@@ -448,6 +448,8 @@ class MasterForwardRuntime:
                 self._log_sync_done("master->assistant", pending)
                 if pending.get("kind") == "assistant_object":
                     self._state_machine.mark_assistant_object_acknowledged()
+                elif pending.get("kind") == "assistant_startup":
+                    self._state_machine.mark_startup_sync_acknowledged()
                 elif pending.get("kind") == "assistant_follow":
                     self._state_machine.mark_assistant_follow_acknowledged()
                 elif pending.get("kind") == "assistant_transport":
