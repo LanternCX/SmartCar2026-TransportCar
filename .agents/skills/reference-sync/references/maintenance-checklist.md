@@ -19,14 +19,14 @@
   - [ ] Skill 入口页仍能路由到 `@../mpy-cli-dev`
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
-### 串口通信协议正文
+### 串口通信协议约束
 
 - 正式落点：`docs/developer/protocol.md`
 - 维护检查项：
-  - [ ] 协议字段、链路约定和示例报文仍然有效
+  - [ ] 链路约定、协议设计取舍和硬件连接约束仍然有效
   - [ ] `using-rules` 入口页仍能路由到正式正文
-  - [ ] 正文没有混入来源追溯类维护信息
-  - [ ] 正文没有维护其他格式兼容层或多套字段双轨说明
+  - [ ] 正文没有混入字段表、示例报文或来源追溯类维护信息
+  - [ ] 正文没有维护兼容层或多套字段双轨说明
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
 ### `wireless_uart` 参考文档
@@ -36,15 +36,6 @@
   - [ ] 原始项目链接与说明书链接仍然可用或已替换为新的有效来源
   - [ ] 本地只保留整理后的 Markdown 与配图, 不再恢复 PDF 副本
   - [ ] 配图目录与正文引用保持一致, 没有失效链接
-  - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
-
-### `docs/superpowers` 协作文档归档规则
-
-- 正式落点：`.agents/skills/reference-sync/references/superpowers-doc-archive.md`
-- 维护检查项：
-  - [ ] specs / plans 根目录和 archive 目录规则仍然有效
-  - [ ] 归档所依赖的 PR 状态已通过本地 git、GitHub 或用户确认
-  - [ ] 搬运规则没有混入具体设计正文或执行正文
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
 ### `problem_statement` 外部链接入口

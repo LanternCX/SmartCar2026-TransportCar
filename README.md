@@ -1,59 +1,24 @@
 # 2025 智能车蚂蚁搬家组 - 搬运车模代码
 
-## 项目定位
+本仓库维护 RT1021 搬运车模控制代码, 覆盖主辅双车协同、底盘控制、主辅通信、本地视觉链路和主机侧测试。
 
-本仓库维护 RT1021 搬运车模控制代码，覆盖主辅双车协同、底盘控制、主辅通信、本地视觉链路和主机侧测试。
+文档只记录代码和 git log 难以稳定给出的信息: 项目方向、外部约定、硬件事实、跨仓库职责、调试结论和长期决策。当前软件行为以代码、注释和行为测试为准。
 
-维护时以代码、注释和行为测试作为事实来源。文档只补充代码难以表达的项目方向、外部约定、题面来源和可复用协作记忆。
+## 协作入口
 
-## 主要入口
-
-- 启动入口: [src/main.py](src/main.py)
-- 正式运行脚本: [src/script/remote_control.py](src/script/remote_control.py)
-- 板端测试入口: [src/script/test.py](src/script/test.py)
-- 共享底盘: [src/core/runtime.py](src/core/runtime.py)
-- 主车角色: [src/vision/master/](src/vision/master/)
-- 辅车角色: [src/vision/assistant/](src/vision/assistant/)
-- 串口协议工具: [src/protocol/](src/protocol/)
-- 行为测试: [tests/](tests/)
+- 项目规则: `AGENTS.md`
+- 代码外项目约束: `docs/developer/`
+- 赛题外部链接: `docs/problem_statement/README.md`
+- 长期协作记忆: `.serena/memories/`
 
 ## 附属仓库
 
 - OpenART 视觉仓库位于 `../SmartCar2026-Vision`。
 - 主机端侧手柄控制上位机位于 `../SmartCar2026-Controller`。
-- 项目规则、题面材料、协作文档和长期开发文档以本仓库为准。
 
-## 文档入口
+## 板端事实
 
-文档按“短索引 -> 代码与注释 -> 测试 -> memory”的顺序使用，不维护代码事实的长篇镜像。Agent 优先读代码和注释理解功能与局部设计原因，阶段取舍和事故背景再查 memory；代码和行为测试能共同约束事实，文档镜像代码功能会增加同步风险。
-
-- [项目方向](docs/developer/strategy.md)
-- [电控与运行入口](docs/developer/control.md)
-- [串口通信协议](docs/developer/protocol.md)
-- [状态机说明](docs/developer/state.md)
-- [视觉职责](docs/developer/vision.md)
-- [赛题资料](docs/problem_statement/README.md)
-- [协作记忆](docs/superpowers/memory/)
-- GitHub issue 和 PR 记录用于任务推进与历史追溯。
-
-## 本地开发
-
-```bash
-uv sync --group test
-uv run --group test python -m pytest tests/unit tests/contract/serial_protocol -q
-```
-
-板端工具通过独立依赖组进入环境：
-
-```bash
-uv sync --group board
-uv run --group board mpy-cli plan
-bash build.sh
-```
-
-## 板端版本备忘
-
-`/dev/cu.usbmodem101` 实测为 RT1021 MicroPython 板端：
+`/dev/cu.usbmodem101` 实测为 RT1021 MicroPython 板端:
 
 - MicroPython: `v1.20.0`
 - 固件标识: `RT1021 MicroPython by NXP & SeekFree with CoreBoard-144Pin-BTB V3.1.0`
@@ -61,7 +26,7 @@ bash build.sh
 - `.mpy` 版本: `version=6`, `sub-version=1`
 - `.mpy` native 架构: `armv7emdp`
 
-因此交叉编译配置应使用：
+交叉编译配置使用:
 
 ```toml
 mpy_cross_arch = "armv7emdp"
