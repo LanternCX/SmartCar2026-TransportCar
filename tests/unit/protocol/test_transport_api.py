@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from protocol.codec import encode_velocity_body  # noqa: E402
+from protocol.codec import encode_master_vision_task_sync_body, encode_velocity_body  # noqa: E402
 from protocol.frame import encode_frame  # noqa: E402
 from protocol.topic import (  # noqa: E402
     ROLE_MASTER,
@@ -103,7 +103,7 @@ def test_tcp_write_busy_and_delivery_lifecycle() -> None:
     clock = _ManualClock(0)
     uart6 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
-    body = bytes([7, 1, 3, 0, 0])
+    body = encode_master_vision_task_sync_body(7, 1, 3, 0)
 
     assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "accepted"
     assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "pending"
@@ -153,7 +153,13 @@ def test_tcp_write_returns_dropped_priority_when_ack_is_pending() -> None:
 
     transport.poll_rx()
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([7, 1, 3, 0, 0])) == "dropped_priority"
+    assert (
+        transport.tcp(UART6).write(
+            TOPIC_MASTER_VISION_TASK_SYNC,
+            encode_master_vision_task_sync_body(7, 1, 3, 0),
+        )
+        == "dropped_priority"
+    )
 
 
 def test_udp_write_still_accepts_latest_value_while_tcp_waits_for_ack() -> None:
@@ -162,7 +168,13 @@ def test_udp_write_still_accepts_latest_value_while_tcp_waits_for_ack() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([7, 1, 3, 0, 0])) == "accepted"
+    assert (
+        transport.tcp(UART6).write(
+            TOPIC_MASTER_VISION_TASK_SYNC,
+            encode_master_vision_task_sync_body(7, 1, 3, 0),
+        )
+        == "accepted"
+    )
     transport.poll_tx()
 
     assert (

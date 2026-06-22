@@ -4,7 +4,7 @@ from play.base import BasePlay
 from play.steps import AngleStep, PositionYStep, VelocityYStep
 
 
-ASSISTANT_LEAD_DISTANCE = 0.50
+ASSISTANT_LEAD_DISTANCE = 0.70
 RETURN_FORWARD_SPEED = 5
 FINAL_FORWARD_SPEED = 5
 RETURN_POSITION_SPEED = 5

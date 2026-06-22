@@ -10,7 +10,7 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
-from protocol.codec import encode_velocity_body  # noqa: E402
+from protocol.codec import encode_master_vision_task_sync_body, encode_velocity_body  # noqa: E402
 from protocol.frame import FRAME_SIZE, encode_frame  # noqa: E402
 from protocol.topic import (  # noqa: E402
     ROLE_MASTER,
@@ -160,7 +160,10 @@ def test_poll_tx_allows_only_one_frame_per_call_globally() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, bytes([1, 2, 3, 4, 5]))
+    transport.tcp(UART6).write(
+        TOPIC_MASTER_VISION_TASK_SYNC,
+        encode_master_vision_task_sync_body(1, 2, 3, 4),
+    )
     transport.udp(UART8).write(
         TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
         encode_velocity_body(1.0, 0.0, 0.0, False),
@@ -222,7 +225,7 @@ def test_poll_rx_reassembles_fragmented_udp_frame_across_cycles() -> None:
 
 def test_poll_rx_reassembles_fragmented_ack_frame_across_cycles() -> None:
     clock = _ManualClock(0)
-    body = bytes([7, 1, 3, 0, 0])
+    body = encode_master_vision_task_sync_body(7, 1, 3, 0)
     uart6 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
 
