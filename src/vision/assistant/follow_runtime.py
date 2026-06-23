@@ -48,6 +48,7 @@ from vision.assistant.state_machine import (
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_FINISHED,
     ASSISTANT_STATE_FOLLOW,
+    ASSISTANT_STATE_IDLE,
     ASSISTANT_STATE_ORBIT,
     ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_STARTUP_MOVE,
@@ -525,6 +526,10 @@ class AssistantFollowRuntime:
             self._transport_car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
 
     def _should_store_velocity(self, source: str) -> bool:
+        if self._state_machine.state == ASSISTANT_STATE_IDLE:
+            return False
+        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+            return False
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
             return source == "uart6" and self._pending_local_vision_sync is None
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:

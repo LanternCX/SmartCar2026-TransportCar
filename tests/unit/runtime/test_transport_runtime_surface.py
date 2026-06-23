@@ -616,6 +616,57 @@ def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     assert snapshot["uart8_input_status"] == "active"
 
 
+def test_assistant_runtime_ignores_velocity_received_during_startup_move(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(0.5, -0.25, 0.0, False),
+        )
+    )
+    uart8 = BufferedUart(
+        incoming=encode_frame(
+            0x01,
+            TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
+            0,
+            encode_velocity_body(1.0, 0.0, 0.25, True),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+
+    runtime._state_machine.apply_master_state(module.ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
+    runtime.poll_transport_rx()
+    for _ in range(8):
+        runtime.step()
+        runtime.poll_transport_tx()
+        cars[0].command_lock = False
+        if runtime._state_machine.state != module.ASSISTANT_STATE_STARTUP_MOVE:
+            break
+
+    assert runtime._state_machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert runtime._uart6_velocity is None
+    assert runtime._uart8_velocity is None
+    assert cars[0].last_chassis_target == {
+        "source": "assistant_follow",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
 def test_assistant_runtime_announces_follow_to_local_vision_on_startup(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
