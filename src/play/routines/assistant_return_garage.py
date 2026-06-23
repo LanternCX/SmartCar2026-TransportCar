@@ -7,7 +7,7 @@ from play.steps import AngleStep, PositionYStep, VelocityYStep
 ASSISTANT_LEAD_DISTANCE = 0.70
 RETURN_FORWARD_SPEED = 5
 FINAL_FORWARD_SPEED = 5
-RETURN_POSITION_SPEED = 5
+RETURN_POSITION_SPEED = 8
 
 
 def _clear_yellow_line_ready(ctx):
