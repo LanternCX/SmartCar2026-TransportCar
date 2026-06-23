@@ -22,7 +22,7 @@ def load_test_script_module():
     assert spec is not None
     assert spec.loader is not None
     module = module_from_spec(spec)
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module)  # pyright: ignore[reportAttributeAccessIssue]
     return module
 
 

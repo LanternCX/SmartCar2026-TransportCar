@@ -25,7 +25,7 @@ def _load_master_state_machine():
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load master state machine module")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module)  # pyright: ignore[reportAttributeAccessIssue]
     return module
 
 

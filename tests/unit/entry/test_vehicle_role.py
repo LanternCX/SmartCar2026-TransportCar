@@ -26,7 +26,7 @@ def load_vehicle_role_module(monkeypatch, pin_cls):
     assert spec is not None
     assert spec.loader is not None
     module = module_from_spec(spec)
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module)  # pyright: ignore[reportAttributeAccessIssue]
     return module
 
 
@@ -72,4 +72,3 @@ def test_decode_vehicle_role_rejects_invalid_pairs(
 
     with pytest.raises(ValueError):
         module.decode_vehicle_role(d8_val, d9_val)
-

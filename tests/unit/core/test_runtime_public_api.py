@@ -127,7 +127,7 @@ def _load_real_positional_pid_controller():
         raise RuntimeError("failed to load pid controller module")
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop("control.pid_math", None)
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module)  # pyright: ignore[reportAttributeAccessIssue]
     return module.PositionalPIDController
 
 
