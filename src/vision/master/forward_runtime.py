@@ -165,6 +165,8 @@ class MasterForwardRuntime:
         self._turn_back_stop_ticks = 0
         self._turn_back_target_heading_deg = None
         self._last_task_sync_status = None
+        self._last_transport_flow_log = None
+        self._last_feedforward_flow_log = None
         self._velocity_body = bytearray(7)
         self._local_vision_control_body = bytearray(1)
         self._task_event_body = bytearray(10)
@@ -359,6 +361,16 @@ class MasterForwardRuntime:
         if self._active_task_context_id == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
             self._remember_task_event_threshold(packet)
+            log(
+                "master_event",
+                "active context=%d state=%d event=%d value=%d"
+                % (
+                    context_id,
+                    int(self._state_machine.state),
+                    int(packet["event"]),
+                    int(packet["value"]),
+                ),
+            )
             if (
                 self._state_machine.state == STATE_RETURN_GARAGE_RETREAT
                 and int(packet["event"]) == int(EVENT_RETURN_LINE_ALIGNED)
@@ -374,15 +386,60 @@ class MasterForwardRuntime:
                 packet["event"],
                 packet["value"],
             )
+            if int(packet["event"]) == int(EVENT_ARRIVED):
+                log(
+                    "master_finish",
+                    "arrived context=%d state=%d value=%d"
+                    % (
+                        context_id,
+                        int(self._state_machine.state),
+                        int(packet["value"]),
+                    ),
+                )
+                if self._state_machine.state != STATE_TRANSPORT_OBJECT:
+                    self._active_task_context_id = None
+                    self._latest_uart6_velocity = None
+                    self._uart6_reset_version = self.transport_service.get_udp_version(
+                        UART6, TOPIC_LOCAL_VISION_VELOCITY
+                    )
             return
         if self._pending_task_sync is not None and context_id == int(self._pending_task_sync["context_id"]):
             self._clear_local_velocity_for_reliable_event("master_vision_event")
+            log(
+                "master_event",
+                "pending context=%d state=%d event=%d value=%d"
+                % (
+                    context_id,
+                    int(self._state_machine.state),
+                    int(packet["event"]),
+                    int(packet["value"]),
+                ),
+            )
             self._pending_task_event = {
                 "context_id": context_id,
                 "event": int(packet["event"]),
                 "value": int(packet["value"]),
                 "threshold": tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0))),
             }
+            return
+        pending_context = -1
+        if self._pending_task_sync is not None:
+            pending_context = int(self._pending_task_sync["context_id"])
+        active_context = -1
+        if self._active_task_context_id is not None:
+            active_context = int(self._active_task_context_id)
+        log(
+            "master_event",
+            "drop context=%d active=%d pending=%d state=%d event=%d value=%d"
+            % (
+                context_id,
+                active_context,
+                pending_context,
+                int(self._state_machine.state),
+                int(packet["event"]),
+                int(packet["value"]),
+            ),
+        )
 
     def _remember_task_event_threshold(self, packet: dict) -> None:
         threshold = tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0)))
@@ -481,10 +538,29 @@ class MasterForwardRuntime:
                 )
             return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
+            if not self._is_transport_finish_task_ready():
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "master_wait_finish_task",
+                    True,
+                )
+                return
             self._apply_transport_velocity()
             return
         if self._state_machine.state == STATE_ORBITING:
             self._apply_orbit_velocity_correction()
+            return
+        if self._state_machine.state == STATE_CLEAR_OBJECT:
+            if not self._clear_motion_started:
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "master_clear_hold",
+                    True,
+                )
             return
         if self._state_machine.state == STATE_RETURN_GARAGE_RETREAT:
             self._run_return_play()
@@ -514,6 +590,9 @@ class MasterForwardRuntime:
             return
         if self._state_machine.allows_search_velocity():
             self._apply_latest_uart6_velocity()
+
+    def _is_transport_finish_task_ready(self) -> bool:
+        return self._active_task_context_id == int(self._state_machine._current_context_id)
 
     def _run_return_play(self) -> None:
         if self.play.current_play is None:
@@ -613,6 +692,7 @@ class MasterForwardRuntime:
         if packet is not None:
             vx += float(packet.get("vx", 0.0))
             vy += float(packet.get("vy", 0.0))
+        self._log_transport_flow(vx, vy)
         self._transport_car.handle_velocity_packet(
             vx,
             vy,
@@ -681,9 +761,20 @@ class MasterForwardRuntime:
 
         @details 是否真正写出由 transport 的统一仲裁决定, 主车角色层不额外做发送互斥
         """
+        if self._pending_assistant_sync is not None or self._pending_sync is not None:
+            self._log_feedforward_flow("blocked_sync")
+            return
+        if (
+            self._state_machine.state == STATE_TRANSPORT_OBJECT
+            and not self._is_transport_finish_task_ready()
+        ):
+            self._log_feedforward_flow("blocked_finish_task")
+            return
         if not self._state_machine.allows_assistant_velocity_forward():
+            self._log_feedforward_flow("blocked_state")
             return
         if self._state_machine.needs_assistant_report_turn():
+            self._log_feedforward_flow("blocked_report_turn")
             return
         state = self._transport_car.control_state
         target = getattr(self._transport_car, "last_chassis_target", {})
@@ -699,6 +790,7 @@ class MasterForwardRuntime:
             TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
             body,
         )
+        self._log_feedforward_flow("sent")
 
     def _advance_state_machine(self) -> None:
         orbit_finished = False
@@ -928,6 +1020,87 @@ class MasterForwardRuntime:
             pending_event["event"],
             pending_event["value"],
         )
+        if (
+            int(pending_event["event"]) == int(EVENT_ARRIVED)
+            and self._state_machine.state != STATE_TRANSPORT_OBJECT
+        ):
+            self._active_task_context_id = None
+            self._latest_uart6_velocity = None
+            self._uart6_reset_version = self.transport_service.get_udp_version(
+                UART6, TOPIC_LOCAL_VISION_VELOCITY
+            )
+
+    def _log_transport_flow(self, vx: float, vy: float) -> None:
+        active_context = -1
+        if self._active_task_context_id is not None:
+            active_context = int(self._active_task_context_id)
+        pending_kind = "none"
+        pending_context = -1
+        pending_queued = 0
+        if self._pending_task_sync is not None:
+            pending_kind = str(self._pending_task_sync.get("kind", "task"))
+            pending_context = int(self._pending_task_sync["context_id"])
+            pending_queued = 1 if bool(self._pending_task_sync.get("queued")) else 0
+        signature = (
+            int(self._state_machine.state),
+            active_context,
+            pending_kind,
+            pending_context,
+            pending_queued,
+            int(self._transport_task_acknowledged),
+            int(self._transport_sync_acknowledged),
+        )
+        if self._last_transport_flow_log == signature:
+            return
+        self._last_transport_flow_log = signature
+        log(
+            "master_transport",
+            "drive state=%d active=%d pending_kind=%s pending=%d queued=%d task_ack=%d assistant_ack=%d vx=%.2f vy=%.2f"
+            % (
+                int(self._state_machine.state),
+                active_context,
+                pending_kind,
+                pending_context,
+                pending_queued,
+                int(self._transport_task_acknowledged),
+                int(self._transport_sync_acknowledged),
+                float(vx),
+                float(vy),
+            ),
+        )
+
+    def _log_feedforward_flow(self, status: str) -> None:
+        pending_kind = "none"
+        pending_queued = 0
+        if self._pending_assistant_sync is not None:
+            pending_kind = str(self._pending_assistant_sync.get("kind", "sync"))
+            pending_queued = 1 if bool(self._pending_assistant_sync.get("queued")) else 0
+        elif self._pending_sync is not None:
+            pending_kind = str(self._pending_sync.get("kind", "sync"))
+            pending_queued = 1 if bool(self._pending_sync.get("queued")) else 0
+        signature = (
+            str(status),
+            int(self._state_machine.state),
+            pending_kind,
+            pending_queued,
+            int(self._state_machine.allows_assistant_velocity_forward()),
+            int(self._state_machine.needs_assistant_report_turn()),
+        )
+        if self._last_feedforward_flow_log == signature:
+            return
+        self._last_feedforward_flow_log = signature
+        log(
+            "master_feedforward",
+            "status=%s state=%d pending_kind=%s queued=%d allow=%d report_turn=%d"
+            % (
+                str(status),
+                int(self._state_machine.state),
+                pending_kind,
+                pending_queued,
+                int(self._state_machine.allows_assistant_velocity_forward()),
+                int(self._state_machine.needs_assistant_report_turn()),
+            ),
+        )
 
     def _threshold_for_assistant_request(self, assistant_request: dict) -> tuple:
         if int(assistant_request.get("target", 0)) == TARGET_OBJECT:
@@ -942,9 +1115,10 @@ class MasterForwardRuntime:
     def _log_sync_start(self, link_name: str, pending: dict) -> None:
         log(
             "sync",
-            "%s sync start state=%d target=%d arg=%d"
+            "%s sync start kind=%s state=%d target=%d arg=%d"
             % (
                 link_name,
+                str(pending.get("kind", "sync")),
                 int(pending["state"]),
                 int(pending["target"]),
                 int(pending["arg"]),
@@ -954,9 +1128,10 @@ class MasterForwardRuntime:
     def _log_sync_done(self, link_name: str, pending: dict) -> None:
         log(
             "sync",
-            "%s sync done state=%d target=%d arg=%d"
+            "%s sync done kind=%s state=%d target=%d arg=%d"
             % (
                 link_name,
+                str(pending.get("kind", "sync")),
                 int(pending["state"]),
                 int(pending["target"]),
                 int(pending["arg"]),
@@ -966,8 +1141,9 @@ class MasterForwardRuntime:
     def _log_task_sync_start(self, pending: dict) -> None:
         log(
             "sync",
-            "master->camera sync start context=%d state=%d target=%d arg=%d"
+            "master->camera sync start kind=%s context=%d state=%d target=%d arg=%d"
             % (
+                str(pending.get("kind", "task")),
                 int(pending["context_id"]),
                 int(pending["state"]),
                 int(pending["target"]),
@@ -978,8 +1154,9 @@ class MasterForwardRuntime:
     def _log_task_sync_done(self, pending: dict) -> None:
         log(
             "sync",
-            "master->camera sync done context=%d state=%d target=%d arg=%d"
+            "master->camera sync done kind=%s context=%d state=%d target=%d arg=%d"
             % (
+                str(pending.get("kind", "task")),
                 int(pending["context_id"]),
                 int(pending["state"]),
                 int(pending["target"]),

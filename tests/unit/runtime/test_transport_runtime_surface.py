@@ -253,6 +253,237 @@ def test_master_runtime_logs_when_task_event_arrives(monkeypatch, capsys) -> Non
     assert "master_event: received context=7 event=8 value=0" in captured
 
 
+def test_master_runtime_logs_task_event_context_status(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._active_task_context_id = 7
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._handle_task_event({"context_id": 7, "event": 8, "value": 0})
+
+    runtime._active_task_context_id = None
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 8,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": True,
+    }
+    runtime._handle_task_event({"context_id": 8, "event": 8, "value": 0})
+
+    runtime._handle_task_event({"context_id": 9, "event": 8, "value": 0})
+
+    captured = capsys.readouterr().out
+    assert "master_event: active context=7 state=4 event=8 value=0" in captured
+    assert "master_finish: arrived context=7 state=4 value=0" in captured
+    assert "master_event: pending context=8 state=4 event=8 value=0" in captured
+    assert "master_event: drop context=9 active=-1 pending=8 state=4 event=8 value=0" in captured
+
+
+def test_master_runtime_logs_transport_and_feedforward_flow(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 8,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": False,
+    }
+    runtime._apply_transport_velocity()
+
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_clear",
+        "state": 5,
+        "target": 1,
+        "arg": 1,
+        "threshold": (0, 0, 0, 0, 0, 0),
+        "queued": False,
+    }
+    runtime._queue_feedforward_velocity()
+
+    captured = capsys.readouterr().out
+    assert (
+        "master_transport: drive state=4 active=-1 pending_kind=finish_task pending=8 queued=0"
+        in captured
+    )
+    assert (
+        "master_feedforward: status=blocked_sync state=5 pending_kind=assistant_clear queued=0"
+        in captured
+    )
+
+
+def test_master_runtime_holds_before_finish_task_is_delivered(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 9,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": False,
+    }
+
+    runtime._apply_motion_outputs()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_wait_finish_task",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
+def test_master_runtime_blocks_feedforward_before_finish_task_is_delivered(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 9,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": True,
+    }
+
+    runtime._queue_feedforward_velocity()
+    runtime.poll_transport_tx()
+
+    assert uart8.messages == []
+
+
+def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
+
+    runtime._handle_task_event({"context_id": 9, "event": module.EVENT_ARRIVED, "value": 0})
+
+    assert runtime._state_machine.state == module.STATE_CLEAR_OBJECT
+    assert runtime._active_task_context_id is None
+
+
+def test_master_runtime_holds_zero_during_clear_sync(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    cars[0].handle_velocity_packet(0.0, module.TRANSPORT_FORWARD_SPEED, 0.0, "master_transport", False)
+
+    runtime._apply_motion_outputs()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_clear_hold",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
+def test_master_runtime_blocks_feedforward_while_assistant_sync_pending(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_clear",
+        "state": 5,
+        "target": 1,
+        "arg": 1,
+        "threshold": (0, 0, 0, 0, 0, 0),
+        "queued": False,
+    }
+
+    runtime._queue_feedforward_velocity()
+    runtime.poll_transport_tx()
+
+    assert uart8.messages == []
+
+
 def test_master_runtime_forwards_target_threshold_to_assistant(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
@@ -396,6 +627,8 @@ def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch
         ),
     )
     runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
 
     run_runtime_cycle(runtime)
 
@@ -486,6 +719,8 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     runtime._last_role_state = module.STATE_SEARCH_OBJECT
 
     runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
 
     runtime._run_role_cycle()
 
