@@ -495,7 +495,6 @@ class AssistantFollowRuntime:
             vy += -float(uart8_velocity.get("vy", 0.0)) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity.get("vx", 0.0))
-            vy += float(uart6_velocity.get("vy", 0.0))
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
     def _write_orbit_velocity_correction(self) -> None:

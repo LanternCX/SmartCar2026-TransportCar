@@ -160,6 +160,38 @@ def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypa
     assert ("set_orbit_velocity_correction", 1.25, -0.5) in car.events
 
 
+def test_master_runtime_writes_zero_velocity_when_orbit_finishes(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_ORBITING
+    runtime._last_role_state = module.STATE_ORBITING
+    runtime._orbit_command_active = True
+    car.command_lock = False
+    car.control_state = {"vx": 1.25, "vy": -0.5, "omega": 0.0}
+
+    runtime._advance_state_machine()
+
+    assert runtime._state_machine.state != module.STATE_ORBITING
+    assert cars[0].last_chassis_target == {
+        "source": "master_orbit_finished",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
 def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -2011,7 +2043,7 @@ def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> N
     }
 
 
-def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
+def test_assistant_transport_uses_feedforward_y_without_local_vision_y(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
@@ -2037,7 +2069,7 @@ def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
     assert cars[0].last_chassis_target == {
         "source": "assistant",
         "vx": 1.0,
-        "vy": 2.0 - 4.0 * feedforward_scale,
+        "vy": -4.0 * feedforward_scale,
         "omega": 0.0,
         "has_omega": False,
     }

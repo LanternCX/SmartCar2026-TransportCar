@@ -796,6 +796,14 @@ class MasterForwardRuntime:
         orbit_finished = False
         if self._orbit_command_active:
             orbit_finished = not bool(getattr(self._transport_car, "command_lock", False))
+            if orbit_finished:
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "master_orbit_finished",
+                    True,
+                )
         self._state_machine.step(orbit_finished)
         if self._state_machine.state != STATE_ORBITING:
             self._orbit_command_active = False
