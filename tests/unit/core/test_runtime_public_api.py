@@ -127,7 +127,7 @@ def _load_real_positional_pid_controller():
         raise RuntimeError("failed to load pid controller module")
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop("control.pid_math", None)
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module)  # pyright: ignore[reportAttributeAccessIssue]
     return module.PositionalPIDController
 
 
@@ -701,7 +701,7 @@ def test_transport_car_orbit_target_reuses_legacy_omega_chain_and_scales_radius(
 
 
 def test_transport_car_orbit_velocity_correction_adds_wheel_targets() -> None:
-    """绕行视觉修正先独立解算为三轮目标, 再叠加到底盘目标."""
+    """绕行视觉修正先叠加到车体系目标, 再统一解算三轮目标."""
 
     _transport_car, car = _make_control_car(
         heading_est=10.0,
@@ -713,21 +713,30 @@ def test_transport_car_orbit_velocity_correction_adds_wheel_targets() -> None:
     car._run_control(0.005)
 
     omega_cmd = float(_transport_car.ORBIT_AUTO_OMEGA_MAX)
-    base_targets = car._inverse_kinematics(
-        -omega_cmd * 120.0,
-        0.0,
-        omega_cmd,
-    )
-    correction_targets = car._inverse_kinematics(60.0, 0.0, 0.0)
+    wheel_targets = car._inverse_kinematics(-omega_cmd * 120.0 + 60.0, 0.0, omega_cmd)
     expected_targets = {
-        "m": base_targets[0] + correction_targets[0],
-        "l": base_targets[1] + correction_targets[1],
-        "r": base_targets[2] + correction_targets[2],
+        "m": wheel_targets[0],
+        "l": wheel_targets[1],
+        "r": wheel_targets[2],
     }
 
     assert car.target_speeds == pytest.approx(expected_targets)
     assert car.orbit_mode is True
     assert car.command_lock is True
+
+
+def test_transport_car_orbit_planar_target_includes_velocity_correction() -> None:
+    """绕行平面目标由基础切向速度和视觉平移修正共同组成."""
+
+    _transport_car, car = _make_control_car()
+
+    car.set_orbit_target(40.0, 2.0)
+    car.set_orbit_velocity_correction(3.0, -1.0)
+
+    vx_cmd, vy_cmd = car._compute_planar_targets(0.005, 4.0)
+
+    assert vx_cmd == pytest.approx(-5.0)
+    assert vy_cmd == pytest.approx(-1.0)
 
 
 def test_transport_car_leaving_orbit_clears_velocity_correction() -> None:

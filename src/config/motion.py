@@ -7,7 +7,7 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 3.0
+TRANSPORT_FORWARD_SPEED = 5.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -51,7 +51,7 @@ HOLD_SPEED_EPS = 0.01
 # 主车绕行的绝对目标角度增量, 单位度
 MASTER_ORBIT_TARGET_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-MASTER_ORBIT_RADIUS_SCALE = 3.0
+MASTER_ORBIT_RADIUS_SCALE = 2.5
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度
@@ -59,7 +59,7 @@ MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = 8.0
 # 辅车绕行的绝对目标角度, 单位度
 ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
-ASSISTANT_ORBIT_RADIUS_SCALE = 3.0
+ASSISTANT_ORBIT_RADIUS_SCALE = 2.5
 # 三轮速度环 PID 参数映射
 PID_MAP = {
     "m": (100, 500, 1),

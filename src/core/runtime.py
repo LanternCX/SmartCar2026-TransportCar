@@ -1138,9 +1138,10 @@ class TransportCar:
         target_vy_cmd = 0.0
 
         if self.orbit_mode:
+            base_vx = -float(omega_cmd) * float(self.orbit_radius_scale)
             return (
-                -float(omega_cmd) * float(self.orbit_radius_scale),
-                0.0,
+                base_vx + float(self.control_state.get("vx", 0.0)),
+                float(self.control_state.get("vy", 0.0)),
             )
 
         cmd_x, cmd_y = self._get_active_position_targets()
@@ -1209,16 +1210,6 @@ class TransportCar:
             target_vy_cmd,
             float(omega_cmd),
         )
-        if self.orbit_mode:
-            corr_vm, corr_vl, corr_vr = self._inverse_kinematics(
-                float(self.control_state.get("vx", 0.0)),
-                float(self.control_state.get("vy", 0.0)),
-                0.0,
-            )
-            vm += corr_vm
-            vl += corr_vl
-            vr += corr_vr
-
         self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
         self.target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
         self.target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)

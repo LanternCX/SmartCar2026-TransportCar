@@ -114,6 +114,52 @@ def test_master_runtime_exposes_external_transport_cycle(monkeypatch) -> None:
     assert "transport_step" in cars[0].events
 
 
+def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_ORBITING
+    runtime._last_role_state = module.STATE_ORBITING
+    runtime._pending_task_sync = {
+        "kind": "orbit_task",
+        "context_id": 9,
+        "state": module.STATE_ORBITING,
+        "target": module.TARGET_OBJECT,
+        "arg": module.MASTER_ORBIT_TASK_CONFIG_ID,
+        "queued": False,
+    }
+    car.set_orbit_target(module.MASTER_ORBIT_TARGET_DEG, module.MASTER_ORBIT_RADIUS_SCALE)
+
+    runtime._queue_pending_task_sync()
+    runtime.poll_transport_tx()
+    uart6.push(ack_last_frame(uart6))
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+    uart6.push(
+        encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(1.25, -0.5, 0.0, False),
+        )
+    )
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+
+    assert ("set_orbit_velocity_correction", 1.25, -0.5) in car.events
+
+
 def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -604,6 +650,49 @@ def test_assistant_runtime_announces_follow_to_local_vision_on_startup(monkeypat
         "arg": 0,
         "threshold": (0, 0, 0, 0, 0, 0),
     }
+
+
+def test_assistant_runtime_applies_orbit_velocity_after_local_sync_delivery(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.ASSISTANT_STATE_ORBIT
+    runtime._pending_local_vision_sync = {
+        "state": module.ASSISTANT_STATE_ORBIT,
+        "target": module.ASSISTANT_TARGET_OBJECT,
+        "arg": _pack_task_arg(module._ASSISTANT_ORBIT_OBJECT_CONFIG_ID, 1),
+        "queued": False,
+    }
+    car.set_orbit_target(module._ASSISTANT_ORBIT_TARGET_DEG, module._ASSISTANT_ORBIT_RADIUS_SCALE)
+
+    runtime._queue_pending_local_vision_sync()
+    runtime.poll_transport_tx()
+    uart6.push(ack_last_frame(uart6))
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+    uart6.push(
+        encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(-0.75, 0.25, 0.0, False),
+        )
+    )
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+
+    assert ("set_orbit_velocity_correction", -0.75, 0.25) in car.events
 
 
 def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
