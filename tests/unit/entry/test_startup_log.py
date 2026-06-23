@@ -8,15 +8,16 @@ import sys
 from utils import startup_log
 
 
-def test_log_prints_consistent_text(capsys) -> None:
+def test_log_prints_consistent_text(capsys, monkeypatch) -> None:
     """日志工具必须直接打印到标准输出."""
 
     startup_log.cnt = 0
+    monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
 
     message = startup_log.log("remote_control", "ticker started")
     output = capsys.readouterr().out
 
-    assert message == "0 remote_control: ticker started"
+    assert message == "0 1234ms remote_control: ticker started"
     assert output.endswith("\n")
     assert message in output
     assert startup_log.cnt == 1
@@ -26,6 +27,7 @@ def test_log_exception_prints_summary_and_full_trace(capsys, monkeypatch) -> Non
     """异常日志入口必须同时输出摘要和完整调用链."""
 
     startup_log.cnt = 0
+    monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
     trace_calls = []
 
     monkeypatch.setattr(
@@ -42,7 +44,7 @@ def test_log_exception_prints_summary_and_full_trace(capsys, monkeypatch) -> Non
     startup_log.log_exception("master_error", "role cycle failed: boom", RuntimeError("boom"))
     output = capsys.readouterr().out
 
-    assert "0 master_error: role cycle failed: boom" in output
+    assert "0 1234ms master_error: role cycle failed: boom" in output
     assert "master_error: traceback start" in output
     assert "Traceback (most recent call last):" in output
     assert "RuntimeError: boom" in output

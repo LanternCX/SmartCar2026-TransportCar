@@ -5,7 +5,17 @@
 """
 
 
+import time
+
+
 cnt = 0
+
+
+def _now_ms() -> int:
+    ticks_ms = getattr(time, "ticks_ms", None)
+    if ticks_ms is not None:
+        return int(ticks_ms())
+    return int(time.time() * 1000)
 
 
 def log(stage: str, detail: str = "") -> str:
@@ -16,11 +26,11 @@ def log(stage: str, detail: str = "") -> str:
     @param stage 阶段标识符 (如 "IMU", "Motor", "Vision")
     @param detail 阶段的详细说明 (可选, 默认为空)
 
-    @return 完整的日志消息字符串, 格式为 "cnt stage: detail"
+    @return 完整的日志消息字符串, 格式为 "cnt timestamp_ms stage: detail"
     """
     global cnt
 
-    message = "%d %s" % (cnt, stage)
+    message = "%d %dms %s" % (cnt, _now_ms(), stage)
     if detail:
         message = "%s: %s" % (message, detail)
     print(message)
