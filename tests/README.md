@@ -15,11 +15,11 @@
 ```bash
 uv run --group test python -m pytest tests/unit -q
 uv run --group test python -m pytest tests/contract/serial_protocol -q
-uv run --group test python -m pytest tests/contract -q
-uv run --group test python -m pytest tests/unit tests/contract -q
+uv run --no-project --with pytest --with pyright python -m pytest tests/contract -q
+uv run --no-project --with pytest --with pyright python -m pytest tests/unit tests/contract -q
 ```
 
-其中 `tests/contract/` 包含 LSP 契约测试，会调用 `uv run --group type pyright` 检查仓库类型状态。
+其中 `tests/contract/` 包含 LSP 契约测试，会调用当前 Python 环境中的 Pyright 检查仓库类型状态。
 
 ## 板端确认
 

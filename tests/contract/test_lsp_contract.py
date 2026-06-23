@@ -1,6 +1,7 @@
 """LSP 契约测试."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -11,7 +12,7 @@ def test_pyright_typecheck_passes() -> None:
     """仓库的 Pyright 检查必须通过."""
 
     result = subprocess.run(
-        ["uv", "run", "--group", "type", "pyright"],
+        [sys.executable, "-m", "pyright"],
         cwd=ROOT,
         capture_output=True,
         text=True,

@@ -40,4 +40,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run contract tests
-        run: uv run --group test python -m pytest tests/contract -q
+        run: uv run --no-project --with pytest --with pyright python -m pytest tests/contract -q
