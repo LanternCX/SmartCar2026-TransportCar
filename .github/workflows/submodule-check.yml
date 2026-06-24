@@ -17,8 +17,15 @@ jobs:
 
       - name: Check submodule pointers
         shell: bash
+        env:
+          SUBMODULE_READ_TOKEN: ${{ secrets.SUBMODULE_READ_TOKEN }}
         run: |
           set -euo pipefail
+
+          if [[ -z "${SUBMODULE_READ_TOKEN}" ]]; then
+            echo "::error::SUBMODULE_READ_TOKEN is required to read private submodule repositories"
+            exit 1
+          fi
 
           check_submodule_latest() {
             local path="$1"
@@ -38,7 +45,12 @@ jobs:
             recorded="$(git rev-parse "HEAD:${path}")"
 
             local latest
-            latest="$(git ls-remote "${url}" "refs/heads/${branch}" | awk '{print $1}')"
+            latest="$(
+              git ls-remote \
+                "https://x-access-token:${SUBMODULE_READ_TOKEN}@github.com/${url#https://github.com/}" \
+                "refs/heads/${branch}" \
+                | awk '{print $1}'
+            )"
             if [[ -z "${latest}" ]]; then
               echo "::error::Cannot find ${branch} in ${url}"
               return 1

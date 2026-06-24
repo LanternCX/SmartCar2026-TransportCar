@@ -17,6 +17,7 @@
 - 主机端侧手柄控制上位机通过 submodule 挂载在 `controller/`, 跟踪 `main` 分支。
 - 克隆后使用 `git submodule update --init --recursive` 初始化附属仓库。
 - 附属仓库更新后, 在主仓库提交对应 submodule 指针。
+- PR 检查通过 `SUBMODULE_READ_TOKEN` 读取私有附属仓库并校验指针是否为目标分支最新版本。
 
 ## 板端事实
 
