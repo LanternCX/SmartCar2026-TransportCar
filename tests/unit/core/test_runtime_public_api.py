@@ -573,6 +573,12 @@ def test_runtime_config_accepts_separate_orbit_omega_limit() -> None:
     assert float(motion_params.ORBIT_AUTO_OMEGA_MAX) >= 0.0
 
 
+def test_runtime_config_accepts_orbit_angle_confirm_ticks() -> None:
+    """运行时配置为绕行保留独立角度到位确认拍数."""
+
+    assert int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS) > 0
+
+
 def test_runtime_config_accepts_separate_heading_transition_omega_limit() -> None:
     """运行时配置为朝向跳转保留独立角速度限幅参数."""
 
@@ -821,6 +827,11 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
     car.heading_target = 90.0
     car.heading_est = 90.0
 
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS) - 1):
+        car._check_unlock()
+        assert car.orbit_mode is True
+        assert car.command_lock is True
+
     car._check_unlock()
 
     assert car.orbit_mode is False
@@ -830,6 +841,28 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
     for state in car.wheel_states:
         assert state["duty"] == 0.0
         assert state["motor"].duties == [0]
+
+
+def test_transport_car_orbit_angle_confirm_ticks_must_be_consecutive() -> None:
+    """统一绕行目标到位确认只接受连续满足容差的控制拍."""
+    _transport_car, car = _make_control_car(heading_est=90.0, heading_target=90.0)
+
+    car.set_orbit_target(90.0, 1.0)
+
+    car._check_unlock()
+    car.heading_est = 90.0 + float(motion_params.ANGLE_TOLERANCE) * 2.0
+    car._check_unlock()
+
+    car.heading_est = 90.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS) - 1):
+        car._check_unlock()
+        assert car.orbit_mode is True
+        assert car.command_lock is True
+
+    car._check_unlock()
+
+    assert car.orbit_mode is False
+    assert car.command_lock is False
 
 
 def test_transport_car_translation_target_unlock_clears_pose_targets_and_output() -> None:

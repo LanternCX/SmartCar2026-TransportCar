@@ -370,6 +370,33 @@ def test_master_runtime_logs_transport_and_feedforward_flow(monkeypatch, capsys)
     )
 
 
+def test_master_runtime_transport_ignores_local_vision_x_correction(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._latest_uart6_velocity = {"vx": 1.5, "vy": -0.5, "omega": 0.0}
+
+    runtime._apply_transport_velocity()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED - 0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_master_runtime_holds_before_finish_task_is_delivered(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -665,6 +692,9 @@ def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch
     run_runtime_cycle(runtime)
 
     assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
         "source": "master_transport",
         "vx": 0.0,
@@ -757,7 +787,66 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     runtime._run_role_cycle()
 
     assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
+    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
+        "source": "master_transport_stop_lock",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+    car.wheel_states[0]["filtered_speed"] = 0.0
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
+        assert car.last_chassis_target["source"] == "master_transport_stop_lock"
+
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
         "source": "master_transport",
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,

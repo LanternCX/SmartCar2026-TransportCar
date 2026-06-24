@@ -305,6 +305,7 @@ def install_transport_car_stubs() -> None:
         "AUTO_OMEGA_MAX": 15.0,
         "HEADING_TRANSITION_OMEGA_MAX": 30.0,
         "ORBIT_AUTO_OMEGA_MAX": 1.5,
+        "ORBIT_ANGLE_CONFIRM_TICKS": 3,
         "HOLD_SPEED_EPS": 0.1,
         "MASTER_ORBIT_TARGET_DEG": 90,
         "MASTER_TURN_BACK_DELTA_DEG": 180,

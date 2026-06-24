@@ -157,6 +157,8 @@ class MasterForwardRuntime:
         self.play = PlayRunner()
         self._transport_sync_acknowledged = False
         self._transport_task_acknowledged = False
+        self._transport_stop_confirm_ticks = 0
+        self._transport_push_unlocked = False
         self._clear_sync_acknowledged = False
         self._clear_motion_started = False
         self._clear_master_completed_phase = None
@@ -253,6 +255,9 @@ class MasterForwardRuntime:
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
             self._return_line_gate_action = None
             self.play.current_play = None
+        if current_state == STATE_TRANSPORT_OBJECT:
+            self._transport_stop_confirm_ticks = 0
+            self._transport_push_unlocked = False
         self._last_role_state = current_state
 
     def _clear_local_vision_pause_residue(self) -> None:
@@ -539,11 +544,22 @@ class MasterForwardRuntime:
             return
         if self._state_machine.state == STATE_TRANSPORT_OBJECT:
             if not self._is_transport_finish_task_ready():
+                self._transport_stop_confirm_ticks = 0
+                self._transport_push_unlocked = False
                 self._transport_car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
                     "master_wait_finish_task",
+                    True,
+                )
+                return
+            if not self._is_transport_push_unlocked():
+                self._transport_car.handle_velocity_packet(
+                    0.0,
+                    0.0,
+                    0.0,
+                    "master_transport_stop_lock",
                     True,
                 )
                 return
@@ -690,7 +706,6 @@ class MasterForwardRuntime:
         vx = 0.0
         vy = float(TRANSPORT_FORWARD_SPEED)
         if packet is not None:
-            vx += float(packet.get("vx", 0.0))
             vy += float(packet.get("vy", 0.0))
         self._log_transport_flow(vx, vy)
         self._transport_car.handle_velocity_packet(
@@ -849,6 +864,8 @@ class MasterForwardRuntime:
                 self._pending_task_event = None
                 self._transport_sync_acknowledged = False
                 self._transport_task_acknowledged = False
+                self._transport_stop_confirm_ticks = 0
+                self._transport_push_unlocked = False
                 self._transport_car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -1015,6 +1032,18 @@ class MasterForwardRuntime:
         for state in wheel_states:
             if abs(float(state.get("filtered_speed", 0.0))) > threshold:
                 return False
+        return True
+
+    def _is_transport_push_unlocked(self) -> bool:
+        if self._transport_push_unlocked:
+            return True
+        if not self._are_all_wheels_near_stop():
+            self._transport_stop_confirm_ticks = 0
+            return False
+        self._transport_stop_confirm_ticks += 1
+        if self._transport_stop_confirm_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+            return False
+        self._transport_push_unlocked = True
         return True
 
     def _drain_pending_task_event(self) -> None:

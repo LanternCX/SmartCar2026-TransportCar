@@ -7,7 +7,7 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 3.00
+TRANSPORT_FORWARD_SPEED = 3.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -45,7 +45,9 @@ AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
 HEADING_TRANSITION_OMEGA_MAX = 5
 # 绕行阶段最大角速度, 对应轮速分量
-ORBIT_AUTO_OMEGA_MAX = 1.25
+ORBIT_AUTO_OMEGA_MAX = 1
+# 绕行角度进入容差后需要连续保持的控制拍数
+ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
 # 主车绕行的绝对目标角度增量, 单位度
