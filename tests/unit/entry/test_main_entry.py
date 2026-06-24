@@ -275,7 +275,7 @@ def test_main_entry_blocks_assistant_script_when_voltage_is_low(
 def test_main_entry_blocks_master_script_with_master_voltage_threshold(
     capsys, monkeypatch
 ) -> None:
-    """主车入口阶段按 11.5V 阈值保护."""
+    """主车入口阶段按主车配置阈值保护."""
 
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
@@ -284,7 +284,7 @@ def test_main_entry_blocks_master_script_with_master_voltage_threshold(
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
     _set_startup_role(monkeypatch, main, "master")
-    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 11.4)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 3.6)
     monkeypatch.setattr(
         main,
         "_run_low_voltage_alarm",
@@ -302,14 +302,14 @@ def test_main_entry_blocks_master_script_with_master_voltage_threshold(
 
     assert result == "alarm"
     assert launched_scripts == []
-    assert alarmed == [11.4]
-    assert any(line.endswith("main: low voltage=11.40V") for line in output_lines)
+    assert alarmed == [3.6]
+    assert any(line.endswith("main: low voltage=3.60V") for line in output_lines)
 
 
 def test_main_entry_allows_assistant_script_above_assistant_voltage_threshold(
     monkeypatch,
 ) -> None:
-    """辅车入口阶段不使用主车 11.5V 阈值."""
+    """辅车入口阶段按辅车配置阈值保护."""
 
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
