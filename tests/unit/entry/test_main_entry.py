@@ -43,8 +43,8 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
 
-    assert main.resolve_startup_script([1, 0, 0, 0]) == "script/remote_control.py"
-    assert main.resolve_startup_script([0, 1, 0, 0]) == "script/remote_control.py"
+    assert main.resolve_startup_script([1, 0, 0, 0]) == "script/run.py"
+    assert main.resolve_startup_script([0, 1, 0, 0]) == "script/run.py"
     assert main.resolve_startup_script([0, 0, 2, 0]) == "script/pid_identify.py"
     assert main.resolve_startup_script([0, 0, 0, 2]) == "script/calibrate_gyro.py"
 
@@ -91,13 +91,13 @@ def test_main_entry_binds_uart3_to_repl_before_startup_logs(
     assert events[0] == "repl"
 
 
-def test_resolve_startup_script_defaults_to_remote_control() -> None:
+def test_resolve_startup_script_defaults_to_run() -> None:
     """没有长按时进入默认运行脚本."""
 
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
 
-    assert main.resolve_startup_script([0, 0, 0, 0]) == "script/remote_control.py"
+    assert main.resolve_startup_script([0, 0, 0, 0]) == "script/run.py"
 
 
 def test_resolve_startup_script_uses_test_entry_when_config_enabled() -> None:
@@ -139,17 +139,17 @@ def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
     result = main.main()
     output_lines = capsys.readouterr().out.splitlines()
 
-    assert result == "script/remote_control.py"
-    assert launched_scripts == ["script/remote_control.py"]
+    assert result == "script/run.py"
+    assert launched_scripts == ["script/run.py"]
     assert any(line.endswith("main: entry start") for line in output_lines)
     assert any(line.endswith("main: power voltage=12.00V") for line in output_lines)
     assert any(line.endswith("main: startup keys=[0, 0, 0, 0]") for line in output_lines)
     assert any(
-        line.endswith("main: selected script=script/remote_control.py")
+        line.endswith("main: selected script=script/run.py")
         for line in output_lines
     )
     assert any(
-        line.endswith("main: launching script=script/remote_control.py")
+        line.endswith("main: launching script=script/run.py")
         for line in output_lines
     )
 
@@ -178,7 +178,7 @@ def test_main_entry_prints_full_fatal_trace_and_memory_snapshot(
         lambda exc, file=None: (
             trace_calls.append((type(exc).__name__, file)),
             print(
-                "Traceback (most recent call last):\n  File \"script/remote_control.py\", line 1, in main\nMemoryError: %s"
+                "Traceback (most recent call last):\n  File \"script/run.py\", line 1, in main\nMemoryError: %s"
                 % exc,
                 file=file,
             ),
@@ -275,7 +275,7 @@ def test_main_entry_blocks_assistant_script_when_voltage_is_low(
 def test_main_entry_blocks_master_script_with_master_voltage_threshold(
     capsys, monkeypatch
 ) -> None:
-    """主车入口阶段按 11.5V 阈值保护."""
+    """主车入口阶段按主车配置阈值保护."""
 
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
@@ -284,7 +284,7 @@ def test_main_entry_blocks_master_script_with_master_voltage_threshold(
 
     monkeypatch.setattr(main, "_sleep_ms", lambda _delay_ms: None)
     _set_startup_role(monkeypatch, main, "master")
-    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 11.4)
+    monkeypatch.setattr(main, "_read_startup_voltage", lambda: 3.6)
     monkeypatch.setattr(
         main,
         "_run_low_voltage_alarm",
@@ -302,14 +302,14 @@ def test_main_entry_blocks_master_script_with_master_voltage_threshold(
 
     assert result == "alarm"
     assert launched_scripts == []
-    assert alarmed == [11.4]
-    assert any(line.endswith("main: low voltage=11.40V") for line in output_lines)
+    assert alarmed == [3.6]
+    assert any(line.endswith("main: low voltage=3.60V") for line in output_lines)
 
 
 def test_main_entry_allows_assistant_script_above_assistant_voltage_threshold(
     monkeypatch,
 ) -> None:
-    """辅车入口阶段不使用主车 11.5V 阈值."""
+    """辅车入口阶段按辅车配置阈值保护."""
 
     main = load_main_module()
     main.startup_params.STARTUP_TEST_MODE = False
@@ -325,8 +325,8 @@ def test_main_entry_allows_assistant_script_above_assistant_voltage_threshold(
         lambda script_path: launched_scripts.append(script_path),
     )
 
-    assert main.main() == "script/remote_control.py"
-    assert launched_scripts == ["script/remote_control.py"]
+    assert main.main() == "script/run.py"
+    assert launched_scripts == ["script/run.py"]
 
 
 def test_main_entry_uses_configured_voltage_threshold(monkeypatch) -> None:
@@ -373,13 +373,13 @@ def test_resolve_existing_startup_script_prefers_compiled_file(monkeypatch) -> N
     """脚本分发在交叉编译部署后应使用存在的 .mpy 文件."""
 
     main = load_main_module()
-    existing = {"script/remote_control.mpy"}
+    existing = {"script/run.mpy"}
 
     monkeypatch.setattr(main, "_path_exists", lambda path: path in existing)
 
     assert (
-        main.resolve_existing_startup_script("script/remote_control.py")
-        == "script/remote_control.mpy"
+        main.resolve_existing_startup_script("script/run.py")
+        == "script/run.mpy"
     )
 
 
@@ -412,8 +412,8 @@ def test_run_compiled_script_imports_module_and_calls_main(monkeypatch) -> None:
         lambda module_name: calls.append(module_name) or FakeModule(),
     )
 
-    assert main._run_script("script/remote_control.mpy") == "ok"
-    assert calls == ["chdir", "script.remote_control", "main-called"]
+    assert main._run_script("script/run.mpy") == "ok"
+    assert calls == ["chdir", "script.run", "main-called"]
 
 
 def test_run_python_script_uses_global_execfile(monkeypatch) -> None:
@@ -429,10 +429,10 @@ def test_run_python_script_uses_global_execfile(monkeypatch) -> None:
     monkeypatch.setattr(main, "_chdir_flash", lambda: calls.append(("chdir", None)))
 
     try:
-        assert main._run_script("script/remote_control.py") == "ok"
+        assert main._run_script("script/run.py") == "ok"
         assert calls == [
             ("chdir", None),
-            ("execfile", "script/remote_control.py"),
+            ("execfile", "script/run.py"),
         ]
     finally:
         delattr(builtins, "execfile")

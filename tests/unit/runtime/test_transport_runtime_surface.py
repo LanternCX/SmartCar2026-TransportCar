@@ -94,7 +94,7 @@ def _ack_assistant_startup_follow_sync(runtime, uart6, clock) -> None:
 def test_master_runtime_exposes_external_transport_cycle(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart()
     uart8 = BufferedUart()
     runtime = module.MasterForwardRuntime(
@@ -117,7 +117,7 @@ def test_master_runtime_exposes_external_transport_cycle(monkeypatch) -> None:
 def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -160,10 +160,42 @@ def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypa
     assert ("set_orbit_velocity_correction", 1.25, -0.5) in car.events
 
 
+def test_master_runtime_writes_zero_velocity_when_orbit_finishes(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_ORBITING
+    runtime._last_role_state = module.STATE_ORBITING
+    runtime._orbit_command_active = True
+    car.command_lock = False
+    car.control_state = {"vx": 1.25, "vy": -0.5, "omega": 0.0}
+
+    runtime._advance_state_machine()
+
+    assert runtime._state_machine.state != module.STATE_ORBITING
+    assert cars[0].last_chassis_target == {
+        "source": "master_orbit_finished",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
 def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart()
     uart8 = BufferedUart()
     runtime = module.MasterForwardRuntime(
@@ -207,7 +239,7 @@ def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) 
 def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -236,7 +268,7 @@ def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypa
 def test_master_runtime_logs_when_task_event_arrives(monkeypatch, capsys) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -253,11 +285,269 @@ def test_master_runtime_logs_when_task_event_arrives(monkeypatch, capsys) -> Non
     assert "master_event: received context=7 event=8 value=0" in captured
 
 
+def test_master_runtime_logs_task_event_context_status(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._active_task_context_id = 7
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._handle_task_event({"context_id": 7, "event": 8, "value": 0})
+
+    runtime._active_task_context_id = None
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 8,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": True,
+    }
+    runtime._handle_task_event({"context_id": 8, "event": 8, "value": 0})
+
+    runtime._handle_task_event({"context_id": 9, "event": 8, "value": 0})
+
+    captured = capsys.readouterr().out
+    assert "master_event: active context=7 state=4 event=8 value=0" in captured
+    assert "master_finish: arrived context=7 state=4 value=0" in captured
+    assert "master_event: pending context=8 state=4 event=8 value=0" in captured
+    assert "master_event: drop context=9 active=-1 pending=8 state=4 event=8 value=0" in captured
+
+
+def test_master_runtime_logs_transport_and_feedforward_flow(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 8,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": False,
+    }
+    runtime._apply_transport_velocity()
+
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_clear",
+        "state": 5,
+        "target": 1,
+        "arg": 1,
+        "threshold": (0, 0, 0, 0, 0, 0),
+        "queued": False,
+    }
+    runtime._queue_feedforward_velocity()
+
+    captured = capsys.readouterr().out
+    assert (
+        "master_transport: drive state=4 active=-1 pending_kind=finish_task pending=8 queued=0"
+        in captured
+    )
+    assert (
+        "master_feedforward: status=blocked_sync state=5 pending_kind=assistant_clear queued=0"
+        in captured
+    )
+
+
+def test_master_runtime_transport_ignores_local_vision_x_correction(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._latest_uart6_velocity = {"vx": 1.5, "vy": -0.5, "omega": 0.0}
+
+    runtime._apply_transport_velocity()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED - 0.5,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_runtime_holds_before_finish_task_is_delivered(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 9,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": False,
+    }
+
+    runtime._apply_motion_outputs()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_wait_finish_task",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
+def test_master_runtime_blocks_feedforward_before_finish_task_is_delivered(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._pending_task_sync = {
+        "kind": "finish_task",
+        "context_id": 9,
+        "state": module.STATE_TRANSPORT_OBJECT,
+        "target": module.TARGET_EDGE_LINE,
+        "arg": module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
+        "queued": True,
+    }
+
+    runtime._queue_feedforward_velocity()
+    runtime.poll_transport_tx()
+
+    assert uart8.messages == []
+
+
+def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
+
+    runtime._handle_task_event({"context_id": 9, "event": module.EVENT_ARRIVED, "value": 0})
+
+    assert runtime._state_machine.state == module.STATE_CLEAR_OBJECT
+    assert runtime._active_task_context_id is None
+
+
+def test_master_runtime_holds_zero_during_clear_sync(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    cars[0].handle_velocity_packet(0.0, module.TRANSPORT_FORWARD_SPEED, 0.0, "master_transport", False)
+
+    runtime._apply_motion_outputs()
+
+    assert cars[0].last_chassis_target == {
+        "source": "master_clear_hold",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
+def test_master_runtime_blocks_feedforward_while_assistant_sync_pending(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._pending_assistant_sync = {
+        "kind": "assistant_clear",
+        "state": 5,
+        "target": 1,
+        "arg": 1,
+        "threshold": (0, 0, 0, 0, 0, 0),
+        "queued": False,
+    }
+
+    runtime._queue_feedforward_velocity()
+    runtime.poll_transport_tx()
+
+    assert uart8.messages == []
+
+
 def test_master_runtime_forwards_target_threshold_to_assistant(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     uart8 = BufferedUart()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -300,8 +590,8 @@ def test_master_runtime_encodes_latest_threshold_when_sending_assistant_sync(
 ) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     uart8 = BufferedUart()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -335,7 +625,7 @@ def test_master_runtime_encodes_latest_threshold_when_sending_assistant_sync(
 def test_master_runtime_pauses_local_vision_control_from_reliable_packet(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -377,7 +667,7 @@ def test_master_runtime_pauses_local_vision_control_from_reliable_packet(monkeyp
 def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -396,10 +686,15 @@ def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch
         ),
     )
     runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
 
     run_runtime_cycle(runtime)
 
     assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
         "source": "master_transport",
         "vx": 0.0,
@@ -412,7 +707,7 @@ def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch
 def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=(
             encode_frame(
@@ -470,7 +765,7 @@ def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypat
 def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -486,11 +781,72 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     runtime._last_role_state = module.STATE_SEARCH_OBJECT
 
     runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
 
     runtime._run_role_cycle()
 
     assert runtime._local_vision_control_paused is False
+    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
+def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
+    runtime._state_machine._current_context_id = 9
+    runtime._active_task_context_id = 9
+    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
+        "source": "master_transport_stop_lock",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+    car.wheel_states[0]["filtered_speed"] = 0.0
+    for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
+        runtime._apply_motion_outputs()
+        assert car.last_chassis_target["source"] == "master_transport_stop_lock"
+
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
+        "source": "master_transport",
+        "vx": 0.0,
+        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+    runtime._apply_motion_outputs()
+
+    assert car.last_chassis_target == {
         "source": "master_transport",
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,
@@ -502,7 +858,7 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
 def test_master_runtime_clears_local_velocity_when_assistant_event_arrives(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart8 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -532,7 +888,7 @@ def test_master_runtime_clears_local_velocity_when_assistant_event_arrives(monke
 def test_master_runtime_keeps_locked_pose_when_assistant_event_arrives(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart8 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -575,7 +931,7 @@ def test_master_runtime_keeps_locked_pose_when_assistant_event_arrives(monkeypat
 def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x01,
@@ -616,10 +972,61 @@ def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     assert snapshot["uart8_input_status"] == "active"
 
 
+def test_assistant_runtime_ignores_velocity_received_during_startup_move(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(0.5, -0.25, 0.0, False),
+        )
+    )
+    uart8 = BufferedUart(
+        incoming=encode_frame(
+            0x01,
+            TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
+            0,
+            encode_velocity_body(1.0, 0.0, 0.25, True),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+
+    runtime._state_machine.apply_master_state(module.ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
+    runtime.poll_transport_rx()
+    for _ in range(8):
+        runtime.step()
+        runtime.poll_transport_tx()
+        cars[0].command_lock = False
+        if runtime._state_machine.state != module.ASSISTANT_STATE_STARTUP_MOVE:
+            break
+
+    assert runtime._state_machine.state == module.ASSISTANT_STATE_FOLLOW
+    assert runtime._uart6_velocity is None
+    assert runtime._uart8_velocity is None
+    assert cars[0].last_chassis_target == {
+        "source": "assistant_follow",
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
 def test_assistant_runtime_announces_follow_to_local_vision_on_startup(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -655,7 +1062,7 @@ def test_assistant_runtime_announces_follow_to_local_vision_on_startup(monkeypat
 def test_assistant_runtime_applies_orbit_velocity_after_local_sync_delivery(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -698,7 +1105,7 @@ def test_assistant_runtime_applies_orbit_velocity_after_local_sync_delivery(monk
 def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     threshold = (12, 80, -30, 40, -20, 60)
     uart6 = BufferedUart()
     uart8 = BufferedUart(
@@ -744,7 +1151,7 @@ def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch
 def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x01,
@@ -807,7 +1214,7 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
 def test_assistant_runtime_pauses_chassis_from_local_vision_control(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -853,7 +1260,7 @@ def test_assistant_runtime_pauses_chassis_from_local_vision_control(monkeypatch)
 def test_assistant_runtime_ignores_stale_pause_after_entering_transport(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -890,7 +1297,7 @@ def test_assistant_runtime_ignores_stale_pause_after_entering_transport(monkeypa
 def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -926,7 +1333,7 @@ def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) 
 def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -985,7 +1392,7 @@ def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkey
 def test_assistant_runtime_new_sync_clears_local_vision_pause(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1012,7 +1419,7 @@ def test_assistant_runtime_new_sync_clears_local_vision_pause(monkeypatch) -> No
 def test_runtime_cycle_requests_each_port_once_for_normal_input(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x01,
@@ -1050,7 +1457,7 @@ def test_runtime_cycle_requests_each_port_once_for_normal_input(monkeypatch) -> 
 def test_master_runtime_cycle_requests_each_port_once_for_normal_input(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart(
         incoming=encode_frame(
             0x01,
@@ -1083,7 +1490,7 @@ def test_master_runtime_cycle_requests_each_port_once_for_normal_input(monkeypat
 def test_master_runtime_logs_when_camera_sync_is_blocked_before_first_send(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     logs = []
     monkeypatch.setattr(module, "log", lambda stage, detail="": logs.append((stage, detail)))
     uart6 = BufferedUart(
@@ -1128,7 +1535,7 @@ def test_master_runtime_logs_when_camera_sync_is_blocked_before_first_send(monke
 def test_master_runtime_logs_role_cycle_failure_to_board_log(capsys, monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1157,7 +1564,7 @@ def test_master_runtime_logs_role_cycle_failure_to_board_log(capsys, monkeypatch
 def test_master_runtime_reports_role_cycle_failure_via_full_trace_helper(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     calls = []
     monkeypatch.setattr(
         module,
@@ -1185,7 +1592,7 @@ def test_master_runtime_reports_role_cycle_failure_via_full_trace_helper(monkeyp
 def test_master_runtime_calls_state_machine_step_without_keyword_args(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     logs = []
     monkeypatch.setattr(module, "log", lambda stage, detail="": logs.append((stage, detail)))
     runtime = module.MasterForwardRuntime(
@@ -1215,7 +1622,7 @@ def test_master_runtime_calls_state_machine_step_without_keyword_args(monkeypatc
 def test_master_runtime_calls_handle_event_without_keyword_args(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1242,7 +1649,7 @@ def test_master_runtime_calls_handle_event_without_keyword_args(monkeypatch) -> 
 def test_master_runtime_calls_transport_velocity_api_without_keyword_args(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1269,7 +1676,7 @@ def test_master_runtime_calls_transport_velocity_api_without_keyword_args(monkey
 def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1295,8 +1702,8 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     uart8 = BufferedUart()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -1333,8 +1740,8 @@ def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_s
 def test_master_runtime_turn_back_completes_immediately_after_lock_release(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1362,8 +1769,8 @@ def test_master_runtime_turn_back_completes_immediately_after_lock_release(monke
 def test_master_runtime_turn_back_completes_inside_turn_back_tolerance(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1400,8 +1807,8 @@ def test_master_runtime_turn_back_completes_inside_turn_back_tolerance(monkeypat
 def test_master_runtime_turn_back_keeps_waiting_outside_turn_back_tolerance(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    state_module = import_module_clean("vision.master.state_machine", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    state_module = import_module_clean("role.master.state_machine", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1431,7 +1838,7 @@ def test_master_runtime_turn_back_keeps_waiting_outside_turn_back_tolerance(monk
 def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1480,7 +1887,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
 def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1529,7 +1936,7 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
 def test_master_runtime_step_two_queues_return_line_gate_on_and_off(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -1583,7 +1990,7 @@ def test_master_runtime_step_two_queues_return_line_gate_on_and_off(monkeypatch)
 def test_master_runtime_does_not_expose_return_marker_motion_state(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1600,7 +2007,7 @@ def test_master_runtime_does_not_expose_return_marker_motion_state(monkeypatch) 
 def test_master_runtime_finished_stops_without_consuming_local_velocity(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1628,7 +2035,7 @@ def test_master_runtime_finished_stops_without_consuming_local_velocity(monkeypa
 def test_assistant_runtime_reports_role_cycle_failure_via_full_trace_helper(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     calls = []
     monkeypatch.setattr(
         module,
@@ -1658,7 +2065,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
 ) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1690,7 +2097,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
 def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -1725,12 +2132,12 @@ def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> N
     }
 
 
-def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
+def test_assistant_transport_uses_feedforward_y_without_local_vision_y(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1751,7 +2158,7 @@ def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
     assert cars[0].last_chassis_target == {
         "source": "assistant",
         "vx": 1.0,
-        "vy": 2.0 - 4.0 * feedforward_scale,
+        "vy": -4.0 * feedforward_scale,
         "omega": 0.0,
         "has_omega": False,
     }
@@ -1760,7 +2167,7 @@ def test_assistant_transport_discards_feedforward_x_and_scales_feedforward_y(
 def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1792,7 +2199,7 @@ def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypat
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1827,7 +2234,7 @@ def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatc
 def test_assistant_runtime_return_follow_sync_uses_standard_logs(capsys, monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     uart8 = BufferedUart(
         incoming=encode_frame(
@@ -1864,7 +2271,7 @@ def test_assistant_runtime_return_follow_sync_uses_standard_logs(capsys, monkeyp
 def test_assistant_runtime_return_follow_event_only_marks_alignment(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     uart6 = BufferedUart()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
@@ -1898,7 +2305,7 @@ def test_assistant_runtime_return_follow_event_only_marks_alignment(monkeypatch)
 def test_assistant_runtime_finished_sync_clears_inputs_and_stops(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(

@@ -10,9 +10,9 @@ def _resolve_motor_mapping(vehicle_role):
 
     if vehicle_role == "master":
         return {
-            "m": (MOTOR_CONTROLLER.PWM_C30_DIR_C31, False),
-            "l": (MOTOR_CONTROLLER.PWM_D4_DIR_D5, False),
-            "r": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, True),
+            "m": (MOTOR_CONTROLLER.PWM_D4_DIR_D5, True),
+            "l": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, True),
+            "r": (MOTOR_CONTROLLER.PWM_C28_DIR_C29, True),
         }
     if vehicle_role == "assistant":
         return {

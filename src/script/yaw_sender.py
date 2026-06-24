@@ -16,7 +16,7 @@ import math
 import time
 import gc
 
-# ===== 配置参数 (保持与 remote_control.py 一致) =====
+# ===== 配置参数 (保持与 run.py 一致) =====
 # 控制周期, 单位毫秒
 TICK_MS = getattr(motion_params, "TICK_MS")
 # 陀螺仪比例因子, 单位 LSB / (deg/s), 用于原始值到角速度的转换

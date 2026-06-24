@@ -1,9 +1,9 @@
-"""按角色装配视觉运行入口
+"""按角色装配角色运行入口
 
 根据识别到的角色创建对应的车体实例
 """
 
-from vision.vehicle_role import ROLE_ASSISTANT, ROLE_MASTER
+from role.vehicle_role import ROLE_ASSISTANT, ROLE_MASTER
 
 
 def create_role_transport_car(role: str):
@@ -15,11 +15,11 @@ def create_role_transport_car(role: str):
     """
 
     if role == ROLE_MASTER:
-        from vision.master import create_transport_car
+        from role.master import create_transport_car
 
         return create_transport_car()
     if role == ROLE_ASSISTANT:
-        from vision.assistant import create_transport_car
+        from role.assistant import create_transport_car
 
         return create_transport_car()
 

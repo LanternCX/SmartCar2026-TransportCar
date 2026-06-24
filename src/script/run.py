@@ -1,6 +1,6 @@
 """搬运车远程控制主程序
 
-@file src/script/remote_control.py
+@file src/script/run.py
 @brief 搬运车的核心控制入口, 初始化系统并启动 5ms 周期的控制循环
 
 @details 根据车辆角色 (主车/辅车) 创建对应的运行时实例, 启动定时中断驱动的控制循环, 按角色使用 UART8 / UART6 进行视觉数据通信
@@ -9,17 +9,18 @@
 from smartcar import ticker
 from config import motion as motion_params
 from utils.startup_log import log, log_exception
-from vision import create_role_transport_car
-from vision.vehicle_role import read_vehicle_role
+from role import create_role_transport_car
+from role.vehicle_role import read_vehicle_role
 
 
 TICK_MS = getattr(motion_params, "TICK_MS")
+LOG_STAGE = "run"
 
 
 def _create_transport_car(role):
     """按当前角色创建当前运行链使用的车体实例
 
-    @brief 根据拨码开关读取的角色标识, 创建对应的视觉运行时实例
+    @brief 根据拨码开关读取的角色标识, 创建对应的角色运行时实例
 
     @param role 车辆角色标识符 (0 = 主车, 1 = 辅车)
 
@@ -64,7 +65,7 @@ def _run_control_loop(car) -> None:
     loop_logged = False
     while True:
         if not loop_logged:
-            log("remote_control", "main loop first iteration")
+            log(LOG_STAGE, "main loop first iteration")
             loop_logged = True
         poll_rx = getattr(car, "poll_transport_rx", None)
         if poll_rx is not None:
@@ -85,7 +86,7 @@ def _stop_runtime_after_fatal(car, pit1) -> None:
             pit1.stop()
         except Exception as exc:
             log_exception(
-                "remote_control",
+                LOG_STAGE,
                 "fatal ticker stop failed: %s" % exc,
                 exc,
             )
@@ -94,14 +95,14 @@ def _stop_runtime_after_fatal(car, pit1) -> None:
             car.stop()
         except Exception as exc:
             log_exception(
-                "remote_control",
+                LOG_STAGE,
                 "fatal car stop failed: %s" % exc,
                 exc,
             )
 
 
 def main():
-    """按角色切换视觉运行入口并启动正式运行链
+    """按角色切换角色运行入口并启动正式运行链
 
     @brief 启动序列入口, 读取拨码开关、创建车体实例、启动定时中断、运行主循环
     """
@@ -109,30 +110,30 @@ def main():
     car = None
     pit1 = None
     try:
-        log("remote_control", "module start")
+        log(LOG_STAGE, "module start")
         role = read_vehicle_role()
-        log("remote_control", "vehicle role=%s" % role)
-        log("remote_control", "vision runtime ready=%s" % role)
+        log(LOG_STAGE, "vehicle role=%s" % role)
+        log(LOG_STAGE, "vision runtime ready=%s" % role)
 
-        log("remote_control", "creating TransportCar")
+        log(LOG_STAGE, "creating TransportCar")
         car = _create_transport_car(role)
-        log("remote_control", "TransportCar ready")
+        log(LOG_STAGE, "TransportCar ready")
 
-        log("remote_control", "creating ticker")
+        log(LOG_STAGE, "creating ticker")
         pit1 = _create_ticker()
         capture_items = _build_capture_items(car)
-        log("remote_control", "binding capture items=%d" % len(capture_items))
+        log(LOG_STAGE, "binding capture items=%d" % len(capture_items))
         pit1.capture_list(*capture_items)
         pit1.callback(car.mark_tick)
         car.set_ticker(pit1)
 
-        log("remote_control", "starting ticker=%dms" % TICK_MS)
+        log(LOG_STAGE, "starting ticker=%dms" % TICK_MS)
         pit1.start(TICK_MS)
-        log("remote_control", "entering main loop")
+        log(LOG_STAGE, "entering main loop")
         _run_control_loop(car)
         return role
     except Exception as exc:
-        log_exception("remote_control", "fatal error: %s" % exc, exc)
+        log_exception(LOG_STAGE, "fatal error: %s" % exc, exc)
         _stop_runtime_after_fatal(car, pit1)
         raise
 

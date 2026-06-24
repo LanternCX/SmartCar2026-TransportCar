@@ -12,7 +12,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-MODULE_PATH = PROJECT_ROOT / "src" / "vision" / "vehicle_role.py"
+MODULE_PATH = PROJECT_ROOT / "src" / "role" / "vehicle_role.py"
 
 
 def load_vehicle_role_module(monkeypatch, pin_cls):

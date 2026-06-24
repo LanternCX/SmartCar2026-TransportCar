@@ -111,7 +111,7 @@ def _create_transport_car():
     """创建基础底盘运行时."""
 
     from core.runtime import TransportCar
-    from vision.vehicle_role import read_vehicle_role
+    from role.vehicle_role import read_vehicle_role
 
     return TransportCar(vehicle_role=read_vehicle_role())
 

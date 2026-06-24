@@ -45,6 +45,7 @@ YAW_I_MAX = getattr(motion_params, "YAW_I_MAX")
 AUTO_OMEGA_MAX = getattr(motion_params, "AUTO_OMEGA_MAX")
 HEADING_TRANSITION_OMEGA_MAX = getattr(motion_params, "HEADING_TRANSITION_OMEGA_MAX")
 ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
+ORBIT_ANGLE_CONFIRM_TICKS = getattr(motion_params, "ORBIT_ANGLE_CONFIRM_TICKS")
 HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
 IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
@@ -320,6 +321,7 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self._orbit_angle_confirm_ticks = 0
 
         # 时间与性能监控
         # @details ticker: ticker 对象引用, 用于停止中断
@@ -524,6 +526,7 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = True
         self.orbit_radius_scale = radius_scale
+        self._orbit_angle_confirm_ticks = 0
         self.heading_target = float(target_angle_deg)
         self.yaw_pid.reset()
         self.yaw_integral = 0.0
@@ -641,6 +644,7 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self._orbit_angle_confirm_ticks = 0
         self._pending_lock = None
         self._pending_dx = None
         self._pending_dy = None
@@ -679,6 +683,7 @@ class TransportCar:
             self.control_state["vy"] = 0.0
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self._orbit_angle_confirm_ticks = 0
 
     def _refresh_control_mode(self):
         """根据当前结构化控制目标刷新锁定状态."""
@@ -1277,6 +1282,10 @@ class TransportCar:
                 pos_ok = False
 
         if angle_ok and pos_ok:
+            if self.orbit_mode and self._has_active_rotation_target():
+                self._orbit_angle_confirm_ticks += 1
+                if self._orbit_angle_confirm_ticks < int(ORBIT_ANGLE_CONFIRM_TICKS):
+                    return
             had_translation_target = self._has_active_translation_target()
             had_rotation_target = self._has_active_rotation_target()
             self.command_lock = False
@@ -1288,6 +1297,7 @@ class TransportCar:
                 reset_pi_state(self.wheel_states)
                 self.yaw_pid.reset()
                 self.yaw_integral = 0.0
+                self._orbit_angle_confirm_ticks = 0
                 for state in self.wheel_states:
                     state["motor"].duty(0)
                     state["duty"] = 0.0
@@ -1299,3 +1309,5 @@ class TransportCar:
             if had_rotation_target:
                 self._clear_rotation_control_targets()
                 self.control_state["omega"] = 0.0
+        elif self.orbit_mode:
+            self._orbit_angle_confirm_ticks = 0

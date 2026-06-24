@@ -31,7 +31,7 @@ from control.ident_tools import (
 )
 from hardware.encoders import create_encoders
 from hardware.motors import create_motors
-from vision.vehicle_role import read_vehicle_role
+from role.vehicle_role import read_vehicle_role
 import gc
 
 

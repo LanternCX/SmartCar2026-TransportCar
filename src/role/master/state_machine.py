@@ -1,10 +1,10 @@
 """主车单车状态机
 
-@file src/vision/master/state_machine.py
+@file src/role/master/state_machine.py
 """
 
-from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
-from vision.task_sync import pack_task_arg
+from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
+from role.task_sync import pack_task_arg
 from utils.startup_log import log
 
 ASSISTANT_FOLLOW_SYNC_STATE = 1

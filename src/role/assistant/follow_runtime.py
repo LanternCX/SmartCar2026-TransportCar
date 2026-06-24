@@ -1,6 +1,6 @@
 """辅车角色运行时主体
 
-@file src/vision/assistant/follow_runtime.py
+@file src/role/assistant/follow_runtime.py
 """
 
 import time
@@ -42,12 +42,13 @@ from play import PlayContext, PlayRunner
 from play.routines.assistant_return_garage import AssistantReturnGaragePlay
 from play.routines.startup_move import StartupMovePlay
 from utils.startup_log import log, log_exception
-from vision.assistant.diagnostics import build_follow_snapshot
-from vision.assistant.state_machine import (
+from role.assistant.diagnostics import build_follow_snapshot
+from role.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_FINISHED,
     ASSISTANT_STATE_FOLLOW,
+    ASSISTANT_STATE_IDLE,
     ASSISTANT_STATE_ORBIT,
     ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_STARTUP_MOVE,
@@ -55,8 +56,8 @@ from vision.assistant.state_machine import (
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
-from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from vision.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
+from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
+from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
 
 
 _TARGET_FOUND_EVENT = 6
@@ -494,7 +495,6 @@ class AssistantFollowRuntime:
             vy += -float(uart8_velocity.get("vy", 0.0)) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity.get("vx", 0.0))
-            vy += float(uart6_velocity.get("vy", 0.0))
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
     def _write_orbit_velocity_correction(self) -> None:
@@ -525,6 +525,10 @@ class AssistantFollowRuntime:
             self._transport_car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
 
     def _should_store_velocity(self, source: str) -> bool:
+        if self._state_machine.state == ASSISTANT_STATE_IDLE:
+            return False
+        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+            return False
         if self._state_machine.state == ASSISTANT_STATE_ORBIT:
             return source == "uart6" and self._pending_local_vision_sync is None
         if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:

@@ -14,6 +14,7 @@ sys.path.insert(0, str(SRC))
 
 
 class _RecordingMotorController:
+    PWM_C28_DIR_C29 = "PWM_C28_DIR_C29"
     PWM_C30_DIR_C31 = "PWM_C30_DIR_C31"
     PWM_D4_DIR_D5 = "PWM_D4_DIR_D5"
     PWM_D6_DIR_D7 = "PWM_D6_DIR_D7"
@@ -48,24 +49,24 @@ def _load_hardware_modules(monkeypatch):
     return motors, encoders
 
 
-def test_master_role_uses_old_hardware_mapping(monkeypatch) -> None:
+def test_master_role_uses_configured_hardware_mapping(monkeypatch) -> None:
     motors_module, encoders_module = _load_hardware_modules(monkeypatch)
 
     motors = motors_module.create_motors("master")
     encoders = encoders_module.create_encoders("master")
 
-    assert motors["m"].channel == _RecordingMotorController.PWM_C30_DIR_C31
-    assert motors["m"].invert is False
-    assert motors["l"].channel == _RecordingMotorController.PWM_D4_DIR_D5
-    assert motors["l"].invert is False
-    assert motors["r"].channel == _RecordingMotorController.PWM_D6_DIR_D7
+    assert motors["m"].channel == _RecordingMotorController.PWM_D4_DIR_D5
+    assert motors["m"].invert is True
+    assert motors["l"].channel == _RecordingMotorController.PWM_D6_DIR_D7
+    assert motors["l"].invert is True
+    assert motors["r"].channel == _RecordingMotorController.PWM_C28_DIR_C29
     assert motors["r"].invert is True
-    assert (encoders["m"].pin_a, encoders["m"].pin_b) == ("D15", "D16")
-    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("C0", "C1")
-    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("C2", "C3")
+    assert (encoders["m"].pin_a, encoders["m"].pin_b) == ("D13", "D14")
+    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("D15", "D16")
+    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("C0", "C1")
 
 
-def test_assistant_role_uses_new_hardware_mapping(monkeypatch) -> None:
+def test_assistant_role_uses_configured_hardware_mapping(monkeypatch) -> None:
     motors_module, encoders_module = _load_hardware_modules(monkeypatch)
 
     motors = motors_module.create_motors("assistant")

@@ -20,7 +20,7 @@ def _pack_task_arg(config_id, object_id):
 
 
 def _load_master_state_machine():
-    module_path = SRC / "vision" / "master" / "state_machine.py"
+    module_path = SRC / "role" / "master" / "state_machine.py"
     spec = importlib.util.spec_from_file_location("test_master_state_machine_module", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load master state machine module")

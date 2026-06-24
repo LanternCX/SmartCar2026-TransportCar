@@ -77,7 +77,7 @@ def _create_encoders():
     """按当前车号创建三路编码器."""
 
     from hardware.encoders import create_encoders
-    from vision.vehicle_role import read_vehicle_role
+    from role.vehicle_role import read_vehicle_role
 
     return create_encoders(read_vehicle_role())
 

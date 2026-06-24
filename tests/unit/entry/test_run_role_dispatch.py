@@ -1,6 +1,6 @@
-"""remote_control 角色分流启动壳测试.
+"""run 角色分流启动壳测试.
 
-@file tests/unit/entry/test_remote_control_role_dispatch.py
+@file tests/unit/entry/test_run_role_dispatch.py
 """
 
 from importlib.util import module_from_spec, spec_from_file_location
@@ -12,11 +12,11 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-REMOTE_CONTROL_PATH = PROJECT_ROOT / "src" / "script" / "remote_control.py"
+RUN_PATH = PROJECT_ROOT / "src" / "script" / "run.py"
 
 
-def load_remote_control_module(monkeypatch):
-    """按文件路径加载 remote_control 模块, 并注入最小依赖桩."""
+def load_run_module(monkeypatch):
+    """按文件路径加载 run 模块, 并注入最小依赖桩."""
 
     state = {"car_created": 0, "ticker_started": 0, "loop_steps": 0}
 
@@ -54,11 +54,11 @@ def load_remote_control_module(monkeypatch):
     setattr(startup_log_module, "log_exception", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
-    vehicle_role_module = ModuleType("vision.vehicle_role")
+    vehicle_role_module = ModuleType("role.vehicle_role")
     setattr(vehicle_role_module, "read_vehicle_role", lambda: "master")
-    monkeypatch.setitem(sys.modules, "vision.vehicle_role", vehicle_role_module)
+    monkeypatch.setitem(sys.modules, "role.vehicle_role", vehicle_role_module)
 
-    vision_module = ModuleType("vision")
+    role_module = ModuleType("role")
 
     class _FakeCar:
         def __init__(self) -> None:
@@ -81,10 +81,10 @@ def load_remote_control_module(monkeypatch):
             state["loop_steps"] += 1
             return False
 
-    setattr(vision_module, "create_role_transport_car", lambda role: _FakeCar())
-    monkeypatch.setitem(sys.modules, "vision", vision_module)
+    setattr(role_module, "create_role_transport_car", lambda role: _FakeCar())
+    monkeypatch.setitem(sys.modules, "role", role_module)
 
-    spec = spec_from_file_location("remote_control_entry", REMOTE_CONTROL_PATH)
+    spec = spec_from_file_location("run_entry", RUN_PATH)
     assert spec is not None
     assert spec.loader is not None
     module = module_from_spec(spec)
@@ -92,20 +92,20 @@ def load_remote_control_module(monkeypatch):
     return module, state
 
 
-def test_remote_control_import_does_not_create_car_or_start_ticker(monkeypatch) -> None:
+def test_run_import_does_not_create_car_or_start_ticker(monkeypatch) -> None:
     """模块导入期不应直接创建运行时对象."""
 
-    _module, state = load_remote_control_module(monkeypatch)
+    _module, state = load_run_module(monkeypatch)
 
     assert state["car_created"] == 0
     assert state["ticker_started"] == 0
     assert state["loop_steps"] == 0
 
 
-def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> None:
+def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
     """运行入口必须先识别角色, 再装配视觉层和运行时."""
 
-    module, _state = load_remote_control_module(monkeypatch)
+    module, _state = load_run_module(monkeypatch)
     events = []
     setattr(module, "read_vehicle_role", lambda: events.append("role") or "master")
     setattr(
@@ -160,12 +160,12 @@ def test_remote_control_main_reads_role_before_runtime_setup(monkeypatch) -> Non
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
 
 
-def test_remote_control_main_returns_assistant_role_and_dispatches_it(
+def test_run_main_returns_assistant_role_and_dispatches_it(
     monkeypatch,
 ) -> None:
     """运行入口切到辅车角色时, 返回值和运行时装配都要保持同一个角色."""
 
-    module, _state = load_remote_control_module(monkeypatch)
+    module, _state = load_run_module(monkeypatch)
     events = []
     setattr(module, "read_vehicle_role", lambda: "assistant")
     setattr(
@@ -208,12 +208,12 @@ def test_remote_control_main_returns_assistant_role_and_dispatches_it(
     assert len(events) == 1
 
 
-def test_remote_control_main_stops_runtime_and_reraises_fatal_error(
+def test_run_main_stops_runtime_and_reraises_fatal_error(
     monkeypatch,
 ) -> None:
     """正式运行入口遇到未捕获异常时, 必须尽量停机并继续上抛."""
 
-    module, _state = load_remote_control_module(monkeypatch)
+    module, _state = load_run_module(monkeypatch)
     events = []
 
     class _Car:
@@ -260,13 +260,13 @@ def test_remote_control_main_stops_runtime_and_reraises_fatal_error(
         module.main()
     assert "ticker_stop" in events
     assert "car_stop" in events
-    assert trace_calls == [("remote_control", "fatal error: loop boom", "loop boom")]
+    assert trace_calls == [("run", "fatal error: loop boom", "loop boom")]
 
 
 def test_run_control_loop_polls_transport_around_runtime_step(monkeypatch) -> None:
     """主循环在运行时外部调度通信 RX 和 TX."""
 
-    module, _state = load_remote_control_module(monkeypatch)
+    module, _state = load_run_module(monkeypatch)
     events = []
 
     class _Car:

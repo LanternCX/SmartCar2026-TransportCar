@@ -10,9 +10,9 @@ def _resolve_encoder_mapping(vehicle_role):
 
     if vehicle_role == "master":
         return {
-            "m": ("D15", "D16", True),
-            "l": ("C0", "C1", True),
-            "r": ("C2", "C3", True),
+            "m": ("D13", "D14", False),
+            "l": ("D15", "D16", False),
+            "r": ("C0", "C1", False),
         }
     if vehicle_role == "assistant":
         return {
