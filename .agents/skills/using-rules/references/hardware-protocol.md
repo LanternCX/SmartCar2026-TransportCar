@@ -11,7 +11,7 @@
 
 - 未在仓库正文或代码中明确给出的引脚、串口、电平、接线或设备行为事实, 必须先问用户, 禁止猜测。
 - 现场判断角色时先看输入电平, 不要直接按开关朝向口头推断。
-- 角色输入解码以 `src/vision/vehicle_role.py` 为准。
+- 角色输入解码以 `src/role/vehicle_role.py` 为准。
 - 启动脚本分发以 `src/main.py` 和入口测试为准。
 
 ## 串口链路事实
@@ -40,7 +40,7 @@
 ## 视觉输入边界
 
 - 车端底盘不处理图像数据。
-- 主辅角色入口职责以 `docs/developer/vision.md` 和 `src/vision/` 代码为准。
+- 主辅角色入口职责以 `docs/developer/vision.md` 和 `src/role/` 代码为准。
 - 视觉端输出字段和速度修正语义以 `docs/developer/protocol.md` 与 `docs/developer/vision.md` 为准。
 - 引入更多视觉设备、观测字段或环境感知能力前, 先明确职责分工与协议字段。
 

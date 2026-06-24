@@ -1,9 +1,9 @@
-"""辅车视觉运行入口
+"""辅车角色运行入口
 
-@file src/vision/assistant/runtime.py
+@file src/role/assistant/runtime.py
 """
 
-from vision.assistant.follow_runtime import AssistantFollowRuntime
+from role.assistant.follow_runtime import AssistantFollowRuntime
 
 
 def create_transport_car() -> AssistantFollowRuntime:

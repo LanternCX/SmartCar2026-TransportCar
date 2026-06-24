@@ -29,7 +29,7 @@
 
 ## 速度前馈与视觉修正
 
-- 速度字段、来源职责和融合行为以 `docs/developer/protocol.md`、`docs/developer/vision.md`、`src/vision/` 代码和行为测试为准。
+- 速度字段、来源职责和融合行为以 `docs/developer/protocol.md`、`docs/developer/vision.md`、`src/role/` 代码和行为测试为准。
 - 改动速度融合前, 先确认每一路输入的来源、时效、清零语义和最终写回边界。
 - 不把调试字段、视觉内部状态或业务上下文塞进高频速度链路。
 

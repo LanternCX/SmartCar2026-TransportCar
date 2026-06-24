@@ -79,10 +79,10 @@ def make_linked_uart_pair():
 def import_module_clean(module_name: str, monkeypatch):
     monkeypatch.syspath_prepend(str(SRC_ROOT))
     for loaded_name in (
-        "vision.master",
-        "vision.master.forward_runtime",
-        "vision.assistant",
-        "vision.assistant.follow_runtime",
+        "role.master",
+        "role.master.forward_runtime",
+        "role.assistant",
+        "role.assistant.follow_runtime",
         "utils.startup_log",
         module_name,
     ):

@@ -1,6 +1,6 @@
 """辅车角色运行时主体
 
-@file src/vision/assistant/follow_runtime.py
+@file src/role/assistant/follow_runtime.py
 """
 
 import time
@@ -42,8 +42,8 @@ from play import PlayContext, PlayRunner
 from play.routines.assistant_return_garage import AssistantReturnGaragePlay
 from play.routines.startup_move import StartupMovePlay
 from utils.startup_log import log, log_exception
-from vision.assistant.diagnostics import build_follow_snapshot
-from vision.assistant.state_machine import (
+from role.assistant.diagnostics import build_follow_snapshot
+from role.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
     ASSISTANT_STATE_FINISHED,
@@ -56,8 +56,8 @@ from vision.assistant.state_machine import (
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
-from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from vision.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
+from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
+from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
 
 
 _TARGET_FOUND_EVENT = 6

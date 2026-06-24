@@ -7,7 +7,7 @@
 - `tests/unit/entry/`：入口、启动与角色分流测试
 - `tests/unit/runtime/`：角色运行时行为与装配测试
 - `tests/unit/command/`：串口正式入口边界测试
-- `tests/unit/vision/`：车端视觉速度解析与辅助状态测试
+- `tests/unit/role/`：角色状态机测试
 - `tests/contract/serial_protocol/`：协议字段、报文格式与运行时协议契约测试
 
 ## 本地命令

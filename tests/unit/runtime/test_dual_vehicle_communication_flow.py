@@ -108,8 +108,8 @@ def _complete_assistant_startup_move(assistant, assistant_car) -> None:
 def test_startup_sync_blocks_formal_start_until_both_cars_are_alive(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
 
     master_uart8, assistant_uart8 = make_linked_uart_pair()
     master = master_module.MasterForwardRuntime(
@@ -151,8 +151,8 @@ def test_startup_sync_blocks_formal_start_until_both_cars_are_alive(monkeypatch)
 def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
-    assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
 
     master_uart6 = BufferedUart()
     assistant_uart6 = BufferedUart()
@@ -371,7 +371,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
 def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
 
     master_uart6 = BufferedUart()
     master_uart8 = BufferedUart()
@@ -430,7 +430,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
 def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     assistant_uart6 = BufferedUart()
     assistant_uart8 = BufferedUart()
     assistant = assistant_module.AssistantFollowRuntime(
@@ -479,7 +479,7 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
 def test_duplicate_assistant_event_report_does_not_requeue_master_transition(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
     master_uart6 = BufferedUart()
     master_uart8 = BufferedUart()
     master = master_module.MasterForwardRuntime(
@@ -586,7 +586,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
 def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    assistant_module = import_module_clean("vision.assistant.follow_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     sender_uart8, assistant_uart8 = make_linked_uart_pair()
     assistant_uart6 = BufferedUart()
     sender = create_transport(ROLE_MASTER, uart8=sender_uart8, now_ms=clock)
@@ -629,7 +629,7 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
 def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
-    master_module = import_module_clean("vision.master.forward_runtime", monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
     master_uart6 = BufferedUart()
     sender_uart8, master_uart8 = make_linked_uart_pair()
     sender = create_transport(ROLE_ASSISTANT, uart8=sender_uart8, now_ms=clock)

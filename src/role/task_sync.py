@@ -1,6 +1,6 @@
 """辅车本地视觉任务参数编码
 
-@file src/vision/task_sync.py
+@file src/role/task_sync.py
 """
 
 

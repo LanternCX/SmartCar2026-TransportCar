@@ -1,6 +1,6 @@
 """主车角色运行时主体
 
-@file src/vision/master/forward_runtime.py
+@file src/role/master/forward_runtime.py
 """
 
 import time
@@ -42,9 +42,9 @@ from protocol.transport import (
 from play import PlayContext, PlayRunner
 from play.routines.master_return_garage import MasterReturnGaragePlay
 from play.routines.startup_move import StartupMovePlay
-from vision.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from vision.master.state_machine import MasterStateMachine
-from vision.master.state_machine import (
+from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
+from role.master.state_machine import MasterStateMachine
+from role.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
     EVENT_CLEARED,

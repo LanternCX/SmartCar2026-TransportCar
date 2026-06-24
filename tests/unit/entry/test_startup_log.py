@@ -14,10 +14,10 @@ def test_log_prints_consistent_text(capsys, monkeypatch) -> None:
     startup_log.cnt = 0
     monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
 
-    message = startup_log.log("remote_control", "ticker started")
+    message = startup_log.log("run", "ticker started")
     output = capsys.readouterr().out
 
-    assert message == "0 1234ms remote_control: ticker started"
+    assert message == "0 1234ms run: ticker started"
     assert output.endswith("\n")
     assert message in output
     assert startup_log.cnt == 1

@@ -13,7 +13,7 @@ sys.path.insert(0, str(SRC))
 
 
 def _load_assistant_state_machine():
-    module_path = SRC / "vision" / "assistant" / "state_machine.py"
+    module_path = SRC / "role" / "assistant" / "state_machine.py"
     spec = importlib.util.spec_from_file_location(
         "test_assistant_state_machine_module", module_path
     )
@@ -24,7 +24,7 @@ def _load_assistant_state_machine():
     return module
 
 
-def test_assistant_state_constants_are_owned_by_vision_layer() -> None:
+def test_assistant_state_constants_are_owned_by_role_layer() -> None:
     module = _load_assistant_state_machine()
 
     assert module.ASSISTANT_STATE_IDLE == 0

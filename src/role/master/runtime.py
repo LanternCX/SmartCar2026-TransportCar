@@ -1,9 +1,9 @@
-"""主车视觉运行入口
+"""主车角色运行入口
 
-@file src/vision/master/runtime.py
+@file src/role/master/runtime.py
 """
 
-from vision.master.forward_runtime import MasterForwardRuntime
+from role.master.forward_runtime import MasterForwardRuntime
 
 
 def create_transport_car() -> MasterForwardRuntime:

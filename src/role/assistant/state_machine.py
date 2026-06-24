@@ -1,6 +1,6 @@
 """辅车子状态机
 
-@file src/vision/assistant/state_machine.py
+@file src/role/assistant/state_machine.py
 """
 
 from utils.startup_log import log

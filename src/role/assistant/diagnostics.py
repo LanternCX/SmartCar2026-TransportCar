@@ -1,6 +1,6 @@
 """辅车角色运行时诊断快照
 
-@file src/vision/assistant/diagnostics.py
+@file src/role/assistant/diagnostics.py
 """
 
 

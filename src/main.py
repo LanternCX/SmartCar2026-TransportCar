@@ -40,8 +40,8 @@ LONG_PRESS_VALUE = 2
 SCRIPT_PID_IDENTIFY = "script/pid_identify.py"
 # 陀螺仪校准脚本路径
 SCRIPT_CALIBRATE_GYRO = "script/calibrate_gyro.py"
-# 遥控主脚本路径
-SCRIPT_REMOTE_CONTROL = "script/remote_control.py"
+# 角色运行脚本路径
+SCRIPT_RUN = "script/run.py"
 # 板端测试入口脚本路径
 SCRIPT_TEST_ENTRY = "script/test.py"
 # 致命异常保存路径
@@ -104,7 +104,7 @@ def resolve_startup_script(key_states):
         return SCRIPT_CALIBRATE_GYRO
     if bool(startup_params.STARTUP_TEST_MODE):
         return SCRIPT_TEST_ENTRY
-    return SCRIPT_REMOTE_CONTROL
+    return SCRIPT_RUN
 
 
 def _read_key_state(key_states, index):
@@ -165,7 +165,7 @@ def _read_startup_voltage():
 def _read_startup_vehicle_role():
     """读取上电阶段车辆角色."""
 
-    from vision.vehicle_role import read_vehicle_role
+    from role.vehicle_role import read_vehicle_role
 
     return read_vehicle_role()
 
