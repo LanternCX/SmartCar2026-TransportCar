@@ -13,8 +13,10 @@
 
 ## 附属仓库
 
-- OpenART 视觉仓库位于 `../SmartCar2026-Vision`。
-- 主机端侧手柄控制上位机位于 `../SmartCar2026-Controller`。
+- OpenART 视觉仓库通过 submodule 挂载在 `vision/`, 跟踪 `dev` 分支。
+- 主机端侧手柄控制上位机通过 submodule 挂载在 `controller/`, 跟踪 `main` 分支。
+- 克隆后使用 `git submodule update --init --recursive` 初始化附属仓库。
+- 附属仓库更新后, 在主仓库提交对应 submodule 指针。
 
 ## 板端事实
 

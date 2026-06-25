@@ -1,0 +1,8 @@
+[submodule "vision"]
+	path = vision
+	url = https://github.com/LanternCX/SmartCar2026-Vision.git
+	branch = dev
+[submodule "controller"]
+	path = controller
+	url = https://github.com/LanternCX/SmartCar2026-Controller.git
+	branch = main
