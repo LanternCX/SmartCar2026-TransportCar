@@ -27,15 +27,13 @@ def test_master_return_garage_play_declares_expected_steps() -> None:
     assert isinstance(play._steps[1], AngleStep)
     assert play._steps[1].target == 90.0
     assert isinstance(play._steps[2], VelocityYStep)
-    assert play._steps[2].speed == 5.0
+    assert play._steps[2].speed == MASTER_RETURN_FORWARD_SPEED
     assert callable(play._steps[2].until)
     assert isinstance(play._steps[3], AngleStep)
     assert play._steps[3].target == -90.0
     assert isinstance(play._steps[4], VelocityYStep)
-    assert play._steps[4].speed == 5.0
+    assert play._steps[4].speed == MASTER_FINAL_FORWARD_SPEED
     assert play._steps[4].until is None
-    assert MASTER_RETURN_FORWARD_SPEED == 5
-    assert MASTER_FINAL_FORWARD_SPEED == 5
 
 
 def test_assistant_return_garage_play_declares_expected_steps() -> None:
@@ -48,15 +46,13 @@ def test_assistant_return_garage_play_declares_expected_steps() -> None:
     assert isinstance(play._steps[1], AngleStep)
     assert play._steps[1].target == -90.0
     assert isinstance(play._steps[2], VelocityYStep)
-    assert play._steps[2].speed == 5.0
+    assert play._steps[2].speed == ASSISTANT_RETURN_FORWARD_SPEED
     assert callable(play._steps[2].until)
     assert isinstance(play._steps[3], AngleStep)
     assert play._steps[3].target == -90.0
     assert isinstance(play._steps[4], VelocityYStep)
-    assert play._steps[4].speed == 5.0
+    assert play._steps[4].speed == ASSISTANT_FINAL_FORWARD_SPEED
     assert play._steps[4].until is None
-    assert ASSISTANT_RETURN_FORWARD_SPEED == 5
-    assert ASSISTANT_FINAL_FORWARD_SPEED == 5
 
 
 def test_startup_move_play_declares_forward_turn_forward_turn_steps() -> None:

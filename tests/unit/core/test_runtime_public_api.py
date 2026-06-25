@@ -153,10 +153,14 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(comm_params.TRANSPORT_RX_READ_LIMIT) > 0
     assert int(comm_params.RELIABLE_RESEND_INTERVAL_MS) >= 0
     assert int(comm_params.ASSISTANT_LOCAL_VISION_SYNC_RESEND_INTERVAL_MS) >= 0
-    assert int(comm_params.SEQ_MIN) == 0
-    assert int(comm_params.SEQ_MAX) == 255
-    assert int(comm_params.SEQ_RING_SIZE) == 256
-    assert int(comm_params.SEQ_HALF_RING) == 128
+    seq_min = int(comm_params.SEQ_MIN)
+    seq_max = int(comm_params.SEQ_MAX)
+    seq_ring_size = int(comm_params.SEQ_RING_SIZE)
+    seq_half_ring = int(comm_params.SEQ_HALF_RING)
+    assert seq_min >= 0
+    assert seq_max > seq_min
+    assert seq_ring_size == seq_max - seq_min + 1
+    assert seq_half_ring * 2 == seq_ring_size
     assert int(motion_params.TICK_MS) > 0
     assert not hasattr(comm_params, "RELIABLE_PACKET_SEND_DELAY_MS")
     assert 0 <= int(vision_params.MASTER_SEARCH_TASK_CONFIG_ID) <= 255

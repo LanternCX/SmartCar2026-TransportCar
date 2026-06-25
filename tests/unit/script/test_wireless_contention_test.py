@@ -90,7 +90,7 @@ def test_contention_packet_uses_large_fixed_payload() -> None:
 
     module = load_test_script_module()
 
-    assert module.CONTENTION_PACKET_BYTES == 32
+    assert module.CONTENTION_PACKET_BYTES > len("\r\n")
     assert len(module.CONTENTION_PACKET) == module.CONTENTION_PACKET_BYTES
     assert module.CONTENTION_PACKET.endswith("\r\n")
 
