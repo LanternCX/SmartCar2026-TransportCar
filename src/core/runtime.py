@@ -48,6 +48,8 @@ ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
 ORBIT_ANGLE_CONFIRM_TICKS = getattr(motion_params, "ORBIT_ANGLE_CONFIRM_TICKS")
 HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
+FIELD_SIZE_M = getattr(motion_params, "FIELD_SIZE_M")
+ASSISTANT_START_POSITION_M = getattr(motion_params, "ASSISTANT_START_POSITION_M")
 IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
 GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
 PID_MAP = getattr(motion_params, "PID_MAP")
@@ -241,6 +243,11 @@ class TransportCar:
         #          odometry: 积分世界系速度, 记录车体当前位置 (x, y)
         self.kinematics = OmniKinematics()
         self.odometry = Odometry()
+        if self.vehicle_role == "assistant":
+            self.odometry.reset(
+                float(ASSISTANT_START_POSITION_M[0]),
+                float(ASSISTANT_START_POSITION_M[1]),
+            )
 
         # 航向角目标值(度), 由角度控制目标或当前航向初始化, 用于偏航 PID 反馈
         self.heading_target = 0.0
@@ -651,6 +658,33 @@ class TransportCar:
         self._pending_d_angle = None
         self._translation_speed_limit_cmd = None
 
+    def build_pose_snapshot(self):
+        """构造当前世界系位姿快照."""
+
+        return {
+            "x": float(self.odometry.x),
+            "y": float(self.odometry.y),
+            "angle": float(self.heading_est),
+        }
+
+    def calibrate_pose_to_field_edge(self, edge):
+        """按贴边结果校准单轴位置.
+
+        @param edge 边线名称, 支持 left/right/bottom/top
+        """
+
+        edge = str(edge)
+        if edge == "left":
+            self.odometry.x = 0.0
+        elif edge == "right":
+            self.odometry.x = float(FIELD_SIZE_M[0])
+        elif edge == "bottom":
+            self.odometry.y = 0.0
+        elif edge == "top":
+            self.odometry.y = float(FIELD_SIZE_M[1])
+        else:
+            raise ValueError("unknown field edge")
+
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""
 
@@ -880,8 +914,8 @@ class TransportCar:
         当任意轮速超过上限 TARGET_SPEED_MAX 时, 对所有轮速进行等比例缩放,
         保持方向不变同时满足速度约束
 
-        @param vx 纵向速度(脉冲/周期), 沿车体纵轴正向
-        @param vy 横向速度(脉冲/周期), 沿车体横轴正向(左为正)
+        @param vx 车体 x 轴速度(脉冲/周期), 正向右移
+        @param vy 车体 y 轴速度(脉冲/周期), 正向前进
         @param omega 角速度(脉冲/周期), 逆时针为正
 
         @return 元组 (vm, vl, vr), 分别对应中轮、左轮、右轮的目标脉冲速度
@@ -1203,8 +1237,8 @@ class TransportCar:
            - 直接驱动电机
         4. 非活跃轮子重置 PID 并停止
 
-        @param target_vx_cmd 目标纵向速度(脉冲/周期)
-        @param target_vy_cmd 目标横向速度(脉冲/周期)
+        @param target_vx_cmd 目标 x 轴速度(脉冲/周期)
+        @param target_vy_cmd 目标 y 轴速度(脉冲/周期)
         @param omega_cmd 目标角速度(脉冲/周期)
         @param dt_s 时间增量(秒), 用于 PID 积分
 

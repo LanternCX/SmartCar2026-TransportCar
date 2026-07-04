@@ -191,6 +191,10 @@ def install_transport_car_stubs() -> None:
         def update(self, *_args) -> None:
             return None
 
+        def reset(self, x=0.0, y=0.0) -> None:
+            self.x = float(x)
+            self.y = float(y)
+
     setattr(control_kinematics, "OmniKinematics", _OmniKinematics)
     setattr(control_kinematics, "Odometry", _Odometry)
     sys.modules["control.kinematics"] = control_kinematics
@@ -293,6 +297,8 @@ def install_transport_car_stubs() -> None:
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
         "ODOMETRY_DISTANCE_SCALE": 1.0,
+        "FIELD_SIZE_M": (3.2, 2.4),
+        "ASSISTANT_START_POSITION_M": (0.10, -0.50),
         "POS_TOLERANCE": 0.01,
         "ANGLE_TOLERANCE": 1.0,
         "ACTIVE_WHEELS": ("m", "l", "r"),

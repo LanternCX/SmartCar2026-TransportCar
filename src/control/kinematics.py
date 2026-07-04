@@ -13,7 +13,7 @@ class OmniKinematics:
     """@class OmniKinematics
     @brief 全向轮运动学模型及单位转换
 
-    基于三轮全向轮配置(中间轮沿纵向, 左右轮呈 120° 布置),
+    基于三轮全向轮配置(中间轮沿车体 y 轴, 左右轮呈 120° 布置),
     提供脉冲/米单位转换以及轮速与机器人体坐标系速度的相互转换
     """
 
@@ -70,11 +70,11 @@ class OmniKinematics:
     def forward_kinematics(self, vm, vl, vr):
         """@brief 前向运动学: 轮速 → 机器人体坐标系速度
 
-        根据三轮速度计算机器人运动速度(纵向、横向、角速度),
+        根据三轮速度计算机器人运动速度(x 轴、y 轴、角速度),
         输入输出单位一致(均为脉冲数/时间 或 m/s)
 
         @details
-        配置: 中间轮沿纵向(正方向), 左右轮呈 ±60° 对称布置
+        配置: 中间轮沿车体 y 轴, 左右轮呈 ±60° 对称布置
         转换公式:
         - vx = 0.5*(vl + vr) - vm
         - vy = (sqrt(3)/2.0)*(vl - vr)
@@ -84,8 +84,8 @@ class OmniKinematics:
         @param vl 左轮速度
         @param vr 右轮速度
         @return 元组 (vx, vy, omega), 其中
-                - vx: 纵向速度(正向前进)
-                - vy: 横向速度(正向左移)
+                - vx: x 轴速度(正向右移)
+                - vy: y 轴速度(正向前进)
                 - omega: 角速度(正向逆时针)
         """
         vx = 0.5 * (vl + vr) - vm
@@ -102,8 +102,8 @@ class OmniKinematics:
         @details
         反向转换, 求解 vl、vr、vm 使得前向运动学结果为 (vx, vy, omega)
 
-        @param vx 纵向速度
-        @param vy 横向速度
+        @param vx x 轴速度
+        @param vy y 轴速度
         @param omega 角速度
         @return 元组 (vm, vl, vr), 分别为中间、左、右轮目标速度
         """
@@ -144,8 +144,8 @@ class Odometry:
             [v_world_x]   [cos(theta)  -sin(theta)]   [vx_robot]
             [v_world_y] = [sin(theta)   cos(theta)] * [vy_robot]
 
-        @param vx_robot 机器人坐标系 X 速度 (m/s), 纵向
-        @param vy_robot 机器人坐标系 Y 速度 (m/s), 横向
+        @param vx_robot 机器人坐标系 X 速度 (m/s), 正向右移
+        @param vy_robot 机器人坐标系 Y 速度 (m/s), 正向前进
         @param theta_rad 机器人当前朝向 (弧度), 相对世界坐标系
         @param dt 时间间隔 (s)
         """

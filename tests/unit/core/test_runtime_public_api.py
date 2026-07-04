@@ -45,10 +45,10 @@ class _Odom:
         self.y = float(y)
         self.reset_count = 0
 
-    def reset(self) -> None:
+    def reset(self, x=0.0, y=0.0) -> None:
         self.reset_count += 1
-        self.x = 0.0
-        self.y = 0.0
+        self.x = float(x)
+        self.y = float(y)
 
 
 class _Quat:
@@ -179,6 +179,10 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
     assert float(motion_params.ODOMETRY_DISTANCE_SCALE) > 0.0
+    assert len(motion_params.FIELD_SIZE_M) == 2
+    assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
+    assert float(motion_params.FIELD_SIZE_M[0]) > 0.0
+    assert float(motion_params.FIELD_SIZE_M[1]) > 0.0
     assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
     assert float(safety_params.V_CMD_MAX) > 0.0
@@ -217,6 +221,13 @@ def test_position_control_params_compensate_encoder_count_scale() -> None:
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > float(
         motion_params.POS_TOLERANCE
     )
+
+
+def test_field_pose_params_are_coordinate_tuples() -> None:
+    """场地坐标配置使用二元元组保持坐标语义."""
+
+    assert motion_params.ASSISTANT_START_POSITION_M == pytest.approx((0.10, -0.50))
+    assert motion_params.FIELD_SIZE_M == pytest.approx((3.2, 2.4))
 
 
 def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
@@ -331,6 +342,46 @@ def test_transport_car_builds_imu_snapshot() -> None:
         "yaw_rate_dps": 3.0,
         "gz_raw": 9.0,
     }
+
+
+def test_transport_car_builds_pose_snapshot_from_odometry_and_heading() -> None:
+    """位姿快照统一返回世界系位置和当前航向."""
+    _transport_car, car = _make_control_car(
+        odometry=_Odom(x=0.10, y=-0.50),
+        heading_est=12.5,
+    )
+
+    assert car.build_pose_snapshot() == {
+        "x": 0.10,
+        "y": -0.50,
+        "angle": 12.5,
+    }
+
+
+def test_transport_car_calibrates_single_axis_to_field_edge() -> None:
+    """边线校准只重置对应单轴, 不改另一轴和航向."""
+    _transport_car, car = _make_control_car(
+        odometry=_Odom(x=1.25, y=1.50),
+        heading_est=33.0,
+    )
+
+    car.calibrate_pose_to_field_edge("right")
+
+    assert car.build_pose_snapshot() == {
+        "x": pytest.approx(motion_params.FIELD_SIZE_M[0]),
+        "y": 1.50,
+        "angle": 33.0,
+    }
+
+
+def test_assistant_transport_car_starts_from_configured_position() -> None:
+    """辅车构造时使用配置中的发车坐标初始化里程计."""
+    transport_car = import_transport_car_module()
+
+    car = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
+
+    assert car.odometry.x == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[0])
+    assert car.odometry.y == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[1])
 
 
 def test_transport_car_builds_encoder_snapshot() -> None:

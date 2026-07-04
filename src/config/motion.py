@@ -22,6 +22,10 @@ MOTION_STOP_CONFIRM_TICKS = 3
 WHEEL_DIAMETER_M = 0.038
 # 里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
 ODOMETRY_DISTANCE_SCALE = 0.65
+# 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
+FIELD_SIZE_M = (3.2, 2.4)
+# 辅车发车坐标, 单位米, 格式为 (x, y)
+ASSISTANT_START_POSITION_M = (0.10, -0.50)
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
