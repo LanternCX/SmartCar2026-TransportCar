@@ -22,6 +22,12 @@
 - 陀螺仪零飘结果保存到 `/flash/gyro_offset.txt`。
 - 电机辨识结果保存到 `/flash/ident_params.txt`。
 
+## 场地坐标约定
+
+- 蚂蚁搬家场地坐标与边线校准示意图: [`field_coordinate_calibration.svg`](./field_coordinate_calibration.svg)。
+- 坐标单位使用 cm, `x+` 向右, `y+` 向前。
+- 边线校准只重置单轴位置, 不重置航向角。
+
 ## 调试取舍
 
 - 状态到达但车辆未动作时, 先区分“目标未下发”和“目标被后续输入覆盖”。
