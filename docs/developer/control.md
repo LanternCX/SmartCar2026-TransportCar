@@ -25,7 +25,7 @@
 ## 场地坐标约定
 
 - 蚂蚁搬家场地坐标与边线校准示意图: [`field_coordinate_calibration.svg`](./field_coordinate_calibration.svg)。
-- 坐标单位使用 cm, `x+` 向右, `y+` 向前。
+- 坐标单位使用 m, `x+` 向右, `y+` 向前。
 - 边线校准只重置单轴位置, 不重置航向角。
 
 ## 调试取舍

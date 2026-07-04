@@ -23,7 +23,7 @@ text{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",Arial,sans-s
 </defs>
 <rect width="100%" height="100%" fill="white"/>
 <text x="550" y="42" text-anchor="middle" class="title">蚂蚁搬家场地坐标与边线校准</text>
-<text x="550" y="70" text-anchor="middle" class="small">场地 3.2m × 2.4m；坐标单位 cm；x+ 向右，y+ 向前；比例 1cm = 2px</text>
+<text x="550" y="70" text-anchor="middle" class="small">场地 3.2m × 2.4m；坐标单位 m；x+ 向右，y+ 向前；比例 1m = 200px</text>
 
 <rect x="210" y="120" width="640" height="480" class="field"/>
 <rect x="210" y="120" width="640" height="480" class="border"/>
@@ -36,26 +36,26 @@ text{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",Arial,sans-s
 <text x="232" y="492" class="label" fill="#059669">y+</text>
 <text x="132" y="624" class="small">原点参考</text>
 
-<text x="530" y="108" text-anchor="middle" class="label">上边线：y = 240</text>
+<text x="530" y="108" text-anchor="middle" class="label">上边线：y = 2.4</text>
 <text x="530" y="628" text-anchor="middle" class="label">底边线：y = 0</text>
 <text x="238" y="158" class="label">左边线：x = 0</text>
-<text x="822" y="158" text-anchor="end" class="label">右边线：x = 320</text>
+<text x="822" y="158" text-anchor="end" class="label">右边线：x = 3.2</text>
 
 <circle cx="230" cy="700" r="8" fill="#ea580c" stroke="#9a3412" stroke-width="2"/>
 <path d="M230,600 L230,692" class="dash"/>
 <path d="M210,700 L222,700" class="dash"/>
 <rect x="42" y="654" width="165" height="62" class="warn"/>
 <text x="124" y="679" text-anchor="middle" class="label">辅车初始点</text>
-<text x="124" y="702" text-anchor="middle" class="small">(x, y) = (10, -50)</text>
+<text x="124" y="702" text-anchor="middle" class="small">(x, y) = (0.10, -0.50)</text>
 
 <rect x="895" y="135" width="160" height="68" class="good"/>
 <text x="975" y="161" text-anchor="middle" class="label">贴上边</text>
-<text x="975" y="185" text-anchor="middle" class="small">只校准 y = 240</text>
+<text x="975" y="185" text-anchor="middle" class="small">只校准 y = 2.4</text>
 <path d="M895,169 C875,150 860,136 842,124" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="895" y="332" width="160" height="68" class="good"/>
 <text x="975" y="358" text-anchor="middle" class="label">贴右边</text>
-<text x="975" y="382" text-anchor="middle" class="small">只校准 x = 320</text>
+<text x="975" y="382" text-anchor="middle" class="small">只校准 x = 3.2</text>
 <path d="M895,366 L858,390" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="895" y="496" width="160" height="68" class="good"/>
