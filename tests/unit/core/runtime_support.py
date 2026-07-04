@@ -299,6 +299,7 @@ def install_transport_car_stubs() -> None:
         "ODOMETRY_DISTANCE_SCALE": 1.0,
         "FIELD_SIZE_M": (3.2, 2.4),
         "ASSISTANT_START_POSITION_M": (0.10, -0.50),
+        "TRANSPORT_OBJECT_TARGET_EDGE": {-1: "bottom"},
         "POS_TOLERANCE": 0.01,
         "ANGLE_TOLERANCE": 1.0,
         "ACTIVE_WHEELS": ("m", "l", "r"),

@@ -684,10 +684,7 @@ class MasterForwardRuntime:
         if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
             self._state_machine, "_orbit_completed", False
         ):
-            target_heading_deg = (
-                float(self._state_machine._boot_heading_deg)
-                + float(MASTER_ORBIT_TARGET_DEG)
-            )
+            target_heading_deg = self._state_machine.get_push_heading_deg()
             self._transport_car.set_heading_target(target_heading_deg)
 
     def _apply_orbit_velocity_correction(self) -> None:

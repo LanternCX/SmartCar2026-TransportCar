@@ -238,6 +238,34 @@ def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) 
     }
 
 
+def test_master_runtime_holds_push_heading_after_orbit(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_SEARCH_OBJECT
+    runtime._state_machine._orbit_completed = True
+    runtime._state_machine._current_target_edge = "left"
+    runtime._latest_uart6_velocity = {
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+    runtime._apply_latest_uart6_velocity()
+
+    assert ("set_heading_target", 90.0) in cars[0].events
+
+
 def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -2196,6 +2224,39 @@ def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypat
         "threshold": (0, 0, 0, 0, 0, 0),
         "queued": False,
     }
+
+
+def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._apply_sync_context(
+        {
+            "state": module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+            "target": module.ASSISTANT_TARGET_OBJECT,
+            "arg": _pack_task_arg(2, 1),
+        }
+    )
+
+    accepted = runtime._apply_sync_context(
+        {
+            "state": module.ASSISTANT_STATE_CLEAR_OBJECT,
+            "target": module.ASSISTANT_TARGET_OBJECT,
+            "arg": module.CLEAR_PHASE_RETREAT,
+        }
+    )
+
+    assert accepted is True
+    assert ("calibrate_pose_to_field_edge", "bottom") in cars[0].events
 
 
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:

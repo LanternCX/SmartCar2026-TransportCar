@@ -58,6 +58,7 @@ from role.assistant.state_machine import (
 )
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
+from role.transport_plan import target_edge_for_object
 
 
 _TARGET_FOUND_EVENT = 6
@@ -741,6 +742,9 @@ class AssistantFollowRuntime:
         self._clear_completed = False
         self._clear_stop_ticks = 0
         self._clear_motion_inputs()
+        self._transport_car.calibrate_pose_to_field_edge(
+            target_edge_for_object(self._current_object_id)
+        )
         clear_phase = int(self._state_machine.arg)
         if clear_phase == CLEAR_PHASE_RETREAT:
             self._transport_car.set_relative_translation_target(

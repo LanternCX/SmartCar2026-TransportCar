@@ -26,6 +26,8 @@ ODOMETRY_DISTANCE_SCALE = 0.65
 FIELD_SIZE_M = (3.2, 2.4)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
 ASSISTANT_START_POSITION_M = (0.10, -0.50)
+# 物体目标边配置, -1 表示覆盖所有物体
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "bottom"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
