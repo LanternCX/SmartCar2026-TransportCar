@@ -41,7 +41,9 @@ from play.routines.assistant_return_garage import (
     RETURN_POSITION_SPEED as ASSISTANT_RETURN_POSITION_SPEED,
 )
 from play.routines.master_return_garage import (
+    FINAL_FORWARD_SPEED as MASTER_FINAL_FORWARD_SPEED,
     MASTER_LEAD_DISTANCE,
+    RETURN_FORWARD_SPEED as MASTER_RETURN_FORWARD_SPEED,
     RETURN_POSITION_SPEED as MASTER_RETURN_POSITION_SPEED,
 )
 from tests.unit.runtime.transport_runtime_support import (
@@ -1862,7 +1864,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     assert cars[0].last_chassis_target == {
         "source": "master_play",
         "vx": 0.0,
-        "vy": 5.0,
+        "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -1878,7 +1880,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     assert cars[0].last_chassis_target == {
         "source": "master_play",
         "vx": 0.0,
-        "vy": 5.0,
+        "vy": float(MASTER_FINAL_FORWARD_SPEED),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -1916,7 +1918,7 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     assert cars[0].last_chassis_target == {
         "source": "master_play",
         "vx": 0.0,
-        "vy": 5.0,
+        "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -1927,7 +1929,7 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     assert cars[0].last_chassis_target == {
         "source": "master_play",
         "vx": 0.0,
-        "vy": 5.0,
+        "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
         "has_omega": False,
     }
