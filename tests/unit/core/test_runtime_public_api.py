@@ -178,7 +178,8 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
-    assert float(motion_params.ODOMETRY_DISTANCE_SCALE) > 0.0
+    assert float(motion_params.MASTER_ODOMETRY_DISTANCE_SCALE) > 0.0
+    assert float(motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE) > 0.0
     assert len(motion_params.FIELD_SIZE_M) == 2
     assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
     assert float(motion_params.FIELD_SIZE_M[0]) > 0.0
@@ -255,11 +256,11 @@ def test_omni_kinematics_uses_measured_encoder_counts_per_wheel_rev() -> None:
     assert kinematics.counts_per_rev == pytest.approx(7 * 30)
 
 
-def test_odometry_applies_distance_scale_from_field_measurement() -> None:
-    """里程计按现场标定比例积分平移距离."""
+def test_odometry_applies_configured_distance_scale() -> None:
+    """里程计按传入的距离标定比例积分平移距离."""
 
-    odometry = Odometry()
-    scale = float(motion_params.ODOMETRY_DISTANCE_SCALE)
+    scale = 0.5
+    odometry = Odometry(distance_scale=scale)
 
     odometry.update(0.0, 1.0, 0.0, 1.0)
 
@@ -389,6 +390,21 @@ def test_assistant_transport_car_starts_from_configured_position() -> None:
 
     assert car.odometry.x == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[0])
     assert car.odometry.y == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[1])
+
+
+def test_transport_car_selects_odometry_distance_scale_by_role() -> None:
+    """底盘构造时按车辆角色选择对应里程计标定比例."""
+    transport_car = import_transport_car_module()
+
+    master = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="master")
+    assistant = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
+
+    assert master.odometry.distance_scale == pytest.approx(
+        transport_car.MASTER_ODOMETRY_DISTANCE_SCALE
+    )
+    assert assistant.odometry.distance_scale == pytest.approx(
+        transport_car.ASSISTANT_ODOMETRY_DISTANCE_SCALE
+    )
 
 
 def test_transport_car_builds_encoder_snapshot() -> None:

@@ -50,6 +50,10 @@ HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
 FIELD_SIZE_M = getattr(motion_params, "FIELD_SIZE_M")
 ASSISTANT_START_POSITION_M = getattr(motion_params, "ASSISTANT_START_POSITION_M")
+MASTER_ODOMETRY_DISTANCE_SCALE = getattr(motion_params, "MASTER_ODOMETRY_DISTANCE_SCALE")
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = getattr(
+    motion_params, "ASSISTANT_ODOMETRY_DISTANCE_SCALE"
+)
 IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
 GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
 PID_MAP = getattr(motion_params, "PID_MAP")
@@ -242,7 +246,12 @@ class TransportCar:
         # @details kinematics: Y 型三轮全向车的正逆运动学变换
         #          odometry: 积分世界系速度, 记录车体当前位置 (x, y)
         self.kinematics = OmniKinematics()
-        self.odometry = Odometry()
+        distance_scale = (
+            MASTER_ODOMETRY_DISTANCE_SCALE
+            if self.vehicle_role == "master"
+            else ASSISTANT_ODOMETRY_DISTANCE_SCALE
+        )
+        self.odometry = Odometry(distance_scale)
         if self.vehicle_role == "assistant":
             self.odometry.reset(
                 float(ASSISTANT_START_POSITION_M[0]),

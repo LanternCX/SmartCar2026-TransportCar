@@ -20,8 +20,10 @@ MOTION_STOP_SPEED_THRESHOLD = 0.5
 MOTION_STOP_CONFIRM_TICKS = 3
 # 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
 WHEEL_DIAMETER_M = 0.038
-# 里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-ODOMETRY_DISTANCE_SCALE = 0.65
+# 主车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
+MASTER_ODOMETRY_DISTANCE_SCALE = 0.9286
+# 辅车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = 0.5107
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 辅车发车坐标, 单位米, 格式为 (x, y)

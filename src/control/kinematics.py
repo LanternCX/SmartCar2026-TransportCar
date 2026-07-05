@@ -125,13 +125,14 @@ class Odometry:
     维护当前位置的 x、y 坐标
     """
 
-    def __init__(self):
+    def __init__(self, distance_scale=1.0):
         """@brief 初始化里程计状态
 
         位置初值为原点(0, 0), 可通过 reset() 方法重置
         """
         self.x = 0.0
         self.y = 0.0
+        self.distance_scale = float(distance_scale)
 
     def update(self, vx_robot, vy_robot, theta_rad, dt):
         """@brief 更新位置
@@ -154,10 +155,8 @@ class Odometry:
 
         v_world_x = vx_robot * cos_t - vy_robot * sin_t
         v_world_y = vx_robot * sin_t + vy_robot * cos_t
-        distance_scale = float(motion_params.ODOMETRY_DISTANCE_SCALE)
-
-        self.x += v_world_x * dt * distance_scale
-        self.y += v_world_y * dt * distance_scale
+        self.x += v_world_x * dt * self.distance_scale
+        self.y += v_world_y * dt * self.distance_scale
 
     def reset(self, x=0.0, y=0.0):
         """@brief 重置里程计
