@@ -289,6 +289,7 @@ def install_transport_car_stubs() -> None:
     config_storage = ModuleType("config.storage")
     motion_values = {
         "TICK_MS": 5,
+        "ROLE_STEP_MS": 100,
         "TRANSPORT_FORWARD_SPEED": 5.0,
         "TRANSPORT_CLEAR_STEP_DISTANCE_M": 0.12,
         "TRANSPORT_CLEAR_RETREAT_DISTANCE_M": 0.10,

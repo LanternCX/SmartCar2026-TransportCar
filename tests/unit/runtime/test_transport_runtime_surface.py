@@ -75,6 +75,8 @@ def _complete_master_startup_move(runtime, car) -> None:
     while runtime._state_machine.state == MASTER_STATE_STARTUP_MOVE:
         run_runtime_cycle(runtime)
         car.command_lock = False
+    runtime.step_role()
+    runtime.poll_transport_tx()
 
 
 def _complete_assistant_startup_move(runtime, car) -> None:
@@ -85,6 +87,8 @@ def _complete_assistant_startup_move(runtime, car) -> None:
         runtime.step()
         runtime.poll_transport_tx()
         car.command_lock = False
+    runtime.step_role()
+    runtime.poll_transport_tx()
 
 
 def _ack_assistant_startup_follow_sync(runtime, uart6, clock) -> None:
@@ -160,6 +164,38 @@ def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypa
     run_runtime_cycle(runtime)
 
     assert ("set_orbit_velocity_correction", 1.25, -0.5) in car.events
+
+
+def test_master_runtime_skips_orbit_correction_after_chassis_orbit_finished(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.STATE_ORBITING
+    runtime._last_role_state = module.STATE_ORBITING
+    runtime._orbit_command_active = True
+    runtime._latest_uart6_velocity = {"vx": 1.25, "vy": -0.5, "omega": 0.0}
+    car.command_lock = False
+    car.orbit_mode = False
+
+    def set_orbit_velocity_correction(vx, vy):
+        raise RuntimeError("orbit velocity correction requires orbit mode")
+
+    car.set_orbit_velocity_correction = set_orbit_velocity_correction
+
+    runtime.step_role()
+
+    assert runtime._last_error_text == "none"
+    assert runtime._state_machine.state == module.STATE_SEARCH_OBJECT
 
 
 def test_master_runtime_writes_zero_velocity_when_orbit_finishes(monkeypatch) -> None:
@@ -353,7 +389,9 @@ def test_master_runtime_logs_task_event_context_status(monkeypatch, capsys) -> N
     assert "master_event: drop context=9 active=-1 pending=8 state=4 event=8 value=0" in captured
 
 
-def test_master_runtime_logs_transport_and_feedforward_flow(monkeypatch, capsys) -> None:
+def test_master_runtime_keeps_transport_and_feedforward_flow_quiet(
+    monkeypatch, capsys
+) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -390,14 +428,8 @@ def test_master_runtime_logs_transport_and_feedforward_flow(monkeypatch, capsys)
     runtime._queue_feedforward_velocity()
 
     captured = capsys.readouterr().out
-    assert (
-        "master_transport: drive state=4 active=-1 pending_kind=finish_task pending=8 queued=0"
-        in captured
-    )
-    assert (
-        "master_feedforward: status=blocked_sync state=5 pending_kind=assistant_clear queued=0"
-        in captured
-    )
+    assert "master_transport:" not in captured
+    assert "master_feedforward:" not in captured
 
 
 def test_master_runtime_transport_ignores_local_vision_x_correction(monkeypatch) -> None:
@@ -815,6 +847,7 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     runtime._active_task_context_id = 9
 
     runtime._run_role_cycle()
+    runtime._run_motion_input_cycle()
 
     assert runtime._local_vision_control_paused is False
     assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
@@ -1130,6 +1163,95 @@ def test_assistant_runtime_applies_orbit_velocity_after_local_sync_delivery(monk
     run_runtime_cycle(runtime)
 
     assert ("set_orbit_velocity_correction", -0.75, 0.25) in car.events
+
+
+def test_assistant_runtime_ignores_local_pause_during_orbit(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart(
+        incoming=(
+            encode_frame(
+                0x02,
+                TOPIC_LOCAL_VISION_CONTROL,
+                9,
+                encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE),
+            )
+            + encode_frame(
+                0x01,
+                TOPIC_LOCAL_VISION_VELOCITY,
+                0,
+                encode_velocity_body(-0.75, 0.25, 0.0, False),
+            )
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.ASSISTANT_STATE_ORBIT
+    runtime._state_machine.arg = _pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 1)
+    car.set_orbit_target(module._ASSISTANT_ORBIT_TARGET_DEG, module._ASSISTANT_ORBIT_RADIUS_SCALE)
+
+    original_handle_velocity = car.handle_velocity_packet
+
+    def handle_velocity_packet(vx, vy, omega, source, has_omega=True):
+        car.orbit_mode = False
+        original_handle_velocity(vx, vy, omega, source, has_omega)
+
+    def set_orbit_velocity_correction(vx, vy):
+        if not car.orbit_mode:
+            raise RuntimeError("orbit velocity correction requires orbit mode")
+        car.events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
+
+    car.handle_velocity_packet = handle_velocity_packet
+    car.set_orbit_velocity_correction = set_orbit_velocity_correction
+
+    run_runtime_cycle(runtime)
+
+    assert runtime._last_error_text == "none"
+    assert car.orbit_mode is True
+    assert ("handle_velocity", "local_vision_pause", 0.0, 0.0, 0.0) not in car.events
+
+
+def test_assistant_runtime_skips_orbit_correction_after_chassis_orbit_finished(
+    monkeypatch,
+) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+    runtime._state_machine.state = module.ASSISTANT_STATE_ORBIT
+    runtime._last_approach_arg = _pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 1)
+    runtime._current_object_id = 1
+    runtime._uart6_velocity = {"vx": -0.75, "vy": 0.25, "omega": 0.0, "has_omega": False}
+    car.command_lock = False
+    car.orbit_mode = False
+
+    def set_orbit_velocity_correction(vx, vy):
+        raise RuntimeError("orbit velocity correction requires orbit mode")
+
+    car.set_orbit_velocity_correction = set_orbit_velocity_correction
+
+    runtime.step_motion_input()
+
+    assert runtime._last_error_text == "none"
+    assert runtime._state_machine.state == module.ASSISTANT_STATE_APPROACH_OBJECT
 
 
 def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
@@ -2160,6 +2282,30 @@ def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> N
     assert decode_local_vision_control_body(gate_on_frame["body"]) == {
         "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     }
+
+
+def test_assistant_runtime_keeps_gate_flow_quiet(monkeypatch, capsys) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._return_line_gate_action = {
+        "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
+        "queued": False,
+    }
+
+    runtime._queue_return_line_gate_action()
+
+    captured = capsys.readouterr().out
+    assert "assistant_gate:" not in captured
 
 
 def test_assistant_transport_uses_feedforward_y_without_local_vision_y(

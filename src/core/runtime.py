@@ -317,7 +317,7 @@ class TransportCar:
             self.wheel_states.append(state)
 
         # 运行期状态变量
-        # @details pit_flag: ticker 中断标志, 主循环检测该标志执行一次控制周期
+        # @details pending_ticks: ticker 待处理标志, 只保留一个底盘控制请求
         #          tick_count: 控制周期计数, 用于性能监控和调试
         #          target_speeds: 目标脉冲速度 {"m", "l", "r"}, 由逆运动学计算
         #          control_state: 底盘控制目标, 存储 vx/vy/omega/x/y/angle
@@ -327,6 +327,7 @@ class TransportCar:
         #          heading_transition_mode: 主动朝向跳转标志, True 时使用独立跳转限幅
         #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
         #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
+        self.pending_ticks = 0
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
@@ -390,7 +391,13 @@ class TransportCar:
 
         @note 中断上下文中应尽量快速完成, 建议 < 100us
         """
+        self.pending_ticks = 1
         self.pit_flag = True
+
+    def has_pending_tick(self):
+        """返回是否存在待处理的底盘控制周期."""
+
+        return int(getattr(self, "pending_ticks", 0)) > 0
 
     def set_ticker(self, ticker_obj):
         """
@@ -447,44 +454,52 @@ class TransportCar:
             return int(ticks_diff(current_us, previous_us))
         return int(current_us - previous_us)
 
-    def step(self):
+    def step_control(self):
         """
-        @brief 执行单次主循环迭代
+        @brief 执行单次底盘控制迭代
 
         @details 主循环流程
         1. 首次执行时记录启动日志
-        2. 检测 ticker 标志, 执行单次控制周期 (_handle_tick)
+        2. 检测 ticker 计数, 执行单次控制周期 (_handle_tick)
         3. 检测硬件紧急停止按钮 switch2, 触发时安全停止
-        4. 执行垃圾回收, 释放内存
-        5. 返回继续运行标志
+        4. 返回继续运行标志
 
         @return True 表示继续运行主循环
                 False 表示检测到致命错误(如急停)应退出主循环
-
-        @note 此函数应在主循环中反复调用, 典型使用
-        @code
-            while True:
-                if not car.step():
-                    break
-        @endcode
         """
         if not self._boot_step_logged:
             log("transport_car", "step loop active")
             self._boot_step_logged = True
 
-        if self.pit_flag:
+        if self.has_pending_tick():
             if not self._boot_tick_logged:
                 log("transport_car", "first ticker event received")
                 self._boot_tick_logged = True
             self._handle_tick()
-            self.pit_flag = False
+            self.pending_ticks -= 1
+            self.pit_flag = self.has_pending_tick()
 
         if self.switch2.value() != self.switch2_init:
             self.stop()
             return False
 
-        gc.collect()
         return True
+
+    def collect_garbage(self):
+        """执行低频垃圾回收."""
+
+        gc.collect()
+
+    def step(self):
+        """
+        @brief 执行单次兼容主循环迭代
+
+        @details 用于诊断脚本或未分层入口, 正式入口优先分别调度
+                 step_control() 与 collect_garbage().
+        """
+        keep_running = self.step_control()
+        self.collect_garbage()
+        return keep_running
 
     def stop(self):
         """

@@ -45,6 +45,8 @@ def load_run_module(monkeypatch):
     config_module = ModuleType("config")
     config_motion = ModuleType("config.motion")
     setattr(config_motion, "TICK_MS", 5)
+    setattr(config_motion, "ROLE_STEP_MS", 100)
+    setattr(config_motion, "MOTION_INPUT_STEP_MS", 15)
     setattr(config_module, "motion", config_motion)
     monkeypatch.setitem(sys.modules, "config", config_module)
     monkeypatch.setitem(sys.modules, "config.motion", config_motion)
@@ -77,9 +79,29 @@ def load_run_module(monkeypatch):
         def set_ticker(self, ticker_obj) -> None:
             self.ticker = ticker_obj
 
-        def step(self) -> bool:
+        def has_pending_tick(self) -> bool:
+            return False
+
+        def step_control(self) -> bool:
             state["loop_steps"] += 1
             return False
+
+        def poll_transport_rx(self) -> None:
+            return None
+
+        def step_role(self) -> bool:
+            state["loop_steps"] += 1
+            return False
+
+        def step_motion_input(self) -> bool:
+            state["loop_steps"] += 1
+            return False
+
+        def poll_transport_tx(self) -> None:
+            return None
+
+        def collect_garbage(self) -> None:
+            return None
 
     setattr(role_module, "create_role_transport_car", lambda role: _FakeCar())
     monkeypatch.setitem(sys.modules, "role", role_module)
@@ -181,7 +203,12 @@ def test_run_main_returns_assistant_role_and_dispatches_it(
                     "imu": "imu",
                     "mark_tick": lambda self, _tick=None: None,
                     "set_ticker": lambda self, _ticker: None,
-                    "step": lambda self: False,
+                    "has_pending_tick": lambda self: False,
+                    "poll_transport_rx": lambda self: None,
+                    "step_role": lambda self: False,
+                    "step_motion_input": lambda self: False,
+                    "poll_transport_tx": lambda self: None,
+                    "collect_garbage": lambda self: None,
                 },
             )()
         ),
@@ -226,8 +253,23 @@ def test_run_main_stops_runtime_and_reraises_fatal_error(
         def set_ticker(self, _ticker) -> None:
             return None
 
-        def step(self) -> bool:
+        def has_pending_tick(self) -> bool:
+            return False
+
+        def poll_transport_rx(self) -> None:
+            return None
+
+        def step_role(self) -> bool:
             raise RuntimeError("loop boom")
+
+        def step_motion_input(self) -> bool:
+            return True
+
+        def poll_transport_tx(self) -> None:
+            return None
+
+        def collect_garbage(self) -> None:
+            return None
 
         def stop(self) -> None:
             events.append("car_stop")
@@ -263,23 +305,202 @@ def test_run_main_stops_runtime_and_reraises_fatal_error(
     assert trace_calls == [("run", "fatal error: loop boom", "loop boom")]
 
 
-def test_run_control_loop_polls_transport_around_runtime_step(monkeypatch) -> None:
-    """主循环在运行时外部调度通信 RX 和 TX."""
+def test_run_control_loop_runs_due_role_after_one_control_tick(monkeypatch) -> None:
+    """底盘 tick 积压时先跑一次底盘, 到期状态机仍要运行."""
 
     module, _state = load_run_module(monkeypatch)
     events = []
 
     class _Car:
+        def __init__(self) -> None:
+            self.pending_ticks = 2
+
+        def has_pending_tick(self) -> bool:
+            return self.pending_ticks > 0
+
+        def step_control(self) -> bool:
+            events.append("control")
+            self.pending_ticks -= 1
+            return True
+
         def poll_transport_rx(self) -> None:
             events.append("rx")
 
-        def step(self) -> bool:
-            events.append("step")
+        def step_role(self) -> bool:
+            events.append("role")
+            return False
+
+        def step_motion_input(self) -> bool:
+            events.append("motion")
             return False
 
         def poll_transport_tx(self) -> None:
             events.append("tx")
 
-    module._run_control_loop(_Car())
+        def collect_garbage(self) -> None:
+            events.append("gc")
 
-    assert events == ["rx", "step", "tx"]
+    module._run_control_loop(_Car(), now_ms=lambda: 0)
+
+    assert events == ["control", "gc", "rx", "role", "tx"]
+
+
+def test_run_control_loop_throttles_role_cycle_to_100ms(monkeypatch) -> None:
+    """状态机业务层按 100ms 运行, 通信与 gc 每轮推进."""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    now_values = [0, 50, 100]
+
+    class _Car:
+        role_steps = 0
+
+        def has_pending_tick(self) -> bool:
+            return False
+
+        def poll_transport_rx(self) -> None:
+            events.append("rx")
+
+        def step_role(self) -> bool:
+            events.append("role")
+            self.role_steps += 1
+            return self.role_steps < 2
+
+        def step_motion_input(self) -> bool:
+            events.append("motion")
+            return True
+
+        def poll_transport_tx(self) -> None:
+            events.append("tx")
+
+        def collect_garbage(self) -> None:
+            events.append("gc")
+
+    module._run_control_loop(_Car(), now_ms=lambda: now_values.pop(0))
+
+    assert events == [
+        "gc",
+        "rx",
+        "role",
+        "motion",
+        "tx",
+        "gc",
+        "rx",
+        "motion",
+        "tx",
+        "gc",
+        "rx",
+        "role",
+        "tx",
+    ]
+
+
+def test_run_control_loop_idles_before_next_due_cycle(monkeypatch) -> None:
+    """未到底盘、通信或状态机周期时, 不空转执行通信和 gc."""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    now_values = [0, 1, 15, 100]
+    monkeypatch.setattr(module, "_idle_wait", lambda: events.append("idle"))
+
+    class _Car:
+        role_steps = 0
+
+        def has_pending_tick(self) -> bool:
+            return False
+
+        def poll_transport_rx(self) -> None:
+            events.append("rx")
+
+        def step_role(self) -> bool:
+            events.append("role")
+            self.role_steps += 1
+            return self.role_steps < 2
+
+        def step_motion_input(self) -> bool:
+            events.append("motion")
+            return True
+
+        def poll_transport_tx(self) -> None:
+            events.append("tx")
+
+        def collect_garbage(self) -> None:
+            events.append("gc")
+
+    module._run_control_loop(_Car(), now_ms=lambda: now_values.pop(0))
+
+    assert events == [
+        "gc",
+        "rx",
+        "role",
+        "motion",
+        "tx",
+        "idle",
+        "gc",
+        "rx",
+        "motion",
+        "tx",
+        "gc",
+        "rx",
+        "role",
+        "tx",
+    ]
+
+
+def test_run_control_loop_runs_due_role_after_rx_tick_arrives(monkeypatch) -> None:
+    """通信 RX 期间出现底盘 tick 时, 到期状态机仍要运行."""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+
+    class _Car:
+        pending_ticks = 0
+
+        def has_pending_tick(self) -> bool:
+            return self.pending_ticks > 0
+
+        def poll_transport_rx(self) -> None:
+            events.append("rx")
+            self.pending_ticks = 1
+
+        def step_control(self) -> bool:
+            events.append("control")
+            self.pending_ticks = 0
+            return False
+
+        def step_role(self) -> bool:
+            events.append("role")
+            return False
+
+        def step_motion_input(self) -> bool:
+            events.append("motion")
+            return False
+
+        def poll_transport_tx(self) -> None:
+            events.append("tx")
+
+        def collect_garbage(self) -> None:
+            events.append("gc")
+
+    module._run_control_loop(_Car(), now_ms=lambda: 0)
+
+    assert events == ["gc", "rx", "role", "tx"]
+
+
+def test_run_control_loop_requires_split_runtime_interface(monkeypatch) -> None:
+    """正式入口不回退到旧 step 接口, 避免形成第二套周期语义."""
+
+    module, _state = load_run_module(monkeypatch)
+
+    class _Car:
+        def has_pending_tick(self) -> bool:
+            return False
+
+        def poll_transport_rx(self) -> None:
+            return None
+
+        def step(self) -> bool:
+            return False
+
+    with pytest.raises(AttributeError, match="collect_garbage|step_role|step_motion_input"):
+        module._run_control_loop(_Car(), now_ms=lambda: 0)
