@@ -1708,8 +1708,8 @@ def test_master_runtime_logs_role_cycle_failure_to_board_log(capsys, monkeypatch
 
     assert keep_running is False
     assert "master_error: master role cycle failed: boom" in output
-    assert "master_error: traceback start" in output
-    assert "master_error: traceback end" in output
+    assert "master_error: traceback start" not in output
+    assert "master_error: traceback end" not in output
     assert cars[0].last_exception_text == "master role cycle failed: boom"
 
 

@@ -4,6 +4,7 @@
 """
 
 import sys
+from types import ModuleType
 
 from utils import startup_log
 
@@ -23,10 +24,47 @@ def test_log_prints_consistent_text(capsys, monkeypatch) -> None:
     assert startup_log.cnt == 1
 
 
-def test_log_exception_prints_summary_and_full_trace(capsys, monkeypatch) -> None:
-    """异常日志入口必须同时输出摘要和完整调用链."""
+def test_log_memory_prints_short_heap_snapshot(capsys, monkeypatch) -> None:
+    """内存日志只输出短标签和堆读数."""
 
     startup_log.cnt = 0
+    monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
+    gc_module = ModuleType("gc")
+    calls = []
+    setattr(gc_module, "collect", lambda: calls.append("collect"))
+    setattr(gc_module, "mem_free", lambda: 100)
+    setattr(gc_module, "mem_alloc", lambda: 28)
+    monkeypatch.setitem(sys.modules, "gc", gc_module)
+
+    message = startup_log.log_memory("r0")
+    output = capsys.readouterr().out
+
+    assert message == "0 1234ms mem: r0 f=100 a=28 t=128"
+    assert message in output
+    assert calls == ["collect"]
+
+
+def test_log_exception_prints_summary_without_trace_by_default(capsys, monkeypatch) -> None:
+    """异常日志默认只输出短摘要."""
+
+    startup_log.TRACE_EXCEPTION = False
+
+    startup_log.cnt = 0
+    monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
+
+    startup_log.log_exception("master_error", "role cycle failed: boom", RuntimeError("boom"))
+    output = capsys.readouterr().out
+
+    assert "0 1234ms master_error: role cycle failed: boom" in output
+    assert "master_error: traceback start" not in output
+    assert "master_error: traceback end" not in output
+
+
+def test_log_exception_prints_full_trace_when_enabled(capsys, monkeypatch) -> None:
+    """诊断开关启用时输出完整调用链."""
+
+    startup_log.cnt = 0
+    startup_log.TRACE_EXCEPTION = True
     monkeypatch.setattr(startup_log, "_now_ms", lambda: 1234)
     trace_calls = []
 
@@ -50,6 +88,7 @@ def test_log_exception_prints_summary_and_full_trace(capsys, monkeypatch) -> Non
     assert "RuntimeError: boom" in output
     assert "master_error: traceback end" in output
     assert trace_calls == ["RuntimeError"]
+    startup_log.TRACE_EXCEPTION = False
 
 
 def test_write_exception_trace_uses_single_argument_when_stdout_stream_is_required(

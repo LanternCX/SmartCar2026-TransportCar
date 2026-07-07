@@ -54,6 +54,7 @@ def load_run_module(monkeypatch):
     startup_log_module = ModuleType("utils.startup_log")
     setattr(startup_log_module, "log", lambda *_args, **_kwargs: None)
     setattr(startup_log_module, "log_exception", lambda *_args, **_kwargs: None)
+    setattr(startup_log_module, "log_memory", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
     vehicle_role_module = ModuleType("role.vehicle_role")
