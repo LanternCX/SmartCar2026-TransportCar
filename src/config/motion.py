@@ -20,8 +20,16 @@ MOTION_STOP_SPEED_THRESHOLD = 0.5
 MOTION_STOP_CONFIRM_TICKS = 3
 # 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
 WHEEL_DIAMETER_M = 0.038
-# 里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-ODOMETRY_DISTANCE_SCALE = 0.65
+# 主车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
+MASTER_ODOMETRY_DISTANCE_SCALE = 0.9286
+# 辅车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = 0.5107
+# 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
+FIELD_SIZE_M = (3.2, 2.4)
+# 辅车发车坐标, 单位米, 格式为 (x, y)
+ASSISTANT_START_POSITION_M = (0.10, -0.50)
+# 物体目标边配置, -1 表示覆盖所有物体
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "bottom"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -68,8 +76,12 @@ PID_MAP = {
     "l": (100, 500, 1),
     "r": (100, 500, 1),
 }
-# 主控制循环周期, 单位毫秒
+# 底盘控制周期, 单位毫秒
 TICK_MS = 5
+# 角色状态机决策周期, 单位毫秒
+ROLE_STEP_MS = 100
+# 视觉运动输入周期, 单位毫秒
+MOTION_INPUT_STEP_MS = 15
 # 启用的轮子集合, 用于调试时选择性激活特定轮子
 ACTIVE_WHEELS = ("m", "l", "r")
 # 陀螺仪比例因子, 单位 LSB / (deg/s), 用于原始数值到角速度的转换

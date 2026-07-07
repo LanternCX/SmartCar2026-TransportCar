@@ -212,7 +212,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
     assert orbit_command == {
-        "target_heading_deg": 105.0,
+        "target_heading_deg": 180.0,
     }
 
 
@@ -369,7 +369,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
     machine.mark_assistant_object_acknowledged()
     assert machine.state == MasterStateMachine.STATE_ORBITING
     assert machine.poll_orbit_command() == {
-        "target_heading_deg": 105.0,
+        "target_heading_deg": 180.0,
     }
 
     machine.step(orbit_finished=False)
@@ -657,6 +657,27 @@ def test_master_state_machine_finish_event_enters_clear_and_requests_assistant_c
         "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
         "arg": MasterStateMachine.CLEAR_PHASE_RETREAT,
+    }
+
+
+def test_master_state_machine_uses_object_target_edge_for_push_heading() -> None:
+    """主车推动朝向由当前物体目标边推导."""
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+
+    machine.mark_assistant_object_acknowledged()
+
+    assert machine.poll_orbit_command() == {
+        "target_heading_deg": 180.0,
     }
 
 

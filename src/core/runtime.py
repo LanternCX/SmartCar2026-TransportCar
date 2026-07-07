@@ -48,6 +48,12 @@ ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
 ORBIT_ANGLE_CONFIRM_TICKS = getattr(motion_params, "ORBIT_ANGLE_CONFIRM_TICKS")
 HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
 MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
+FIELD_SIZE_M = getattr(motion_params, "FIELD_SIZE_M")
+ASSISTANT_START_POSITION_M = getattr(motion_params, "ASSISTANT_START_POSITION_M")
+MASTER_ODOMETRY_DISTANCE_SCALE = getattr(motion_params, "MASTER_ODOMETRY_DISTANCE_SCALE")
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = getattr(
+    motion_params, "ASSISTANT_ODOMETRY_DISTANCE_SCALE"
+)
 IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
 GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
 PID_MAP = getattr(motion_params, "PID_MAP")
@@ -240,7 +246,17 @@ class TransportCar:
         # @details kinematics: Y 型三轮全向车的正逆运动学变换
         #          odometry: 积分世界系速度, 记录车体当前位置 (x, y)
         self.kinematics = OmniKinematics()
-        self.odometry = Odometry()
+        distance_scale = (
+            MASTER_ODOMETRY_DISTANCE_SCALE
+            if self.vehicle_role == "master"
+            else ASSISTANT_ODOMETRY_DISTANCE_SCALE
+        )
+        self.odometry = Odometry(distance_scale)
+        if self.vehicle_role == "assistant":
+            self.odometry.reset(
+                float(ASSISTANT_START_POSITION_M[0]),
+                float(ASSISTANT_START_POSITION_M[1]),
+            )
 
         # 航向角目标值(度), 由角度控制目标或当前航向初始化, 用于偏航 PID 反馈
         self.heading_target = 0.0
@@ -301,7 +317,7 @@ class TransportCar:
             self.wheel_states.append(state)
 
         # 运行期状态变量
-        # @details pit_flag: ticker 中断标志, 主循环检测该标志执行一次控制周期
+        # @details pending_ticks: ticker 待处理标志, 只保留一个底盘控制请求
         #          tick_count: 控制周期计数, 用于性能监控和调试
         #          target_speeds: 目标脉冲速度 {"m", "l", "r"}, 由逆运动学计算
         #          control_state: 底盘控制目标, 存储 vx/vy/omega/x/y/angle
@@ -311,6 +327,7 @@ class TransportCar:
         #          heading_transition_mode: 主动朝向跳转标志, True 时使用独立跳转限幅
         #          orbit_mode: 统一绕行模式标志, True 时按角速度解算线速度
         #          orbit_radius_scale: 统一绕行半径倍率, 仅表达半径大小
+        self.pending_ticks = 0
         self.pit_flag = False
         self.tick_count = 0
         self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
@@ -374,7 +391,13 @@ class TransportCar:
 
         @note 中断上下文中应尽量快速完成, 建议 < 100us
         """
+        self.pending_ticks = 1
         self.pit_flag = True
+
+    def has_pending_tick(self):
+        """返回是否存在待处理的底盘控制周期."""
+
+        return int(getattr(self, "pending_ticks", 0)) > 0
 
     def set_ticker(self, ticker_obj):
         """
@@ -431,44 +454,52 @@ class TransportCar:
             return int(ticks_diff(current_us, previous_us))
         return int(current_us - previous_us)
 
-    def step(self):
+    def step_control(self):
         """
-        @brief 执行单次主循环迭代
+        @brief 执行单次底盘控制迭代
 
         @details 主循环流程
         1. 首次执行时记录启动日志
-        2. 检测 ticker 标志, 执行单次控制周期 (_handle_tick)
+        2. 检测 ticker 计数, 执行单次控制周期 (_handle_tick)
         3. 检测硬件紧急停止按钮 switch2, 触发时安全停止
-        4. 执行垃圾回收, 释放内存
-        5. 返回继续运行标志
+        4. 返回继续运行标志
 
         @return True 表示继续运行主循环
                 False 表示检测到致命错误(如急停)应退出主循环
-
-        @note 此函数应在主循环中反复调用, 典型使用
-        @code
-            while True:
-                if not car.step():
-                    break
-        @endcode
         """
         if not self._boot_step_logged:
             log("transport_car", "step loop active")
             self._boot_step_logged = True
 
-        if self.pit_flag:
+        if self.has_pending_tick():
             if not self._boot_tick_logged:
                 log("transport_car", "first ticker event received")
                 self._boot_tick_logged = True
             self._handle_tick()
-            self.pit_flag = False
+            self.pending_ticks -= 1
+            self.pit_flag = self.has_pending_tick()
 
         if self.switch2.value() != self.switch2_init:
             self.stop()
             return False
 
-        gc.collect()
         return True
+
+    def collect_garbage(self):
+        """执行低频垃圾回收."""
+
+        gc.collect()
+
+    def step(self):
+        """
+        @brief 执行单次兼容主循环迭代
+
+        @details 用于诊断脚本或未分层入口, 正式入口优先分别调度
+                 step_control() 与 collect_garbage().
+        """
+        keep_running = self.step_control()
+        self.collect_garbage()
+        return keep_running
 
     def stop(self):
         """
@@ -650,6 +681,33 @@ class TransportCar:
         self._pending_dy = None
         self._pending_d_angle = None
         self._translation_speed_limit_cmd = None
+
+    def build_pose_snapshot(self):
+        """构造当前世界系位姿快照."""
+
+        return {
+            "x": float(self.odometry.x),
+            "y": float(self.odometry.y),
+            "angle": float(self.heading_est),
+        }
+
+    def calibrate_pose_to_field_edge(self, edge):
+        """按贴边结果校准单轴位置.
+
+        @param edge 边线名称, 支持 left/right/bottom/top
+        """
+
+        edge = str(edge)
+        if edge == "left":
+            self.odometry.x = 0.0
+        elif edge == "right":
+            self.odometry.x = float(FIELD_SIZE_M[0])
+        elif edge == "bottom":
+            self.odometry.y = 0.0
+        elif edge == "top":
+            self.odometry.y = float(FIELD_SIZE_M[1])
+        else:
+            raise ValueError("unknown field edge")
 
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""
@@ -880,8 +938,8 @@ class TransportCar:
         当任意轮速超过上限 TARGET_SPEED_MAX 时, 对所有轮速进行等比例缩放,
         保持方向不变同时满足速度约束
 
-        @param vx 纵向速度(脉冲/周期), 沿车体纵轴正向
-        @param vy 横向速度(脉冲/周期), 沿车体横轴正向(左为正)
+        @param vx 车体 x 轴速度(脉冲/周期), 正向右移
+        @param vy 车体 y 轴速度(脉冲/周期), 正向前进
         @param omega 角速度(脉冲/周期), 逆时针为正
 
         @return 元组 (vm, vl, vr), 分别对应中轮、左轮、右轮的目标脉冲速度
@@ -1203,8 +1261,8 @@ class TransportCar:
            - 直接驱动电机
         4. 非活跃轮子重置 PID 并停止
 
-        @param target_vx_cmd 目标纵向速度(脉冲/周期)
-        @param target_vy_cmd 目标横向速度(脉冲/周期)
+        @param target_vx_cmd 目标 x 轴速度(脉冲/周期)
+        @param target_vy_cmd 目标 y 轴速度(脉冲/周期)
         @param omega_cmd 目标角速度(脉冲/周期)
         @param dt_s 时间增量(秒), 用于 PID 积分
 

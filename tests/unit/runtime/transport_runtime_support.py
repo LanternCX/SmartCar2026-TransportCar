@@ -183,6 +183,9 @@ def install_fake_core(monkeypatch):
                 "y": float(dy),
             }
 
+        def calibrate_pose_to_field_edge(self, edge) -> None:
+            self.events.append(("calibrate_pose_to_field_edge", str(edge)))
+
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", FakeTransportCar)
     monkeypatch.setitem(sys.modules, "core.runtime", core_module)

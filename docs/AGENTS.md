@@ -11,6 +11,7 @@
 
 - 项目方向和路线边界: `docs/developer/strategy.md`
 - 电控与运行外部约定: `docs/developer/control.md`
+- 蚂蚁搬家场地坐标与边线校准图: `docs/developer/field_coordinate_calibration.svg`
 - 串口链路设计约束: `docs/developer/protocol.md`
 - 状态机所有权: `docs/developer/state.md`
 - 视觉仓库与车端职责边界: `docs/developer/vision.md`

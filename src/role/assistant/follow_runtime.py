@@ -58,6 +58,7 @@ from role.assistant.state_machine import (
 )
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
+from role.transport_plan import target_edge_for_object
 
 
 _TARGET_FOUND_EVENT = 6
@@ -158,21 +159,47 @@ class AssistantFollowRuntime:
     def set_ticker(self, ticker_obj: object) -> None:
         self._transport_car.set_ticker(ticker_obj)
 
+    def has_pending_tick(self) -> bool:
+        return self._transport_car.has_pending_tick()
+
+    def step_control(self) -> bool:
+        return self._transport_car.step_control()
+
+    def collect_garbage(self) -> None:
+        self._transport_car.collect_garbage()
+
     def poll_transport_rx(self) -> None:
         self.transport_service.poll_rx()
 
     def poll_transport_tx(self) -> None:
         self.transport_service.poll_tx()
 
-    def step(self) -> bool:
+    def step_motion_input(self) -> bool:
+        try:
+            self._run_motion_input_cycle()
+        except Exception as exc:
+            self._record_error_text("motion_input failed: %s" % exc, exc)
+        self._finish_clear_if_needed()
+        self._resume_approach_after_orbit()
+        return True
+
+    def step_role(self) -> bool:
         try:
             self._run_role_cycle()
         except Exception as exc:
             self._record_error_text("role_cycle failed: %s" % exc, exc)
+        return True
+
+    def step(self) -> bool:
+        self.step_role()
+        self.step_motion_input()
         keep_running = self._transport_car.step()
-        self._finish_clear_if_needed()
-        self._resume_approach_after_orbit()
         return keep_running
+
+    def _run_motion_input_cycle(self) -> None:
+        """执行视觉速度输入和底盘目标写入."""
+        self._consume_velocity_inputs()
+        self._write_effective_velocity()
 
     def _run_role_cycle(self) -> None:
         """执行辅车单拍业务编排.
@@ -182,8 +209,6 @@ class AssistantFollowRuntime:
         self._check_transport_deliveries()
         self._consume_master_sync()
         self._consume_local_vision_event()
-        self._consume_velocity_inputs()
-        self._write_effective_velocity()
         self._queue_pending_local_vision_sync()
         self._queue_return_line_gate_action()
         self._queue_pending_report()
@@ -204,7 +229,6 @@ class AssistantFollowRuntime:
                 self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
                 == DELIVERY_DELIVERED
             ):
-                log("assistant_gate", "done action=%d" % int(pending_gate["action"]))
                 self._return_line_gate_action = None
         pending = self._pending_target_found_report
         if pending is not None and pending.get("queued"):
@@ -348,7 +372,6 @@ class AssistantFollowRuntime:
             and event == _RETURN_LINE_ALIGNED_EVENT
         ):
             self._return_line_aligned = True
-            log("assistant_gate", "ready_on value=%d" % int(packet["value"]))
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
@@ -402,6 +425,9 @@ class AssistantFollowRuntime:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
 
         action = int(packet.get("action", 0))
+        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+            self._clear_local_vision_pause_residue()
+            return
         if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
             self._local_vision_control_paused = False
             return
@@ -499,6 +525,8 @@ class AssistantFollowRuntime:
 
     def _write_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
+        if not bool(getattr(self._transport_car, "orbit_mode", False)):
             return
         if self._pending_local_vision_sync is not None:
             return
@@ -741,6 +769,9 @@ class AssistantFollowRuntime:
         self._clear_completed = False
         self._clear_stop_ticks = 0
         self._clear_motion_inputs()
+        self._transport_car.calibrate_pose_to_field_edge(
+            target_edge_for_object(self._current_object_id)
+        )
         clear_phase = int(self._state_machine.arg)
         if clear_phase == CLEAR_PHASE_RETREAT:
             self._transport_car.set_relative_translation_target(
@@ -841,7 +872,6 @@ class AssistantFollowRuntime:
         body = encode_local_vision_control_body(pending["action"])
         status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            log("assistant_gate", "start action=%d" % int(pending["action"]))
             pending["queued"] = True
 
     def _queue_pending_report(self) -> None:

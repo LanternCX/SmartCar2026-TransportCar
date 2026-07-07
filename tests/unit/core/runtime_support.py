@@ -184,12 +184,17 @@ def install_transport_car_stubs() -> None:
             return float(vm), float(vl), float(vr)
 
     class _Odometry:
-        def __init__(self) -> None:
+        def __init__(self, distance_scale=1.0) -> None:
             self.x = 0.0
             self.y = 0.0
+            self.distance_scale = float(distance_scale)
 
         def update(self, *_args) -> None:
             return None
+
+        def reset(self, x=0.0, y=0.0) -> None:
+            self.x = float(x)
+            self.y = float(y)
 
     setattr(control_kinematics, "OmniKinematics", _OmniKinematics)
     setattr(control_kinematics, "Odometry", _Odometry)
@@ -284,6 +289,7 @@ def install_transport_car_stubs() -> None:
     config_storage = ModuleType("config.storage")
     motion_values = {
         "TICK_MS": 5,
+        "ROLE_STEP_MS": 100,
         "TRANSPORT_FORWARD_SPEED": 5.0,
         "TRANSPORT_CLEAR_STEP_DISTANCE_M": 0.12,
         "TRANSPORT_CLEAR_RETREAT_DISTANCE_M": 0.10,
@@ -292,7 +298,11 @@ def install_transport_car_stubs() -> None:
         "MOTION_STOP_CONFIRM_TICKS": 3,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
-        "ODOMETRY_DISTANCE_SCALE": 1.0,
+        "MASTER_ODOMETRY_DISTANCE_SCALE": 1.25,
+        "ASSISTANT_ODOMETRY_DISTANCE_SCALE": 0.75,
+        "FIELD_SIZE_M": (3.2, 2.4),
+        "ASSISTANT_START_POSITION_M": (0.10, -0.50),
+        "TRANSPORT_OBJECT_TARGET_EDGE": {-1: "bottom"},
         "POS_TOLERANCE": 0.01,
         "ANGLE_TOLERANCE": 1.0,
         "ACTIVE_WHEELS": ("m", "l", "r"),

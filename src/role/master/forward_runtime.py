@@ -198,18 +198,40 @@ class MasterForwardRuntime:
     def set_ticker(self, ticker_obj: object) -> None:
         self._transport_car.set_ticker(ticker_obj)
 
+    def has_pending_tick(self) -> bool:
+        return self._transport_car.has_pending_tick()
+
+    def step_control(self) -> bool:
+        return self._transport_car.step_control()
+
+    def collect_garbage(self) -> None:
+        self._transport_car.collect_garbage()
+
     def poll_transport_rx(self) -> None:
         self.transport_service.poll_rx()
 
     def poll_transport_tx(self) -> None:
         self.transport_service.poll_tx()
 
-    def step(self) -> bool:
+    def step_motion_input(self) -> bool:
+        try:
+            self._run_motion_input_cycle()
+        except Exception as exc:
+            self._record_error("master motion input failed: %s" % exc, exc)
+        return True
+
+    def step_role(self) -> bool:
         try:
             self._run_role_cycle()
         except Exception as exc:
             self._record_error("master role cycle failed: %s" % exc, exc)
-        return self._transport_car.step()
+        return True
+
+    def step(self) -> bool:
+        keep_running = self.step_role()
+        if keep_running:
+            keep_running = self.step_motion_input()
+        return bool(self._transport_car.step()) and keep_running
 
     def request_state_sync(self, state: int, target: int, arg: int) -> int:
         pending = {
@@ -233,18 +255,24 @@ class MasterForwardRuntime:
         self._advance_state_machine()
         self._sync_role_state_transition()
         self._drain_state_machine_outputs()
-        self._consume_uart6_inputs()
+        self._consume_uart6_reliable_inputs()
         self._consume_uart8_inputs()
         self._check_transport_deliveries()
         self._sync_role_state_transition()
         self._drain_state_machine_outputs()
+        self._queue_transport_outputs()
+
+    def _run_motion_input_cycle(self) -> None:
+        """执行视觉速度输入和底盘目标写入."""
+        self._sync_role_state_transition()
+        self._consume_uart6_velocity_input()
         self._apply_motion_outputs()
         self._run_clear_phase()
         self._sync_role_state_transition()
         self._run_turn_back_phase()
         self._sync_role_state_transition()
         self._drain_state_machine_outputs()
-        self._queue_transport_outputs()
+        self._queue_feedforward_velocity()
 
     def _sync_role_state_transition(self) -> None:
         current_state = int(self._state_machine.state)
@@ -267,8 +295,8 @@ class MasterForwardRuntime:
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
 
-    def _consume_uart6_inputs(self) -> None:
-        """消费本车视觉链路上的 UDP 速度与 TCP 事件."""
+    def _consume_uart6_reliable_inputs(self) -> None:
+        """消费本车视觉链路上的 TCP 控制与事件."""
         if (
             self.transport_service.tcp(UART6).read(
                 TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
@@ -277,6 +305,17 @@ class MasterForwardRuntime:
         ):
             packet = decode_local_vision_control_body(self._local_vision_control_body)
             self._handle_local_vision_control(packet)
+        if (
+            self.transport_service.tcp(UART6).read(
+                TOPIC_MASTER_VISION_EVENT_REPORT, self._task_event_body
+            )
+            == "ok"
+        ):
+            packet = decode_master_vision_event_report_body(self._task_event_body)
+            self._handle_task_event(packet)
+
+    def _consume_uart6_velocity_input(self) -> None:
+        """消费本车视觉链路上的 UDP 速度."""
         if (
             self.transport_service.udp(UART6).read(
                 TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body
@@ -297,14 +336,6 @@ class MasterForwardRuntime:
                     )
                 ):
                     self._latest_uart6_velocity = packet
-        if (
-            self.transport_service.tcp(UART6).read(
-                TOPIC_MASTER_VISION_EVENT_REPORT, self._task_event_body
-            )
-            == "ok"
-        ):
-            packet = decode_master_vision_event_report_body(self._task_event_body)
-            self._handle_task_event(packet)
 
     def _handle_local_vision_control(self, packet: dict) -> None:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
@@ -684,14 +715,13 @@ class MasterForwardRuntime:
         if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
             self._state_machine, "_orbit_completed", False
         ):
-            target_heading_deg = (
-                float(self._state_machine._boot_heading_deg)
-                + float(MASTER_ORBIT_TARGET_DEG)
-            )
+            target_heading_deg = self._state_machine.get_push_heading_deg()
             self._transport_car.set_heading_target(target_heading_deg)
 
     def _apply_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
+            return
+        if not bool(getattr(self._transport_car, "orbit_mode", False)):
             return
         packet = self._latest_uart6_velocity
         if packet is None:
@@ -717,11 +747,10 @@ class MasterForwardRuntime:
         )
 
     def _queue_transport_outputs(self) -> None:
-        """提交本拍要发送的 task、状态同步和前馈速度."""
+        """提交本拍要发送的 task 和状态同步."""
         self._queue_pending_task_sync()
         self._queue_return_line_gate_action()
         self._queue_pending_sync()
-        self._queue_feedforward_velocity()
 
     def _queue_pending_task_sync(self) -> None:
         pending = self._pending_task_sync
@@ -1068,76 +1097,10 @@ class MasterForwardRuntime:
             )
 
     def _log_transport_flow(self, vx: float, vy: float) -> None:
-        active_context = -1
-        if self._active_task_context_id is not None:
-            active_context = int(self._active_task_context_id)
-        pending_kind = "none"
-        pending_context = -1
-        pending_queued = 0
-        if self._pending_task_sync is not None:
-            pending_kind = str(self._pending_task_sync.get("kind", "task"))
-            pending_context = int(self._pending_task_sync["context_id"])
-            pending_queued = 1 if bool(self._pending_task_sync.get("queued")) else 0
-        signature = (
-            int(self._state_machine.state),
-            active_context,
-            pending_kind,
-            pending_context,
-            pending_queued,
-            int(self._transport_task_acknowledged),
-            int(self._transport_sync_acknowledged),
-        )
-        if self._last_transport_flow_log == signature:
-            return
-        self._last_transport_flow_log = signature
-        log(
-            "master_transport",
-            "drive state=%d active=%d pending_kind=%s pending=%d queued=%d task_ack=%d assistant_ack=%d vx=%.2f vy=%.2f"
-            % (
-                int(self._state_machine.state),
-                active_context,
-                pending_kind,
-                pending_context,
-                pending_queued,
-                int(self._transport_task_acknowledged),
-                int(self._transport_sync_acknowledged),
-                float(vx),
-                float(vy),
-            ),
-        )
+        return None
 
     def _log_feedforward_flow(self, status: str) -> None:
-        pending_kind = "none"
-        pending_queued = 0
-        if self._pending_assistant_sync is not None:
-            pending_kind = str(self._pending_assistant_sync.get("kind", "sync"))
-            pending_queued = 1 if bool(self._pending_assistant_sync.get("queued")) else 0
-        elif self._pending_sync is not None:
-            pending_kind = str(self._pending_sync.get("kind", "sync"))
-            pending_queued = 1 if bool(self._pending_sync.get("queued")) else 0
-        signature = (
-            str(status),
-            int(self._state_machine.state),
-            pending_kind,
-            pending_queued,
-            int(self._state_machine.allows_assistant_velocity_forward()),
-            int(self._state_machine.needs_assistant_report_turn()),
-        )
-        if self._last_feedforward_flow_log == signature:
-            return
-        self._last_feedforward_flow_log = signature
-        log(
-            "master_feedforward",
-            "status=%s state=%d pending_kind=%s queued=%d allow=%d report_turn=%d"
-            % (
-                str(status),
-                int(self._state_machine.state),
-                pending_kind,
-                pending_queued,
-                int(self._state_machine.allows_assistant_velocity_forward()),
-                int(self._state_machine.needs_assistant_report_turn()),
-            ),
-        )
+        return None
 
     def _threshold_for_assistant_request(self, assistant_request: dict) -> tuple:
         if int(assistant_request.get("target", 0)) == TARGET_OBJECT:

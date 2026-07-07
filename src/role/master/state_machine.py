@@ -5,6 +5,7 @@
 
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg
+from role.transport_plan import push_heading_for_edge, target_edge_for_object
 from utils.startup_log import log
 
 ASSISTANT_FOLLOW_SYNC_STATE = 1
@@ -111,6 +112,7 @@ class MasterStateMachine:
         self._master_cleared = False
         self._assistant_cleared = False
         self._current_object_id = 0
+        self._current_target_edge = None
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -188,6 +190,7 @@ class MasterStateMachine:
                 if self._orbit_completed:
                     return
                 self._current_object_id = int(value) & 0xFF
+                self._current_target_edge = target_edge_for_object(self._current_object_id)
                 self._waiting_assistant_object_ack = True
                 self._assistant_object_request_emitted = True
                 self._pending_assistant_request = {
@@ -225,7 +228,7 @@ class MasterStateMachine:
             self._current_context_id = (self._current_context_id + 1) % 256
             self._enter_state(STATE_ORBITING)
             self._pending_orbit_command = {
-                "target_heading_deg": self._boot_heading_deg + self._orbit_delta_deg,
+                "target_heading_deg": push_heading_for_edge(self._current_target_edge),
             }
 
     def handle_assistant_target_found(self, value):
@@ -393,6 +396,7 @@ class MasterStateMachine:
         self._master_cleared = False
         self._assistant_cleared = False
         self._current_object_id = 0
+        self._current_target_edge = None
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._search_task_arg)
         self._pending_assistant_request = {
@@ -420,6 +424,7 @@ class MasterStateMachine:
         self._master_cleared = False
         self._assistant_cleared = False
         self._current_object_id = 0
+        self._current_target_edge = None
 
     def _enter_return_retreat(self):
         """进入主车回库后退找黄线段"""
@@ -472,6 +477,11 @@ class MasterStateMachine:
         """返回当前搬运收尾阶段编号"""
 
         return self._clear_phase
+
+    def get_push_heading_deg(self):
+        """返回当前物体目标边对应的推动朝向."""
+
+        return push_heading_for_edge(self._current_target_edge)
 
     def _enter_clear_phase(self, clear_phase):
         """进入指定的搬运收尾阶段并按需同步辅车"""
