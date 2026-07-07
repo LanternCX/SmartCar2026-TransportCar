@@ -6,7 +6,14 @@
 import time
 
 from config import comm as comm_params
-from protocol.frame import FRAME_SIZE, MODE_ACK, MODE_TCP, MODE_UDP, decode_frame, encode_frame
+from protocol.frame import (
+    FRAME_SIZE,
+    MODE_ACK,
+    MODE_TCP,
+    MODE_UDP,
+    decode_frame_fields,
+    encode_frame,
+)
 from protocol.topic import (
     ROLE_ASSISTANT,
     ROLE_MASTER,
@@ -408,17 +415,19 @@ class TransportService:
         frame_size = FRAME_SIZE
         offset = 0
         while offset + frame_size <= len(chunk):
-            frame = decode_frame(chunk[offset : offset + frame_size])
-            if frame is None or not self._can_dispatch_frame(port, frame):
+            fields = decode_frame_fields(chunk, offset)
+            if fields is None:
                 offset += 1
                 continue
-            self._dispatch_frame(port, frame)
+            mode, topic, seq = fields
+            if not self._can_dispatch_frame_fields(port, mode, topic):
+                offset += 1
+                continue
+            self._dispatch_frame_fields(port, mode, topic, seq, chunk, offset)
             offset += frame_size
         state["rx_buffer"] = chunk[offset:]
 
-    def _can_dispatch_frame(self, port, frame):
-        topic = int(frame["topic"])
-        mode = int(frame["mode"])
+    def _can_dispatch_frame_fields(self, port, mode, topic):
         entry = get_topic_entry(topic)
         if entry is None:
             return False
@@ -432,11 +441,8 @@ class TransportService:
             return False
         return True
 
-    def _dispatch_frame(self, port, frame):
+    def _dispatch_frame_fields(self, port, mode, topic, seq, frame_bytes, frame_offset):
         """把单个固定帧路由到 ACK、TCP 或 UDP 槽."""
-        topic = int(frame["topic"])
-        mode = int(frame["mode"])
-        seq = int(frame["seq"])
         entry = get_topic_entry(topic)
         state = self._ports[port]
         if entry is None:
@@ -460,7 +466,8 @@ class TransportService:
                 state["stats"]["dropped_invalid_frames"] += 1
                 return
             body_size = get_topic_body_size(topic)
-            state["udp_rx"][topic] = frame["body"][:body_size]
+            body_start = int(frame_offset) + 4
+            state["udp_rx"][topic] = frame_bytes[body_start : body_start + body_size]
             state["udp_rx_versions"][topic] = int(state["udp_rx_versions"].get(topic, 0)) + 1
             return
         if mode == MODE_TCP:
@@ -474,10 +481,11 @@ class TransportService:
             if state["tcp_rx_slot"] is not None:
                 return
             body_size = get_topic_body_size(topic)
+            body_start = int(frame_offset) + 4
             state["tcp_rx_slot"] = {
                 "topic": topic,
                 "seq": seq,
-                "body": frame["body"][:body_size],
+                "body": frame_bytes[body_start : body_start + body_size],
             }
             state["last_rx_token"] = token
             self._schedule_ack(port, topic, seq)

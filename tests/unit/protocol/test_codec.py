@@ -22,6 +22,7 @@ from protocol.codec import (  # noqa: E402
     decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_master_vision_task_sync_body,
+    decode_velocity_body_into,
     decode_velocity_body,
     decode_vision_observation_body,
     encode_assistant_event_report_body,
@@ -41,6 +42,21 @@ def test_velocity_body_roundtrip_uses_little_endian_fixed_point() -> None:
 
     assert body == bytes([0xE2, 0x04, 0x0C, 0xFE, 0xEE, 0x02, 0x01])
     assert decode_velocity_body(body) == {
+        "vx": 1.25,
+        "vy": -0.5,
+        "omega": 0.75,
+        "has_omega": True,
+    }
+
+
+def test_velocity_body_can_decode_into_reused_slot() -> None:
+    body = encode_velocity_body(1.25, -0.5, 0.75, True)
+    out = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "has_omega": False}
+
+    result = decode_velocity_body_into(body, out)
+
+    assert result is out
+    assert out == {
         "vx": 1.25,
         "vy": -0.5,
         "omega": 0.75,

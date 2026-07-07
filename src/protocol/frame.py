@@ -42,8 +42,13 @@ def _normalize_body(body):
 
 
 def _crc8(data):
+    return _crc8_range(data, 0, len(data))
+
+
+def _crc8_range(data, start, end):
     crc = 0
-    for value in data:
+    for index in range(int(start), int(end)):
+        value = data[index]
         crc ^= int(value)
         for _ in range(8):
             if crc & 0x80:
@@ -66,6 +71,27 @@ def encode_frame(mode, topic, seq, body):
     return bytes([FRAME_HEAD]) + payload + bytes([_crc8(payload)])
 
 
+def decode_frame_fields(frame_bytes, offset=0):
+    """解码固定帧头字段，不拷贝 body。"""
+
+    if not isinstance(frame_bytes, (bytes, bytearray, memoryview)):
+        return None
+    offset = int(offset)
+    if offset < 0 or offset + FRAME_SIZE > len(frame_bytes):
+        return None
+    if frame_bytes[offset] != FRAME_HEAD:
+        return None
+    payload_start = offset + 1
+    payload_end = offset + FRAME_SIZE - 1
+    if _crc8_range(frame_bytes, payload_start, payload_end) != frame_bytes[payload_end]:
+        return None
+    return (
+        int(frame_bytes[payload_start]),
+        int(frame_bytes[payload_start + 1]),
+        int(frame_bytes[payload_start + 2]),
+    )
+
+
 def decode_frame(frame_bytes):
     """解码固定帧."""
 
@@ -75,16 +101,14 @@ def decode_frame(frame_bytes):
         frame_bytes = bytes(frame_bytes)
     if not isinstance(frame_bytes, bytes):
         return None
-    if len(frame_bytes) != FRAME_SIZE:
+    fields = decode_frame_fields(frame_bytes, 0)
+    if fields is None:
         return None
-    if frame_bytes[0] != FRAME_HEAD:
-        return None
+    mode, topic, seq = fields
     payload = frame_bytes[1:-1]
-    if _crc8(payload) != frame_bytes[-1]:
-        return None
     return {
-        "mode": payload[0],
-        "topic": payload[1],
-        "seq": payload[2],
+        "mode": mode,
+        "topic": topic,
+        "seq": seq,
         "body": payload[3:],
     }

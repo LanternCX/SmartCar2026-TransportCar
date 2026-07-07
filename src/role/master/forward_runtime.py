@@ -15,7 +15,7 @@ from protocol.codec import (
     decode_assistant_event_report_body,
     decode_local_vision_control_body,
     decode_master_vision_event_report_body,
-    decode_velocity_body,
+    decode_velocity_body_into,
     encode_assistant_state_sync_body,
     encode_local_vision_control_body,
     encode_master_vision_task_sync_body,
@@ -122,6 +122,12 @@ class MasterForwardRuntime:
         )
         self._last_error_text = "none"
         self._latest_uart6_velocity = None
+        self._uart6_velocity_packet = {
+            "vx": 0.0,
+            "vy": 0.0,
+            "omega": 0.0,
+            "has_omega": False,
+        }
         self._uart6_reset_version = 0
         self._active_task_context_id = None
         self._pending_task_sync = None
@@ -337,7 +343,9 @@ class MasterForwardRuntime:
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             if version > self._uart6_reset_version and not self._local_vision_control_paused:
-                packet = decode_velocity_body(self._velocity_body)
+                packet = decode_velocity_body_into(
+                    self._velocity_body, self._uart6_velocity_packet
+                )
                 if (
                     self._state_machine.allows_search_velocity()
                     or self._state_machine.state == STATE_TRANSPORT_OBJECT

@@ -15,7 +15,7 @@ from protocol.codec import (
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
     decode_local_vision_control_body,
-    decode_velocity_body,
+    decode_velocity_body_into,
     encode_assistant_event_report_body,
     encode_assistant_vision_task_sync_body,
     encode_local_vision_control_body,
@@ -116,6 +116,18 @@ class AssistantFollowRuntime:
         self._last_error_text = "none"
         self._uart6_velocity = None
         self._uart8_velocity = None
+        self._uart6_velocity_packet = {
+            "vx": 0.0,
+            "vy": 0.0,
+            "omega": 0.0,
+            "has_omega": False,
+        }
+        self._uart8_velocity_packet = {
+            "vx": 0.0,
+            "vy": 0.0,
+            "omega": 0.0,
+            "has_omega": False,
+        }
         self._uart6_reset_version = 0
         self._uart8_reset_version = 0
         self._uart6_status = "idle"
@@ -429,7 +441,9 @@ class AssistantFollowRuntime:
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             if version > self._uart6_reset_version and not self._local_vision_control_paused:
-                self._uart6_velocity = decode_velocity_body(self._velocity_body)
+                self._uart6_velocity = decode_velocity_body_into(
+                    self._velocity_body, self._uart6_velocity_packet
+                )
                 self._uart6_velocity["omega"] = 0.0
                 self._uart6_velocity["has_omega"] = False
                 self._uart6_status = "active"
@@ -444,7 +458,9 @@ class AssistantFollowRuntime:
                 UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
             )
             if version > self._uart8_reset_version and not self._local_vision_control_paused:
-                self._uart8_velocity = decode_velocity_body(self._velocity_body)
+                self._uart8_velocity = decode_velocity_body_into(
+                    self._velocity_body, self._uart8_velocity_packet
+                )
                 self._uart8_status = "active"
 
         if not self._should_store_velocity("uart6"):

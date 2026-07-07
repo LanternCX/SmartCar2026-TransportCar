@@ -104,12 +104,15 @@ def encode_velocity_body(vx, vy, omega, has_omega):
 
 
 def decode_velocity_body(body):
-    return {
-        "vx": _unpack_scaled(body, 0),
-        "vy": _unpack_scaled(body, 2),
-        "omega": _unpack_scaled(body, 4),
-        "has_omega": bool(body[6]),
-    }
+    return decode_velocity_body_into(body, {})
+
+
+def decode_velocity_body_into(body, out):
+    out["vx"] = _unpack_scaled(body, 0)
+    out["vy"] = _unpack_scaled(body, 2)
+    out["omega"] = _unpack_scaled(body, 4)
+    out["has_omega"] = bool(body[6])
+    return out
 
 
 def encode_vision_observation_body(context_id, x, y, value):
