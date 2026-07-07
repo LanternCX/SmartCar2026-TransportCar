@@ -3,18 +3,25 @@
 @brief 业务 body bytes 编解码
 """
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-_I16_MIN = -32768
-_I16_MAX = 32767
-_I8_MIN = -128
-_I8_MAX = 127
-_SCALE = 1000
+    def const(value):
+        return value
+
+
+_I16_MIN = const(-32768)
+_I16_MAX = const(32767)
+_I8_MIN = const(-128)
+_I8_MAX = const(127)
+_SCALE = const(1000)
 _ZERO_THRESHOLD = (0, 0, 0, 0, 0, 0)
 
-LOCAL_VISION_CONTROL_PAUSE = 1
-LOCAL_VISION_CONTROL_RESUME = 2
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = 3
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = 4
+LOCAL_VISION_CONTROL_PAUSE = const(1)
+LOCAL_VISION_CONTROL_RESUME = const(2)
+LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = const(3)
+LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = const(4)
 
 
 def _require_u8(value):

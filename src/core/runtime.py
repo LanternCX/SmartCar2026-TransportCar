@@ -28,35 +28,33 @@ from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 
 
-TICK_MS = getattr(motion_params, "TICK_MS")
-MAX_DUTY = getattr(safety_params, "MAX_DUTY")
-TARGET_SPEED_MAX = getattr(safety_params, "TARGET_SPEED_MAX")
-POS_MAX_SPEED = getattr(motion_params, "POS_MAX_SPEED")
-POS_KP = getattr(motion_params, "POS_KP")
-POS_TOLERANCE = getattr(motion_params, "POS_TOLERANCE")
-ANGLE_TOLERANCE = getattr(motion_params, "ANGLE_TOLERANCE")
-ACTIVE_WHEELS = getattr(motion_params, "ACTIVE_WHEELS")
-GYRO_LPF_ALPHA = getattr(motion_params, "GYRO_LPF_ALPHA")
-GYRO_SCALE = getattr(motion_params, "GYRO_SCALE")
-YAW_KP = getattr(motion_params, "YAW_KP")
-YAW_KI = getattr(motion_params, "YAW_KI")
-YAW_KD = getattr(motion_params, "YAW_KD")
-YAW_I_MAX = getattr(motion_params, "YAW_I_MAX")
-AUTO_OMEGA_MAX = getattr(motion_params, "AUTO_OMEGA_MAX")
-HEADING_TRANSITION_OMEGA_MAX = getattr(motion_params, "HEADING_TRANSITION_OMEGA_MAX")
-ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
-ORBIT_ANGLE_CONFIRM_TICKS = getattr(motion_params, "ORBIT_ANGLE_CONFIRM_TICKS")
-HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
-MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
-FIELD_SIZE_M = getattr(motion_params, "FIELD_SIZE_M")
-ASSISTANT_START_POSITION_M = getattr(motion_params, "ASSISTANT_START_POSITION_M")
-MASTER_ODOMETRY_DISTANCE_SCALE = getattr(motion_params, "MASTER_ODOMETRY_DISTANCE_SCALE")
-ASSISTANT_ODOMETRY_DISTANCE_SCALE = getattr(
-    motion_params, "ASSISTANT_ODOMETRY_DISTANCE_SCALE"
-)
-IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
-GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
-PID_MAP = getattr(motion_params, "PID_MAP")
+TICK_MS = motion_params.TICK_MS
+MAX_DUTY = safety_params.MAX_DUTY
+TARGET_SPEED_MAX = safety_params.TARGET_SPEED_MAX
+POS_MAX_SPEED = motion_params.POS_MAX_SPEED
+POS_KP = motion_params.POS_KP
+POS_TOLERANCE = motion_params.POS_TOLERANCE
+ANGLE_TOLERANCE = motion_params.ANGLE_TOLERANCE
+ACTIVE_WHEELS = motion_params.ACTIVE_WHEELS
+GYRO_LPF_ALPHA = motion_params.GYRO_LPF_ALPHA
+GYRO_SCALE = motion_params.GYRO_SCALE
+YAW_KP = motion_params.YAW_KP
+YAW_KI = motion_params.YAW_KI
+YAW_KD = motion_params.YAW_KD
+YAW_I_MAX = motion_params.YAW_I_MAX
+AUTO_OMEGA_MAX = motion_params.AUTO_OMEGA_MAX
+HEADING_TRANSITION_OMEGA_MAX = motion_params.HEADING_TRANSITION_OMEGA_MAX
+ORBIT_AUTO_OMEGA_MAX = motion_params.ORBIT_AUTO_OMEGA_MAX
+ORBIT_ANGLE_CONFIRM_TICKS = motion_params.ORBIT_ANGLE_CONFIRM_TICKS
+HOLD_SPEED_EPS = motion_params.HOLD_SPEED_EPS
+MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+FIELD_SIZE_M = motion_params.FIELD_SIZE_M
+ASSISTANT_START_POSITION_M = motion_params.ASSISTANT_START_POSITION_M
+MASTER_ODOMETRY_DISTANCE_SCALE = motion_params.MASTER_ODOMETRY_DISTANCE_SCALE
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
+IDENT_RESULTS_FILE = storage_params.IDENT_RESULTS_FILE
+GYRO_OFFSET_FILE = storage_params.GYRO_OFFSET_FILE
+PID_MAP = motion_params.PID_MAP
 
 
 class _NullImu:

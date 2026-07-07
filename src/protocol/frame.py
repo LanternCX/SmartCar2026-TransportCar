@@ -5,14 +5,21 @@
 
 from config import comm as comm_params
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-MODE_UDP = 0x01
-MODE_TCP = 0x02
-MODE_ACK = 0x03
+    def const(value):
+        return value
 
-FRAME_BODY_SIZE = getattr(comm_params, "TRANSPORT_FRAME_BODY_SIZE")
-FRAME_HEAD = getattr(comm_params, "TRANSPORT_FRAME_HEAD")
-FRAME_SIZE = getattr(comm_params, "TRANSPORT_FRAME_SIZE")
+
+MODE_UDP = const(0x01)
+MODE_TCP = const(0x02)
+MODE_ACK = const(0x03)
+
+FRAME_BODY_SIZE = comm_params.TRANSPORT_FRAME_BODY_SIZE
+FRAME_HEAD = comm_params.TRANSPORT_FRAME_HEAD
+FRAME_SIZE = comm_params.TRANSPORT_FRAME_SIZE
 
 
 def _require_u8(value):

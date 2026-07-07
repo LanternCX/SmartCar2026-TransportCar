@@ -16,9 +16,9 @@ from role import create_role_transport_car
 from role.vehicle_role import read_vehicle_role
 
 
-TICK_MS = getattr(motion_params, "TICK_MS")
-ROLE_STEP_MS = getattr(motion_params, "ROLE_STEP_MS")
-MOTION_INPUT_STEP_MS = getattr(motion_params, "MOTION_INPUT_STEP_MS")
+TICK_MS = motion_params.TICK_MS
+ROLE_STEP_MS = motion_params.ROLE_STEP_MS
+MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 LOG_STAGE = "run"
 
 

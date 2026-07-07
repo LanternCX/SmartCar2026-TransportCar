@@ -21,10 +21,10 @@ from protocol.topic import (
 )
 
 
-RX_READ_LIMIT = getattr(comm_params, "TRANSPORT_RX_READ_LIMIT", 32)
-UDP_SEND_INTERVAL_MS = getattr(comm_params, "UDP_SEND_INTERVAL_MS")
-TCP_SEND_INTERVAL_MS = getattr(comm_params, "TCP_SEND_INTERVAL_MS")
-SEQ_RING_SIZE = getattr(comm_params, "SEQ_RING_SIZE")
+RX_READ_LIMIT = comm_params.TRANSPORT_RX_READ_LIMIT
+UDP_SEND_INTERVAL_MS = comm_params.UDP_SEND_INTERVAL_MS
+TCP_SEND_INTERVAL_MS = comm_params.TCP_SEND_INTERVAL_MS
+SEQ_RING_SIZE = comm_params.SEQ_RING_SIZE
 
 WRITE_ACCEPTED = "accepted"
 WRITE_OVERWRITTEN = "overwritten"
