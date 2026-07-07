@@ -15,6 +15,7 @@ from protocol.topic import (
     can_role_read,
     can_role_write,
     get_topic_entry,
+    get_topic_body_size,
     validate_body_bytes,
     validate_mode_for_topic,
     validate_port_for_topic,
@@ -458,7 +459,7 @@ class TransportService:
             if not can_role_read(topic, self.role):
                 state["stats"]["dropped_invalid_frames"] += 1
                 return
-            body_size = int(entry["body_size"])
+            body_size = get_topic_body_size(topic)
             state["udp_rx"][topic] = frame["body"][:body_size]
             state["udp_rx_versions"][topic] = int(state["udp_rx_versions"].get(topic, 0)) + 1
             return
@@ -472,7 +473,7 @@ class TransportService:
                 return
             if state["tcp_rx_slot"] is not None:
                 return
-            body_size = int(entry["body_size"])
+            body_size = get_topic_body_size(topic)
             state["tcp_rx_slot"] = {
                 "topic": topic,
                 "seq": seq,

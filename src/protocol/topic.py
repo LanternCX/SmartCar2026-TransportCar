@@ -5,6 +5,13 @@
 
 from protocol.frame import MODE_TCP, MODE_UDP
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
+
+    def const(value):
+        return value
+
 
 ROLE_MASTER = "master"
 ROLE_ASSISTANT = "assistant"
@@ -12,152 +19,187 @@ ROLE_ASSISTANT = "assistant"
 UART6 = "uart6"
 UART8 = "uart8"
 
-TOPIC_LOCAL_VISION_VELOCITY = 0x01
-TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY = 0x02
-TOPIC_VISION_OBSERVATION = 0x03
-TOPIC_LOCAL_VISION_CONTROL = 0x04
-TOPIC_MASTER_VISION_TASK_SYNC = 0x10
-TOPIC_ASSISTANT_VISION_TASK_SYNC = 0x11
-TOPIC_MASTER_VISION_EVENT_REPORT = 0x12
-TOPIC_ASSISTANT_VISION_EVENT_REPORT = 0x13
-TOPIC_ASSISTANT_STATE_SYNC = 0x20
-TOPIC_ASSISTANT_EVENT_REPORT = 0x21
+TOPIC_LOCAL_VISION_VELOCITY = const(0x01)
+TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY = const(0x02)
+TOPIC_VISION_OBSERVATION = const(0x03)
+TOPIC_LOCAL_VISION_CONTROL = const(0x04)
+TOPIC_MASTER_VISION_TASK_SYNC = const(0x10)
+TOPIC_ASSISTANT_VISION_TASK_SYNC = const(0x11)
+TOPIC_MASTER_VISION_EVENT_REPORT = const(0x12)
+TOPIC_ASSISTANT_VISION_EVENT_REPORT = const(0x13)
+TOPIC_ASSISTANT_STATE_SYNC = const(0x20)
+TOPIC_ASSISTANT_EVENT_REPORT = const(0x21)
 
-_TOPIC_TABLE = {
-    TOPIC_LOCAL_VISION_VELOCITY: {
-        "name": "LOCAL_VISION_VELOCITY",
-        "mode": MODE_UDP,
-        "port": UART6,
-        "body_size": 7,
-        "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
-        "write_roles": (),
-    },
-    TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY: {
-        "name": "ASSISTANT_FEEDFORWARD_VELOCITY",
-        "mode": MODE_UDP,
-        "port": UART8,
-        "body_size": 7,
-        "read_roles": (ROLE_ASSISTANT,),
-        "write_roles": (ROLE_MASTER,),
-    },
-    TOPIC_VISION_OBSERVATION: {
-        "name": "VISION_OBSERVATION",
-        "mode": MODE_UDP,
-        "port": UART6,
-        "body_size": 7,
-        "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
-        "write_roles": (),
-    },
-    TOPIC_LOCAL_VISION_CONTROL: {
-        "name": "LOCAL_VISION_CONTROL",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 1,
-        "read_roles": (ROLE_MASTER, ROLE_ASSISTANT),
-        "write_roles": (ROLE_MASTER, ROLE_ASSISTANT),
-    },
-    TOPIC_MASTER_VISION_TASK_SYNC: {
-        "name": "MASTER_VISION_TASK_SYNC",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 5,
-        "read_roles": (),
-        "write_roles": (ROLE_MASTER,),
-    },
-    TOPIC_ASSISTANT_VISION_TASK_SYNC: {
-        "name": "ASSISTANT_VISION_TASK_SYNC",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 10,
-        "read_roles": (),
-        "write_roles": (ROLE_ASSISTANT,),
-    },
-    TOPIC_MASTER_VISION_EVENT_REPORT: {
-        "name": "MASTER_VISION_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 10,
-        "read_roles": (ROLE_MASTER,),
-        "write_roles": (),
-    },
-    TOPIC_ASSISTANT_VISION_EVENT_REPORT: {
-        "name": "ASSISTANT_VISION_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 3,
-        "read_roles": (ROLE_ASSISTANT,),
-        "write_roles": (),
-    },
-    TOPIC_ASSISTANT_STATE_SYNC: {
-        "name": "ASSISTANT_STATE_SYNC",
-        "mode": MODE_TCP,
-        "port": UART8,
-        "body_size": 10,
-        "read_roles": (ROLE_ASSISTANT,),
-        "write_roles": (ROLE_MASTER,),
-    },
-    TOPIC_ASSISTANT_EVENT_REPORT: {
-        "name": "ASSISTANT_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART8,
-        "body_size": 3,
-        "read_roles": (ROLE_MASTER,),
-        "write_roles": (ROLE_ASSISTANT,),
-    },
-}
+_ENTRY_TOPIC = const(0)
+_ENTRY_MODE = const(1)
+_ENTRY_PORT = const(2)
+_ENTRY_BODY_SIZE = const(3)
+_ENTRY_READ_MASK = const(4)
+_ENTRY_WRITE_MASK = const(5)
+
+_PORT_UART6 = const(6)
+_PORT_UART8 = const(8)
+_ROLE_MASTER_MASK = const(1)
+_ROLE_ASSISTANT_MASK = const(2)
+_ROLE_BOTH_MASK = const(3)
+
+_TOPIC_TABLE = (
+    (TOPIC_LOCAL_VISION_VELOCITY, MODE_UDP, _PORT_UART6, 7, _ROLE_BOTH_MASK, 0),
+    (
+        TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
+        MODE_UDP,
+        _PORT_UART8,
+        7,
+        _ROLE_ASSISTANT_MASK,
+        _ROLE_MASTER_MASK,
+    ),
+    (TOPIC_VISION_OBSERVATION, MODE_UDP, _PORT_UART6, 7, _ROLE_BOTH_MASK, 0),
+    (
+        TOPIC_LOCAL_VISION_CONTROL,
+        MODE_TCP,
+        _PORT_UART6,
+        1,
+        _ROLE_BOTH_MASK,
+        _ROLE_BOTH_MASK,
+    ),
+    (TOPIC_MASTER_VISION_TASK_SYNC, MODE_TCP, _PORT_UART6, 5, 0, _ROLE_MASTER_MASK),
+    (
+        TOPIC_ASSISTANT_VISION_TASK_SYNC,
+        MODE_TCP,
+        _PORT_UART6,
+        10,
+        0,
+        _ROLE_ASSISTANT_MASK,
+    ),
+    (TOPIC_MASTER_VISION_EVENT_REPORT, MODE_TCP, _PORT_UART6, 10, _ROLE_MASTER_MASK, 0),
+    (
+        TOPIC_ASSISTANT_VISION_EVENT_REPORT,
+        MODE_TCP,
+        _PORT_UART6,
+        3,
+        _ROLE_ASSISTANT_MASK,
+        0,
+    ),
+    (TOPIC_ASSISTANT_STATE_SYNC, MODE_TCP, _PORT_UART8, 10, _ROLE_ASSISTANT_MASK, _ROLE_MASTER_MASK),
+    (TOPIC_ASSISTANT_EVENT_REPORT, MODE_TCP, _PORT_UART8, 3, _ROLE_MASTER_MASK, _ROLE_ASSISTANT_MASK),
+)
+
+
+def _find_topic_entry(topic):
+    topic = int(topic)
+    for entry in _TOPIC_TABLE:
+        if int(entry[_ENTRY_TOPIC]) == topic:
+            return entry
+    return None
+
+
+def _role_mask(role):
+    if role == ROLE_MASTER:
+        return _ROLE_MASTER_MASK
+    if role == ROLE_ASSISTANT:
+        return _ROLE_ASSISTANT_MASK
+    return 0
+
+
+def _port_code(port):
+    if port == UART6:
+        return _PORT_UART6
+    if port == UART8:
+        return _PORT_UART8
+    return 0
+
+
+def _port_name(port_code):
+    if int(port_code) == _PORT_UART6:
+        return UART6
+    if int(port_code) == _PORT_UART8:
+        return UART8
+    return None
+
+
+def _topic_name(topic):
+    topic = int(topic)
+    if topic == TOPIC_LOCAL_VISION_VELOCITY:
+        return "LOCAL_VISION_VELOCITY"
+    if topic == TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY:
+        return "ASSISTANT_FEEDFORWARD_VELOCITY"
+    if topic == TOPIC_VISION_OBSERVATION:
+        return "VISION_OBSERVATION"
+    if topic == TOPIC_LOCAL_VISION_CONTROL:
+        return "LOCAL_VISION_CONTROL"
+    if topic == TOPIC_MASTER_VISION_TASK_SYNC:
+        return "MASTER_VISION_TASK_SYNC"
+    if topic == TOPIC_ASSISTANT_VISION_TASK_SYNC:
+        return "ASSISTANT_VISION_TASK_SYNC"
+    if topic == TOPIC_MASTER_VISION_EVENT_REPORT:
+        return "MASTER_VISION_EVENT_REPORT"
+    if topic == TOPIC_ASSISTANT_VISION_EVENT_REPORT:
+        return "ASSISTANT_VISION_EVENT_REPORT"
+    if topic == TOPIC_ASSISTANT_STATE_SYNC:
+        return "ASSISTANT_STATE_SYNC"
+    if topic == TOPIC_ASSISTANT_EVENT_REPORT:
+        return "ASSISTANT_EVENT_REPORT"
+    return None
 
 
 def get_topic_spec(topic):
     """返回测试友好的最小 topic 信息."""
 
-    entry = _TOPIC_TABLE.get(int(topic))
+    entry = _find_topic_entry(topic)
     if entry is None:
         return None
     return {
-        "name": entry["name"],
-        "mode": entry["mode"],
-        "port": entry["port"],
-        "body_size": entry["body_size"],
+        "name": _topic_name(topic),
+        "mode": entry[_ENTRY_MODE],
+        "port": _port_name(entry[_ENTRY_PORT]),
+        "body_size": entry[_ENTRY_BODY_SIZE],
     }
 
 
 def get_topic_entry(topic):
     """返回 topic 注册表完整信息."""
 
-    return _TOPIC_TABLE.get(int(topic))
+    return _find_topic_entry(topic)
+
+
+def get_topic_body_size(topic):
+    entry = _find_topic_entry(topic)
+    if entry is None:
+        return -1
+    return int(entry[_ENTRY_BODY_SIZE])
 
 
 def validate_mode_for_topic(topic, mode):
-    entry = get_topic_entry(topic)
+    entry = _find_topic_entry(topic)
     if entry is None:
         return False
-    return int(mode) == int(entry["mode"])
+    return int(mode) == int(entry[_ENTRY_MODE])
 
 
 def validate_port_for_topic(topic, port):
-    entry = get_topic_entry(topic)
+    entry = _find_topic_entry(topic)
     if entry is None:
         return False
-    return port == entry["port"]
+    return _port_code(port) == int(entry[_ENTRY_PORT])
 
 
 def can_role_read(topic, role):
-    entry = get_topic_entry(topic)
+    entry = _find_topic_entry(topic)
     if entry is None:
         return False
-    return role in entry["read_roles"]
+    return bool(_role_mask(role) & int(entry[_ENTRY_READ_MASK]))
 
 
 def can_role_write(topic, role):
-    entry = get_topic_entry(topic)
+    entry = _find_topic_entry(topic)
     if entry is None:
         return False
-    return role in entry["write_roles"]
+    return bool(_role_mask(role) & int(entry[_ENTRY_WRITE_MASK]))
 
 
 def validate_body_bytes(topic, body):
-    entry = get_topic_entry(topic)
-    if entry is None:
+    body_size = get_topic_body_size(topic)
+    if body_size < 0:
         return False
     if isinstance(body, str):
         return False
@@ -169,4 +211,4 @@ def validate_body_bytes(topic, body):
         size = len(body)
     else:
         return False
-    return size == int(entry["body_size"])
+    return size == body_size
