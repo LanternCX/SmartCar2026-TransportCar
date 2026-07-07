@@ -847,7 +847,7 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     runtime._active_task_context_id = 9
 
     runtime._run_role_cycle()
-    runtime._run_motion_input_cycle()
+    run_runtime_cycle(runtime)
 
     assert runtime._local_vision_control_paused is False
     assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
@@ -1851,6 +1851,26 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     ) in cars[0].events
 
 
+def test_master_runtime_preloads_return_play_when_startup_play_starts(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_STARTUP_MOVE
+
+    runtime._apply_motion_outputs()
+
+    assert runtime._return_play_class is not None
+
+
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
@@ -1887,6 +1907,46 @@ def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_s
         state_module.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         0,
     )
+
+
+def test_master_runtime_starts_return_play_after_assistant_return_sync(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    uart8 = BufferedUart()
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    runtime._state_machine.state = module.STATE_CLEAR_OBJECT
+    runtime._state_machine._clear_phase = module.CLEAR_PHASE_RETREAT
+    runtime._state_machine._required_object_count = 1
+    runtime._state_machine._master_cleared = True
+    runtime._state_machine.handle_assistant_cleared(value=module.CLEAR_PHASE_RETREAT)
+    runtime._drain_state_machine_outputs()
+    runtime._queue_pending_sync()
+    runtime._queue_pending_task_sync()
+    runtime.poll_transport_tx()
+    runtime.poll_transport_tx()
+
+    runtime._run_motion_input_cycle()
+
+    assert runtime._state_machine.state == module.STATE_RETURN_GARAGE_RETREAT
+    assert runtime.play.current_play is not None
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        MASTER_LEAD_DISTANCE,
+        float(MASTER_RETURN_POSITION_SPEED),
+    ) in cars[0].events
+    frame = decode_frame(uart8.messages[-1])
+    assert frame is not None
+    assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
 
 
 def test_master_runtime_turn_back_completes_immediately_after_lock_release(monkeypatch) -> None:

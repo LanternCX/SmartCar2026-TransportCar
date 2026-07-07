@@ -38,9 +38,6 @@ from protocol.transport import (
     WRITE_OVERWRITTEN,
     create_transport,
 )
-from play import PlayContext, PlayRunner
-from play.routines.assistant_return_garage import AssistantReturnGaragePlay
-from play.routines.startup_move import StartupMovePlay
 from utils.startup_log import log, log_exception
 from role.assistant.diagnostics import build_follow_snapshot
 from role.assistant.state_machine import (
@@ -112,7 +109,9 @@ class AssistantFollowRuntime:
             now_ms=self._now_ms,
         )
         self._state_machine = AssistantStateMachine()
-        self.play = PlayRunner()
+        self._play = None
+        self._startup_move_play_class = None
+        self._return_play_class = None
         self._last_error_text = "none"
         self._uart6_velocity = None
         self._uart8_velocity = None
@@ -139,19 +138,52 @@ class AssistantFollowRuntime:
         self._local_vision_control_paused = False
         self._return_line_aligned = False
         self._return_line_gate_action = None
-        self._return_play_context = PlayContext(
-            set_position_x=self._play_set_position_x,
-            set_position_y=self._play_set_position_y,
-            set_angle=self._play_set_angle,
-            write_velocity_y=self._play_write_velocity_y,
-            is_position_x_done=self._play_motion_done,
-            is_position_y_done=self._play_motion_done,
-            is_angle_done=self._play_motion_done,
-            yellow_line_ready=self._play_yellow_line_ready,
-            clear_yellow_line_ready=self._play_clear_yellow_line_ready,
-            enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
-            disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
-        )
+        self._return_play_context = None
+
+    @property
+    def play(self):
+        return self._ensure_play_runner()
+
+    def _ensure_play_runner(self):
+        if self._play is None:
+            from play.runner import PlayRunner
+
+            self._play = PlayRunner()
+        return self._play
+
+    def _ensure_return_play_context(self):
+        if self._return_play_context is None:
+            from play.context import PlayContext
+
+            self._return_play_context = PlayContext(
+                set_position_x=self._play_set_position_x,
+                set_position_y=self._play_set_position_y,
+                set_angle=self._play_set_angle,
+                write_velocity_y=self._play_write_velocity_y,
+                is_position_x_done=self._play_motion_done,
+                is_position_y_done=self._play_motion_done,
+                is_angle_done=self._play_motion_done,
+                yellow_line_ready=self._play_yellow_line_ready,
+                clear_yellow_line_ready=self._play_clear_yellow_line_ready,
+                enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
+                disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
+            )
+        return self._return_play_context
+
+    def _ensure_startup_move_play_class(self):
+        if self._startup_move_play_class is None:
+            from play.routines.startup_move import StartupMovePlay
+
+            self._startup_move_play_class = StartupMovePlay
+            self._ensure_return_play_class()
+        return self._startup_move_play_class
+
+    def _ensure_return_play_class(self):
+        if self._return_play_class is None:
+            from play.routines.assistant_return_garage import AssistantReturnGaragePlay
+
+            self._return_play_class = AssistantReturnGaragePlay
+        return self._return_play_class
 
     def mark_tick(self, tick=None) -> None:
         self._transport_car.mark_tick(tick)
@@ -614,13 +646,13 @@ class AssistantFollowRuntime:
 
     def _run_return_play(self) -> None:
         if self.play.current_play is None:
-            self.play.run(AssistantReturnGaragePlay)
-        self.play.tick(self._return_play_context)
+            self.play.run(self._ensure_return_play_class())
+        self.play.tick(self._ensure_return_play_context())
 
     def _run_startup_move_play(self) -> None:
         if self.play.current_play is None:
-            self.play.run(StartupMovePlay)
-        result = self.play.tick(self._return_play_context)
+            self.play.run(self._ensure_startup_move_play_class())
+        result = self.play.tick(self._ensure_return_play_context())
         if result.status == "finished":
             self._state_machine.mark_startup_move_completed()
             self._enter_follow_state()
