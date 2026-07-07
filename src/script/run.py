@@ -100,6 +100,18 @@ def _collect_runtime_garbage(car) -> None:
     car.collect_garbage()
 
 
+def _print_mem_info_before_ready() -> None:
+    try:
+        import micropython  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    mem_info = getattr(micropython, "mem_info", None)
+    if mem_info is None:
+        return
+    log(LOG_STAGE, "mem_info verbose before ready")
+    mem_info(1)
+
+
 def _run_control_loop(car, now_ms=None) -> None:
     """运行主控制循环
 
@@ -198,6 +210,7 @@ def main():
         log_memory("r0")
         car = _create_transport_car(role)
         log_memory("r1")
+        _print_mem_info_before_ready()
         log(LOG_STAGE, "TransportCar ready")
 
         log(LOG_STAGE, "creating ticker")

@@ -183,6 +183,27 @@ def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
 
 
+def test_run_main_prints_mem_info_before_ready_when_available(monkeypatch) -> None:
+    """板端提供 mem_info 时，在运行时 ready 日志前输出一次。"""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    calls = []
+    micropython_module = ModuleType("micropython")
+    setattr(
+        micropython_module,
+        "mem_info",
+        lambda *args: (calls.append(args), events.append("mem_info")),
+    )
+    monkeypatch.setitem(sys.modules, "micropython", micropython_module)
+    setattr(module, "log", lambda _stage, detail="": events.append(detail))
+
+    module.main()
+
+    assert events.index("mem_info") < events.index("TransportCar ready")
+    assert calls == [(1,)]
+
+
 def test_run_main_returns_assistant_role_and_dispatches_it(
     monkeypatch,
 ) -> None:
