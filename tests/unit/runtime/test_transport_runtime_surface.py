@@ -36,16 +36,7 @@ from protocol.topic import (
     UART8,
 )
 from protocol.transport import create_transport
-from play.routines.assistant_return_garage import (
-    ASSISTANT_LEAD_DISTANCE,
-    RETURN_POSITION_SPEED as ASSISTANT_RETURN_POSITION_SPEED,
-)
-from play.routines.master_return_garage import (
-    FINAL_FORWARD_SPEED as MASTER_FINAL_FORWARD_SPEED,
-    MASTER_LEAD_DISTANCE,
-    RETURN_FORWARD_SPEED as MASTER_RETURN_FORWARD_SPEED,
-    RETURN_POSITION_SPEED as MASTER_RETURN_POSITION_SPEED,
-)
+from play.routines import assistant_return_garage, master_return_garage
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -58,6 +49,12 @@ from tests.unit.runtime.transport_runtime_support import (
 
 MASTER_STATE_STARTUP_MOVE = 9
 ASSISTANT_STATE_STARTUP_MOVE = 8
+MASTER_LEAD_DISTANCE = master_return_garage.SEQUENCE[1] / 100.0
+MASTER_RETURN_POSITION_SPEED = master_return_garage.SEQUENCE[2]
+MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
+MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
+ASSISTANT_LEAD_DISTANCE = assistant_return_garage.SEQUENCE[1] / 100.0
+ASSISTANT_RETURN_POSITION_SPEED = assistant_return_garage.SEQUENCE[2]
 
 
 def _pack_task_arg(config_id, object_id):
@@ -1473,7 +1470,7 @@ def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) 
     run_runtime_cycle(runtime)
 
     assert runtime._local_vision_control_paused is False
-    assert runtime.play.current_play is not None
+    assert runtime.play_kind != 0
     assert (
         "set_relative_translation_target",
         0.0,
@@ -1842,7 +1839,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
 
     runtime._apply_motion_outputs()
 
-    assert runtime.play.current_play is not None
+    assert runtime.play_kind != 0
     assert (
         "set_relative_translation_target",
         0.0,
@@ -1851,7 +1848,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     ) in cars[0].events
 
 
-def test_master_runtime_preloads_return_play_when_startup_play_starts(monkeypatch) -> None:
+def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -1868,7 +1865,7 @@ def test_master_runtime_preloads_return_play_when_startup_play_starts(monkeypatc
 
     runtime._apply_motion_outputs()
 
-    assert runtime._return_play_class is not None
+    assert runtime.play_kind != 0
 
 
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
@@ -1937,7 +1934,7 @@ def test_master_runtime_starts_return_play_after_assistant_return_sync(monkeypat
     runtime._run_motion_input_cycle()
 
     assert runtime._state_machine.state == module.STATE_RETURN_GARAGE_RETREAT
-    assert runtime.play.current_play is not None
+    assert runtime.play_kind != 0
     assert (
         "set_relative_translation_target",
         0.0,
@@ -2123,8 +2120,8 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     runtime._apply_motion_outputs()
 
     assert runtime._return_line_aligned is False
-    assert runtime.play.current_play is not None
-    assert runtime.play.current_play.step_index == 2
+    assert runtime.play_kind != 0
+    assert runtime.play_step == 2
     assert cars[0].last_chassis_target == {
         "source": "master_play",
         "vx": 0.0,
@@ -2292,7 +2289,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
 
     runtime._write_effective_velocity()
 
-    assert runtime.play.current_play is not None
+    assert runtime.play_kind != 0
     assert (
         "set_relative_translation_target",
         0.0,

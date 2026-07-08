@@ -1,43 +1,39 @@
-"""主车回库 Play。"""
+"""主车回库流程。"""
 
-from play.base import BasePlay
-from play.steps import AngleStep, PositionYStep, VelocityYStep
+from play.routines import OP_ANGLE, OP_END, OP_HOLD_Y, OP_LINE_Y, OP_POS_Y
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-MASTER_LEAD_DISTANCE = -0.50
-RETURN_FORWARD_SPEED = 3
-FINAL_FORWARD_SPEED = 8
-RETURN_POSITION_SPEED = 5
+    def const(value):
+        return value
 
+# 主车回库前先后退给辅车让位，单位 cm。
+_LEAD_DISTANCE_CM = const(-50)
+_RETURN_POSITION_SPEED = const(5)
+_RETURN_FORWARD_SPEED = const(3)
+_FINAL_FORWARD_SPEED = const(8)
+_FIRST_TURN_DEG = const(90)
+_FINAL_TURN_DEG = const(-90)
 
-def _clear_yellow_line_ready(ctx):
-    ctx.clear_yellow_line_ready()
-
-
-def _yellow_line_ready(ctx):
-    return ctx.yellow_line_ready()
-
-
-def _enter_return_line_wait(ctx):
-    ctx.clear_yellow_line_ready()
-    ctx.enable_yellow_line_ready_gate()
-
-
-def _exit_return_line_wait(ctx):
-    ctx.disable_yellow_line_ready_gate()
-
-
-class MasterReturnGaragePlay(BasePlay):
-    def _create_steps(self):
-        return [
-            PositionYStep(MASTER_LEAD_DISTANCE, max_speed_cmd=RETURN_POSITION_SPEED),
-            AngleStep(+90),
-            VelocityYStep(
-                RETURN_FORWARD_SPEED,
-                until=_yellow_line_ready,
-                on_enter=_enter_return_line_wait,
-                on_exit=_exit_return_line_wait,
-            ),
-            AngleStep(-90),
-            VelocityYStep(FINAL_FORWARD_SPEED),
-        ]
+SEQUENCE = (
+    OP_POS_Y,
+    _LEAD_DISTANCE_CM,
+    _RETURN_POSITION_SPEED,
+    OP_ANGLE,
+    _FIRST_TURN_DEG,
+    0,
+    OP_LINE_Y,
+    _RETURN_FORWARD_SPEED,
+    0,
+    OP_ANGLE,
+    _FINAL_TURN_DEG,
+    0,
+    OP_HOLD_Y,
+    _FINAL_FORWARD_SPEED,
+    0,
+    OP_END,
+    0,
+    0,
+)

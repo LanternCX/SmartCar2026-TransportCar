@@ -110,9 +110,9 @@ class AssistantFollowRuntime:
             now_ms=self._now_ms,
         )
         self._state_machine = AssistantStateMachine()
-        self._play = None
-        self._startup_move_play_class = None
-        self._return_play_class = None
+        self.play_kind = 0
+        self.play_step = 0
+        self.play_entered = False
         self._last_error_text = "none"
         self._uart6_velocity = None
         self._uart8_velocity = None
@@ -151,57 +151,15 @@ class AssistantFollowRuntime:
         self._local_vision_control_paused = False
         self._return_line_aligned = False
         self._return_line_gate_action = None
-        self._return_play_context = None
-
-    @property
-    def play(self):
-        return self._ensure_play_runner()
-
-    def _ensure_play_runner(self):
-        if self._play is None:
-            from play.runner import PlayRunner
-
-            self._play = PlayRunner()
-        return self._play
-
-    def _ensure_return_play_context(self):
-        if self._return_play_context is None:
-            from play.context import PlayContext
-
-            self._return_play_context = PlayContext(
-                set_position_x=self._play_set_position_x,
-                set_position_y=self._play_set_position_y,
-                set_angle=self._play_set_angle,
-                write_velocity_y=self._play_write_velocity_y,
-                is_position_x_done=self._play_motion_done,
-                is_position_y_done=self._play_motion_done,
-                is_angle_done=self._play_motion_done,
-                yellow_line_ready=self._play_yellow_line_ready,
-                clear_yellow_line_ready=self._play_clear_yellow_line_ready,
-                enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
-                disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
-            )
-        return self._return_play_context
-
-    def _ensure_startup_move_play_class(self):
-        if self._startup_move_play_class is None:
-            from play.routines.startup_move import StartupMovePlay
-
-            self._startup_move_play_class = StartupMovePlay
-            self._ensure_return_play_class()
-        return self._startup_move_play_class
-
-    def _ensure_return_play_class(self):
-        if self._return_play_class is None:
-            from play.routines.assistant_return_garage import AssistantReturnGaragePlay
-
-            self._return_play_class = AssistantReturnGaragePlay
-        return self._return_play_class
 
     def prepare_runtime(self) -> None:
-        self._ensure_play_runner()
-        self._ensure_return_play_context()
-        self._ensure_startup_move_play_class()
+        # from utils.startup_log import log_memory
+        # log_memory("p0")
+        from play import sequence as play_sequence
+
+        # log_memory("p1")
+        play_sequence.clear(self)
+        # log_memory("p9")
 
     def mark_tick(self, tick=None) -> None:
         self._transport_car.mark_tick(tick)
@@ -314,7 +272,9 @@ class AssistantFollowRuntime:
         if not accepted:
             return False
         if self._state_machine.state != ASSISTANT_STATE_RETURN_FOLLOW:
-            self.play.current_play = None
+            from play import sequence as play_sequence
+
+            play_sequence.clear(self)
             self._return_line_aligned = False
             self._return_line_gate_action = None
         self._clear_local_vision_pause_residue()
@@ -667,37 +627,38 @@ class AssistantFollowRuntime:
         }
 
     def _run_return_play(self) -> None:
-        if self.play.current_play is None:
-            self.play.run(self._ensure_return_play_class())
-        self.play.tick(self._ensure_return_play_context())
+        from play import sequence as play_sequence
+
+        play_sequence.start(self, play_sequence.PLAY_ASSISTANT_RETURN)
+        play_sequence.tick(self)
 
     def _run_startup_move_play(self) -> None:
-        if self.play.current_play is None:
-            self.play.run(self._ensure_startup_move_play_class())
-        result = self.play.tick(self._ensure_return_play_context())
-        if result.status == "finished":
+        from play import sequence as play_sequence
+
+        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if play_sequence.tick(self):
             self._state_machine.mark_startup_move_completed()
             self._enter_follow_state()
 
-    def _play_set_position_x(self, value, max_speed_cmd=None) -> None:
+    def play_set_position_x(self, value, max_speed_cmd=None) -> None:
         self._transport_car.set_relative_translation_target(
             float(value),
             0.0,
             max_speed_cmd=max_speed_cmd,
         )
 
-    def _play_set_position_y(self, value, max_speed_cmd=None) -> None:
+    def play_set_position_y(self, value, max_speed_cmd=None) -> None:
         self._transport_car.set_relative_translation_target(
             0.0,
             float(value),
             max_speed_cmd=max_speed_cmd,
         )
 
-    def _play_set_angle(self, value) -> None:
+    def play_set_angle(self, value) -> None:
         target_heading_deg = float(getattr(self._transport_car, "heading_est", 0.0)) + float(value)
         self._transport_car.set_heading_transition_target(target_heading_deg)
 
-    def _play_write_velocity_y(self, value) -> None:
+    def play_write_velocity_y(self, value) -> None:
         self._transport_car.handle_velocity_packet(
             0.0,
             float(value),
@@ -706,22 +667,22 @@ class AssistantFollowRuntime:
             False,
         )
 
-    def _play_motion_done(self) -> bool:
+    def play_motion_done(self) -> bool:
         return not bool(getattr(self._transport_car, "command_lock", False))
 
-    def _play_yellow_line_ready(self) -> bool:
+    def play_yellow_line_ready(self) -> bool:
         return bool(self._return_line_aligned)
 
-    def _play_clear_yellow_line_ready(self) -> None:
+    def play_clear_yellow_line_ready(self) -> None:
         self._return_line_aligned = False
 
-    def _play_enable_yellow_line_ready_gate(self) -> None:
+    def play_enable_yellow_line_ready_gate(self) -> None:
         self._return_line_gate_action = {
             "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
             "queued": False,
         }
 
-    def _play_disable_yellow_line_ready_gate(self) -> None:
+    def play_disable_yellow_line_ready_gate(self) -> None:
         self._return_line_gate_action = {
             "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
             "queued": False,
