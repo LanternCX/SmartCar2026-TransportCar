@@ -28,6 +28,13 @@ from protocol.topic import (
     validate_port_for_topic,
 )
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
+
+    def const(value):
+        return value
+
 
 RX_READ_LIMIT = comm_params.TRANSPORT_RX_READ_LIMIT
 UDP_SEND_INTERVAL_MS = comm_params.UDP_SEND_INTERVAL_MS
@@ -49,6 +56,22 @@ DELIVERY_PENDING = "pending"
 DELIVERY_DELIVERED = "delivered"
 DELIVERY_DROPPED = "dropped"
 DELIVERY_INVALID = "invalid"
+
+_DELIVERY_IDLE_CODE = const(0)
+_DELIVERY_PENDING_CODE = const(1)
+_DELIVERY_DELIVERED_CODE = const(2)
+_DELIVERY_DROPPED_CODE = const(3)
+
+
+def _delivery_label(code):
+    code = int(code)
+    if code == _DELIVERY_PENDING_CODE:
+        return DELIVERY_PENDING
+    if code == _DELIVERY_DELIVERED_CODE:
+        return DELIVERY_DELIVERED
+    if code == _DELIVERY_DROPPED_CODE:
+        return DELIVERY_DROPPED
+    return DELIVERY_IDLE
 
 
 def _default_now_ms():
@@ -95,6 +118,79 @@ class _TcpHandle:
         return self._service._tcp_delivery(self._port, topic)
 
 
+_ST_NAME = const(0)
+_ST_UART = const(1)
+_ST_RX_BUFFER = const(2)
+_ST_UDP_RX = const(3)
+_ST_UDP_RX_VERSIONS = const(4)
+_ST_UDP_TX = const(5)
+_ST_TCP_RX_TOPIC = const(6)
+_ST_TCP_RX_SEQ = const(7)
+_ST_TCP_RX_BODY = const(8)
+_ST_TCP_TX_TOPIC = const(9)
+_ST_TCP_TX_BODY = const(10)
+_ST_TCP_TX_SEQ = const(11)
+_ST_TCP_TX_LAST_SENT_MS = const(12)
+_ST_TCP_TX_INTENT_TOPIC = const(13)
+_ST_TCP_TX_INTENT_BODY = const(14)
+_ST_NEXT_SEQ = const(15)
+_ST_LAST_DELIVERY_TOPIC = const(16)
+_ST_LAST_DELIVERY_CODE = const(17)
+_ST_LAST_RX_TOPIC = const(18)
+_ST_LAST_RX_SEQ = const(19)
+_ST_UDP_LAST_SENT_MS = const(20)
+_ST_RX_READS = const(21)
+_ST_DROPPED_TRUNCATED_FRAMES = const(22)
+_ST_DROPPED_INVALID_FRAMES = const(23)
+_ST_TCP_RETRIES = const(24)
+_ST_ACK_RX = const(25)
+_ST_ACK_TX = const(26)
+_ST_UDP_OVERWRITES = const(27)
+_ST_PRIORITY_DROPS = const(28)
+_ST_BUSY_DROPS = const(29)
+_ST_ACK_OVERWRITES = const(30)
+_ST_TX_FRAMES = const(31)
+
+
+def _new_port_state(port, uart):
+    if uart is None:
+        uart = _try_create_uart(port)
+    return [
+        port,
+        uart,
+        b"",
+        {},
+        {},
+        {},
+        -1,
+        0,
+        None,
+        -1,
+        None,
+        0,
+        None,
+        -1,
+        None,
+        0,
+        -1,
+        _DELIVERY_IDLE_CODE,
+        -1,
+        -1,
+        None,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]
+
+
 class TransportService:
     """统一通信服务."""
 
@@ -103,59 +199,67 @@ class TransportService:
         self._now_ms = now_ms or _default_now_ms
         self._rr_next_port = UART6
         self._udp_candidate = None
+        self._udp_candidate_port = None
+        self._udp_candidate_topic = 0
         self._ack_candidate = None
-        self._ports = {
-            UART6: self._build_port_state(UART6, uart6),
-            UART8: self._build_port_state(UART8, uart8),
-        }
+        self._ack_candidate_port = None
+        self._ack_candidate_topic = 0
+        self._ack_candidate_seq = 0
+        self._uart6_state = _new_port_state(UART6, uart6)
+        self._uart8_state = _new_port_state(UART8, uart8)
+        self._udp6 = _UdpHandle(self, UART6)
+        self._udp8 = _UdpHandle(self, UART8)
+        self._tcp6 = _TcpHandle(self, UART6)
+        self._tcp8 = _TcpHandle(self, UART8)
 
-    def _build_port_state(self, port, uart):
-        if uart is None:
-            uart = _try_create_uart(port)
-        return {
-            "name": port,
-            "uart": uart,
-            "rx_buffer": b"",
-            "udp_rx": {},
-            "udp_rx_versions": {},
-            "udp_tx": {},
-            "tcp_rx_slot": None,
-            "tcp_tx_slot": None,
-            "tcp_tx_intent": None,
-            "next_seq": 0,
-            "last_delivery": {},
-            "last_rx_token": None,
-            "udp_last_sent_ms": None,
-            "stats": {
-                "rx_reads": 0,
-                "dropped_truncated_frames": 0,
-                "dropped_invalid_frames": 0,
-                "tcp_retries": 0,
-                "ack_rx": 0,
-                "ack_tx": 0,
-                "udp_overwrites": 0,
-                "priority_drops": 0,
-                "busy_drops": 0,
-                "ack_overwrites": 0,
-                "tx_frames": 0,
-            },
-        }
+    def _find_port_state(self, port):
+        if port == UART6:
+            return self._uart6_state
+        if port == UART8:
+            return self._uart8_state
+        return None
+
+    def _port_state(self, port):
+        if port == UART6:
+            return self._uart6_state
+        return self._uart8_state
 
     def udp(self, port):
+        if port == UART6:
+            return self._udp6
+        if port == UART8:
+            return self._udp8
         return _UdpHandle(self, port)
 
     def tcp(self, port):
+        if port == UART6:
+            return self._tcp6
+        if port == UART8:
+            return self._tcp8
         return _TcpHandle(self, port)
 
     def diagnostics(self, port):
-        state = self._ports.get(port)
+        state = self._find_port_state(port)
         if state is None:
             return {}
-        snapshot = dict(state["stats"])
-        snapshot["tcp_tx_busy"] = state["tcp_tx_slot"] is not None or state["tcp_tx_intent"] is not None
-        snapshot["tcp_rx_busy"] = state["tcp_rx_slot"] is not None
-        snapshot["ack_pending"] = self._ack_candidate is not None and self._ack_candidate["port"] == port
-        return snapshot
+        return {
+            "rx_reads": state[_ST_RX_READS],
+            "dropped_truncated_frames": state[_ST_DROPPED_TRUNCATED_FRAMES],
+            "dropped_invalid_frames": state[_ST_DROPPED_INVALID_FRAMES],
+            "tcp_retries": state[_ST_TCP_RETRIES],
+            "ack_rx": state[_ST_ACK_RX],
+            "ack_tx": state[_ST_ACK_TX],
+            "udp_overwrites": state[_ST_UDP_OVERWRITES],
+            "priority_drops": state[_ST_PRIORITY_DROPS],
+            "busy_drops": state[_ST_BUSY_DROPS],
+            "ack_overwrites": state[_ST_ACK_OVERWRITES],
+            "tx_frames": state[_ST_TX_FRAMES],
+            "tcp_tx_busy": state[_ST_TCP_TX_BODY] is not None
+            or state[_ST_TCP_TX_INTENT_BODY] is not None,
+            "tcp_rx_busy": state[_ST_TCP_RX_BODY] is not None,
+            "ack_pending": self._ack_candidate is not None
+            and self._ack_candidate_port == port,
+        }
 
     def poll_rx(self):
         """按固定顺序轮询两个端口的接收侧.
@@ -177,20 +281,20 @@ class TransportService:
         return False
 
     def clear_udp(self, port, topic):
-        state = self._ports.get(port)
+        state = self._find_port_state(port)
         if state is None:
             return False
-        if topic in state["udp_rx"]:
-            del state["udp_rx"][topic]
-            state["udp_rx_versions"].pop(int(topic), None)
+        if topic in state[_ST_UDP_RX]:
+            del state[_ST_UDP_RX][topic]
+            state[_ST_UDP_RX_VERSIONS].pop(int(topic), None)
             return True
         return False
 
     def get_udp_version(self, port, topic):
-        state = self._ports.get(port)
+        state = self._find_port_state(port)
         if state is None:
             return 0
-        return int(state["udp_rx_versions"].get(int(topic), 0))
+        return int(state[_ST_UDP_RX_VERSIONS].get(int(topic), 0))
 
     def _validate_topic(self, port, topic, mode, operation):
         entry = get_topic_entry(topic)
@@ -211,15 +315,17 @@ class TransportService:
         if entry is None or not validate_body_bytes(topic, body):
             return WRITE_INVALID
         if self._ack_candidate is not None or self._has_pending_tcp_intent():
-            self._ports[port]["stats"]["priority_drops"] += 1
+            self._port_state(port)[_ST_PRIORITY_DROPS] += 1
             return WRITE_DROPPED_PRIORITY
-        state = self._ports[port]
+        state = self._port_state(port)
         stored = _copy_body(body)
-        overwritten = topic in state["udp_tx"]
-        state["udp_tx"][topic] = stored
-        self._udp_candidate = {"port": port, "topic": topic}
+        overwritten = topic in state[_ST_UDP_TX]
+        state[_ST_UDP_TX][topic] = stored
+        self._udp_candidate = True
+        self._udp_candidate_port = port
+        self._udp_candidate_topic = int(topic)
         if overwritten:
-            state["stats"]["udp_overwrites"] += 1
+            state[_ST_UDP_OVERWRITES] += 1
             return WRITE_OVERWRITTEN
         return WRITE_ACCEPTED
 
@@ -227,7 +333,7 @@ class TransportService:
         entry = self._validate_topic(port, topic, MODE_UDP, "read")
         if entry is None:
             return READ_INVALID
-        body = self._ports[port]["udp_rx"].get(int(topic))
+        body = self._port_state(port)[_ST_UDP_RX].get(int(topic))
         if body is None:
             return READ_EMPTY
         if not _write_out_body(out_body, body):
@@ -239,45 +345,58 @@ class TransportService:
         if entry is None or not validate_body_bytes(topic, body):
             return WRITE_INVALID
         if self._ack_candidate is not None:
-            self._ports[port]["stats"]["priority_drops"] += 1
-            self._ports[port]["last_delivery"][int(topic)] = DELIVERY_DROPPED
+            state = self._port_state(port)
+            state[_ST_PRIORITY_DROPS] += 1
+            state[_ST_LAST_DELIVERY_TOPIC] = int(topic)
+            state[_ST_LAST_DELIVERY_CODE] = _DELIVERY_DROPPED_CODE
             return WRITE_DROPPED_PRIORITY
-        state = self._ports[port]
-        if state["tcp_tx_slot"] is not None:
-            state["stats"]["busy_drops"] += 1
-            state["last_delivery"][int(topic)] = DELIVERY_DROPPED
+        state = self._port_state(port)
+        if state[_ST_TCP_TX_BODY] is not None:
+            state[_ST_BUSY_DROPS] += 1
+            state[_ST_LAST_DELIVERY_TOPIC] = int(topic)
+            state[_ST_LAST_DELIVERY_CODE] = _DELIVERY_DROPPED_CODE
             return WRITE_DROPPED_BUSY
         stored = _copy_body(body)
-        if state["tcp_tx_intent"] is not None:
-            state["last_delivery"][int(topic)] = DELIVERY_PENDING
-            state["tcp_tx_intent"] = {"topic": int(topic), "body": stored}
+        if state[_ST_TCP_TX_INTENT_BODY] is not None:
+            state[_ST_LAST_DELIVERY_TOPIC] = int(topic)
+            state[_ST_LAST_DELIVERY_CODE] = _DELIVERY_PENDING_CODE
+            state[_ST_TCP_TX_INTENT_TOPIC] = int(topic)
+            state[_ST_TCP_TX_INTENT_BODY] = stored
             return WRITE_OVERWRITTEN
-        state["tcp_tx_intent"] = {"topic": int(topic), "body": stored}
-        state["last_delivery"][int(topic)] = DELIVERY_PENDING
+        state[_ST_TCP_TX_INTENT_TOPIC] = int(topic)
+        state[_ST_TCP_TX_INTENT_BODY] = stored
+        state[_ST_LAST_DELIVERY_TOPIC] = int(topic)
+        state[_ST_LAST_DELIVERY_CODE] = _DELIVERY_PENDING_CODE
         return WRITE_ACCEPTED
 
     def _tcp_read(self, port, topic, out_body):
         entry = self._validate_topic(port, topic, MODE_TCP, "read")
         if entry is None:
             return READ_INVALID
-        slot = self._ports[port]["tcp_rx_slot"]
-        if slot is None or int(slot["topic"]) != int(topic):
+        state = self._port_state(port)
+        if state[_ST_TCP_RX_BODY] is None or int(state[_ST_TCP_RX_TOPIC]) != int(topic):
             return READ_EMPTY
-        if not _write_out_body(out_body, slot["body"]):
+        if not _write_out_body(out_body, state[_ST_TCP_RX_BODY]):
             return READ_INVALID
-        self._ports[port]["tcp_rx_slot"] = None
+        state[_ST_TCP_RX_BODY] = None
+        state[_ST_TCP_RX_TOPIC] = -1
         return READ_OK
 
     def _tcp_delivery(self, port, topic):
         entry = self._validate_topic(port, topic, MODE_TCP, "write")
         if entry is None:
             return DELIVERY_INVALID
-        state = self._ports[port]
-        if state["tcp_tx_slot"] is not None and int(state["tcp_tx_slot"]["topic"]) == int(topic):
+        state = self._port_state(port)
+        if state[_ST_TCP_TX_BODY] is not None and int(state[_ST_TCP_TX_TOPIC]) == int(topic):
             return DELIVERY_PENDING
-        if state["tcp_tx_intent"] is not None and int(state["tcp_tx_intent"]["topic"]) == int(topic):
+        if (
+            state[_ST_TCP_TX_INTENT_BODY] is not None
+            and int(state[_ST_TCP_TX_INTENT_TOPIC]) == int(topic)
+        ):
             return DELIVERY_PENDING
-        return state["last_delivery"].get(int(topic), DELIVERY_IDLE)
+        if state[_ST_LAST_DELIVERY_TOPIC] == int(topic):
+            return _delivery_label(state[_ST_LAST_DELIVERY_CODE])
+        return DELIVERY_IDLE
 
     def _materialize_tcp_intents(self):
         """把本周期可靠写入意图转成固定发送槽.
@@ -285,93 +404,103 @@ class TransportService:
         @details 只有发送槽空闲时才会分配可靠序号, 避免同链路同时出现多份待确认 TCP
         """
         for port in (UART6, UART8):
-            state = self._ports[port]
-            if state["tcp_tx_slot"] is not None:
+            state = self._port_state(port)
+            if state[_ST_TCP_TX_BODY] is not None:
                 continue
-            intent = state["tcp_tx_intent"]
-            if intent is None:
+            if state[_ST_TCP_TX_INTENT_BODY] is None:
                 continue
-            seq = int(state["next_seq"])
-            state["next_seq"] = (seq + 1) % SEQ_RING_SIZE
-            state["tcp_tx_slot"] = {
-                "topic": int(intent["topic"]),
-                "body": intent["body"],
-                "seq": seq,
-                "last_sent_ms": None,
-            }
-            state["tcp_tx_intent"] = None
+            seq = int(state[_ST_NEXT_SEQ])
+            state[_ST_NEXT_SEQ] = (seq + 1) % SEQ_RING_SIZE
+            state[_ST_TCP_TX_TOPIC] = int(state[_ST_TCP_TX_INTENT_TOPIC])
+            state[_ST_TCP_TX_BODY] = state[_ST_TCP_TX_INTENT_BODY]
+            state[_ST_TCP_TX_SEQ] = seq
+            state[_ST_TCP_TX_LAST_SENT_MS] = None
+            state[_ST_TCP_TX_INTENT_TOPIC] = -1
+            state[_ST_TCP_TX_INTENT_BODY] = None
 
     def _send_ack_if_pending(self):
         """发送当前待确认对象的 ACK."""
-        candidate = self._ack_candidate
-        if candidate is None:
+        if self._ack_candidate is None:
             return False
-        state = self._ports[candidate["port"]]
+        port = self._ack_candidate_port
+        topic = self._ack_candidate_topic
+        seq = self._ack_candidate_seq
+        state = self._port_state(port)
         if not _write_uart_frame(
-            state["uart"], encode_frame(MODE_ACK, candidate["topic"], candidate["seq"], b"")
+            state[_ST_UART], encode_frame(MODE_ACK, topic, seq, b"")
         ):
             return False
-        state["stats"]["ack_tx"] += 1
-        state["stats"]["tx_frames"] += 1
+        state[_ST_ACK_TX] += 1
+        state[_ST_TX_FRAMES] += 1
         self._ack_candidate = None
         return True
 
     def _send_tcp_if_due(self):
         """发送或重发到达节奏点的可靠帧."""
-        due_ports = []
         now_ms = self._now_ms()
-        for port in (UART6, UART8):
-            slot = self._ports[port]["tcp_tx_slot"]
-            if slot is None:
-                continue
-            last_sent_ms = slot["last_sent_ms"]
-            if last_sent_ms is None or now_ms - int(last_sent_ms) >= int(TCP_SEND_INTERVAL_MS):
-                due_ports.append(port)
-        if not due_ports:
+        uart6_due = self._is_tcp_due(self._uart6_state, now_ms)
+        uart8_due = self._is_tcp_due(self._uart8_state, now_ms)
+        if not uart6_due and not uart8_due:
             return False
-        port = _choose_round_robin(due_ports, self._rr_next_port)
+        if uart6_due and uart8_due:
+            port = self._rr_next_port
+        elif uart6_due:
+            port = UART6
+        else:
+            port = UART8
         self._rr_next_port = UART8 if port == UART6 else UART6
-        state = self._ports[port]
-        slot = state["tcp_tx_slot"]
-        frame = encode_frame(MODE_TCP, slot["topic"], slot["seq"], slot["body"])
-        if not _write_uart_frame(state["uart"], frame):
+        state = self._port_state(port)
+        frame = encode_frame(
+            MODE_TCP,
+            state[_ST_TCP_TX_TOPIC],
+            state[_ST_TCP_TX_SEQ],
+            state[_ST_TCP_TX_BODY],
+        )
+        if not _write_uart_frame(state[_ST_UART], frame):
             return False
-        if slot["last_sent_ms"] is not None:
-            state["stats"]["tcp_retries"] += 1
-        slot["last_sent_ms"] = now_ms
-        state["stats"]["tx_frames"] += 1
+        if state[_ST_TCP_TX_LAST_SENT_MS] is not None:
+            state[_ST_TCP_RETRIES] += 1
+        state[_ST_TCP_TX_LAST_SENT_MS] = now_ms
+        state[_ST_TX_FRAMES] += 1
         return True
+
+    def _is_tcp_due(self, state, now_ms):
+        if state[_ST_TCP_TX_BODY] is None:
+            return False
+        last_sent_ms = state[_ST_TCP_TX_LAST_SENT_MS]
+        return last_sent_ms is None or now_ms - int(last_sent_ms) >= int(TCP_SEND_INTERVAL_MS)
 
     def _send_udp_if_due(self):
         """发送最新值 UDP 候选.
 
         @details UDP 不排队, 这里只发送当前候选槽里的最新 body
         """
-        candidate = self._udp_candidate
-        if candidate is None:
+        if self._udp_candidate is None:
             return False
-        state = self._ports[candidate["port"]]
-        body = state["udp_tx"].get(int(candidate["topic"]))
+        port = self._udp_candidate_port
+        topic = self._udp_candidate_topic
+        state = self._port_state(port)
+        body = state[_ST_UDP_TX].get(int(topic))
         if body is None:
             return False
         now_ms = self._now_ms()
-        last_sent_ms = state["udp_last_sent_ms"]
+        last_sent_ms = state[_ST_UDP_LAST_SENT_MS]
         if last_sent_ms is not None and now_ms - int(last_sent_ms) < int(UDP_SEND_INTERVAL_MS):
             return False
-        frame = encode_frame(MODE_UDP, candidate["topic"], 0, body)
-        if not _write_uart_frame(state["uart"], frame):
+        frame = encode_frame(MODE_UDP, topic, 0, body)
+        if not _write_uart_frame(state[_ST_UART], frame):
             return False
-        state["udp_last_sent_ms"] = now_ms
-        state["stats"]["tx_frames"] += 1
+        state[_ST_UDP_LAST_SENT_MS] = now_ms
+        state[_ST_TX_FRAMES] += 1
         return True
 
     def _poll_port_rx(self, port):
         """对单个端口执行一轮受限读取."""
-        state = self._ports[port]
-        uart = state["uart"]
+        state = self._port_state(port)
+        uart = state[_ST_UART]
         if uart is None or getattr(uart, "any", None) is None:
             return
-        state["stats"]["rx_reads"] += 1
+        state[_ST_RX_READS] += 1
         try:
             pending = int(uart.any())
         except Exception:
@@ -387,7 +516,7 @@ class TransportService:
             return
         if pending > int(RX_READ_LIMIT):
             self._handle_rx_chunk(port, bytes(chunk))
-            self._ports[port]["rx_buffer"] = b""
+            state[_ST_RX_BUFFER] = b""
             self._drain_port_overflow(uart)
             return
         self._handle_rx_chunk(port, bytes(chunk))
@@ -408,10 +537,10 @@ class TransportService:
 
     def _handle_rx_chunk(self, port, chunk):
         """把本轮读取到的 bytes 扫描成固定帧并分发."""
-        state = self._ports[port]
+        state = self._port_state(port)
         if len(chunk) < 1:
             return
-        chunk = state["rx_buffer"] + chunk
+        chunk = state[_ST_RX_BUFFER] + chunk
         frame_size = FRAME_SIZE
         offset = 0
         while offset + frame_size <= len(chunk):
@@ -425,7 +554,7 @@ class TransportService:
                 continue
             self._dispatch_frame_fields(port, mode, topic, seq, chunk, offset)
             offset += frame_size
-        state["rx_buffer"] = chunk[offset:]
+        state[_ST_RX_BUFFER] = chunk[offset:]
 
     def _can_dispatch_frame_fields(self, port, mode, topic):
         entry = get_topic_entry(topic)
@@ -444,50 +573,55 @@ class TransportService:
     def _dispatch_frame_fields(self, port, mode, topic, seq, frame_bytes, frame_offset):
         """把单个固定帧路由到 ACK、TCP 或 UDP 槽."""
         entry = get_topic_entry(topic)
-        state = self._ports[port]
+        state = self._port_state(port)
         if entry is None:
-            state["stats"]["dropped_invalid_frames"] += 1
+            state[_ST_DROPPED_INVALID_FRAMES] += 1
             return
         if not validate_port_for_topic(topic, port):
-            state["stats"]["dropped_invalid_frames"] += 1
+            state[_ST_DROPPED_INVALID_FRAMES] += 1
             return
         if mode == MODE_ACK:
-            slot = state["tcp_tx_slot"]
-            if slot is not None and int(slot["topic"]) == topic and int(slot["seq"]) == seq:
-                state["tcp_tx_slot"] = None
-                state["last_delivery"][topic] = DELIVERY_DELIVERED
-                state["stats"]["ack_rx"] += 1
+            if (
+                state[_ST_TCP_TX_BODY] is not None
+                and int(state[_ST_TCP_TX_TOPIC]) == topic
+                and int(state[_ST_TCP_TX_SEQ]) == seq
+            ):
+                state[_ST_TCP_TX_BODY] = None
+                state[_ST_TCP_TX_TOPIC] = -1
+                state[_ST_LAST_DELIVERY_TOPIC] = topic
+                state[_ST_LAST_DELIVERY_CODE] = _DELIVERY_DELIVERED_CODE
+                state[_ST_ACK_RX] += 1
             return
         if not validate_mode_for_topic(topic, mode):
-            state["stats"]["dropped_invalid_frames"] += 1
+            state[_ST_DROPPED_INVALID_FRAMES] += 1
             return
         if mode == MODE_UDP:
             if not can_role_read(topic, self.role):
-                state["stats"]["dropped_invalid_frames"] += 1
+                state[_ST_DROPPED_INVALID_FRAMES] += 1
                 return
             body_size = get_topic_body_size(topic)
             body_start = int(frame_offset) + 4
-            state["udp_rx"][topic] = frame_bytes[body_start : body_start + body_size]
-            state["udp_rx_versions"][topic] = int(state["udp_rx_versions"].get(topic, 0)) + 1
+            state[_ST_UDP_RX][topic] = frame_bytes[body_start : body_start + body_size]
+            state[_ST_UDP_RX_VERSIONS][topic] = (
+                int(state[_ST_UDP_RX_VERSIONS].get(topic, 0)) + 1
+            )
             return
         if mode == MODE_TCP:
             if not can_role_read(topic, self.role):
-                state["stats"]["dropped_invalid_frames"] += 1
+                state[_ST_DROPPED_INVALID_FRAMES] += 1
                 return
-            token = (topic, seq)
-            if state["last_rx_token"] == token:
+            if state[_ST_LAST_RX_TOPIC] == topic and state[_ST_LAST_RX_SEQ] == seq:
                 self._schedule_ack(port, topic, seq)
                 return
-            if state["tcp_rx_slot"] is not None:
+            if state[_ST_TCP_RX_BODY] is not None:
                 return
             body_size = get_topic_body_size(topic)
             body_start = int(frame_offset) + 4
-            state["tcp_rx_slot"] = {
-                "topic": topic,
-                "seq": seq,
-                "body": frame_bytes[body_start : body_start + body_size],
-            }
-            state["last_rx_token"] = token
+            state[_ST_TCP_RX_TOPIC] = topic
+            state[_ST_TCP_RX_SEQ] = seq
+            state[_ST_TCP_RX_BODY] = frame_bytes[body_start : body_start + body_size]
+            state[_ST_LAST_RX_TOPIC] = topic
+            state[_ST_LAST_RX_SEQ] = seq
             self._schedule_ack(port, topic, seq)
 
     def _schedule_ack(self, port, topic, seq):
@@ -495,33 +629,32 @@ class TransportService:
 
         @details 不同确认对象同时出现时, 只保留尚未写出的最新 ACK 候选
         """
-        candidate = {"port": port, "topic": int(topic), "seq": int(seq)}
+        topic = int(topic)
+        seq = int(seq)
         if self._ack_candidate is None:
-            self._ack_candidate = candidate
+            self._ack_candidate = True
+            self._ack_candidate_port = port
+            self._ack_candidate_topic = topic
+            self._ack_candidate_seq = seq
             return
         if (
-            self._ack_candidate["port"] == candidate["port"]
-            and self._ack_candidate["topic"] == candidate["topic"]
-            and self._ack_candidate["seq"] == candidate["seq"]
+            self._ack_candidate_port == port
+            and self._ack_candidate_topic == topic
+            and self._ack_candidate_seq == seq
         ):
             return
-        self._ports[port]["stats"]["ack_overwrites"] += 1
-        self._ack_candidate = candidate
+        self._port_state(port)[_ST_ACK_OVERWRITES] += 1
+        self._ack_candidate = True
+        self._ack_candidate_port = port
+        self._ack_candidate_topic = topic
+        self._ack_candidate_seq = seq
 
     def _has_pending_tcp_intent(self):
         for port in (UART6, UART8):
-            state = self._ports[port]
-            if state["tcp_tx_intent"] is not None:
+            state = self._port_state(port)
+            if state[_ST_TCP_TX_INTENT_BODY] is not None:
                 return True
         return False
-
-
-def _choose_round_robin(ports, next_port):
-    if len(ports) == 1:
-        return ports[0]
-    if next_port in ports:
-        return next_port
-    return ports[0]
 
 
 def _write_out_body(out_body, body):

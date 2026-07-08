@@ -100,6 +100,12 @@ def _collect_runtime_garbage(car) -> None:
     car.collect_garbage()
 
 
+def _prepare_runtime_before_ready(car) -> None:
+    prepare = getattr(car, "prepare_runtime", None)
+    if prepare is not None:
+        prepare()
+
+
 def _print_mem_info_before_ready() -> None:
     try:
         import micropython  # pyright: ignore[reportMissingImports]
@@ -210,6 +216,7 @@ def main():
         log_memory("r0")
         car = _create_transport_car(role)
         log_memory("r1")
+        _prepare_runtime_before_ready(car)
         _print_mem_info_before_ready()
         log(LOG_STAGE, "TransportCar ready")
 

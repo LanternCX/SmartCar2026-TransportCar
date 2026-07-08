@@ -204,6 +204,43 @@ def test_run_main_prints_mem_info_before_ready_when_available(monkeypatch) -> No
     assert calls == [(1,)]
 
 
+def test_run_main_prepares_runtime_before_mem_info(monkeypatch) -> None:
+    """运行时预热先于详细内存诊断，避免主循环首次导入。"""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    micropython_module = ModuleType("micropython")
+    setattr(micropython_module, "mem_info", lambda *_args: events.append("mem_info"))
+    monkeypatch.setitem(sys.modules, "micropython", micropython_module)
+    setattr(module, "log", lambda _stage, detail="": events.append(detail))
+    setattr(
+        module,
+        "create_role_transport_car",
+        lambda _role: type(
+            "_Car",
+            (),
+            {
+                "wheel_states": [{"encoder": "enc_m"}],
+                "imu": "imu",
+                "prepare_runtime": lambda self: events.append("prepare"),
+                "mark_tick": lambda self, _tick=None: None,
+                "set_ticker": lambda self, _ticker: None,
+                "has_pending_tick": lambda self: False,
+                "poll_transport_rx": lambda self: None,
+                "step_role": lambda self: False,
+                "step_motion_input": lambda self: False,
+                "poll_transport_tx": lambda self: None,
+                "collect_garbage": lambda self: None,
+            },
+        )(),
+    )
+
+    module.main()
+
+    assert events.index("prepare") < events.index("mem_info")
+    assert events.index("prepare") < events.index("TransportCar ready")
+
+
 def test_run_main_returns_assistant_role_and_dispatches_it(
     monkeypatch,
 ) -> None:

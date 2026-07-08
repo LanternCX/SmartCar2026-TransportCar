@@ -198,6 +198,11 @@ class AssistantFollowRuntime:
             self._return_play_class = AssistantReturnGaragePlay
         return self._return_play_class
 
+    def prepare_runtime(self) -> None:
+        self._ensure_play_runner()
+        self._ensure_return_play_context()
+        self._ensure_startup_move_play_class()
+
     def mark_tick(self, tick=None) -> None:
         self._transport_car.mark_tick(tick)
 
