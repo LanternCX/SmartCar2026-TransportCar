@@ -8,10 +8,20 @@ import time
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
+    AE_EVENT,
+    AE_VALUE,
+    CTL_ACTION,
     LOCAL_VISION_CONTROL_PAUSE,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
+    ME_CTX,
+    ME_EVENT,
+    ME_TH,
+    ME_VALUE,
+    VEL_HAS_W,
+    VEL_X,
+    VEL_Y,
     decode_assistant_event_report_body,
     decode_local_vision_control_body,
     decode_master_vision_event_report_body,
@@ -47,6 +57,23 @@ from role.master.state_machine import (
     EVENT_CLEARED,
     EVENT_RETURN_LINE_ALIGNED,
     EVENT_TARGET_FOUND,
+    RQ_ARG,
+    RQ_CONTEXT,
+    RQ_KIND,
+    RQ_STATE,
+    RQ_TARGET,
+    RK_A_CLEAR,
+    RK_A_FOLLOW,
+    RK_A_OBJ,
+    RK_A_ORBIT,
+    RK_A_RETURN,
+    RK_A_START,
+    RK_A_TRANSPORT,
+    RK_NONE,
+    RK_T_FINISH,
+    RK_T_ORBIT,
+    RK_T_RETURN,
+    RK_T_TRANSPORT,
     STATE_CLEAR_OBJECT,
     STATE_FINISHED,
     STATE_ORBITING,
@@ -60,6 +87,31 @@ from role.master.state_machine import (
     TARGET_OBJECT,
 )
 from utils.startup_log import log, log_exception
+
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
+
+    def const(value):
+        return value
+
+
+_P_KIND = const(0)
+_P_CTX = const(1)
+_P_STATE = const(2)
+_P_TARGET = const(3)
+_P_ARG = const(4)
+_P_QUEUED = const(5)
+
+_S_KIND = const(0)
+_S_STATE = const(1)
+_S_TARGET = const(2)
+_S_ARG = const(3)
+_S_THRESHOLD = const(4)
+_S_QUEUED = const(5)
+
+_G_ACTION = const(0)
+_G_QUEUED = const(1)
 
 
 MASTER_SEARCH_TASK_CONFIG_ID = vision_params.MASTER_SEARCH_TASK_CONFIG_ID
@@ -92,6 +144,33 @@ def _default_now_ms():
     return int(time.time() * 1000)
 
 
+def _request_kind_name(kind, fallback):
+    kind = int(kind)
+    if kind == RK_A_START:
+        return "assistant_startup"
+    if kind == RK_A_OBJ:
+        return "assistant_object"
+    if kind == RK_A_ORBIT:
+        return "assistant_orbit"
+    if kind == RK_A_FOLLOW:
+        return "assistant_follow"
+    if kind == RK_A_TRANSPORT:
+        return "assistant_transport"
+    if kind == RK_A_CLEAR:
+        return "assistant_clear"
+    if kind == RK_A_RETURN:
+        return "assistant_return_line"
+    if kind == RK_T_TRANSPORT:
+        return "transport_task"
+    if kind == RK_T_FINISH:
+        return "finish_task"
+    if kind == RK_T_ORBIT:
+        return "orbit_task"
+    if kind == RK_T_RETURN:
+        return "return_line_task"
+    return fallback
+
+
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观."""
 
@@ -99,7 +178,8 @@ class MasterForwardRuntime:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_MASTER)
-        self._transport_car = car
+        # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是主车状态机。
+        self._car = car
         self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
@@ -108,7 +188,7 @@ class MasterForwardRuntime:
             now_ms=self._now_ms,
         )
         seed_value = int(self._now_ms()) % 256
-        self._state_machine = MasterStateMachine(
+        self._sm = MasterStateMachine(
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
@@ -120,47 +200,47 @@ class MasterForwardRuntime:
             total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
         )
-        self._last_error_text = "none"
-        self._latest_uart6_velocity = None
-        self._uart6_velocity_packet = {
-            "vx": 0.0,
-            "vy": 0.0,
-            "omega": 0.0,
-            "has_omega": False,
-        }
-        self._uart6_reset_version = 0
-        self._active_task_context_id = None
-        self._pending_task_sync = None
-        self._pending_task_event = None
-        self._current_object_threshold = (0, 0, 0, 0, 0, 0)
-        self._pending_sync = None
-        self._pending_assistant_sync = None
-        self._orbit_command_active = False
+        self._err = "none"
+        # UART6 视觉速度缓存：_u6v 是当前速度槽，_u6_ver 是丢弃旧包的版本线。
+        self._u6v = None
+        self._u6_pkt = [0.0, 0.0, 0.0, False]
+        self._u6_ver = 0
+        self._u6_has_w = False
+        # 主车可靠链路状态：act 是当前上下文，p_* 是等待确认的通信请求。
+        self._act_ctx = None
+        self._p_task = None
+        self._p_event = None
+        self._obj_th = (0, 0, 0, 0, 0, 0)
+        self._p_sync = None
+        self._p_ast = None
+        self._orb_act = False
+        # play_* 是轻量动作脚本的运行游标，由 play.sequence 读写。
         self.play_kind = 0
         self.play_step = 0
         self.play_entered = False
-        self._transport_sync_acknowledged = False
-        self._transport_task_acknowledged = False
-        self._transport_stop_confirm_ticks = 0
-        self._transport_push_unlocked = False
-        self._clear_sync_acknowledged = False
-        self._clear_motion_started = False
-        self._clear_master_completed_phase = None
-        self._clear_motion_stop_ticks = 0
-        self._turn_back_rotation_started = False
-        self._turn_back_stop_ticks = 0
-        self._turn_back_target_heading_deg = None
-        self._last_task_sync_status = None
-        self._last_transport_flow_log = None
-        self._last_feedforward_flow_log = None
-        self._velocity_body = bytearray(7)
-        self._local_vision_control_body = bytearray(1)
-        self._task_event_body = bytearray(10)
-        self._assistant_event_body = bytearray(3)
-        self._local_vision_control_paused = False
-        self._last_role_state = int(self._state_machine.state)
-        self._return_line_aligned = False
-        self._return_line_gate_action = None
+        # transport/clear/turn-back 阶段状态：tr/clr/tb 分别对应运输、清障、回正。
+        self._tr_sync_ack = False
+        self._tr_task_ack = False
+        self._tr_ticks = 0
+        self._tr_unlock = False
+        self._clr_sync_ack = False
+        self._clr_move = False
+        self._clr_done_phase = None
+        self._clr_ticks = 0
+        self._tb_rot = False
+        self._tb_ticks = 0
+        self._tb_heading = None
+        self._task_status = None
+        # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
+        self._vel_body = bytearray(7)
+        self._ctrl_body = bytearray(1)
+        self._task_body = bytearray(10)
+        self._ast_body = bytearray(3)
+        # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
+        self._lv_pause = False
+        self._last_state = int(self._sm.state)
+        self._line_ok = False
+        self._gate = None
         self.last_report = None
 
     def prepare_runtime(self) -> None:
@@ -169,19 +249,19 @@ class MasterForwardRuntime:
         play_sequence.clear(self)
 
     def mark_tick(self, tick=None) -> None:
-        self._transport_car.mark_tick(tick)
+        self._car.mark_tick(tick)
 
     def set_ticker(self, ticker_obj: object) -> None:
-        self._transport_car.set_ticker(ticker_obj)
+        self._car.set_ticker(ticker_obj)
 
     def has_pending_tick(self) -> bool:
-        return self._transport_car.has_pending_tick()
+        return self._car.has_pending_tick()
 
     def step_control(self) -> bool:
-        return self._transport_car.step_control()
+        return self._car.step_control()
 
     def collect_garbage(self) -> None:
-        self._transport_car.collect_garbage()
+        self._car.collect_garbage()
 
     def poll_transport_rx(self) -> None:
         self.transport_service.poll_rx()
@@ -207,18 +287,17 @@ class MasterForwardRuntime:
         keep_running = self.step_role()
         if keep_running:
             keep_running = self.step_motion_input()
-        return bool(self._transport_car.step()) and keep_running
+        return bool(self._car.step()) and keep_running
 
     def request_state_sync(self, state: int, target: int, arg: int) -> int:
-        pending = {
-            "kind": "generic",
-            "state": int(state),
-            "target": int(target),
-            "arg": int(arg),
-            "threshold": (0, 0, 0, 0, 0, 0),
-            "queued": False,
-        }
-        self._pending_sync = pending
+        self._p_sync = (
+            RK_NONE,
+            int(state),
+            int(target),
+            int(arg),
+            (0, 0, 0, 0, 0, 0),
+            False,
+        )
         return int(state)
 
     def _run_role_cycle(self) -> None:
@@ -251,25 +330,26 @@ class MasterForwardRuntime:
         self._queue_feedforward_velocity()
 
     def _sync_role_state_transition(self) -> None:
-        current_state = int(self._state_machine.state)
-        if current_state == int(self._last_role_state):
+        current_state = int(self._sm.state)
+        if current_state == int(self._last_state):
             return
         self._clear_local_vision_pause_residue()
-        self._return_line_aligned = False
+        self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
-            self._return_line_gate_action = None
+            self._gate = None
             from play import sequence as play_sequence
 
             play_sequence.clear(self)
         if current_state == STATE_TRANSPORT_OBJECT:
-            self._transport_stop_confirm_ticks = 0
-            self._transport_push_unlocked = False
-        self._last_role_state = current_state
+            self._tr_ticks = 0
+            self._tr_unlock = False
+        self._last_state = current_state
 
     def _clear_local_vision_pause_residue(self) -> None:
-        self._local_vision_control_paused = False
-        self._latest_uart6_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._lv_pause = False
+        self._u6v = None
+        self._u6_has_w = False
+        self._u6_ver = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
 
@@ -277,61 +357,63 @@ class MasterForwardRuntime:
         """消费本车视觉链路上的 TCP 控制与事件."""
         if (
             self.transport_service.tcp(UART6).read(
-                TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
+                TOPIC_LOCAL_VISION_CONTROL, self._ctrl_body
             )
             == "ok"
         ):
-            packet = decode_local_vision_control_body(self._local_vision_control_body)
+            packet = decode_local_vision_control_body(self._ctrl_body)
             self._handle_local_vision_control(packet)
         if (
             self.transport_service.tcp(UART6).read(
-                TOPIC_MASTER_VISION_EVENT_REPORT, self._task_event_body
+                TOPIC_MASTER_VISION_EVENT_REPORT, self._task_body
             )
             == "ok"
         ):
-            packet = decode_master_vision_event_report_body(self._task_event_body)
+            packet = decode_master_vision_event_report_body(self._task_body)
             self._handle_task_event(packet)
 
     def _consume_uart6_velocity_input(self) -> None:
         """消费本车视觉链路上的 UDP 速度."""
         if (
             self.transport_service.udp(UART6).read(
-                TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body
+                TOPIC_LOCAL_VISION_VELOCITY, self._vel_body
             )
             == "ok"
         ):
             version = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._uart6_reset_version and not self._local_vision_control_paused:
+            if version > self._u6_ver and not self._lv_pause:
                 packet = decode_velocity_body_into(
-                    self._velocity_body, self._uart6_velocity_packet
+                    self._vel_body, self._u6_pkt
                 )
                 if (
-                    self._state_machine.allows_search_velocity()
-                    or self._state_machine.state == STATE_TRANSPORT_OBJECT
+                    self._sm.allows_search_velocity()
+                    or self._sm.state == STATE_TRANSPORT_OBJECT
                     or (
-                        self._state_machine.state == STATE_ORBITING
-                        and self._pending_task_sync is None
+                        self._sm.state == STATE_ORBITING
+                        and self._p_task is None
                     )
                 ):
-                    self._latest_uart6_velocity = packet
+                    self._u6v = packet
+                    self._u6_has_w = bool(packet[VEL_HAS_W])
 
-    def _handle_local_vision_control(self, packet: dict) -> None:
+    def _handle_local_vision_control(self, packet) -> None:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
 
-        action = int(packet.get("action", 0))
+        action = int(packet[CTL_ACTION])
         if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
-            self._local_vision_control_paused = False
+            self._lv_pause = False
             return
-        self._latest_uart6_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._u6v = None
+        self._u6_has_w = False
+        self._u6_ver = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
         if action == LOCAL_VISION_CONTROL_PAUSE:
-            self._local_vision_control_paused = True
-            if not bool(getattr(self._transport_car, "command_lock", False)):
-                self._transport_car.handle_velocity_packet(
+            self._lv_pause = True
+            if not bool(getattr(self._car, "command_lock", False)):
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
@@ -340,41 +422,41 @@ class MasterForwardRuntime:
                 )
             return
         if action == LOCAL_VISION_CONTROL_RESUME:
-            self._local_vision_control_paused = False
+            self._lv_pause = False
 
     def _allows_local_vision_control(self) -> bool:
-        return int(self._state_machine.state) == int(STATE_SEARCH_OBJECT)
+        return int(self._sm.state) == int(STATE_SEARCH_OBJECT)
 
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
         if (
             self.transport_service.tcp(UART8).read(
-                TOPIC_ASSISTANT_EVENT_REPORT, self._assistant_event_body
+                TOPIC_ASSISTANT_EVENT_REPORT, self._ast_body
             )
             == "ok"
         ):
-            packet = decode_assistant_event_report_body(self._assistant_event_body)
+            packet = decode_assistant_event_report_body(self._ast_body)
             self._clear_local_velocity_for_reliable_event("assistant_event")
-            self.last_report = dict(packet)
-            if int(packet["event"]) == EVENT_TARGET_FOUND:
-                self._state_machine.handle_assistant_target_found(packet["value"])
-            elif int(packet["event"]) == EVENT_ALIGNED:
-                self._state_machine.handle_assistant_aligned(packet["value"])
-            elif int(packet["event"]) == EVENT_CLEARED:
-                self._state_machine.handle_assistant_cleared(packet["value"])
+            self.last_report = packet
+            if int(packet[AE_EVENT]) == EVENT_TARGET_FOUND:
+                self._sm.handle_assistant_target_found(packet[AE_VALUE])
+            elif int(packet[AE_EVENT]) == EVENT_ALIGNED:
+                self._sm.handle_assistant_aligned(packet[AE_VALUE])
+            elif int(packet[AE_EVENT]) == EVENT_CLEARED:
+                self._sm.handle_assistant_cleared(packet[AE_VALUE])
 
-    def _handle_task_event(self, packet: dict) -> None:
-        context_id = int(packet["context_id"])
+    def _handle_task_event(self, packet) -> None:
+        context_id = int(packet[ME_CTX])
         log(
             "master_event",
             "received context=%d event=%d value=%d"
             % (
                 context_id,
-                int(packet["event"]),
-                int(packet["value"]),
+                int(packet[ME_EVENT]),
+                int(packet[ME_VALUE]),
             ),
         )
-        if self._active_task_context_id == context_id:
+        if self._act_ctx == context_id:
             self._clear_local_velocity_for_reliable_event("master_vision_event")
             self._remember_task_event_threshold(packet)
             log(
@@ -382,68 +464,69 @@ class MasterForwardRuntime:
                 "active context=%d state=%d event=%d value=%d"
                 % (
                     context_id,
-                    int(self._state_machine.state),
-                    int(packet["event"]),
-                    int(packet["value"]),
+                    int(self._sm.state),
+                    int(packet[ME_EVENT]),
+                    int(packet[ME_VALUE]),
                 ),
             )
             if (
-                self._state_machine.state == STATE_RETURN_GARAGE_RETREAT
-                and int(packet["event"]) == int(EVENT_RETURN_LINE_ALIGNED)
+                self._sm.state == STATE_RETURN_GARAGE_RETREAT
+                and int(packet[ME_EVENT]) == int(EVENT_RETURN_LINE_ALIGNED)
             ):
-                self._return_line_aligned = True
+                self._line_ok = True
                 log(
                     "master_gate",
                     "ready_on context=%d value=%d"
-                    % (context_id, int(packet["value"])),
+                    % (context_id, int(packet[ME_VALUE])),
                 )
-            self._state_machine.handle_event(
+            self._sm.handle_event(
                 context_id,
-                packet["event"],
-                packet["value"],
+                packet[ME_EVENT],
+                packet[ME_VALUE],
             )
-            if int(packet["event"]) == int(EVENT_ARRIVED):
+            if int(packet[ME_EVENT]) == int(EVENT_ARRIVED):
                 log(
                     "master_finish",
                     "arrived context=%d state=%d value=%d"
                     % (
                         context_id,
-                        int(self._state_machine.state),
-                        int(packet["value"]),
+                        int(self._sm.state),
+                        int(packet[ME_VALUE]),
                     ),
                 )
-                if self._state_machine.state != STATE_TRANSPORT_OBJECT:
-                    self._active_task_context_id = None
-                    self._latest_uart6_velocity = None
-                    self._uart6_reset_version = self.transport_service.get_udp_version(
+                if self._sm.state != STATE_TRANSPORT_OBJECT:
+                    self._act_ctx = None
+                    self._u6v = None
+                    self._u6_has_w = False
+                    self._u6_ver = self.transport_service.get_udp_version(
                         UART6, TOPIC_LOCAL_VISION_VELOCITY
                     )
             return
-        if self._pending_task_sync is not None and context_id == int(self._pending_task_sync["context_id"]):
+        if self._p_task is not None and context_id == int(self._p_task[_P_CTX]):
             self._clear_local_velocity_for_reliable_event("master_vision_event")
             log(
                 "master_event",
                 "pending context=%d state=%d event=%d value=%d"
                 % (
                     context_id,
-                    int(self._state_machine.state),
-                    int(packet["event"]),
-                    int(packet["value"]),
+                    int(self._sm.state),
+                    int(packet[ME_EVENT]),
+                    int(packet[ME_VALUE]),
                 ),
             )
-            self._pending_task_event = {
-                "context_id": context_id,
-                "event": int(packet["event"]),
-                "value": int(packet["value"]),
-                "threshold": tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0))),
-            }
+            self._p_event = (
+                int(context_id),
+                int(packet[ME_EVENT]),
+                int(packet[ME_VALUE]),
+                tuple(packet[ME_TH]),
+            )
             return
         pending_context = -1
-        if self._pending_task_sync is not None:
-            pending_context = int(self._pending_task_sync["context_id"])
+        if self._p_task is not None:
+            pending_context = int(self._p_task[_P_CTX])
         active_context = -1
-        if self._active_task_context_id is not None:
-            active_context = int(self._active_task_context_id)
+        if self._act_ctx is not None:
+            active_context = int(self._act_ctx)
         log(
             "master_event",
             "drop context=%d active=%d pending=%d state=%d event=%d value=%d"
@@ -451,16 +534,16 @@ class MasterForwardRuntime:
                 context_id,
                 active_context,
                 pending_context,
-                int(self._state_machine.state),
-                int(packet["event"]),
-                int(packet["value"]),
+                int(self._sm.state),
+                int(packet[ME_EVENT]),
+                int(packet[ME_VALUE]),
             ),
         )
 
-    def _remember_task_event_threshold(self, packet: dict) -> None:
-        threshold = tuple(packet.get("threshold", (0, 0, 0, 0, 0, 0)))
+    def _remember_task_event_threshold(self, packet) -> None:
+        threshold = tuple(packet[ME_TH])
         if self._threshold_has_value(threshold):
-            self._current_object_threshold = threshold
+            self._obj_th = threshold
 
     def _threshold_has_value(self, threshold: tuple) -> bool:
         for value in threshold:
@@ -471,13 +554,14 @@ class MasterForwardRuntime:
     def _clear_local_velocity_for_reliable_event(self, source: str) -> None:
         """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
 
-        self._latest_uart6_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._u6v = None
+        self._u6_has_w = False
+        self._u6_ver = self.transport_service.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        if bool(getattr(self._transport_car, "command_lock", False)):
+        if bool(getattr(self._car, "command_lock", False)):
             return
-        self._transport_car.handle_velocity_packet(
+        self._car.handle_velocity_packet(
             0.0,
             0.0,
             0.0,
@@ -487,65 +571,65 @@ class MasterForwardRuntime:
 
     def _check_transport_deliveries(self) -> None:
         """把通信层的交付结果映射回角色状态机."""
-        pending = self._pending_task_sync
-        if pending is not None and pending.get("queued"):
+        pending = self._p_task
+        if pending is not None and pending[_P_QUEUED]:
             if (
                 self.transport_service.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_task_sync_done(pending)
-                self._active_task_context_id = int(pending["context_id"])
-                if pending.get("kind") == "transport_task":
-                    self._transport_task_acknowledged = True
-                    if self._transport_sync_acknowledged:
-                        self._state_machine.mark_transport_ready()
-                elif self._state_machine.state == STATE_SEARCH_OBJECT:
-                    self._state_machine.mark_restart_search_task_acknowledged()
-                self._pending_task_sync = None
+                self._act_ctx = int(pending[_P_CTX])
+                if pending[_P_KIND] == RK_T_TRANSPORT:
+                    self._tr_task_ack = True
+                    if self._tr_sync_ack:
+                        self._sm.mark_transport_ready()
+                elif self._sm.state == STATE_SEARCH_OBJECT:
+                    self._sm.mark_restart_search_task_acknowledged()
+                self._p_task = None
                 self._drain_pending_task_event()
-        pending_gate = self._return_line_gate_action
-        if pending_gate is not None and pending_gate.get("queued"):
+        pending_gate = self._gate
+        if pending_gate is not None and pending_gate[_G_QUEUED]:
             if (
                 self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
                 == DELIVERY_DELIVERED
             ):
-                log("master_gate", "done action=%d" % int(pending_gate["action"]))
-                self._return_line_gate_action = None
+                log("master_gate", "done action=%d" % int(pending_gate[_G_ACTION]))
+                self._gate = None
 
-        pending = self._pending_assistant_sync
-        if pending is not None and pending.get("queued"):
+        pending = self._p_ast
+        if pending is not None and pending[_S_QUEUED]:
             if (
                 self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_STATE_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_sync_done("master->assistant", pending)
-                if pending.get("kind") == "assistant_object":
-                    self._state_machine.mark_assistant_object_acknowledged()
-                elif pending.get("kind") == "assistant_startup":
-                    self._state_machine.mark_startup_sync_acknowledged()
-                elif pending.get("kind") == "assistant_follow":
-                    self._state_machine.mark_assistant_follow_acknowledged()
-                elif pending.get("kind") == "assistant_transport":
-                    self._transport_sync_acknowledged = True
-                    if self._transport_task_acknowledged:
-                        self._state_machine.mark_transport_ready()
-                elif pending.get("kind") == "assistant_clear":
-                    self._clear_sync_acknowledged = True
-                self._pending_assistant_sync = None
+                if pending[_S_KIND] == RK_A_OBJ:
+                    self._sm.mark_assistant_object_acknowledged()
+                elif pending[_S_KIND] == RK_A_START:
+                    self._sm.mark_startup_sync_acknowledged()
+                elif pending[_S_KIND] == RK_A_FOLLOW:
+                    self._sm.mark_assistant_follow_acknowledged()
+                elif pending[_S_KIND] == RK_A_TRANSPORT:
+                    self._tr_sync_ack = True
+                    if self._tr_task_ack:
+                        self._sm.mark_transport_ready()
+                elif pending[_S_KIND] == RK_A_CLEAR:
+                    self._clr_sync_ack = True
+                self._p_ast = None
 
-        pending = self._pending_sync
-        if pending is not None and pending.get("queued"):
+        pending = self._p_sync
+        if pending is not None and pending[_S_QUEUED]:
             if (
                 self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_STATE_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_sync_done("master->assistant", pending)
-                self._pending_sync = None
+                self._p_sync = None
 
     def _apply_motion_outputs(self) -> None:
-        if self._local_vision_control_paused:
-            if not bool(getattr(self._transport_car, "command_lock", False)):
-                self._transport_car.handle_velocity_packet(
+        if self._lv_pause:
+            if not bool(getattr(self._car, "command_lock", False)):
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
@@ -553,11 +637,11 @@ class MasterForwardRuntime:
                     True,
                 )
             return
-        if self._state_machine.state == STATE_TRANSPORT_OBJECT:
+        if self._sm.state == STATE_TRANSPORT_OBJECT:
             if not self._is_transport_finish_task_ready():
-                self._transport_stop_confirm_ticks = 0
-                self._transport_push_unlocked = False
-                self._transport_car.handle_velocity_packet(
+                self._tr_ticks = 0
+                self._tr_unlock = False
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
@@ -566,7 +650,7 @@ class MasterForwardRuntime:
                 )
                 return
             if not self._is_transport_push_unlocked():
-                self._transport_car.handle_velocity_packet(
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
@@ -576,12 +660,12 @@ class MasterForwardRuntime:
                 return
             self._apply_transport_velocity()
             return
-        if self._state_machine.state == STATE_ORBITING:
+        if self._sm.state == STATE_ORBITING:
             self._apply_orbit_velocity_correction()
             return
-        if self._state_machine.state == STATE_CLEAR_OBJECT:
-            if not self._clear_motion_started:
-                self._transport_car.handle_velocity_packet(
+        if self._sm.state == STATE_CLEAR_OBJECT:
+            if not self._clr_move:
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
@@ -589,14 +673,14 @@ class MasterForwardRuntime:
                     True,
                 )
             return
-        if self._state_machine.state == STATE_RETURN_GARAGE_RETREAT:
+        if self._sm.state == STATE_RETURN_GARAGE_RETREAT:
             self._run_return_play()
             return
-        if self._state_machine.state == STATE_STARTUP_MOVE:
+        if self._sm.state == STATE_STARTUP_MOVE:
             self._run_startup_move_play()
             return
-        if self._state_machine.state == STATE_FINISHED:
-            self._transport_car.handle_velocity_packet(
+        if self._sm.state == STATE_FINISHED:
+            self._car.handle_velocity_packet(
                 0.0,
                 0.0,
                 0.0,
@@ -604,10 +688,10 @@ class MasterForwardRuntime:
                 True,
             )
             return
-        if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
-            self._state_machine, "_master_aligned", False
+        if self._sm.state == STATE_SEARCH_OBJECT and getattr(
+            self._sm, "_m_aligned", False
         ):
-            self._transport_car.handle_velocity_packet(
+            self._car.handle_velocity_packet(
                 0.0,
                 0.0,
                 0.0,
@@ -615,11 +699,11 @@ class MasterForwardRuntime:
                 True,
             )
             return
-        if self._state_machine.allows_search_velocity():
+        if self._sm.allows_search_velocity():
             self._apply_latest_uart6_velocity()
 
     def _is_transport_finish_task_ready(self) -> bool:
-        return self._active_task_context_id == int(self._state_machine._current_context_id)
+        return self._act_ctx == int(self._sm._ctx)
 
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
@@ -632,28 +716,28 @@ class MasterForwardRuntime:
 
         play_sequence.start(self, play_sequence.PLAY_STARTUP)
         if play_sequence.tick(self):
-            self._state_machine.mark_startup_move_completed()
+            self._sm.mark_startup_move_completed()
 
     def play_set_position_x(self, value, max_speed_cmd=None) -> None:
-        self._transport_car.set_relative_translation_target(
+        self._car.set_relative_translation_target(
             float(value),
             0.0,
             max_speed_cmd=max_speed_cmd,
         )
 
     def play_set_position_y(self, value, max_speed_cmd=None) -> None:
-        self._transport_car.set_relative_translation_target(
+        self._car.set_relative_translation_target(
             0.0,
             float(value),
             max_speed_cmd=max_speed_cmd,
         )
 
     def play_set_angle(self, value) -> None:
-        target_heading_deg = float(getattr(self._transport_car, "heading_est", 0.0)) + float(value)
-        self._transport_car.set_heading_transition_target(target_heading_deg)
+        target_heading_deg = float(getattr(self._car, "heading_est", 0.0)) + float(value)
+        self._car.set_heading_transition_target(target_heading_deg)
 
     def play_write_velocity_y(self, value) -> None:
-        self._transport_car.handle_velocity_packet(
+        self._car.handle_velocity_packet(
             0.0,
             float(value),
             0.0,
@@ -662,64 +746,58 @@ class MasterForwardRuntime:
         )
 
     def play_motion_done(self) -> bool:
-        return not bool(getattr(self._transport_car, "command_lock", False))
+        return not bool(getattr(self._car, "command_lock", False))
 
     def play_yellow_line_ready(self) -> bool:
-        return bool(self._return_line_aligned)
+        return bool(self._line_ok)
 
     def play_clear_yellow_line_ready(self) -> None:
-        self._return_line_aligned = False
+        self._line_ok = False
 
     def play_enable_yellow_line_ready_gate(self) -> None:
-        self._return_line_gate_action = {
-            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
-            "queued": False,
-        }
+        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON, False)
 
     def play_disable_yellow_line_ready_gate(self) -> None:
-        self._return_line_gate_action = {
-            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-            "queued": False,
-        }
+        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF, False)
 
     def _apply_latest_uart6_velocity(self) -> None:
-        packet = self._latest_uart6_velocity
+        packet = self._u6v
         if packet is None:
             return
-        self._transport_car.handle_velocity_packet(
-            float(packet["vx"]),
-            float(packet["vy"]),
+        self._car.handle_velocity_packet(
+            float(packet[VEL_X]),
+            float(packet[VEL_Y]),
             0.0,
             "uart6",
             False,
         )
-        if self._state_machine.state == STATE_SEARCH_OBJECT and getattr(
-            self._state_machine, "_orbit_completed", False
+        if self._sm.state == STATE_SEARCH_OBJECT and getattr(
+            self._sm, "_orbit_done", False
         ):
-            target_heading_deg = self._state_machine.get_push_heading_deg()
-            self._transport_car.set_heading_target(target_heading_deg)
+            target_heading_deg = self._sm.get_push_heading_deg()
+            self._car.set_heading_target(target_heading_deg)
 
     def _apply_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
             return
-        if not bool(getattr(self._transport_car, "orbit_mode", False)):
+        if not bool(getattr(self._car, "orbit_mode", False)):
             return
-        packet = self._latest_uart6_velocity
+        packet = self._u6v
         if packet is None:
             return
-        self._transport_car.set_orbit_velocity_correction(
-            float(packet["vx"]),
-            float(packet["vy"]),
+        self._car.set_orbit_velocity_correction(
+            float(packet[VEL_X]),
+            float(packet[VEL_Y]),
         )
 
     def _apply_transport_velocity(self) -> None:
-        packet = self._latest_uart6_velocity
+        packet = self._u6v
         vx = 0.0
         vy = float(TRANSPORT_FORWARD_SPEED)
         if packet is not None:
-            vy += float(packet.get("vy", 0.0))
+            vy += float(packet[VEL_Y])
         self._log_transport_flow(vx, vy)
-        self._transport_car.handle_velocity_packet(
+        self._car.handle_velocity_packet(
             vx,
             vy,
             0.0,
@@ -734,76 +812,99 @@ class MasterForwardRuntime:
         self._queue_pending_sync()
 
     def _queue_pending_task_sync(self) -> None:
-        pending = self._pending_task_sync
-        if pending is None or pending.get("queued"):
+        pending = self._p_task
+        if pending is None or pending[_P_QUEUED]:
             return
         body = encode_master_vision_task_sync_body(
-            pending["context_id"],
-            pending["state"],
-            pending["target"],
-            pending["arg"],
+            pending[_P_CTX],
+            pending[_P_STATE],
+            pending[_P_TARGET],
+            pending[_P_ARG],
         )
         status = self.transport_service.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_task_sync_start(pending)
-            self._last_task_sync_status = None
-            pending["queued"] = True
+            self._task_status = None
+            self._p_task = (
+                pending[_P_KIND],
+                pending[_P_CTX],
+                pending[_P_STATE],
+                pending[_P_TARGET],
+                pending[_P_ARG],
+                True,
+            )
             return
-        if self._last_task_sync_status == status:
+        if self._task_status == status:
             return
-        self._last_task_sync_status = status
+        self._task_status = status
         self._log_task_sync_blocked(pending, status)
 
     def _queue_pending_sync(self) -> None:
-        pending = self._pending_assistant_sync
+        pending = self._p_ast
         if pending is None:
-            pending = self._pending_sync
-        if pending is None or pending.get("queued"):
+            pending = self._p_sync
+        if pending is None or pending[_S_QUEUED]:
             return
         body = encode_assistant_state_sync_body(
-            pending["state"],
-            pending["target"],
-            pending["arg"],
+            pending[_S_STATE],
+            pending[_S_TARGET],
+            pending[_S_ARG],
             self._threshold_for_assistant_sync(pending),
         )
         status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_sync_start("master->assistant", pending)
-            pending["queued"] = True
+            if pending is self._p_ast:
+                self._p_ast = (
+                    pending[_S_KIND],
+                    pending[_S_STATE],
+                    pending[_S_TARGET],
+                    pending[_S_ARG],
+                    pending[_S_THRESHOLD],
+                    True,
+                )
+            else:
+                self._p_sync = (
+                    pending[_S_KIND],
+                    pending[_S_STATE],
+                    pending[_S_TARGET],
+                    pending[_S_ARG],
+                    pending[_S_THRESHOLD],
+                    True,
+                )
 
     def _queue_return_line_gate_action(self) -> None:
-        pending = self._return_line_gate_action
-        if pending is None or pending.get("queued"):
+        pending = self._gate
+        if pending is None or pending[_G_QUEUED]:
             return
-        body = encode_local_vision_control_body(pending["action"])
+        body = encode_local_vision_control_body(pending[_G_ACTION])
         status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            log("master_gate", "start action=%d" % int(pending["action"]))
-            pending["queued"] = True
+            log("master_gate", "start action=%d" % int(pending[_G_ACTION]))
+            self._gate = (pending[_G_ACTION], True)
 
     def _queue_feedforward_velocity(self) -> None:
         """提交主车当前底盘速度前馈.
 
         @details 是否真正写出由 transport 的统一仲裁决定, 主车角色层不额外做发送互斥
         """
-        if self._pending_assistant_sync is not None or self._pending_sync is not None:
+        if self._p_ast is not None or self._p_sync is not None:
             self._log_feedforward_flow("blocked_sync")
             return
         if (
-            self._state_machine.state == STATE_TRANSPORT_OBJECT
+            self._sm.state == STATE_TRANSPORT_OBJECT
             and not self._is_transport_finish_task_ready()
         ):
             self._log_feedforward_flow("blocked_finish_task")
             return
-        if not self._state_machine.allows_assistant_velocity_forward():
+        if not self._sm.allows_assistant_velocity_forward():
             self._log_feedforward_flow("blocked_state")
             return
-        if self._state_machine.needs_assistant_report_turn():
+        if self._sm.needs_assistant_report_turn():
             self._log_feedforward_flow("blocked_report_turn")
             return
-        car = self._transport_car
-        target = getattr(self._transport_car, "last_chassis_target", {})
-        has_omega = bool(target.get("has_omega"))
+        car = self._car
+        has_omega = bool(self._u6_has_w)
         omega = float(getattr(car, "control_omega", 0.0)) if has_omega else 0.0
         body = encode_velocity_body(
             getattr(car, "control_vx", 0.0),
@@ -819,214 +920,220 @@ class MasterForwardRuntime:
 
     def _advance_state_machine(self) -> None:
         orbit_finished = False
-        if self._orbit_command_active:
-            orbit_finished = not bool(getattr(self._transport_car, "command_lock", False))
+        if self._orb_act:
+            orbit_finished = not bool(getattr(self._car, "command_lock", False))
             if orbit_finished:
-                self._transport_car.handle_velocity_packet(
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
                     "master_orbit_finished",
                     True,
                 )
-        self._state_machine.step(orbit_finished)
-        if self._state_machine.state != STATE_ORBITING:
-            self._orbit_command_active = False
+        self._sm.step(orbit_finished)
+        if self._sm.state != STATE_ORBITING:
+            self._orb_act = False
 
     def _drain_state_machine_outputs(self) -> None:
         """消费状态机一次性输出并刷新本拍业务意图."""
-        task_request = self._state_machine.poll_task_request()
+        task_request = self._sm.poll_task_request()
         if task_request is not None:
-            self._active_task_context_id = None
-            self._latest_uart6_velocity = None
-            self._uart6_reset_version = self.transport_service.get_udp_version(
+            self._act_ctx = None
+            self._u6v = None
+            self._u6_has_w = False
+            self._u6_ver = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            self._pending_task_event = None
-            self._transport_task_acknowledged = False
-            self._pending_task_sync = {
-                "kind": task_request.get("kind"),
-                "context_id": int(task_request["context_id"]),
-                "state": int(task_request["state"]),
-                "target": int(task_request["target"]),
-                "arg": int(task_request["arg"]),
-                "queued": False,
-            }
-        assistant_request = self._state_machine.poll_assistant_request()
+            self._p_event = None
+            self._tr_task_ack = False
+            self._p_task = (
+                task_request[RQ_KIND],
+                task_request[RQ_CONTEXT],
+                task_request[RQ_STATE],
+                task_request[RQ_TARGET],
+                task_request[RQ_ARG],
+                False,
+            )
+        assistant_request = self._sm.poll_assistant_request()
         if assistant_request is not None:
-            request_kind = assistant_request.get("kind")
-            if request_kind == "assistant_object":
-                self._latest_uart6_velocity = None
-                self._uart6_reset_version = self.transport_service.get_udp_version(
+            request_kind = int(assistant_request[RQ_KIND])
+            if request_kind == RK_A_OBJ:
+                self._u6v = None
+                self._u6_has_w = False
+                self._u6_ver = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
-            elif request_kind == "assistant_follow":
-                self._latest_uart6_velocity = None
-                self._uart6_reset_version = self.transport_service.get_udp_version(
+            elif request_kind == RK_A_FOLLOW:
+                self._u6v = None
+                self._u6_has_w = False
+                self._u6_ver = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
-            elif request_kind == "assistant_transport":
-                self._active_task_context_id = None
-                self._latest_uart6_velocity = None
-                self._uart6_reset_version = self.transport_service.get_udp_version(
+            elif request_kind == RK_A_TRANSPORT:
+                self._act_ctx = None
+                self._u6v = None
+                self._u6_has_w = False
+                self._u6_ver = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
-                self._pending_task_event = None
-                self._transport_sync_acknowledged = False
-                self._transport_task_acknowledged = False
-                self._transport_stop_confirm_ticks = 0
-                self._transport_push_unlocked = False
-                self._transport_car.handle_velocity_packet(
+                self._p_event = None
+                self._tr_sync_ack = False
+                self._tr_task_ack = False
+                self._tr_ticks = 0
+                self._tr_unlock = False
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
                     "master_wait_transport_ready",
                     True,
                 )
-                self._pending_task_sync = {
-                    "kind": "transport_task",
-                    "context_id": int(self._state_machine._current_context_id),
-                    "state": STATE_SEARCH_OBJECT,
-                    "target": int(assistant_request["target"]),
-                    "arg": int(MASTER_TRANSPORT_TASK_CONFIG_ID),
-                    "queued": False,
-                }
-            elif request_kind == "assistant_clear":
-                self._latest_uart6_velocity = None
-                self._uart6_reset_version = self.transport_service.get_udp_version(
+                self._p_task = (
+                    RK_T_TRANSPORT,
+                    int(self._sm._ctx),
+                    STATE_SEARCH_OBJECT,
+                    int(assistant_request[RQ_TARGET]),
+                    int(MASTER_TRANSPORT_TASK_CONFIG_ID),
+                    False,
+                )
+            elif request_kind == RK_A_CLEAR:
+                self._u6v = None
+                self._u6_has_w = False
+                self._u6_ver = self.transport_service.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
-                self._clear_sync_acknowledged = False
-                self._clear_motion_started = False
-                self._clear_master_completed_phase = None
-                self._clear_motion_stop_ticks = 0
-                self._transport_car.handle_velocity_packet(
+                self._clr_sync_ack = False
+                self._clr_move = False
+                self._clr_done_phase = None
+                self._clr_ticks = 0
+                self._car.handle_velocity_packet(
                     0.0,
                     0.0,
                     0.0,
                     "master_wait_clear_ready",
                     True,
                 )
-            self._pending_assistant_sync = {
-                "kind": request_kind,
-                "state": int(assistant_request["state"]),
-                "target": int(assistant_request["target"]),
-                "arg": int(assistant_request["arg"]),
-                "threshold": self._threshold_for_assistant_request(assistant_request),
-                "queued": False,
-            }
+            self._p_ast = (
+                request_kind,
+                int(assistant_request[RQ_STATE]),
+                int(assistant_request[RQ_TARGET]),
+                int(assistant_request[RQ_ARG]),
+                self._threshold_for_assistant_request(assistant_request),
+                False,
+            )
 
-        orbit_command = self._state_machine.poll_orbit_command()
+        orbit_command = self._sm.poll_orbit_command()
         if orbit_command is not None:
-            self._active_task_context_id = None
-            self._latest_uart6_velocity = None
-            self._uart6_reset_version = self.transport_service.get_udp_version(
+            self._act_ctx = None
+            self._u6v = None
+            self._u6_has_w = False
+            self._u6_ver = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            self._pending_task_event = None
-            self._pending_task_sync = {
-                "kind": "orbit_task",
-                "context_id": int(self._state_machine._current_context_id),
-                "state": STATE_ORBITING,
-                "target": TARGET_OBJECT,
-                "arg": int(MASTER_ORBIT_TASK_CONFIG_ID),
-                "queued": False,
-            }
-            self._transport_car.set_orbit_target(
-                float(orbit_command["target_heading_deg"]),
+            self._p_event = None
+            self._p_task = (
+                RK_T_ORBIT,
+                int(self._sm._ctx),
+                STATE_ORBITING,
+                TARGET_OBJECT,
+                int(MASTER_ORBIT_TASK_CONFIG_ID),
+                False,
+            )
+            self._car.set_orbit_target(
+                float(orbit_command),
                 float(MASTER_ORBIT_RADIUS_SCALE),
             )
-            self._orbit_command_active = True
+            self._orb_act = True
 
     def _run_clear_phase(self) -> None:
-        if self._state_machine.state != STATE_CLEAR_OBJECT:
-            self._clear_motion_started = False
-            self._clear_master_completed_phase = None
-            self._clear_motion_stop_ticks = 0
-            self._turn_back_target_heading_deg = None
+        if self._sm.state != STATE_CLEAR_OBJECT:
+            self._clr_move = False
+            self._clr_done_phase = None
+            self._clr_ticks = 0
+            self._tb_heading = None
             return
-        clear_phase = int(self._state_machine.get_clear_phase())
+        clear_phase = int(self._sm.get_clear_phase())
         if clear_phase != CLEAR_PHASE_RETREAT and clear_phase != CLEAR_PHASE_FORWARD:
-            self._clear_motion_started = False
-            self._clear_motion_stop_ticks = 0
+            self._clr_move = False
+            self._clr_ticks = 0
             return
-        if self._clear_motion_started:
-            if bool(getattr(self._transport_car, "command_lock", False)):
-                self._clear_motion_stop_ticks = 0
+        if self._clr_move:
+            if bool(getattr(self._car, "command_lock", False)):
+                self._clr_ticks = 0
                 return
             if not self._are_all_wheels_near_stop():
-                self._clear_motion_stop_ticks = 0
+                self._clr_ticks = 0
                 return
-            self._clear_motion_stop_ticks += 1
-            if self._clear_motion_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+            self._clr_ticks += 1
+            if self._clr_ticks < int(MOTION_STOP_CONFIRM_TICKS):
                 return
-            self._clear_motion_started = False
-            self._clear_master_completed_phase = clear_phase
-            self._clear_motion_stop_ticks = 0
-            self._state_machine.mark_master_cleared()
+            self._clr_move = False
+            self._clr_done_phase = clear_phase
+            self._clr_ticks = 0
+            self._sm.mark_master_cleared()
             return
-        if not self._clear_sync_acknowledged:
+        if not self._clr_sync_ack:
             return
-        if self._clear_master_completed_phase == clear_phase:
+        if self._clr_done_phase == clear_phase:
             return
         if clear_phase == CLEAR_PHASE_RETREAT:
-            self._transport_car.set_relative_translation_target(
+            self._car.set_relative_translation_target(
                 0.0,
                 -float(TRANSPORT_CLEAR_RETREAT_DISTANCE_M),
                 None,
                 float(TRANSPORT_CLEAR_RETREAT_MAX_SPEED),
             )
         else:
-            self._transport_car.set_relative_translation_target(
+            self._car.set_relative_translation_target(
                 0.0,
                 float(TRANSPORT_CLEAR_STEP_DISTANCE_M),
-                self._turn_back_target_heading_deg,
+                self._tb_heading,
             )
-        self._clear_motion_started = True
-        self._clear_motion_stop_ticks = 0
+        self._clr_move = True
+        self._clr_ticks = 0
 
     def _run_turn_back_phase(self) -> None:
-        if not self._state_machine.is_post_clear_turn_back_pending():
-            self._turn_back_rotation_started = False
-            self._turn_back_stop_ticks = 0
+        if not self._sm.is_post_clear_turn_back_pending():
+            self._tb_rot = False
+            self._tb_ticks = 0
             return
-        if self._turn_back_rotation_started:
-            if bool(getattr(self._transport_car, "command_lock", False)):
+        if self._tb_rot:
+            if bool(getattr(self._car, "command_lock", False)):
                 if self._is_turn_back_within_unlock_tolerance():
-                    self._transport_car.handle_velocity_packet(
+                    self._car.handle_velocity_packet(
                         0.0,
                         0.0,
                         0.0,
                         "master_turn_back_tolerance",
                         True,
                     )
-                    self._turn_back_rotation_started = False
-                    self._turn_back_stop_ticks = 0
-                    self._state_machine.mark_turn_back_completed()
+                    self._tb_rot = False
+                    self._tb_ticks = 0
+                    self._sm.mark_turn_back_completed()
                     return
-                self._turn_back_stop_ticks = 0
+                self._tb_ticks = 0
                 return
-            self._turn_back_rotation_started = False
-            self._turn_back_stop_ticks = 0
-            self._state_machine.mark_turn_back_completed()
+            self._tb_rot = False
+            self._tb_ticks = 0
+            self._sm.mark_turn_back_completed()
             return
-        if not self._state_machine.can_start_turn_back_rotation():
+        if not self._sm.can_start_turn_back_rotation():
             return
         target_heading_deg = (
-            float(getattr(self._transport_car, "heading_est", 0.0))
+            float(getattr(self._car, "heading_est", 0.0))
             + float(MASTER_TURN_BACK_DELTA_DEG)
         )
-        self._turn_back_target_heading_deg = target_heading_deg
-        self._transport_car.set_heading_transition_target(target_heading_deg)
-        self._turn_back_rotation_started = True
-        self._turn_back_stop_ticks = 0
+        self._tb_heading = target_heading_deg
+        self._car.set_heading_transition_target(target_heading_deg)
+        self._tb_rot = True
+        self._tb_ticks = 0
 
     def _is_turn_back_within_unlock_tolerance(self) -> bool:
-        target_deg = self._turn_back_target_heading_deg
+        target_deg = self._tb_heading
         if target_deg is None:
             return False
         err_deg = float(target_deg) - float(
-            getattr(self._transport_car, "heading_est", 0.0)
+            getattr(self._car, "heading_est", 0.0)
         )
         while err_deg >= 180.0:
             err_deg -= 360.0
@@ -1035,38 +1142,41 @@ class MasterForwardRuntime:
         return abs(err_deg) <= float(MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG)
 
     def _are_all_wheels_near_stop(self) -> bool:
-        return bool(self._transport_car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
+        return bool(self._car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
 
     def _is_transport_push_unlocked(self) -> bool:
-        if self._transport_push_unlocked:
+        if self._tr_unlock:
             return True
         if not self._are_all_wheels_near_stop():
-            self._transport_stop_confirm_ticks = 0
+            self._tr_ticks = 0
             return False
-        self._transport_stop_confirm_ticks += 1
-        if self._transport_stop_confirm_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+        self._tr_ticks += 1
+        if self._tr_ticks < int(MOTION_STOP_CONFIRM_TICKS):
             return False
-        self._transport_push_unlocked = True
+        self._tr_unlock = True
         return True
 
     def _drain_pending_task_event(self) -> None:
-        pending_event = self._pending_task_event
+        pending_event = self._p_event
         if pending_event is None:
             return
-        self._pending_task_event = None
-        self._remember_task_event_threshold(pending_event)
-        self._state_machine.handle_event(
-            pending_event["context_id"],
-            pending_event["event"],
-            pending_event["value"],
+        self._p_event = None
+        context_id, event, value, threshold = pending_event
+        if self._threshold_has_value(threshold):
+            self._obj_th = threshold
+        self._sm.handle_event(
+            context_id,
+            event,
+            value,
         )
         if (
-            int(pending_event["event"]) == int(EVENT_ARRIVED)
-            and self._state_machine.state != STATE_TRANSPORT_OBJECT
+            int(event) == int(EVENT_ARRIVED)
+            and self._sm.state != STATE_TRANSPORT_OBJECT
         ):
-            self._active_task_context_id = None
-            self._latest_uart6_velocity = None
-            self._uart6_reset_version = self.transport_service.get_udp_version(
+            self._act_ctx = None
+            self._u6v = None
+            self._u6_has_w = False
+            self._u6_ver = self.transport_service.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
 
@@ -1076,83 +1186,83 @@ class MasterForwardRuntime:
     def _log_feedforward_flow(self, status: str) -> None:
         return None
 
-    def _threshold_for_assistant_request(self, assistant_request: dict) -> tuple:
-        if int(assistant_request.get("target", 0)) == TARGET_OBJECT:
-            return tuple(self._current_object_threshold)
+    def _threshold_for_assistant_request(self, assistant_request: tuple) -> tuple:
+        if int(assistant_request[RQ_TARGET]) == TARGET_OBJECT:
+            return tuple(self._obj_th)
         return (0, 0, 0, 0, 0, 0)
 
-    def _threshold_for_assistant_sync(self, pending: dict) -> tuple:
-        if int(pending.get("target", 0)) == TARGET_OBJECT:
-            return tuple(self._current_object_threshold)
-        return tuple(pending.get("threshold", (0, 0, 0, 0, 0, 0)))
+    def _threshold_for_assistant_sync(self, pending: tuple) -> tuple:
+        if int(pending[_S_TARGET]) == TARGET_OBJECT:
+            return tuple(self._obj_th)
+        return tuple(pending[_S_THRESHOLD])
 
-    def _log_sync_start(self, link_name: str, pending: dict) -> None:
+    def _log_sync_start(self, link_name: str, pending: tuple) -> None:
         log(
             "sync",
             "%s sync start kind=%s state=%d target=%d arg=%d"
             % (
                 link_name,
-                str(pending.get("kind", "sync")),
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
+                _request_kind_name(pending[_S_KIND], "sync"),
+                int(pending[_S_STATE]),
+                int(pending[_S_TARGET]),
+                int(pending[_S_ARG]),
             ),
         )
 
-    def _log_sync_done(self, link_name: str, pending: dict) -> None:
+    def _log_sync_done(self, link_name: str, pending: tuple) -> None:
         log(
             "sync",
             "%s sync done kind=%s state=%d target=%d arg=%d"
             % (
                 link_name,
-                str(pending.get("kind", "sync")),
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
+                _request_kind_name(pending[_S_KIND], "sync"),
+                int(pending[_S_STATE]),
+                int(pending[_S_TARGET]),
+                int(pending[_S_ARG]),
             ),
         )
 
-    def _log_task_sync_start(self, pending: dict) -> None:
+    def _log_task_sync_start(self, pending: tuple) -> None:
         log(
             "sync",
             "master->camera sync start kind=%s context=%d state=%d target=%d arg=%d"
             % (
-                str(pending.get("kind", "task")),
-                int(pending["context_id"]),
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
+                _request_kind_name(pending[_P_KIND], "task"),
+                int(pending[_P_CTX]),
+                int(pending[_P_STATE]),
+                int(pending[_P_TARGET]),
+                int(pending[_P_ARG]),
             ),
         )
 
-    def _log_task_sync_done(self, pending: dict) -> None:
+    def _log_task_sync_done(self, pending: tuple) -> None:
         log(
             "sync",
             "master->camera sync done kind=%s context=%d state=%d target=%d arg=%d"
             % (
-                str(pending.get("kind", "task")),
-                int(pending["context_id"]),
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
+                _request_kind_name(pending[_P_KIND], "task"),
+                int(pending[_P_CTX]),
+                int(pending[_P_STATE]),
+                int(pending[_P_TARGET]),
+                int(pending[_P_ARG]),
             ),
         )
 
-    def _log_task_sync_blocked(self, pending: dict, status: str) -> None:
+    def _log_task_sync_blocked(self, pending: tuple, status: str) -> None:
         log(
             "sync",
             "master->camera sync blocked status=%s context=%d state=%d target=%d arg=%d"
             % (
                 status,
-                int(pending["context_id"]),
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
+                int(pending[_P_CTX]),
+                int(pending[_P_STATE]),
+                int(pending[_P_TARGET]),
+                int(pending[_P_ARG]),
             ),
         )
 
     def _record_error(self, text: str, exc: Exception) -> None:
-        if self._last_error_text != text:
+        if self._err != text:
             log_exception("master_error", text, exc)
-        self._last_error_text = text
-        self._transport_car.last_exception_text = text
+        self._err = text
+        self._car.last_exception_text = text

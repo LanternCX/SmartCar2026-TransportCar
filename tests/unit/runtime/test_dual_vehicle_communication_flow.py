@@ -59,20 +59,20 @@ def _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6
         _ack_latest_tcp_if_needed(master_uart6)
         run_runtime_cycle(assistant)
         _ack_latest_tcp_if_needed(assistant_uart6)
-        if master._state_machine.state == MASTER_STATE_STARTUP_MOVE and master_car.command_lock:
+        if master._sm.state == MASTER_STATE_STARTUP_MOVE and master_car.command_lock:
             master_car.command_lock = False
         if (
-            assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE
+            assistant._sm.state == ASSISTANT_STATE_STARTUP_MOVE
             and assistant_car.command_lock
         ):
             assistant_car.command_lock = False
-        if master._state_machine.state == 2 and master_car.command_lock:
+        if master._sm.state == 2 and master_car.command_lock:
             master_car.command_lock = False
-        if assistant._state_machine.state == 3 and assistant_car.command_lock:
+        if assistant._sm.state == 3 and assistant_car.command_lock:
             assistant_car.command_lock = False
-        if master._state_machine.state == 5 and master_car.command_lock:
+        if master._sm.state == 5 and master_car.command_lock:
             master_car.command_lock = False
-        if assistant._state_machine.state == 5 and assistant_car.command_lock:
+        if assistant._sm.state == 5 and assistant_car.command_lock:
             assistant_car.command_lock = False
         clock.advance(20)
 
@@ -86,20 +86,20 @@ def _pump_until(clock, master, assistant, master_car, assistant_car, master_uart
 
 
 def _complete_master_startup_move(master, master_car) -> None:
-    master._state_machine.step(False)
-    master._state_machine.poll_assistant_request()
-    master._state_machine.mark_startup_sync_acknowledged()
-    master._pending_assistant_sync = None
-    while master._state_machine.state == MASTER_STATE_STARTUP_MOVE:
+    master._sm.step(False)
+    master._sm.poll_assistant_request()
+    master._sm.mark_startup_sync_acknowledged()
+    master._p_ast = None
+    while master._sm.state == MASTER_STATE_STARTUP_MOVE:
         run_runtime_cycle(master)
         master_car.command_lock = False
 
 
 def _complete_assistant_startup_move(assistant, assistant_car) -> None:
-    assistant._state_machine.apply_master_state(ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
+    assistant._sm.apply_master_state(ASSISTANT_STATE_STARTUP_MOVE, 0, 0)
     assistant.step()
     assistant.poll_transport_tx()
-    while assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+    while assistant._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
         assistant.step()
         assistant.poll_transport_tx()
         assistant_car.command_lock = False
@@ -133,18 +133,18 @@ def test_startup_sync_blocks_formal_start_until_both_cars_are_alive(monkeypatch)
 
     run_runtime_cycle(master)
 
-    assert master._state_machine.state == MASTER_STATE_STARTUP_SYNC
-    assert assistant._state_machine.state == ASSISTANT_STATE_IDLE
+    assert master._sm.state == MASTER_STATE_STARTUP_SYNC
+    assert assistant._sm.state == ASSISTANT_STATE_IDLE
     frame = decode_frame(master_uart8.messages[-1])
     assert frame is not None
     assert frame["mode"] == 0x02
     assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
 
     run_runtime_cycle(assistant)
-    assert assistant._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE
+    assert assistant._sm.state == ASSISTANT_STATE_STARTUP_MOVE
 
     run_runtime_cycle(master)
-    assert master._state_machine.state == MASTER_STATE_STARTUP_MOVE
+    assert master._sm.state == MASTER_STATE_STARTUP_MOVE
     assert cars[0].events[-1] == "transport_step"
 
 
@@ -187,7 +187,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_task_context_id is not None,
+        lambda: master._act_ctx is not None,
     )
 
     master_uart6.push(
@@ -196,7 +196,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             1,
             encode_master_vision_event_report_body(
-                master._active_task_context_id,
+                master._act_ctx,
                 master_module.EVENT_TARGET_FOUND,
                 2,
             ),
@@ -210,7 +210,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._state_machine.state == master_module.STATE_ORBITING,
+        lambda: master._sm.state == master_module.STATE_ORBITING,
     )
 
     _pump_until(
@@ -221,8 +221,8 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: assistant._state_machine.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
-        and assistant._pending_local_vision_sync is None,
+        lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+        and assistant._p_local is None,
     )
 
     assistant_uart6.push(
@@ -244,7 +244,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: assistant._state_machine.state == assistant_module.ASSISTANT_STATE_ORBIT,
+        lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_ORBIT,
     )
 
     _pump_until(
@@ -255,9 +255,9 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: assistant._post_orbit_realign_active
-        and assistant._state_machine.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
-        and assistant._pending_local_vision_sync is None,
+        lambda: assistant._realign
+        and assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+        and assistant._p_local is None,
     )
 
     master_uart6.push(
@@ -266,7 +266,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             2,
             encode_master_vision_event_report_body(
-                master._active_task_context_id,
+                master._act_ctx,
                 master_module.EVENT_ALIGNED,
                 0,
             ),
@@ -291,8 +291,8 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._state_machine.state == master_module.STATE_TRANSPORT_OBJECT
-        and assistant._state_machine.state == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+        lambda: master._sm.state == master_module.STATE_TRANSPORT_OBJECT
+        and assistant._sm.state == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT,
     )
     _pump_until(
         clock,
@@ -302,7 +302,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._active_task_context_id is not None,
+        lambda: master._act_ctx is not None,
     )
 
     master_uart6.push(
@@ -311,7 +311,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             TOPIC_MASTER_VISION_EVENT_REPORT,
             3,
             encode_master_vision_event_report_body(
-                master._active_task_context_id,
+                master._act_ctx,
                 master_module.EVENT_ARRIVED,
                 0,
             ),
@@ -325,8 +325,8 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._state_machine.state == master_module.STATE_CLEAR_OBJECT
-        and assistant._state_machine.state == assistant_module.ASSISTANT_STATE_CLEAR_OBJECT,
+        lambda: master._sm.state == master_module.STATE_CLEAR_OBJECT
+        and assistant._sm.state == assistant_module.ASSISTANT_STATE_CLEAR_OBJECT,
     )
     _pump_until(
         clock,
@@ -359,13 +359,13 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_car,
         master_uart6,
         assistant_uart6,
-        lambda: master._state_machine.state == expected_master_state
-        and assistant._state_machine.state == expected_assistant_state,
+        lambda: master._sm.state == expected_master_state
+        and assistant._sm.state == expected_assistant_state,
         max_steps=160,
     )
 
-    assert master._state_machine.state == expected_master_state
-    assert assistant._state_machine.state == expected_assistant_state
+    assert master._sm.state == expected_master_state
+    assert assistant._sm.state == expected_assistant_state
 
 
 def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch) -> None:
@@ -391,16 +391,16 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_task_context_id is not None:
+        if master._act_ctx is not None:
             break
-    assert master._active_task_context_id is not None
+    assert master._act_ctx is not None
 
     frame = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         7,
         encode_master_vision_event_report_body(
-            master._active_task_context_id,
+            master._act_ctx,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
@@ -423,7 +423,7 @@ def test_duplicate_reliable_event_does_not_repeat_master_state_jump(monkeypatch)
     _ack_latest_tcp_if_needed(master_uart6)
 
     orbit_events = [event for event in master_car.events if isinstance(event, tuple) and event[0] == "set_orbit_target"]
-    assert master._state_machine.state == master_module.STATE_ORBITING
+    assert master._sm.state == master_module.STATE_ORBITING
     assert len(orbit_events) == 1
 
 
@@ -458,7 +458,7 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
     assistant_uart8.push(frame)
     run_runtime_cycle(assistant)
     assert assistant._sync_apply_count == 1
-    assert assistant._state_machine.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+    assert assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
     for _ in range(10):
         if assistant_uart6.messages:
             break
@@ -472,7 +472,7 @@ def test_duplicate_assistant_state_sync_does_not_reapply_local_task(monkeypatch)
     run_runtime_cycle(assistant)
 
     assert assistant._sync_apply_count == 1
-    assert assistant._state_machine.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+    assert assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
     assert assistant_uart6.messages == first_uart6_messages
 
 
@@ -498,16 +498,16 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_task_context_id is not None:
+        if master._act_ctx is not None:
             break
-    assert master._active_task_context_id is not None
+    assert master._act_ctx is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_task_context_id,
+            master._act_ctx,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
@@ -649,16 +649,16 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
         run_runtime_cycle(master)
         _ack_latest_tcp_if_needed(master_uart6)
         clock.advance(20)
-        if master._active_task_context_id is not None:
+        if master._act_ctx is not None:
             break
-    assert master._active_task_context_id is not None
+    assert master._act_ctx is not None
 
     target_found = encode_frame(
         0x02,
         TOPIC_MASTER_VISION_EVENT_REPORT,
         1,
         encode_master_vision_event_report_body(
-            master._active_task_context_id,
+            master._act_ctx,
             master_module.EVENT_TARGET_FOUND,
             2,
         ),
