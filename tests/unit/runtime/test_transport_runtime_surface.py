@@ -213,7 +213,10 @@ def test_master_runtime_writes_zero_velocity_when_orbit_finishes(monkeypatch) ->
     runtime._last_role_state = module.STATE_ORBITING
     runtime._orbit_command_active = True
     car.command_lock = False
-    car.control_state = {"vx": 1.25, "vy": -0.5, "omega": 0.0}
+    car.control_vx = 1.25
+    car.control_vy = -0.5
+    car.control_omega = 0.0
+    car.control_omega_active = True
 
     runtime._advance_state_machine()
 
@@ -876,7 +879,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
     runtime._state_machine.state = module.STATE_TRANSPORT_OBJECT
     runtime._state_machine._current_context_id = 9
     runtime._active_task_context_id = 9
-    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+    car.w_filt[0] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
 
     runtime._apply_motion_outputs()
 
@@ -888,7 +891,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
         "has_omega": True,
     }
 
-    car.wheel_states[0]["filtered_speed"] = 0.0
+    car.w_filt[0] = 0.0
     for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
         runtime._apply_motion_outputs()
         assert car.last_chassis_target["source"] == "master_transport_stop_lock"
@@ -903,7 +906,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
         "has_omega": False,
     }
 
-    car.wheel_states[0]["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
+    car.w_filt[0] = float(module.MOTION_STOP_SPEED_THRESHOLD) * 2.0
     runtime._apply_motion_outputs()
 
     assert car.last_chassis_target == {
@@ -970,14 +973,16 @@ def test_master_runtime_keeps_locked_pose_when_assistant_event_arrives(monkeypat
     runtime._state_machine.state = module.STATE_SEARCH_OBJECT
     runtime._last_role_state = module.STATE_SEARCH_OBJECT
     cars[0].command_lock = True
-    cars[0].control_state = {
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "x": 1.0,
-        "y": 2.0,
-        "angle": 90.0,
-    }
+    cars[0].control_vx = 0.0
+    cars[0].control_vy = 0.0
+    cars[0].control_omega = 0.0
+    cars[0].control_omega_active = True
+    cars[0].control_x = 1.0
+    cars[0].control_y = 2.0
+    cars[0].control_angle = 90.0
+    cars[0].control_x_active = True
+    cars[0].control_y_active = True
+    cars[0].control_angle_active = True
 
     run_runtime_cycle(runtime)
 
@@ -1965,8 +1970,10 @@ def test_master_runtime_turn_back_completes_immediately_after_lock_release(monke
     runtime._state_machine._required_object_count = 1
     runtime._turn_back_rotation_started = True
     cars[0].command_lock = False
-    for state in cars[0].wheel_states:
-        state["filtered_speed"] = float(module.MOTION_STOP_SPEED_THRESHOLD) + 1.0
+    for idx in range(3):
+        cars[0].w_filt[idx] = (
+            float(module.MOTION_STOP_SPEED_THRESHOLD) + 1.0
+        )
 
     runtime._run_turn_back_phase()
     runtime._drain_state_machine_outputs()

@@ -15,6 +15,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_PATH = PROJECT_ROOT / "src" / "script" / "run.py"
 
 
+class _WheelState:
+    def __init__(self, encoder) -> None:
+        self.encoder = encoder
+
+
 def load_run_module(monkeypatch):
     """按文件路径加载 run 模块, 并注入最小依赖桩."""
 
@@ -66,11 +71,7 @@ def load_run_module(monkeypatch):
     class _FakeCar:
         def __init__(self) -> None:
             state["car_created"] += 1
-            self.wheel_states = [
-                {"encoder": "enc_m"},
-                {"encoder": "enc_l"},
-                {"encoder": "enc_r"},
-            ]
+            self.wheel_encoders = ("enc_m", "enc_l", "enc_r")
             self.imu = "imu"
             self.ticker = None
 
@@ -140,7 +141,7 @@ def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
                 "_Car",
                 (),
                 {
-                    "wheel_states": [{"encoder": "enc_m"}],
+                        "wheel_encoders": ("enc_m",),
                     "imu": "imu",
                     "mark_tick": lambda self, _tick=None: None,
                     "set_ticker": lambda self, ticker_obj: events.append(
@@ -220,7 +221,7 @@ def test_run_main_prepares_runtime_before_mem_info(monkeypatch) -> None:
             "_Car",
             (),
             {
-                "wheel_states": [{"encoder": "enc_m"}],
+                    "wheel_encoders": ("enc_m",),
                 "imu": "imu",
                 "prepare_runtime": lambda self: events.append("prepare"),
                 "mark_tick": lambda self, _tick=None: None,
@@ -258,7 +259,7 @@ def test_run_main_returns_assistant_role_and_dispatches_it(
                 "_Car",
                 (),
                 {
-                    "wheel_states": [{"encoder": "enc_l"}, {"encoder": "enc_r"}],
+                        "wheel_encoders": ("enc_l", "enc_r"),
                     "imu": "imu",
                     "mark_tick": lambda self, _tick=None: None,
                     "set_ticker": lambda self, _ticker: None,
@@ -303,7 +304,7 @@ def test_run_main_stops_runtime_and_reraises_fatal_error(
     events = []
 
     class _Car:
-        wheel_states = [{"encoder": "enc_m"}]
+        wheel_encoders = ("enc_m",)
         imu = "imu"
 
         def mark_tick(self, _tick=None) -> None:

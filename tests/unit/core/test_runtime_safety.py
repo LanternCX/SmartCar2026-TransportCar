@@ -52,10 +52,9 @@ def test_transport_car_stop_ignores_missing_ticker_but_zeroes_motors() -> None:
     motors = [DummyMotor(), DummyMotor()]
     _transport_car, car = make_minimal_transport_car(
         ticker=None,
-        wheel_states=[
-            {"motor": motors[0]},
-            {"motor": motors[1]},
-        ],
+        w_mot=(motors[0], motors[1], DummyMotor()),
+        w_pid=[DummyPid(), DummyPid(), DummyPid()],
+        w_duty=[0.0, 0.0, 0.0],
     )
 
     car.stop()

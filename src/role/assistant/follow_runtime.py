@@ -100,7 +100,7 @@ class AssistantFollowRuntime:
 
         car = TransportCar(vehicle_role=ROLE_ASSISTANT)
         self._transport_car = car
-        self.wheel_states = car.wheel_states
+        self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
         self.transport_service = transport or create_transport(
@@ -852,14 +852,7 @@ class AssistantFollowRuntime:
         }
 
     def _are_all_wheels_near_stop(self) -> bool:
-        wheel_states = getattr(self._transport_car, "wheel_states", ())
-        if len(wheel_states) < 3:
-            return False
-        threshold = float(MOTION_STOP_SPEED_THRESHOLD)
-        for state in wheel_states:
-            if abs(float(state.get("filtered_speed", 0.0))) > threshold:
-                return False
-        return True
+        return bool(self._transport_car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
 
     def _queue_pending_local_vision_sync(self) -> None:
         pending = self._pending_local_vision_sync

@@ -100,7 +100,7 @@ class MasterForwardRuntime:
 
         car = TransportCar(vehicle_role=ROLE_MASTER)
         self._transport_car = car
-        self.wheel_states = car.wheel_states
+        self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
         self.transport_service = transport or create_transport(
@@ -801,13 +801,13 @@ class MasterForwardRuntime:
         if self._state_machine.needs_assistant_report_turn():
             self._log_feedforward_flow("blocked_report_turn")
             return
-        state = self._transport_car.control_state
+        car = self._transport_car
         target = getattr(self._transport_car, "last_chassis_target", {})
         has_omega = bool(target.get("has_omega"))
-        omega = float(state.get("omega", 0.0)) if has_omega else 0.0
+        omega = float(getattr(car, "control_omega", 0.0)) if has_omega else 0.0
         body = encode_velocity_body(
-            state.get("vx", 0.0),
-            state.get("vy", 0.0),
+            getattr(car, "control_vx", 0.0),
+            getattr(car, "control_vy", 0.0),
             omega,
             has_omega,
         )
@@ -1035,14 +1035,7 @@ class MasterForwardRuntime:
         return abs(err_deg) <= float(MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG)
 
     def _are_all_wheels_near_stop(self) -> bool:
-        wheel_states = getattr(self._transport_car, "wheel_states", ())
-        if len(wheel_states) < 3:
-            return False
-        threshold = float(MOTION_STOP_SPEED_THRESHOLD)
-        for state in wheel_states:
-            if abs(float(state.get("filtered_speed", 0.0))) > threshold:
-                return False
-        return True
+        return bool(self._transport_car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
 
     def _is_transport_push_unlocked(self) -> bool:
         if self._transport_push_unlocked:

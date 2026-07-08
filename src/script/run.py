@@ -75,7 +75,7 @@ def _build_capture_items(car):
 
     @return 包含编码器和 IMU 对象的列表, ticker 每周期调用这些对象的采样方法
     """
-    capture_items = [state["encoder"] for state in car.wheel_states]
+    capture_items = list(car.wheel_encoders)
     capture_items.append(car.imu)
     return capture_items
 

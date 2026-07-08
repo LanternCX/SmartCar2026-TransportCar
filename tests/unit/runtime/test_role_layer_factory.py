@@ -124,7 +124,7 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     class _TransportCar:
         def __init__(self, vehicle_role=None) -> None:
             created_roles.append(vehicle_role)
-            self.wheel_states = []
+            self.wheel_encoders = ("enc_m",)
             self.imu = "imu"
 
         def mark_tick(self, _tick=None) -> None:
@@ -143,6 +143,7 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     car = runtime_module.create_transport_car()
 
     assert not isinstance(car, _TransportCar)
+    assert car.wheel_encoders == ("enc_m",)
     assert car.imu == "imu"
     assert hasattr(car, "step")
     assert created_roles == ["master"]
@@ -159,7 +160,7 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
     class _TransportCar:
         def __init__(self, vehicle_role=None) -> None:
             created_roles.append(vehicle_role)
-            self.wheel_states = []
+            self.wheel_encoders = ("enc_m",)
             self.imu = "imu"
 
         def mark_tick(self, _tick=None) -> None:
@@ -178,6 +179,7 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
     car = runtime_module.create_transport_car()
 
     assert not isinstance(car, _TransportCar)
+    assert car.wheel_encoders == ("enc_m",)
     assert car.imu == "imu"
     assert hasattr(car, "step")
     assert created_roles == ["assistant"]

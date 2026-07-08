@@ -98,16 +98,22 @@ def install_fake_core(monkeypatch):
     class FakeTransportCar:
         def __init__(self, vehicle_role=None) -> None:
             self.vehicle_role = vehicle_role
-            self.wheel_states = [
-                {"encoder": "enc-m", "filtered_speed": 0.0},
-                {"encoder": "enc-l", "filtered_speed": 0.0},
-                {"encoder": "enc-r", "filtered_speed": 0.0},
-            ]
+            self.wheel_encoders = ("enc-m", "enc-l", "enc-r")
+            self.w_filt = [0.0, 0.0, 0.0]
             self.imu = "imu"
             self.heading_est = 0.0
             self.command_lock = False
             self.orbit_mode = False
-            self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+            self.control_vx = 0.0
+            self.control_vy = 0.0
+            self.control_omega = 0.0
+            self.control_omega_active = True
+            self.control_x = 0.0
+            self.control_y = 0.0
+            self.control_angle = 0.0
+            self.control_x_active = False
+            self.control_y_active = False
+            self.control_angle_active = False
             self.last_chassis_target = {
                 "source": None,
                 "vx": 0.0,
@@ -129,9 +135,23 @@ def install_fake_core(monkeypatch):
             self.events.append("transport_step")
             return False
 
+        def wheel_stop_confirmed(self, threshold) -> bool:
+            threshold = float(threshold)
+            return (
+                abs(float(self.w_filt[0])) <= threshold
+                and abs(float(self.w_filt[1])) <= threshold
+                and abs(float(self.w_filt[2])) <= threshold
+            )
+
         def handle_velocity_packet(self, vx, vy, omega, source, has_omega=True) -> None:
             self.events.append(("handle_velocity", source, float(vx), float(vy), float(omega)))
-            self.control_state = {"vx": float(vx), "vy": float(vy), "omega": float(omega)}
+            self.control_vx = float(vx)
+            self.control_vy = float(vy)
+            self.control_omega = float(omega)
+            self.control_omega_active = True
+            self.control_x_active = False
+            self.control_y_active = False
+            self.control_angle_active = False
             self.last_chassis_target = {
                 "source": source,
                 "vx": float(vx),
@@ -145,27 +165,29 @@ def install_fake_core(monkeypatch):
             self.events.append(("set_orbit_target", float(target_angle_deg), float(radius_scale)))
             self.command_lock = True
             self.orbit_mode = True
-            self.control_state = {
-                "vx": 0.0,
-                "vy": 0.0,
-                "omega": 0.0,
-                "angle": float(target_angle_deg),
-            }
+            self.control_vx = 0.0
+            self.control_vy = 0.0
+            self.control_omega = 0.0
+            self.control_omega_active = True
+            self.control_angle = float(target_angle_deg)
+            self.control_angle_active = True
 
         def set_orbit_velocity_correction(self, vx, vy) -> None:
             self.events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
-            self.control_state["vx"] = float(vx)
-            self.control_state["vy"] = float(vy)
+            self.control_vx = float(vx)
+            self.control_vy = float(vy)
 
         def set_heading_target(self, angle_deg) -> None:
             self.events.append(("set_heading_target", float(angle_deg)))
             self.command_lock = True
-            self.control_state["angle"] = float(angle_deg)
+            self.control_angle = float(angle_deg)
+            self.control_angle_active = True
 
         def set_heading_transition_target(self, angle_deg) -> None:
             self.events.append(("set_heading_transition_target", float(angle_deg)))
             self.command_lock = True
-            self.control_state["angle"] = float(angle_deg)
+            self.control_angle = float(angle_deg)
+            self.control_angle_active = True
 
         def set_relative_translation_target(self, dx, dy, hold_heading_deg=None, max_speed_cmd=None) -> None:
             event = ["set_relative_translation_target", float(dx), float(dy)]
@@ -175,13 +197,30 @@ def install_fake_core(monkeypatch):
                 event.append(float(max_speed_cmd))
             self.events.append(tuple(event))
             self.command_lock = True
-            self.control_state = {
-                "vx": 0.0,
-                "vy": 0.0,
-                "omega": 0.0,
-                "x": float(dx),
-                "y": float(dy),
+            self.control_vx = 0.0
+            self.control_vy = 0.0
+            self.control_omega = 0.0
+            self.control_omega_active = True
+            self.control_x = float(dx)
+            self.control_y = float(dy)
+            self.control_x_active = True
+            self.control_y_active = True
+
+        @property
+        def control_state(self):
+            snapshot = {
+                "vx": float(self.control_vx),
+                "vy": float(self.control_vy),
             }
+            if self.control_omega_active:
+                snapshot["omega"] = float(self.control_omega)
+            if self.control_x_active:
+                snapshot["x"] = float(self.control_x)
+            if self.control_y_active:
+                snapshot["y"] = float(self.control_y)
+            if self.control_angle_active:
+                snapshot["angle"] = float(self.control_angle)
+            return snapshot
 
         def calibrate_pose_to_field_edge(self, edge) -> None:
             self.events.append(("calibrate_pose_to_field_edge", str(edge)))
