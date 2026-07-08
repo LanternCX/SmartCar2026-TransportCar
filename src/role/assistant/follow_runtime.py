@@ -128,7 +128,7 @@ class AssistantFollowRuntime:
         self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
-        self.transport_service = transport or create_transport(
+        self._ts = transport or create_transport(
             ROLE_ASSISTANT,
             uart6=uart6,
             uart8=uart8,
@@ -194,10 +194,10 @@ class AssistantFollowRuntime:
         self._car.collect_garbage()
 
     def poll_transport_rx(self) -> None:
-        self.transport_service.poll_rx()
+        self._ts.poll_rx()
 
     def poll_transport_tx(self) -> None:
-        self.transport_service.poll_tx()
+        self._ts.poll_tx()
 
     def step_motion_input(self) -> bool:
         try:
@@ -243,7 +243,7 @@ class AssistantFollowRuntime:
         pending = self._p_local
         if pending is not None and pending[_L_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_ASSISTANT_VISION_TASK_SYNC)
+                self._ts.tcp_delivery(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_local_vision_sync_done(pending)
@@ -251,14 +251,14 @@ class AssistantFollowRuntime:
         pending_gate = self._gate
         if pending_gate is not None and pending_gate[_G_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
+                self._ts.tcp_delivery(UART6, TOPIC_LOCAL_VISION_CONTROL)
                 == DELIVERY_DELIVERED
             ):
                 self._gate = None
         pending = self._p_report
         if pending is not None and pending[_R_QUEUED]:
             if (
-                self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_EVENT_REPORT)
+                self._ts.tcp_delivery(UART8, TOPIC_ASSISTANT_EVENT_REPORT)
                 == DELIVERY_DELIVERED
             ):
                 self._p_report = None
@@ -266,7 +266,8 @@ class AssistantFollowRuntime:
     def _consume_master_sync(self) -> None:
         """消费主车下发的辅车状态同步."""
         if (
-            self.transport_service.tcp(UART8).read(
+            self._ts.tcp_read(
+                UART8,
                 TOPIC_ASSISTANT_STATE_SYNC, self._sync_body
             )
             != "ok"
@@ -368,17 +369,18 @@ class AssistantFollowRuntime:
         self._lv_pause = False
         self._u6v = None
         self._u8v = None
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._u8_ver = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
 
     def _consume_local_vision_event(self) -> None:
         """消费本地视觉的可靠事件回报."""
         if (
-            self.transport_service.tcp(UART6).read(
+            self._ts.tcp_read(
+                UART6,
                 TOPIC_ASSISTANT_VISION_EVENT_REPORT, self._event_body
             )
             != "ok"
@@ -414,7 +416,8 @@ class AssistantFollowRuntime:
         self._u6_status = "idle"
         self._u8_status = "idle"
         if (
-            self.transport_service.tcp(UART6).read(
+            self._ts.tcp_read(
+                UART6,
                 TOPIC_LOCAL_VISION_CONTROL, self._ctrl_body
             )
             == "ok"
@@ -422,10 +425,10 @@ class AssistantFollowRuntime:
             packet = decode_local_vision_control_body(self._ctrl_body)
             self._handle_local_vision_control(packet)
         if (
-            self.transport_service.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, self._vel_body)
+            self._ts.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, self._vel_body)
             == "ok"
         ):
-            version = self.transport_service.get_udp_version(
+            version = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             if version > self._u6_ver and not self._lv_pause:
@@ -436,13 +439,14 @@ class AssistantFollowRuntime:
                 self._u6v[VEL_HAS_W] = False
                 self._u6_status = "active"
         if (
-            self.transport_service.udp(UART8).read(
+            self._ts.udp_read(
+                UART8,
                 TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
                 self._vel_body,
             )
             == "ok"
         ):
-            version = self.transport_service.get_udp_version(
+            version = self._ts.get_udp_version(
                 UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
             )
             if version > self._u8_ver and not self._lv_pause:
@@ -470,10 +474,10 @@ class AssistantFollowRuntime:
             return
         self._u6v = None
         self._u8v = None
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._u8_ver = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
         if action == LOCAL_VISION_CONTROL_PAUSE:
@@ -620,10 +624,10 @@ class AssistantFollowRuntime:
         """在状态切换时丢弃当前业务视角下的旧速度输入."""
         self._u6v = None
         self._u8v = None
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._u8_ver = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
         self._u6_status = "idle"
@@ -873,7 +877,7 @@ class AssistantFollowRuntime:
             pending[_L_ARG],
             pending[_L_THRESHOLD],
         )
-        status = self.transport_service.tcp(UART6).write(TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
+        status = self._ts.tcp_write(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_local_vision_sync_start(pending)
             self._p_local = (
@@ -889,7 +893,7 @@ class AssistantFollowRuntime:
         if pending is None or pending[_G_QUEUED]:
             return
         body = encode_local_vision_control_body(pending[_G_ACTION])
-        status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
+        status = self._ts.tcp_write(UART6, TOPIC_LOCAL_VISION_CONTROL, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._gate = (pending[_G_ACTION], True)
 
@@ -901,7 +905,7 @@ class AssistantFollowRuntime:
             pending[_R_EVENT],
             pending[_R_VALUE],
         )
-        status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_EVENT_REPORT, body)
+        status = self._ts.tcp_write(UART8, TOPIC_ASSISTANT_EVENT_REPORT, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._p_report = (pending[_R_EVENT], pending[_R_VALUE], True)
 

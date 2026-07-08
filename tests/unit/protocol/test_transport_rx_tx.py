@@ -76,7 +76,7 @@ def test_poll_rx_limits_first_read_when_input_exceeds_limit() -> None:
     assert uart6.read_calls >= 1
     assert uart6.read_sizes[0] == 32
     out_body = bytearray(7)
-    assert transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
+    assert transport.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
 
 
 def test_poll_rx_finds_valid_udp_frame_after_leading_noise() -> None:
@@ -92,7 +92,7 @@ def test_poll_rx_finds_valid_udp_frame_after_leading_noise() -> None:
     transport.poll_rx()
 
     out_body = bytearray(7)
-    assert transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
+    assert transport.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
     assert bytes(out_body) == latest_body
 
 
@@ -109,7 +109,7 @@ def test_poll_rx_skips_crc_invalid_false_udp_frame_after_lost_byte() -> None:
     transport.poll_rx()
 
     out_body = bytearray(7)
-    assert transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
+    assert transport.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
     assert bytes(out_body) == latest_body
 
 
@@ -126,7 +126,7 @@ def test_poll_rx_skips_crc_invalid_false_ack_frame_after_lost_byte() -> None:
     transport.poll_rx()
 
     out_body = bytearray(3)
-    assert transport.tcp(UART8).read(TOPIC_ASSISTANT_EVENT_REPORT, out_body) == "ok"
+    assert transport.tcp_read(UART8, TOPIC_ASSISTANT_EVENT_REPORT, out_body) == "ok"
     assert bytes(out_body) == body
 
 
@@ -160,11 +160,13 @@ def test_poll_tx_allows_only_one_frame_per_call_globally() -> None:
     uart8 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
-    transport.tcp(UART6).write(
+    transport.tcp_write(
+        UART6,
         TOPIC_MASTER_VISION_TASK_SYNC,
         encode_master_vision_task_sync_body(1, 2, 3, 4),
     )
-    transport.udp(UART8).write(
+    transport.udp_write(
+        UART8,
         TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
         encode_velocity_body(1.0, 0.0, 0.0, False),
     )
@@ -182,7 +184,8 @@ def test_ack_frame_has_higher_priority_than_udp() -> None:
     transport = create_transport(ROLE_MASTER, uart8=uart8, now_ms=clock)
 
     transport.poll_rx()
-    transport.udp(UART8).write(
+    transport.udp_write(
+        UART8,
         TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
         encode_velocity_body(0.5, 0.25, 0.0, False),
     )
@@ -197,7 +200,7 @@ def test_poll_rx_accepts_local_vision_control_and_schedules_ack() -> None:
 
     transport.poll_rx()
     out_body = bytearray(1)
-    status = transport.tcp(UART6).read(TOPIC_LOCAL_VISION_CONTROL, out_body)
+    status = transport.tcp_read(UART6, TOPIC_LOCAL_VISION_CONTROL, out_body)
     transport.poll_tx()
 
     assert status == "ok"
@@ -214,12 +217,12 @@ def test_poll_rx_reassembles_fragmented_udp_frame_across_cycles() -> None:
     transport.poll_rx()
 
     out_body = bytearray(7)
-    assert transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, out_body) == "empty"
+    assert transport.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, out_body) == "empty"
 
     uart6.push(frame[5:])
     transport.poll_rx()
 
-    assert transport.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
+    assert transport.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, out_body) == "ok"
     assert out_body == body
 
 
@@ -229,14 +232,14 @@ def test_poll_rx_reassembles_fragmented_ack_frame_across_cycles() -> None:
     uart6 = _FakeUart()
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
 
-    assert transport.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body) == "accepted"
+    assert transport.tcp_write(UART6, TOPIC_MASTER_VISION_TASK_SYNC, body) == "accepted"
     transport.poll_tx()
     ack_frame = encode_frame(0x03, TOPIC_MASTER_VISION_TASK_SYNC, 0, b"")
 
     uart6.push(ack_frame[:4])
     transport.poll_rx()
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "pending"
+    assert transport.tcp_delivery(UART6, TOPIC_MASTER_VISION_TASK_SYNC) == "pending"
 
     uart6.push(ack_frame[4:])
     transport.poll_rx()
-    assert transport.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC) == "delivered"
+    assert transport.tcp_delivery(UART6, TOPIC_MASTER_VISION_TASK_SYNC) == "delivered"

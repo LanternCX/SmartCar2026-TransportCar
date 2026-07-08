@@ -81,6 +81,10 @@ def _default_now_ms():
     return int(time.time() * 1000)
 
 
+_OP_WRITE = const(1)
+_OP_READ = const(2)
+
+
 def _copy_body(body):
     if isinstance(body, bytes):
         return body
@@ -89,33 +93,6 @@ def _copy_body(body):
     if isinstance(body, memoryview):
         return body.tobytes()
     raise TypeError("body must be bytes-like")
-
-
-class _UdpHandle:
-    def __init__(self, service, port):
-        self._service = service
-        self._port = port
-
-    def write(self, topic, body):
-        return self._service._udp_write(self._port, topic, body)
-
-    def read(self, topic, out_body):
-        return self._service._udp_read(self._port, topic, out_body)
-
-
-class _TcpHandle:
-    def __init__(self, service, port):
-        self._service = service
-        self._port = port
-
-    def write(self, topic, body):
-        return self._service._tcp_write(self._port, topic, body)
-
-    def read(self, topic, out_body):
-        return self._service._tcp_read(self._port, topic, out_body)
-
-    def delivery(self, topic):
-        return self._service._tcp_delivery(self._port, topic)
 
 
 _ST_NAME = const(0)
@@ -207,10 +184,6 @@ class TransportService:
         self._ack_candidate_seq = 0
         self._uart6_state = _new_port_state(UART6, uart6)
         self._uart8_state = _new_port_state(UART8, uart8)
-        self._udp6 = _UdpHandle(self, UART6)
-        self._udp8 = _UdpHandle(self, UART8)
-        self._tcp6 = _TcpHandle(self, UART6)
-        self._tcp8 = _TcpHandle(self, UART8)
 
     def _find_port_state(self, port):
         if port == UART6:
@@ -224,42 +197,20 @@ class TransportService:
             return self._uart6_state
         return self._uart8_state
 
-    def udp(self, port):
-        if port == UART6:
-            return self._udp6
-        if port == UART8:
-            return self._udp8
-        return _UdpHandle(self, port)
+    def udp_write(self, port, topic, body):
+        return self._udp_write(port, topic, body)
 
-    def tcp(self, port):
-        if port == UART6:
-            return self._tcp6
-        if port == UART8:
-            return self._tcp8
-        return _TcpHandle(self, port)
+    def udp_read(self, port, topic, out_body):
+        return self._udp_read(port, topic, out_body)
 
-    def diagnostics(self, port):
-        state = self._find_port_state(port)
-        if state is None:
-            return {}
-        return {
-            "rx_reads": state[_ST_RX_READS],
-            "dropped_truncated_frames": state[_ST_DROPPED_TRUNCATED_FRAMES],
-            "dropped_invalid_frames": state[_ST_DROPPED_INVALID_FRAMES],
-            "tcp_retries": state[_ST_TCP_RETRIES],
-            "ack_rx": state[_ST_ACK_RX],
-            "ack_tx": state[_ST_ACK_TX],
-            "udp_overwrites": state[_ST_UDP_OVERWRITES],
-            "priority_drops": state[_ST_PRIORITY_DROPS],
-            "busy_drops": state[_ST_BUSY_DROPS],
-            "ack_overwrites": state[_ST_ACK_OVERWRITES],
-            "tx_frames": state[_ST_TX_FRAMES],
-            "tcp_tx_busy": state[_ST_TCP_TX_BODY] is not None
-            or state[_ST_TCP_TX_INTENT_BODY] is not None,
-            "tcp_rx_busy": state[_ST_TCP_RX_BODY] is not None,
-            "ack_pending": self._ack_candidate is not None
-            and self._ack_candidate_port == port,
-        }
+    def tcp_write(self, port, topic, body):
+        return self._tcp_write(port, topic, body)
+
+    def tcp_read(self, port, topic, out_body):
+        return self._tcp_read(port, topic, out_body)
+
+    def tcp_delivery(self, port, topic):
+        return self._tcp_delivery(port, topic)
 
     def poll_rx(self):
         """按固定顺序轮询两个端口的接收侧.
@@ -304,14 +255,14 @@ class TransportService:
             return None
         if not validate_port_for_topic(topic, port):
             return None
-        if operation == "write" and not can_role_write(topic, self.role):
+        if operation == _OP_WRITE and not can_role_write(topic, self.role):
             return None
-        if operation == "read" and not can_role_read(topic, self.role):
+        if operation == _OP_READ and not can_role_read(topic, self.role):
             return None
         return entry
 
     def _udp_write(self, port, topic, body):
-        entry = self._validate_topic(port, topic, MODE_UDP, "write")
+        entry = self._validate_topic(port, topic, MODE_UDP, _OP_WRITE)
         if entry is None or not validate_body_bytes(topic, body):
             return WRITE_INVALID
         if self._ack_candidate is not None or self._has_pending_tcp_intent():
@@ -330,7 +281,7 @@ class TransportService:
         return WRITE_ACCEPTED
 
     def _udp_read(self, port, topic, out_body):
-        entry = self._validate_topic(port, topic, MODE_UDP, "read")
+        entry = self._validate_topic(port, topic, MODE_UDP, _OP_READ)
         if entry is None:
             return READ_INVALID
         body = self._port_state(port)[_ST_UDP_RX].get(int(topic))
@@ -341,7 +292,7 @@ class TransportService:
         return READ_OK
 
     def _tcp_write(self, port, topic, body):
-        entry = self._validate_topic(port, topic, MODE_TCP, "write")
+        entry = self._validate_topic(port, topic, MODE_TCP, _OP_WRITE)
         if entry is None or not validate_body_bytes(topic, body):
             return WRITE_INVALID
         if self._ack_candidate is not None:
@@ -370,7 +321,7 @@ class TransportService:
         return WRITE_ACCEPTED
 
     def _tcp_read(self, port, topic, out_body):
-        entry = self._validate_topic(port, topic, MODE_TCP, "read")
+        entry = self._validate_topic(port, topic, MODE_TCP, _OP_READ)
         if entry is None:
             return READ_INVALID
         state = self._port_state(port)
@@ -383,7 +334,7 @@ class TransportService:
         return READ_OK
 
     def _tcp_delivery(self, port, topic):
-        entry = self._validate_topic(port, topic, MODE_TCP, "write")
+        entry = self._validate_topic(port, topic, MODE_TCP, _OP_WRITE)
         if entry is None:
             return DELIVERY_INVALID
         state = self._port_state(port)

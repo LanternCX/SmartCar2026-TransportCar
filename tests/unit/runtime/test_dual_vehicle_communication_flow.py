@@ -602,7 +602,8 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
     assistant_car = cars[0]
     _complete_assistant_startup_move(assistant, assistant_car)
 
-    assert sender.tcp(UART8).write(
+    assert sender.tcp_write(
+        UART8,
         TOPIC_ASSISTANT_STATE_SYNC,
         encode_assistant_state_sync_body(
             assistant_module.ASSISTANT_STATE_APPROACH_OBJECT,
@@ -613,7 +614,7 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
     sender.poll_tx()
     assistant.poll_transport_rx()
     assistant.step()
-    assistant.transport_service._ack_candidate = None
+    assistant._ts._ack_candidate = None
     assistant.poll_transport_tx()
     first_uart6_count = len(assistant_uart6.messages)
     assert assistant._sync_apply_count == 1
@@ -690,14 +691,15 @@ def test_resent_assistant_event_report_does_not_repeat_master_transition(monkeyp
     clock.advance(20)
     run_runtime_cycle(master)
 
-    assert sender.tcp(UART8).write(
+    assert sender.tcp_write(
+        UART8,
         TOPIC_ASSISTANT_EVENT_REPORT,
         encode_assistant_vision_event_report_body(master_module.EVENT_TARGET_FOUND, 300),
     ) == "accepted"
     sender.poll_tx()
     master.poll_transport_rx()
     master.step()
-    master.transport_service._ack_candidate = None
+    master._ts._ack_candidate = None
     master.poll_transport_tx()
     orbit_events_first = [
         event for event in master_car.events if isinstance(event, tuple) and event[0] == "set_orbit_target"

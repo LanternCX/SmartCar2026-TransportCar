@@ -109,53 +109,6 @@ def _port_code(port):
     return 0
 
 
-def _port_name(port_code):
-    if int(port_code) == _PORT_UART6:
-        return UART6
-    if int(port_code) == _PORT_UART8:
-        return UART8
-    return None
-
-
-def _topic_name(topic):
-    topic = int(topic)
-    if topic == TOPIC_LOCAL_VISION_VELOCITY:
-        return "LOCAL_VISION_VELOCITY"
-    if topic == TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY:
-        return "ASSISTANT_FEEDFORWARD_VELOCITY"
-    if topic == TOPIC_VISION_OBSERVATION:
-        return "VISION_OBSERVATION"
-    if topic == TOPIC_LOCAL_VISION_CONTROL:
-        return "LOCAL_VISION_CONTROL"
-    if topic == TOPIC_MASTER_VISION_TASK_SYNC:
-        return "MASTER_VISION_TASK_SYNC"
-    if topic == TOPIC_ASSISTANT_VISION_TASK_SYNC:
-        return "ASSISTANT_VISION_TASK_SYNC"
-    if topic == TOPIC_MASTER_VISION_EVENT_REPORT:
-        return "MASTER_VISION_EVENT_REPORT"
-    if topic == TOPIC_ASSISTANT_VISION_EVENT_REPORT:
-        return "ASSISTANT_VISION_EVENT_REPORT"
-    if topic == TOPIC_ASSISTANT_STATE_SYNC:
-        return "ASSISTANT_STATE_SYNC"
-    if topic == TOPIC_ASSISTANT_EVENT_REPORT:
-        return "ASSISTANT_EVENT_REPORT"
-    return None
-
-
-def get_topic_spec(topic):
-    """返回测试友好的最小 topic 信息."""
-
-    entry = _find_topic_entry(topic)
-    if entry is None:
-        return None
-    return {
-        "name": _topic_name(topic),
-        "mode": entry[_ENTRY_MODE],
-        "port": _port_name(entry[_ENTRY_PORT]),
-        "body_size": entry[_ENTRY_BODY_SIZE],
-    }
-
-
 def get_topic_entry(topic):
     """返回 topic 注册表完整信息."""
 

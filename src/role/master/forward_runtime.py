@@ -5,8 +5,11 @@
 
 import time
 
+from utils.startup_log import log, log_exception
+
 from config import motion as motion_params
 from config import vision as vision_params
+
 from protocol.codec import (
     AE_EVENT,
     AE_VALUE,
@@ -31,6 +34,7 @@ from protocol.codec import (
     encode_master_vision_task_sync_body,
     encode_velocity_body,
 )
+
 from protocol.topic import (
     ROLE_MASTER,
     TOPIC_ASSISTANT_EVENT_REPORT,
@@ -43,12 +47,14 @@ from protocol.topic import (
     UART6,
     UART8,
 )
+
 from protocol.transport import (
     DELIVERY_DELIVERED,
     WRITE_ACCEPTED,
     WRITE_OVERWRITTEN,
     create_transport,
 )
+
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.master.state_machine import MasterStateMachine
 from role.master.state_machine import (
@@ -86,7 +92,6 @@ from role.master.state_machine import (
     TARGET_EDGE_LINE,
     TARGET_OBJECT,
 )
-from utils.startup_log import log, log_exception
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -183,7 +188,7 @@ class MasterForwardRuntime:
         self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
-        self.transport_service = transport or create_transport(
+        self._ts = transport or create_transport(
             ROLE_MASTER,
             now_ms=self._now_ms,
         )
@@ -264,10 +269,10 @@ class MasterForwardRuntime:
         self._car.collect_garbage()
 
     def poll_transport_rx(self) -> None:
-        self.transport_service.poll_rx()
+        self._ts.poll_rx()
 
     def poll_transport_tx(self) -> None:
-        self.transport_service.poll_tx()
+        self._ts.poll_tx()
 
     def step_motion_input(self) -> bool:
         try:
@@ -349,14 +354,15 @@ class MasterForwardRuntime:
         self._lv_pause = False
         self._u6v = None
         self._u6_has_w = False
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
 
     def _consume_uart6_reliable_inputs(self) -> None:
         """消费本车视觉链路上的 TCP 控制与事件."""
         if (
-            self.transport_service.tcp(UART6).read(
+            self._ts.tcp_read(
+                UART6,
                 TOPIC_LOCAL_VISION_CONTROL, self._ctrl_body
             )
             == "ok"
@@ -364,7 +370,8 @@ class MasterForwardRuntime:
             packet = decode_local_vision_control_body(self._ctrl_body)
             self._handle_local_vision_control(packet)
         if (
-            self.transport_service.tcp(UART6).read(
+            self._ts.tcp_read(
+                UART6,
                 TOPIC_MASTER_VISION_EVENT_REPORT, self._task_body
             )
             == "ok"
@@ -375,12 +382,13 @@ class MasterForwardRuntime:
     def _consume_uart6_velocity_input(self) -> None:
         """消费本车视觉链路上的 UDP 速度."""
         if (
-            self.transport_service.udp(UART6).read(
+            self._ts.udp_read(
+                UART6,
                 TOPIC_LOCAL_VISION_VELOCITY, self._vel_body
             )
             == "ok"
         ):
-            version = self.transport_service.get_udp_version(
+            version = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             if version > self._u6_ver and not self._lv_pause:
@@ -407,7 +415,7 @@ class MasterForwardRuntime:
             return
         self._u6v = None
         self._u6_has_w = False
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
         if action == LOCAL_VISION_CONTROL_PAUSE:
@@ -430,7 +438,8 @@ class MasterForwardRuntime:
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
         if (
-            self.transport_service.tcp(UART8).read(
+            self._ts.tcp_read(
+                UART8,
                 TOPIC_ASSISTANT_EVENT_REPORT, self._ast_body
             )
             == "ok"
@@ -498,7 +507,7 @@ class MasterForwardRuntime:
                     self._act_ctx = None
                     self._u6v = None
                     self._u6_has_w = False
-                    self._u6_ver = self.transport_service.get_udp_version(
+                    self._u6_ver = self._ts.get_udp_version(
                         UART6, TOPIC_LOCAL_VISION_VELOCITY
                     )
             return
@@ -556,7 +565,7 @@ class MasterForwardRuntime:
 
         self._u6v = None
         self._u6_has_w = False
-        self._u6_ver = self.transport_service.get_udp_version(
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
         if bool(getattr(self._car, "command_lock", False)):
@@ -574,7 +583,7 @@ class MasterForwardRuntime:
         pending = self._p_task
         if pending is not None and pending[_P_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_MASTER_VISION_TASK_SYNC)
+                self._ts.tcp_delivery(UART6, TOPIC_MASTER_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_task_sync_done(pending)
@@ -590,7 +599,7 @@ class MasterForwardRuntime:
         pending_gate = self._gate
         if pending_gate is not None and pending_gate[_G_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
+                self._ts.tcp_delivery(UART6, TOPIC_LOCAL_VISION_CONTROL)
                 == DELIVERY_DELIVERED
             ):
                 log("master_gate", "done action=%d" % int(pending_gate[_G_ACTION]))
@@ -599,7 +608,7 @@ class MasterForwardRuntime:
         pending = self._p_ast
         if pending is not None and pending[_S_QUEUED]:
             if (
-                self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_STATE_SYNC)
+                self._ts.tcp_delivery(UART8, TOPIC_ASSISTANT_STATE_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_sync_done("master->assistant", pending)
@@ -620,7 +629,7 @@ class MasterForwardRuntime:
         pending = self._p_sync
         if pending is not None and pending[_S_QUEUED]:
             if (
-                self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_STATE_SYNC)
+                self._ts.tcp_delivery(UART8, TOPIC_ASSISTANT_STATE_SYNC)
                 == DELIVERY_DELIVERED
             ):
                 self._log_sync_done("master->assistant", pending)
@@ -821,7 +830,7 @@ class MasterForwardRuntime:
             pending[_P_TARGET],
             pending[_P_ARG],
         )
-        status = self.transport_service.tcp(UART6).write(TOPIC_MASTER_VISION_TASK_SYNC, body)
+        status = self._ts.tcp_write(UART6, TOPIC_MASTER_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_task_sync_start(pending)
             self._task_status = None
@@ -851,7 +860,7 @@ class MasterForwardRuntime:
             pending[_S_ARG],
             self._threshold_for_assistant_sync(pending),
         )
-        status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_STATE_SYNC, body)
+        status = self._ts.tcp_write(UART8, TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._log_sync_start("master->assistant", pending)
             if pending is self._p_ast:
@@ -878,7 +887,7 @@ class MasterForwardRuntime:
         if pending is None or pending[_G_QUEUED]:
             return
         body = encode_local_vision_control_body(pending[_G_ACTION])
-        status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
+        status = self._ts.tcp_write(UART6, TOPIC_LOCAL_VISION_CONTROL, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             log("master_gate", "start action=%d" % int(pending[_G_ACTION]))
             self._gate = (pending[_G_ACTION], True)
@@ -912,7 +921,8 @@ class MasterForwardRuntime:
             omega,
             has_omega,
         )
-        self.transport_service.udp(UART8).write(
+        self._ts.udp_write(
+            UART8,
             TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
             body,
         )
@@ -941,7 +951,7 @@ class MasterForwardRuntime:
             self._act_ctx = None
             self._u6v = None
             self._u6_has_w = False
-            self._u6_ver = self.transport_service.get_udp_version(
+            self._u6_ver = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             self._p_event = None
@@ -960,20 +970,20 @@ class MasterForwardRuntime:
             if request_kind == RK_A_OBJ:
                 self._u6v = None
                 self._u6_has_w = False
-                self._u6_ver = self.transport_service.get_udp_version(
+                self._u6_ver = self._ts.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
             elif request_kind == RK_A_FOLLOW:
                 self._u6v = None
                 self._u6_has_w = False
-                self._u6_ver = self.transport_service.get_udp_version(
+                self._u6_ver = self._ts.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
             elif request_kind == RK_A_TRANSPORT:
                 self._act_ctx = None
                 self._u6v = None
                 self._u6_has_w = False
-                self._u6_ver = self.transport_service.get_udp_version(
+                self._u6_ver = self._ts.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
                 self._p_event = None
@@ -999,7 +1009,7 @@ class MasterForwardRuntime:
             elif request_kind == RK_A_CLEAR:
                 self._u6v = None
                 self._u6_has_w = False
-                self._u6_ver = self.transport_service.get_udp_version(
+                self._u6_ver = self._ts.get_udp_version(
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
                 self._clr_sync_ack = False
@@ -1027,7 +1037,7 @@ class MasterForwardRuntime:
             self._act_ctx = None
             self._u6v = None
             self._u6_has_w = False
-            self._u6_ver = self.transport_service.get_udp_version(
+            self._u6_ver = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
             self._p_event = None
@@ -1176,7 +1186,7 @@ class MasterForwardRuntime:
             self._act_ctx = None
             self._u6v = None
             self._u6_has_w = False
-            self._u6_ver = self.transport_service.get_udp_version(
+            self._u6_ver = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
 
