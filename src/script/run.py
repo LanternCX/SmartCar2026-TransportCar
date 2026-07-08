@@ -108,12 +108,14 @@ def _prepare_runtime_before_ready(car) -> None:
 
 def _print_mem_info_before_ready() -> None:
     try:
+        import gc
         import micropython  # pyright: ignore[reportMissingImports]
     except ImportError:
         return
     mem_info = getattr(micropython, "mem_info", None)
     if mem_info is None:
         return
+    gc.collect()
     log(LOG_STAGE, "mem_info verbose before ready")
     mem_info(1)
 

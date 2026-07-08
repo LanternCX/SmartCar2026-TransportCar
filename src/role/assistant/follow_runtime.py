@@ -153,13 +153,9 @@ class AssistantFollowRuntime:
         self._return_line_gate_action = None
 
     def prepare_runtime(self) -> None:
-        # from utils.startup_log import log_memory
-        # log_memory("p0")
         from play import sequence as play_sequence
 
-        # log_memory("p1")
         play_sequence.clear(self)
-        # log_memory("p9")
 
     def mark_tick(self, tick=None) -> None:
         self._transport_car.mark_tick(tick)
