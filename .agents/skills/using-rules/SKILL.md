@@ -41,5 +41,5 @@ description: Use when implementing or refactoring code in this repository and ne
 ## 边界
 
 - `using-rules` 只服务实现前和实现中的规则查询。
-- 完成前收口评审使用 `project-extension-requesting-code-review`。
+- 只有用户主动要求 review 时才使用 `code-review`。
 - 长期协作记忆由 Serena memory 维护。
