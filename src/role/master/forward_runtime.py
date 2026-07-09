@@ -132,7 +132,6 @@ MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = (
 )
 TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
-MASTER_ORBIT_TARGET_DEG = motion_params.MASTER_ORBIT_TARGET_DEG
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 TRANSPORT_AVOIDANCE_DEMO_ENABLED = bool(motion_params.TRANSPORT_AVOIDANCE_DEMO_ENABLED)
 TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
@@ -173,7 +172,6 @@ class MasterForwardRuntime:
         self._sm = MasterStateMachine(
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
-            orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             assistant_orbit_arg=ASSISTANT_ORBIT_OBJECT_CONFIG_ID,

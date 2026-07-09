@@ -175,7 +175,7 @@ def test_master_runtime_applies_orbit_velocity_after_task_sync_delivery(monkeypa
         module.TARGET_OBJECT,
         module.MASTER_ORBIT_TASK_CONFIG_ID,
     )
-    car.set_orbit_target(module.MASTER_ORBIT_TARGET_DEG, module.MASTER_ORBIT_RADIUS_SCALE)
+    car.set_orbit_target(0.0, module.MASTER_ORBIT_RADIUS_SCALE)
 
     runtime._queue_pending_task_sync()
     runtime.poll_transport_tx()
@@ -1198,7 +1198,7 @@ def test_assistant_runtime_applies_orbit_velocity_after_local_sync_delivery(monk
         _pack_task_arg(module._ASSISTANT_ORBIT_OBJECT_CONFIG_ID, 1),
         (0, 0, 0, 0, 0, 0),
     )
-    car.set_orbit_target(module._ASSISTANT_ORBIT_TARGET_DEG, module._ASSISTANT_ORBIT_RADIUS_SCALE)
+    car.set_orbit_target(0.0, module._ASSISTANT_ORBIT_RADIUS_SCALE)
 
     runtime._queue_pending_local_vision_sync()
     runtime.poll_transport_tx()
@@ -1251,7 +1251,7 @@ def test_assistant_runtime_ignores_local_pause_during_orbit(monkeypatch) -> None
     car = cars[0]
     runtime._sm.state = module.ASSISTANT_STATE_ORBIT
     runtime._sm.arg = _pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 1)
-    car.set_orbit_target(module._ASSISTANT_ORBIT_TARGET_DEG, module._ASSISTANT_ORBIT_RADIUS_SCALE)
+    car.set_orbit_target(0.0, module._ASSISTANT_ORBIT_RADIUS_SCALE)
 
     original_handle_velocity = car.handle_velocity_packet
 
@@ -1337,10 +1337,18 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
     car = cars[0]
 
     run_runtime_cycle(runtime)
+    from role.transport_plan import (
+        heading_with_offset,
+        push_heading_for_edge,
+        target_edge_for_object,
+    )
 
     assert (
         "set_orbit_target",
-        90.0,
+        heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(2)),
+            -float(module._TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
+        ),
         float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
     ) in car.events
 
@@ -1368,7 +1376,13 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
     clock.advance(20)
     run_runtime_cycle(runtime)
 
-    assert ("set_heading_target", 90.0) in car.events
+    assert (
+        "set_heading_target",
+        heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(2)),
+            -float(module._TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
+        ),
+    ) in car.events
 
 
 def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
@@ -1377,6 +1391,7 @@ def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
     uart8 = BufferedUart(
         incoming=encode_frame(
             0x02,
@@ -1393,20 +1408,61 @@ def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
         now_ms=clock,
         transport=create_transport(
             ROLE_ASSISTANT,
-            uart6=BufferedUart(),
+            uart6=uart6,
             uart8=uart8,
             now_ms=clock,
         ),
     )
+    runtime._av_shift = True
+    runtime._last_approach_arg = _pack_task_arg(
+        module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+        2,
+    )
 
     run_runtime_cycle(runtime)
+    from role.transport_plan import (
+        heading_with_offset,
+        push_heading_for_edge,
+        target_edge_for_object,
+    )
 
     assert (
         "set_orbit_target",
-        float(module._ASSISTANT_ORBIT_TARGET_DEG),
+        heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(2)),
+            180.0,
+        ),
         float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
     ) in cars[0].events
     assert runtime._av_orbit is False
+
+    cars[0].command_lock = False
+    cars[0].orbit_mode = False
+    clock.advance(20)
+    runtime.step_motion_input()
+    runtime._queue_pending_local_vision_sync()
+    runtime.poll_transport_tx()
+    uart6.push(ack_last_frame(uart6))
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+    uart6.push(
+        encode_frame(
+            0x01,
+            TOPIC_LOCAL_VISION_VELOCITY,
+            0,
+            encode_velocity_body(0.5, -0.25, 0.0, False),
+        )
+    )
+    clock.advance(20)
+    run_runtime_cycle(runtime)
+
+    assert (
+        "set_heading_target",
+        heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(2)),
+            180.0,
+        ),
+    ) in cars[0].events
 
 
 def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
@@ -2666,7 +2722,9 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     )
 
     assert accepted is True
-    assert ("calibrate_pose_to_field_edge", "bottom") in cars[0].events
+    from role.transport_plan import target_edge_for_object
+
+    assert ("calibrate_pose_to_field_edge", target_edge_for_object(1)) in cars[0].events
 
 
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:

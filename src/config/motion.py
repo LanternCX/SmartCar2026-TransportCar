@@ -29,7 +29,7 @@ FIELD_SIZE_M = (3.2, 2.4)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
 ASSISTANT_START_POSITION_M = (0.10, -0.50)
 # 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "bottom"}
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "top"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -58,8 +58,6 @@ ORBIT_AUTO_OMEGA_MAX = 1
 ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
-# 主车绕行的绝对目标角度增量, 单位度
-MASTER_ORBIT_TARGET_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
 # 避障 Demo 开关, 启用后先执行避障角度绕行
@@ -72,8 +70,6 @@ TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M = 0.70
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度
 MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = 8.0
-# 辅车绕行的绝对目标角度, 单位度
-ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 ASSISTANT_ORBIT_RADIUS_SCALE = 2.5
 # 三轮速度环 PID 参数映射

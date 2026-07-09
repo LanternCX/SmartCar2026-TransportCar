@@ -73,11 +73,14 @@ def _enter_initial_search(machine):
     machine.mark_startup_move_completed()
 
 
+def _push_heading_for_object(module, object_id):
+    return module.push_heading_for_edge(module.target_edge_for_object(object_id))
+
+
 def _drive_machine_to_post_assistant_orbit_request(module):
     machine = module.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -98,7 +101,6 @@ def test_master_state_machine_enters_search_and_builds_task_context() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     _enter_initial_search(machine)
@@ -118,7 +120,6 @@ def test_master_state_machine_waits_for_startup_sync_before_startup_move() -> No
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     machine.step(orbit_finished=False)
@@ -151,7 +152,6 @@ def test_master_state_machine_prints_when_entering_new_state(capsys) -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     _enter_initial_search(machine)
@@ -164,7 +164,6 @@ def test_master_state_machine_matching_target_found_enters_orbiting() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
 
@@ -189,7 +188,6 @@ def test_master_state_machine_marks_assistant_object_request_kind_before_orbit()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
 
@@ -210,7 +208,6 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -236,7 +233,6 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -248,7 +244,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     orbit_command = machine.poll_orbit_command()
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert orbit_command == 180.0
+    assert orbit_command == _push_heading_for_object(MasterStateMachine, 2)
 
 
 def test_master_state_machine_avoidance_demo_uses_perpendicular_master_orbit() -> None:
@@ -256,7 +252,6 @@ def test_master_state_machine_avoidance_demo_uses_perpendicular_master_orbit() -
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         avoidance_enabled=True,
         avoidance_orbit_offset_deg=90.0,
     )
@@ -269,7 +264,10 @@ def test_master_state_machine_avoidance_demo_uses_perpendicular_master_orbit() -
     machine.mark_assistant_object_acknowledged()
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == -90.0
+    assert machine.poll_orbit_command() == MasterStateMachine.heading_with_offset(
+        _push_heading_for_object(MasterStateMachine, 2),
+        90.0,
+    )
 
 
 def test_master_state_machine_avoidance_demo_queues_assistant_orbit_after_master_orbit() -> None:
@@ -277,7 +275,6 @@ def test_master_state_machine_avoidance_demo_queues_assistant_orbit_after_master
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         avoidance_enabled=True,
         avoidance_orbit_offset_deg=90.0,
     )
@@ -312,7 +309,6 @@ def test_master_state_machine_avoidance_demo_accepts_late_assistant_target_found
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         avoidance_enabled=True,
         avoidance_orbit_offset_deg=90.0,
     )
@@ -341,7 +337,6 @@ def test_master_state_machine_avoidance_demo_hands_off_to_formal_transport() -> 
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         avoidance_enabled=True,
         avoidance_orbit_offset_deg=90.0,
     )
@@ -375,7 +370,9 @@ def test_master_state_machine_avoidance_demo_hands_off_to_formal_transport() -> 
     machine.handle_assistant_cleared(value=0)
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == 180.0
+    assert machine.poll_orbit_command() == _push_heading_for_object(
+        MasterStateMachine, 2
+    )
     machine.step(orbit_finished=True)
     task = _task_request(MasterStateMachine, machine.poll_task_request())
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
@@ -402,7 +399,6 @@ def test_master_state_machine_ignores_mismatched_context_event() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
 
@@ -420,7 +416,6 @@ def test_master_state_machine_does_not_repeat_orbit_enter_action() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
 
@@ -447,7 +442,6 @@ def test_master_state_machine_returns_to_search_when_orbit_finishes() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -467,7 +461,6 @@ def test_master_state_machine_orbit_finish_does_not_repeat_assistant_object_requ
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -497,7 +490,6 @@ def test_master_state_machine_emits_new_transport_task_request_after_orbit_finis
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         assistant_object_arg=1,
         initial_context_id=0,
     )
@@ -525,7 +517,6 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     _enter_initial_search(machine)
@@ -549,7 +540,9 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
 
     machine.mark_assistant_object_acknowledged()
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == 180.0
+    assert machine.poll_orbit_command() == _push_heading_for_object(
+        MasterStateMachine, 2
+    )
 
     machine.step(orbit_finished=False)
     assert machine.poll_assistant_request() is None
@@ -563,7 +556,6 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -594,7 +586,6 @@ def test_master_state_machine_exposes_search_velocity_gate() -> None:
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     _enter_initial_search(machine)
@@ -616,7 +607,6 @@ def test_master_state_machine_does_not_enter_orbiting_before_assistant_ack() -> 
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
 
     _enter_initial_search(machine)
@@ -633,7 +623,6 @@ def test_master_state_machine_ignores_master_aligned_before_front_half_completes
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         assistant_transport_arg=9,
     )
 
@@ -651,7 +640,6 @@ def test_master_state_machine_ignores_assistant_aligned_before_assistant_orbit_r
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         assistant_transport_arg=9,
     )
     _enter_initial_search(machine)
@@ -674,7 +662,6 @@ def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishe
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -771,7 +758,6 @@ def test_master_state_machine_master_aligned_disables_search_velocity_before_tra
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -845,7 +831,6 @@ def test_master_state_machine_uses_object_target_edge_for_push_heading() -> None
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -855,7 +840,9 @@ def test_master_state_machine_uses_object_target_edge_for_push_heading() -> None
 
     machine.mark_assistant_object_acknowledged()
 
-    assert machine.poll_orbit_command() == 180.0
+    assert machine.poll_orbit_command() == _push_heading_for_object(
+        MasterStateMachine, 2
+    )
 
 
 def test_master_state_machine_clear_retreat_waits_for_both_cars_before_turn_back() -> None:
@@ -1007,7 +994,6 @@ def test_master_state_machine_return_garage_events_do_not_advance_state() -> Non
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        orbit_delta_deg=90.0,
         total_object_count=1,
         return_line_task_arg=5,
         initial_context_id=4,

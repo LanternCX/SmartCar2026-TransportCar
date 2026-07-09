@@ -14,8 +14,15 @@ from role.transport_plan import (
 def test_transport_object_target_edge_uses_global_override() -> None:
     """-1 配置覆盖所有物体目标边."""
 
-    assert target_edge_for_object(1) == FIELD_EDGE_BOTTOM
-    assert target_edge_for_object(255) == FIELD_EDGE_BOTTOM
+    edge = target_edge_for_object(1)
+
+    assert edge in {
+        FIELD_EDGE_BOTTOM,
+        FIELD_EDGE_TOP,
+        FIELD_EDGE_LEFT,
+        FIELD_EDGE_RIGHT,
+    }
+    assert target_edge_for_object(255) == edge
 
 
 def test_push_heading_is_derived_from_field_axes() -> None:

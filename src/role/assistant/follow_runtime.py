@@ -83,7 +83,6 @@ _TARGET_FOUND_EVENT = const(6)
 _ALIGNED_EVENT = const(7)
 _CLEARED_EVENT = const(9)
 _RETURN_LINE_ALIGNED_EVENT = const(10)
-_ASSISTANT_ORBIT_TARGET_DEG = motion_params.ASSISTANT_ORBIT_TARGET_DEG
 _ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
 _TRANSPORT_AVOIDANCE_DEMO_ENABLED = bool(motion_params.TRANSPORT_AVOIDANCE_DEMO_ENABLED)
 _TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
@@ -170,7 +169,6 @@ class AssistantFollowRuntime:
         self._realign = False
         self._av_orbit = False
         self._av_shift = False
-        self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
         self._shift_done = False
         self._shift_x = 0.0
         self._shift_y = 0.0
@@ -320,7 +318,6 @@ class AssistantFollowRuntime:
             self._realign = False
             self._av_orbit = False
             self._av_shift = False
-            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._shift_done = False
             self._clear_done = False
             self._write_zero_velocity()
@@ -333,7 +330,6 @@ class AssistantFollowRuntime:
             self._realign = False
             self._av_orbit = False
             self._av_shift = False
-            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._shift_done = False
             self._clear_done = False
             self._enter_follow_state()
@@ -345,7 +341,6 @@ class AssistantFollowRuntime:
             self._realign = False
             self._av_orbit = False
             self._av_shift = False
-            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._shift_done = False
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
@@ -374,7 +369,6 @@ class AssistantFollowRuntime:
             self._realign = False
             self._av_orbit = False
             self._av_shift = False
-            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._shift_done = False
             self._clear_done = False
             self._line_ok = False
@@ -389,7 +383,6 @@ class AssistantFollowRuntime:
             self._realign = False
             self._av_orbit = False
             self._av_shift = False
-            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._shift_done = False
             self._clear_done = False
             self._write_zero_velocity()
@@ -610,7 +603,11 @@ class AssistantFollowRuntime:
             self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and self._realign
         ):
-            self._car.set_heading_target(float(self._align_heading))
+            push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
+            offset = 180.0
+            if self._av_shift:
+                offset = -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG)
+            self._car.set_heading_target(heading_with_offset(push_heading, offset))
 
     def _should_store_velocity(self, source) -> bool:
         if self._sm.state == ASSISTANT_STATE_IDLE:
@@ -766,7 +763,10 @@ class AssistantFollowRuntime:
             self._obj_th,
             False,
         )
-        orbit_target = float(_ASSISTANT_ORBIT_TARGET_DEG)
+        orbit_target = heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(self._obj_id)),
+            180.0,
+        )
         self._av_orbit = (
             bool(_TRANSPORT_AVOIDANCE_DEMO_ENABLED)
             and int(unpack_task_arg_config(self._sm.arg)) == 0
@@ -776,7 +776,8 @@ class AssistantFollowRuntime:
                 push_heading_for_edge(target_edge_for_object(self._obj_id)),
                 -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
             )
-        self._align_heading = float(orbit_target)
+        else:
+            self._av_shift = False
         self._car.set_orbit_target(
             orbit_target,
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),

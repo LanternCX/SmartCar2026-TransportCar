@@ -106,7 +106,6 @@ class MasterStateMachine:
         self,
         search_task_arg,
         boot_heading_deg,
-        orbit_delta_deg,
         assistant_object_arg=1,
         assistant_transport_arg=1,
         assistant_orbit_arg=1,
@@ -120,7 +119,6 @@ class MasterStateMachine:
     ):
         self.state = STATE_IDLE
         _ = boot_heading_deg
-        _ = orbit_delta_deg
         # 主运行链使用短字段降低 qstr 常驻压力；字段按参数、pending、回合状态分组。
         # *_arg 是下发给视觉或辅车的配置编号；obj/ctx 分别表示物体进度和同步上下文。
         self._s_arg = int(search_task_arg)
