@@ -14,8 +14,8 @@ _LEAD_DISTANCE_CM = const(-50)
 _RETURN_POSITION_SPEED = const(5)
 _RETURN_FORWARD_SPEED = const(3)
 _FINAL_FORWARD_SPEED = const(8)
-_FIRST_TURN_DEG = const(90)
-_FINAL_TURN_DEG = const(-90)
+_FIRST_TURN_DEG = const(-90)
+_FINAL_TURN_DEG = const(180)
 
 SEQUENCE = (
     OP_POS_Y,

@@ -15,7 +15,7 @@ _FIRST_FORWARD_DISTANCE_CM = const(70)
 _SECOND_FORWARD_DISTANCE_CM = const(110)
 _MOVE_SPEED = const(5)
 _RIGHT_TURN_DEG = const(90)
-_LEFT_TURN_DEG = const(-90)
+_LEFT_TURN_DEG = const(0)
 
 SEQUENCE = (
     OP_POS_Y,

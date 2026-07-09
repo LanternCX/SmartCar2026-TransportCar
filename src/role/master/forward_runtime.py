@@ -657,7 +657,7 @@ class MasterForwardRuntime:
         )
 
     def play_set_angle(self, value) -> None:
-        target_heading_deg = float(getattr(self._car, "heading_est", 0.0)) + float(value)
+        target_heading_deg = float(value)
         self._car.set_heading_transition_target(target_heading_deg)
 
     def play_write_velocity_y(self, value) -> None:

@@ -1960,7 +1960,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
 
 def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     clock = ManualClock(0)
-    install_fake_core(monkeypatch)
+    cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
@@ -1976,6 +1976,19 @@ def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     runtime._apply_motion_outputs()
 
     assert runtime.play_kind != 0
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    assert ("set_heading_transition_target", 90.0) in cars[0].events
+    cars[0].command_lock = False
+    cars[0].heading_est = 90.0
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+    runtime._apply_motion_outputs()
+    assert ("set_heading_transition_target", 0.0) in cars[0].events
 
 
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
@@ -2175,7 +2188,8 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    cars[0].heading_est = 90.0
+    assert ("set_heading_transition_target", -90.0) in cars[0].events
+    cars[0].heading_est = -90.0
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
@@ -2189,13 +2203,13 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     }
     runtime._line_ok = True
     runtime._apply_motion_outputs()
-    cars[0].heading_est = 90.0
+    cars[0].heading_est = -90.0
     runtime._apply_motion_outputs()
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
 
-    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
@@ -2415,6 +2429,15 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     runtime._write_effective_velocity()
     runtime._write_effective_velocity()
     assert ("set_heading_transition_target", -90.0) in cars[0].events
+    cars[0].command_lock = False
+    cars[0].heading_est = -90.0
+    runtime._write_effective_velocity()
+    runtime._line_ok = True
+    runtime._write_effective_velocity()
+    cars[0].command_lock = False
+    runtime._write_effective_velocity()
+    runtime._write_effective_velocity()
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
 
 
 def test_assistant_runtime_step_two_queues_return_line_gate_on(monkeypatch) -> None:
