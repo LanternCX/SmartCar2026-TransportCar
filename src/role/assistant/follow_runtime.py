@@ -60,12 +60,17 @@ from role.assistant.state_machine import (
     ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_STARTUP_MOVE,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
+    ASSISTANT_TARGET_NONE,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
-from role.transport_plan import target_edge_for_object
+from role.transport_plan import (
+    heading_with_offset,
+    push_heading_for_edge,
+    target_edge_for_object,
+)
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -81,6 +86,8 @@ _CLEARED_EVENT = const(9)
 _RETURN_LINE_ALIGNED_EVENT = const(10)
 _ASSISTANT_ORBIT_TARGET_DEG = motion_params.ASSISTANT_ORBIT_TARGET_DEG
 _ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
+_TRANSPORT_AVOIDANCE_DEMO_ENABLED = bool(motion_params.TRANSPORT_AVOIDANCE_DEMO_ENABLED)
+_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID
 ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = (
@@ -158,6 +165,7 @@ class AssistantFollowRuntime:
         self._obj_id = 0
         self._obj_th = (0, 0, 0, 0, 0, 0)
         self._realign = False
+        self._av_orbit = False
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
@@ -301,6 +309,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
+            self._av_orbit = False
             self._clear_done = False
             self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
@@ -310,6 +319,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
+            self._av_orbit = False
             self._clear_done = False
             self._enter_follow_state()
         elif self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
@@ -318,6 +328,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
+            self._av_orbit = False
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._realign = False
@@ -341,6 +352,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
+            self._av_orbit = False
             self._clear_done = False
             self._line_ok = False
             self._enter_return_follow_state()
@@ -352,6 +364,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
+            self._av_orbit = False
             self._clear_done = False
             self._write_zero_velocity()
         return True
@@ -721,6 +734,7 @@ class AssistantFollowRuntime:
         self._found_done = False
         self._p_report = None
         self._clear_motion_inputs()
+        self._obj_id = unpack_task_arg_object_id(self._sm.arg)
         self._p_local = (
             ASSISTANT_STATE_ORBIT,
             ASSISTANT_TARGET_OBJECT,
@@ -731,8 +745,15 @@ class AssistantFollowRuntime:
             self._obj_th,
             False,
         )
+        orbit_target = float(_ASSISTANT_ORBIT_TARGET_DEG)
+        self._av_orbit = bool(_TRANSPORT_AVOIDANCE_DEMO_ENABLED)
+        if self._av_orbit:
+            orbit_target = heading_with_offset(
+                push_heading_for_edge(target_edge_for_object(self._obj_id)),
+                -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
+            )
         self._car.set_orbit_target(
-            float(_ASSISTANT_ORBIT_TARGET_DEG),
+            orbit_target,
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
         )
 
@@ -798,6 +819,19 @@ class AssistantFollowRuntime:
         if bool(getattr(self._car, "command_lock", False)):
             return
         if self._realign:
+            return
+        if self._av_orbit:
+            self._av_orbit = False
+            self._sm.apply_master_state(
+                ASSISTANT_STATE_FINISHED,
+                ASSISTANT_TARGET_NONE,
+                0,
+            )
+            self._clear_motion_inputs()
+            self._p_local = None
+            self._p_report = None
+            self._found_done = False
+            self._write_zero_velocity()
             return
         if self._last_approach_arg <= 0:
             return

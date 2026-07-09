@@ -35,3 +35,14 @@ def push_heading_for_edge(edge):
     if edge == FIELD_EDGE_RIGHT:
         return -90.0
     raise ValueError("unknown field edge")
+
+
+def heading_with_offset(heading_deg, offset_deg):
+    """在场地角度坐标系中计算偏移后的航向角."""
+
+    heading = float(heading_deg) + float(offset_deg)
+    while heading > 180.0:
+        heading -= 360.0
+    while heading <= -180.0:
+        heading += 360.0
+    return heading

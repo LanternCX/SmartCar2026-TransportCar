@@ -5,7 +5,11 @@
 
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg
-from role.transport_plan import push_heading_for_edge, target_edge_for_object
+from role.transport_plan import (
+    heading_with_offset,
+    push_heading_for_edge,
+    target_edge_for_object,
+)
 from utils.startup_log import log
 
 try:
@@ -28,6 +32,8 @@ ASSISTANT_CLEAR_SYNC_STATE = const(5)
 ASSISTANT_CLEAR_SYNC_TARGET = const(1)
 ASSISTANT_RETURN_FOLLOW_SYNC_STATE = const(6)
 ASSISTANT_RETURN_FOLLOW_SYNC_TARGET = const(0)
+ASSISTANT_FINISHED_SYNC_STATE = const(7)
+ASSISTANT_FINISHED_SYNC_TARGET = const(0)
 ASSISTANT_STARTUP_SYNC_STATE = const(8)
 ASSISTANT_STARTUP_SYNC_TARGET = const(0)
 
@@ -84,6 +90,7 @@ RK_T_TRANSPORT = const(8)
 RK_T_FINISH = const(9)
 RK_T_ORBIT = const(10)
 RK_T_RETURN = const(11)
+RK_A_FINISHED = const(12)
 
 RQ_KIND = const(0)
 RQ_CONTEXT = const(1)
@@ -107,6 +114,8 @@ class MasterStateMachine:
         return_line_task_arg=5,
         total_object_count=999,
         initial_context_id=0,
+        avoidance_enabled=False,
+        avoidance_orbit_offset_deg=90.0,
     ):
         self.state = STATE_IDLE
         _ = boot_heading_deg
@@ -120,6 +129,8 @@ class MasterStateMachine:
         self._fin_task_arg = int(finish_task_arg)
         self._ret_task_arg = int(return_line_task_arg)
         self._obj_need = int(total_object_count)
+        self._av_on = bool(avoidance_enabled)
+        self._av_offset = float(avoidance_orbit_offset_deg)
         self.obj_done = 0
         self._ctx = int(initial_context_id) % 256
         # _p_task: 本车视觉 task；_p_ast: 辅车同步；_p_orbit: 本车绕行动作。
@@ -145,6 +156,7 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._av_m_orbit = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -171,6 +183,20 @@ class MasterStateMachine:
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
+            if self._av_m_orbit:
+                self._av_m_orbit = False
+                if self._obj_pending:
+                    self._obj_pending = False
+                    self._orbit_req = True
+                    self._p_ast = (
+                        RK_A_ORBIT,
+                        0,
+                        ASSISTANT_ORBIT_SYNC_STATE,
+                        ASSISTANT_ORBIT_SYNC_TARGET,
+                        pack_task_arg(0, self._obj_id),
+                    )
+                self._enter_state(STATE_FINISHED)
+                return
             self._enter_state(STATE_SEARCH_OBJECT)
             self._orbit_done = True
             self._m_aligned = False
@@ -263,12 +289,30 @@ class MasterStateMachine:
             self._wait_obj_ack = False
             self._ctx = (self._ctx + 1) % 256
             self._enter_state(STATE_ORBITING)
-            self._p_orbit = float(push_heading_for_edge(self._edge))
+            push_heading = push_heading_for_edge(self._edge)
+            if self._av_on:
+                self._av_m_orbit = True
+                self._p_orbit = heading_with_offset(
+                    push_heading, self._av_offset
+                )
+                return
+            self._p_orbit = float(push_heading)
 
     def handle_assistant_target_found(self, value):
         """消费辅车目标命中回报"""
 
         _ = value
+        if self.state == STATE_FINISHED and self._av_on:
+            if self._obj_req and not self._orbit_req:
+                self._orbit_req = True
+                self._p_ast = (
+                    RK_A_ORBIT,
+                    0,
+                    ASSISTANT_ORBIT_SYNC_STATE,
+                    ASSISTANT_ORBIT_SYNC_TARGET,
+                    pack_task_arg(0, self._obj_id),
+                )
+            return
         if self.state == STATE_ORBITING:
             if self._obj_req and not self._orbit_req:
                 self._obj_pending = True
@@ -434,6 +478,7 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._av_m_orbit = False
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
         self._p_ast = (

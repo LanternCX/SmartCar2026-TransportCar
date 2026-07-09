@@ -62,6 +62,10 @@ HOLD_SPEED_EPS = 0.01
 MASTER_ORBIT_TARGET_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
+# 避障 Demo 开关, 启用后先执行避障角度绕行
+TRANSPORT_AVOIDANCE_DEMO_ENABLED = True
+# 主车避障绕行相对正式推动朝向的角度偏移, 单位度
+TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = 90.0
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

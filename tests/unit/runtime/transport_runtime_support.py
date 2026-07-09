@@ -83,6 +83,9 @@ def import_module_clean(module_name: str, monkeypatch):
         "role.master.forward_runtime",
         "role.assistant",
         "role.assistant.follow_runtime",
+        "config",
+        "config.motion",
+        "config.vision",
         "utils.startup_log",
         module_name,
     ):

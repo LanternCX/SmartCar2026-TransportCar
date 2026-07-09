@@ -38,6 +38,7 @@ def _kind_name(module, kind):
         module.RK_A_TRANSPORT: "assistant_transport",
         module.RK_A_CLEAR: "assistant_clear",
         module.RK_A_RETURN: "assistant_return_line",
+        module.RK_A_FINISHED: "assistant_finished",
         module.RK_T_FINISH: "finish_task",
         module.RK_T_RETURN: "return_line_task",
     }
@@ -248,6 +249,85 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
     assert orbit_command == 180.0
+
+
+def test_master_state_machine_avoidance_demo_uses_perpendicular_master_orbit() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+        avoidance_enabled=True,
+        avoidance_orbit_offset_deg=90.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+
+    machine.mark_assistant_object_acknowledged()
+
+    assert machine.state == MasterStateMachine.STATE_ORBITING
+    assert machine.poll_orbit_command() == -90.0
+
+
+def test_master_state_machine_avoidance_demo_queues_assistant_orbit_after_master_orbit() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+        avoidance_enabled=True,
+        avoidance_orbit_offset_deg=90.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+    machine.mark_assistant_object_acknowledged()
+    machine.poll_orbit_command()
+    machine.handle_assistant_target_found(value=300)
+
+    machine.step(orbit_finished=True)
+
+    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_orbit",
+        "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
+        "arg": _pack_task_arg(0, 2),
+    }
+
+
+def test_master_state_machine_avoidance_demo_accepts_late_assistant_target_found() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+        avoidance_enabled=True,
+        avoidance_orbit_offset_deg=90.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+    machine.mark_assistant_object_acknowledged()
+    machine.poll_orbit_command()
+    machine.step(orbit_finished=True)
+
+    machine.handle_assistant_target_found(value=300)
+
+    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_orbit",
+        "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
+        "arg": _pack_task_arg(0, 2),
+    }
 
 
 def test_master_state_machine_ignores_mismatched_context_event() -> None:

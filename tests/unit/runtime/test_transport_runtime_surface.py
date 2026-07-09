@@ -1210,6 +1210,56 @@ def test_assistant_runtime_skips_orbit_correction_after_chassis_orbit_finished(
     assert runtime._sm.state == module.ASSISTANT_STATE_APPROACH_OBJECT
 
 
+def test_assistant_runtime_avoidance_orbit_finishes_locally(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart8 = BufferedUart(
+        incoming=encode_frame(
+            0x02,
+            TOPIC_ASSISTANT_STATE_SYNC,
+            7,
+            encode_assistant_state_sync_body(
+                module.ASSISTANT_STATE_ORBIT,
+                module.ASSISTANT_TARGET_OBJECT,
+                _pack_task_arg(0, 2),
+            ),
+        )
+    )
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=uart8,
+            now_ms=clock,
+        ),
+    )
+    car = cars[0]
+
+    run_runtime_cycle(runtime)
+
+    assert (
+        "set_orbit_target",
+        90.0,
+        float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
+    ) in car.events
+
+    car.command_lock = False
+    car.orbit_mode = False
+    clock.advance(20)
+    runtime.step_motion_input()
+
+    assert runtime._sm.state == module.ASSISTANT_STATE_FINISHED
+    assert car.last_chassis_target == {
+        "source": None,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "has_omega": True,
+    }
+
+
 def test_assistant_runtime_forwards_master_threshold_to_local_vision(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)

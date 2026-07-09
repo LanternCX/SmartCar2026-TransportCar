@@ -5,6 +5,7 @@ from role.transport_plan import (
     FIELD_EDGE_LEFT,
     FIELD_EDGE_RIGHT,
     FIELD_EDGE_TOP,
+    heading_with_offset,
     push_heading_for_edge,
     target_edge_for_object,
 )
@@ -24,3 +25,10 @@ def test_push_heading_is_derived_from_field_axes() -> None:
     assert push_heading_for_edge(FIELD_EDGE_BOTTOM) == 180.0
     assert push_heading_for_edge(FIELD_EDGE_LEFT) == 90.0
     assert push_heading_for_edge(FIELD_EDGE_RIGHT) == -90.0
+
+
+def test_heading_with_offset_wraps_to_control_range() -> None:
+    """航向偏移结果保持在控制角度范围内."""
+
+    assert heading_with_offset(180.0, 90.0) == -90.0
+    assert heading_with_offset(-90.0, -180.0) == 90.0

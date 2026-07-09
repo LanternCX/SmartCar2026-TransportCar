@@ -69,6 +69,7 @@ from role.master.state_machine import (
     RQ_STATE,
     RQ_TARGET,
     RK_A_CLEAR,
+    RK_A_FINISHED,
     RK_A_FOLLOW,
     RK_A_OBJ,
     RK_A_ORBIT,
@@ -132,6 +133,8 @@ TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_TARGET_DEG = motion_params.MASTER_ORBIT_TARGET_DEG
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+TRANSPORT_AVOIDANCE_DEMO_ENABLED = bool(motion_params.TRANSPORT_AVOIDANCE_DEMO_ENABLED)
+TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -177,6 +180,8 @@ class MasterForwardRuntime:
             return_line_task_arg=MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID,
             total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
+            avoidance_enabled=TRANSPORT_AVOIDANCE_DEMO_ENABLED,
+            avoidance_orbit_offset_deg=TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG,
         )
         self._err = "none"
         # UART6 视觉速度缓存：_u6v 是当前速度槽，_u6_ver 是丢弃旧包的版本线。
@@ -531,6 +536,8 @@ class MasterForwardRuntime:
                         self._sm.mark_transport_ready()
                 elif pending[_S_KIND] == RK_A_CLEAR:
                     self._clr_sync_ack = True
+                elif pending[_S_KIND] == RK_A_FINISHED:
+                    pass
                 self._p_ast = None
 
         pending = self._p_sync
