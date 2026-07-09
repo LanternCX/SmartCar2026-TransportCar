@@ -767,7 +767,10 @@ class AssistantFollowRuntime:
             False,
         )
         orbit_target = float(_ASSISTANT_ORBIT_TARGET_DEG)
-        self._av_orbit = bool(_TRANSPORT_AVOIDANCE_DEMO_ENABLED)
+        self._av_orbit = (
+            bool(_TRANSPORT_AVOIDANCE_DEMO_ENABLED)
+            and int(unpack_task_arg_config(self._sm.arg)) == 0
+        )
         if self._av_orbit:
             orbit_target = heading_with_offset(
                 push_heading_for_edge(target_edge_for_object(self._obj_id)),

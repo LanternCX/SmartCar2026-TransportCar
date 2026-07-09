@@ -109,6 +109,7 @@ class MasterStateMachine:
         orbit_delta_deg,
         assistant_object_arg=1,
         assistant_transport_arg=1,
+        assistant_orbit_arg=1,
         transport_task_arg=2,
         finish_task_arg=3,
         return_line_task_arg=5,
@@ -125,6 +126,7 @@ class MasterStateMachine:
         self._s_arg = int(search_task_arg)
         self._a_obj_arg = int(assistant_object_arg)
         self._a_tr_arg = int(assistant_transport_arg)
+        self._a_orb_arg = int(assistant_orbit_arg)
         self._tr_task_arg = int(transport_task_arg)
         self._fin_task_arg = int(finish_task_arg)
         self._ret_task_arg = int(return_line_task_arg)
@@ -159,6 +161,7 @@ class MasterStateMachine:
         self._av_m_orbit = False
         self._av_align = False
         self._av_shift = False
+        self._av_f_orbit = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -226,12 +229,16 @@ class MasterStateMachine:
             if self._obj_pending and not self._orbit_req:
                 self._obj_pending = False
                 self._orbit_req = True
+                orbit_arg = 0
+                if self._av_f_orbit:
+                    orbit_arg = self._a_orb_arg
+                    self._av_f_orbit = False
                 self._p_ast = (
                     RK_A_ORBIT,
                     0,
                     ASSISTANT_ORBIT_SYNC_STATE,
                     ASSISTANT_ORBIT_SYNC_TARGET,
-                    pack_task_arg(0, self._obj_id),
+                    pack_task_arg(orbit_arg, self._obj_id),
                 )
 
     def mark_startup_move_completed(self):
@@ -430,14 +437,11 @@ class MasterStateMachine:
             self._av_shift = False
             self._tr_req = False
             self._tr_ready = False
-            self._p_ast = (
-                RK_A_FINISHED,
-                0,
-                ASSISTANT_FINISHED_SYNC_STATE,
-                ASSISTANT_FINISHED_SYNC_TARGET,
-                0,
-            )
-            self._enter_state(STATE_FINISHED)
+            self._obj_pending = True
+            self._orbit_req = False
+            self._av_f_orbit = True
+            self._enter_state(STATE_ORBITING)
+            self._p_orbit = push_heading_for_edge(self._edge)
             return
         if self.state != STATE_CLEAR_OBJECT:
             return
@@ -516,6 +520,7 @@ class MasterStateMachine:
         self._av_shift = False
         self._av_m_orbit = False
         self._av_align = False
+        self._av_f_orbit = False
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
         self._p_ast = (
@@ -545,6 +550,8 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._av_shift = False
+        self._av_f_orbit = False
 
     def _enter_return_retreat(self):
         """进入主车回库后退找黄线段"""
