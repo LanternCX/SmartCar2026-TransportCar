@@ -49,8 +49,7 @@ from protocol.transport import (
     WRITE_OVERWRITTEN,
     create_transport,
 )
-from utils.startup_log import log, log_exception
-from role.assistant.diagnostics import build_follow_snapshot
+from utils.startup_log import log_exception
 from role.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
@@ -107,6 +106,8 @@ _R_QUEUED = const(2)
 
 _G_ACTION = const(0)
 _G_QUEUED = const(1)
+_SRC_U6 = const(6)
+_SRC_U8 = const(8)
 
 
 def _default_now_ms() -> int:
@@ -146,9 +147,6 @@ class AssistantFollowRuntime:
         self._u8_pkt = [0.0, 0.0, 0.0, False]
         self._u6_ver = 0
         self._u8_ver = 0
-        self._u6_status = "idle"
-        self._u8_status = "idle"
-        self.sync_context = None
         self._sync_apply_count = 0
         seed_value = int(self._now_ms()) % 256
         # 本地视觉同步和主车回报 pending；object/clear 为当前任务阶段状态。
@@ -246,7 +244,6 @@ class AssistantFollowRuntime:
                 self._ts.tcp_delivery(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
-                self._log_local_vision_sync_done(pending)
                 self._p_local = None
         pending_gate = self._gate
         if pending_gate is not None and pending_gate[_G_QUEUED]:
@@ -274,19 +271,13 @@ class AssistantFollowRuntime:
         ):
             return
         packet = decode_assistant_state_sync_body(self._sync_body)
-        state, target, arg, _ = packet
+        state, _, _, _ = packet
         accepted = self._apply_sync_context(packet)
         if not accepted:
             text = "unknown assistant sync state: %s" % int(state)
             self._record_error_text(text, RuntimeError(text))
             return
-        self.sync_context = {
-            "state": int(state),
-            "target": int(target),
-            "arg": int(arg),
-        }
         self._sync_apply_count += 1
-        self._log_master_sync_done(packet)
 
     def _apply_sync_context(self, packet) -> bool:
         state, target, arg, _ = packet
@@ -311,7 +302,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._clear_done = False
-            self._write_zero_velocity("assistant_idle")
+            self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
             self._obj_id = 0
             self._obj_th = (0, 0, 0, 0, 0, 0)
@@ -362,7 +353,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._clear_done = False
-            self._write_zero_velocity("assistant_finished")
+            self._write_zero_velocity()
         return True
 
     def _clear_local_vision_pause_residue(self) -> None:
@@ -413,8 +404,6 @@ class AssistantFollowRuntime:
 
         @details 通过版本号判断状态切换后的旧值是否仍应被忽略, 不直接清底层缓存
         """
-        self._u6_status = "idle"
-        self._u8_status = "idle"
         if (
             self._ts.tcp_read(
                 UART6,
@@ -437,7 +426,6 @@ class AssistantFollowRuntime:
                 )
                 self._u6v[VEL_W] = 0.0
                 self._u6v[VEL_HAS_W] = False
-                self._u6_status = "active"
         if (
             self._ts.udp_read(
                 UART8,
@@ -453,14 +441,11 @@ class AssistantFollowRuntime:
                 self._u8v = decode_velocity_body_into(
                     self._vel_body, self._u8_pkt
                 )
-                self._u8_status = "active"
 
-        if not self._should_store_velocity("uart6"):
+        if not self._should_store_velocity(_SRC_U6):
             self._u6v = None
-            self._u6_status = "idle"
-        if not self._should_store_velocity("uart8"):
+        if not self._should_store_velocity(_SRC_U8):
             self._u8v = None
-            self._u8_status = "idle"
 
     def _handle_local_vision_control(self, packet) -> None:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
@@ -482,7 +467,7 @@ class AssistantFollowRuntime:
         )
         if action == LOCAL_VISION_CONTROL_PAUSE:
             self._lv_pause = True
-            self._write_zero_velocity("local_vision_pause")
+            self._write_zero_velocity()
             return
         if action == LOCAL_VISION_CONTROL_RESUME:
             self._lv_pause = False
@@ -500,7 +485,7 @@ class AssistantFollowRuntime:
 
     def _write_effective_velocity(self) -> None:
         if self._lv_pause:
-            self._write_zero_velocity("local_vision_pause")
+            self._write_zero_velocity()
             return
         if self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._write_approach_object_velocity()
@@ -511,7 +496,7 @@ class AssistantFollowRuntime:
         if self._sm.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return
         if self._sm.state == ASSISTANT_STATE_FINISHED:
-            self._write_zero_velocity("assistant_finished")
+            self._write_zero_velocity()
             return
         if self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
             self._run_return_play()
@@ -584,7 +569,7 @@ class AssistantFollowRuntime:
             vx,
             vy,
             omega,
-            "assistant",
+            None,
             has_omega,
         )
         if (
@@ -593,26 +578,26 @@ class AssistantFollowRuntime:
         ):
             self._car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
 
-    def _should_store_velocity(self, source: str) -> bool:
+    def _should_store_velocity(self, source) -> bool:
         if self._sm.state == ASSISTANT_STATE_IDLE:
             return False
         if self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
             return False
         if self._sm.state == ASSISTANT_STATE_ORBIT:
-            return source == "uart6" and self._p_local is None
+            return source == _SRC_U6 and self._p_local is None
         if self._sm.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
         if self._sm.state == ASSISTANT_STATE_FINISHED:
             return False
         if self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
             return False
-        if source == "uart6" and self._p_local is not None:
+        if source == _SRC_U6 and self._p_local is not None:
             return False
         if self._sm.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             return True
         if self._sm.state != ASSISTANT_STATE_APPROACH_OBJECT:
             return True
-        if source == "uart8":
+        if source == _SRC_U8:
             return False
         if self._p_local is not None:
             return False
@@ -630,11 +615,9 @@ class AssistantFollowRuntime:
         self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
-        self._u6_status = "idle"
-        self._u8_status = "idle"
 
     def _enter_follow_state(self) -> None:
-        self._write_zero_velocity("assistant_follow")
+        self._write_zero_velocity()
         self._p_local = (
             ASSISTANT_STATE_FOLLOW,
             0,
@@ -644,7 +627,7 @@ class AssistantFollowRuntime:
         )
 
     def _enter_return_follow_state(self) -> None:
-        self._write_zero_velocity("assistant_return_play")
+        self._write_zero_velocity()
         self._p_local = (
             ASSISTANT_STATE_RETURN_FOLLOW,
             0,
@@ -690,7 +673,7 @@ class AssistantFollowRuntime:
             0.0,
             float(value),
             0.0,
-            "assistant_play",
+            None,
             False,
         )
 
@@ -709,12 +692,12 @@ class AssistantFollowRuntime:
     def play_disable_yellow_line_ready_gate(self) -> None:
         self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF, False)
 
-    def _write_zero_velocity(self, source: str) -> None:
+    def _write_zero_velocity(self) -> None:
         self._car.handle_velocity_packet(
             0.0,
             0.0,
             0.0,
-            source,
+            None,
             True,
         )
 
@@ -725,7 +708,7 @@ class AssistantFollowRuntime:
         self._found_done = False
         self._p_report = None
         self._clear_motion_inputs()
-        self._write_zero_velocity("assistant_approach_object")
+        self._write_zero_velocity()
         self._p_local = (
             int(packet[AS_STATE]),
             int(packet[AS_TARGET]),
@@ -756,13 +739,13 @@ class AssistantFollowRuntime:
     def _handle_local_target_found(self, value: int) -> None:
         self._found_done = True
         self._u6v = None
-        self._write_zero_velocity("assistant_target_found")
+        self._write_zero_velocity()
         self._p_report = (_TARGET_FOUND_EVENT, int(value), False)
 
     def _handle_local_aligned(self, value: int) -> None:
         self._found_done = True
         self._u6v = None
-        self._write_zero_velocity("assistant_aligned")
+        self._write_zero_velocity()
         self._p_report = (_ALIGNED_EVENT, int(value), False)
 
     def _enter_transport_state(self, packet) -> None:
@@ -773,7 +756,7 @@ class AssistantFollowRuntime:
         self._realign = False
         self._clear_done = False
         self._clear_motion_inputs()
-        self._write_zero_velocity("assistant_transport")
+        self._write_zero_velocity()
         self._p_local = (
             ASSISTANT_STATE_TRANSPORT_OBJECT,
             int(packet[AS_TARGET]),
@@ -857,7 +840,7 @@ class AssistantFollowRuntime:
             return
         self._clear_ticks = 0
         self._clear_done = True
-        self._write_zero_velocity("assistant_clear_complete")
+        self._write_zero_velocity()
         self._p_report = (
             _CLEARED_EVENT,
             int(self._sm.arg),
@@ -879,7 +862,6 @@ class AssistantFollowRuntime:
         )
         status = self._ts.tcp_write(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            self._log_local_vision_sync_start(pending)
             self._p_local = (
                 pending[_L_STATE],
                 pending[_L_TARGET],
@@ -909,68 +891,11 @@ class AssistantFollowRuntime:
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
             self._p_report = (pending[_R_EVENT], pending[_R_VALUE], True)
 
-    def build_follow_snapshot(self) -> dict:
-        return build_follow_snapshot(
-            self._sm.state,
-            self._sm.target,
-            dict(self._car.control_state),
-            self._u6_status,
-            self._u8_status,
-            self._build_velocity_snapshot(self._u6v),
-            self._build_velocity_snapshot(self._u8v),
-            self._p_local is not None,
-            self._found_done,
-            self._err,
-        )
-
-    def _build_velocity_snapshot(self, velocity) -> dict:
-        if velocity is None:
-            return {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-        return {
-            "vx": float(velocity[VEL_X]),
-            "vy": float(velocity[VEL_Y]),
-            "omega": float(velocity[VEL_W]),
-        }
-
     def _record_error_text(self, text: str, exc: Exception) -> None:
         if self._err != text:
             log_exception("assistant_error", text, exc)
         self._err = text
         self._car.last_exception_text = text
-
-    def _log_master_sync_done(self, packet) -> None:
-        state, target, arg, _ = packet
-        log(
-            "sync",
-            "master->assistant sync done state=%d target=%d arg=%d"
-            % (
-                int(state),
-                int(target),
-                int(arg),
-            ),
-        )
-
-    def _log_local_vision_sync_start(self, pending: tuple) -> None:
-        log(
-            "sync",
-            "assistant->camera sync start state=%d target=%d arg=%d"
-            % (
-                int(pending[_L_STATE]),
-                int(pending[_L_TARGET]),
-                int(pending[_L_ARG]),
-            ),
-        )
-
-    def _log_local_vision_sync_done(self, pending: tuple) -> None:
-        log(
-            "sync",
-            "assistant->camera sync done state=%d target=%d arg=%d"
-            % (
-                int(pending[_L_STATE]),
-                int(pending[_L_TARGET]),
-                int(pending[_L_ARG]),
-            ),
-        )
 
 
 def create_transport_car() -> AssistantFollowRuntime:

@@ -830,13 +830,13 @@ class TransportCar:
             self.command_mode = "none"
             self._translation_speed_limit_cmd = None
 
-    def handle_velocity_packet(self, vx, vy, omega=0.0, source="protocol", has_omega=True):
+    def handle_velocity_packet(self, vx, vy, omega=0.0, source=None, has_omega=True):
         """接收结构化速度短包结果
 
         @param vx 车体系 x 方向速度
         @param vy 车体系 y 方向速度
         @param omega 车体系角速度
-        @param source 输入来源标识
+        @param source 可选输入来源标识
         @param has_omega 本包是否显式携带角速度
         """
 

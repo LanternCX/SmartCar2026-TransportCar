@@ -255,7 +255,7 @@ def test_master_runtime_writes_zero_velocity_when_orbit_finishes(monkeypatch) ->
 
     assert runtime._sm.state != module.STATE_ORBITING
     assert cars[0].last_chassis_target == {
-        "source": "master_orbit_finished",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -290,7 +290,7 @@ def test_master_runtime_applies_local_velocity_after_task_delivery(monkeypatch) 
     run_runtime_cycle(runtime)
 
     assert cars[0].last_chassis_target == {
-        "source": "uart6",
+        "source": None,
         "vx": 1.0,
         "vy": -2.0,
         "omega": 0.0,
@@ -346,71 +346,12 @@ def test_master_runtime_clears_local_velocity_when_vision_event_arrives(monkeypa
 
     assert runtime._u6v is None
     assert cars[0].last_chassis_target == {
-        "source": "master_vision_event",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
         "has_omega": True,
     }
-
-
-def test_master_runtime_logs_when_task_event_arrives(monkeypatch, capsys) -> None:
-    clock = ManualClock(0)
-    install_fake_core(monkeypatch)
-    module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
-    )
-
-    runtime._handle_task_event(_master_event(7, 8, 0))
-
-    captured = capsys.readouterr().out
-    assert "master_event: received context=7 event=8 value=0" in captured
-
-
-def test_master_runtime_logs_task_event_context_status(monkeypatch, capsys) -> None:
-    clock = ManualClock(0)
-    install_fake_core(monkeypatch)
-    module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
-    )
-
-    runtime._act_ctx = 7
-    runtime._sm.state = module.STATE_TRANSPORT_OBJECT
-    runtime._handle_task_event(_master_event(7, 8, 0))
-
-    runtime._act_ctx = None
-    runtime._p_task = _task_pending(
-        module,
-        module.RK_T_FINISH,
-        8,
-        module.STATE_TRANSPORT_OBJECT,
-        module.TARGET_EDGE_LINE,
-        module.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
-        True,
-    )
-    runtime._handle_task_event(_master_event(8, 8, 0))
-
-    runtime._handle_task_event(_master_event(9, 8, 0))
-
-    captured = capsys.readouterr().out
-    assert "master_event: active context=7 state=4 event=8 value=0" in captured
-    assert "master_finish: arrived context=7 state=4 value=0" in captured
-    assert "master_event: pending context=8 state=4 event=8 value=0" in captured
-    assert "master_event: drop context=9 active=-1 pending=8 state=4 event=8 value=0" in captured
 
 
 def test_master_runtime_keeps_transport_and_feedforward_flow_quiet(
@@ -475,7 +416,7 @@ def test_master_runtime_transport_ignores_local_vision_x_correction(monkeypatch)
     runtime._apply_transport_velocity()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_transport",
+        "source": None,
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED - 0.5,
         "omega": 0.0,
@@ -510,7 +451,7 @@ def test_master_runtime_holds_before_finish_task_is_delivered(monkeypatch) -> No
     runtime._apply_motion_outputs()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_wait_finish_task",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -592,7 +533,7 @@ def test_master_runtime_holds_zero_during_clear_sync(monkeypatch) -> None:
     runtime._apply_motion_outputs()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_clear_hold",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -733,7 +674,7 @@ def test_master_runtime_pauses_local_vision_control_from_reliable_packet(monkeyp
     assert runtime._lv_pause is True
     assert runtime._u6v is None
     assert cars[0].last_chassis_target == {
-        "source": "local_vision_pause",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -773,11 +714,11 @@ def test_master_runtime_ignores_stale_pause_after_entering_transport(monkeypatch
     run_runtime_cycle(runtime)
 
     assert runtime._lv_pause is False
-    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    assert cars[0].last_chassis_target["source"] is None
     for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
         runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
-        "source": "master_transport",
+        "source": None,
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
@@ -835,7 +776,7 @@ def test_master_runtime_resume_discards_cached_velocity_until_next_udp(monkeypat
     run_runtime_cycle(runtime)
 
     assert cars[0].last_chassis_target == {
-        "source": "uart6",
+        "source": None,
         "vx": 2.0,
         "vy": 3.0,
         "omega": 0.0,
@@ -869,11 +810,11 @@ def test_master_runtime_transport_transition_clears_local_vision_pause(monkeypat
     run_runtime_cycle(runtime)
 
     assert runtime._lv_pause is False
-    assert cars[0].last_chassis_target["source"] == "master_transport_stop_lock"
+    assert cars[0].last_chassis_target["source"] is None
     for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
         runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
-        "source": "master_transport",
+        "source": None,
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
@@ -903,7 +844,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
     runtime._apply_motion_outputs()
 
     assert car.last_chassis_target == {
-        "source": "master_transport_stop_lock",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -913,12 +854,12 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
     car.w_filt[0] = 0.0
     for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
         runtime._apply_motion_outputs()
-        assert car.last_chassis_target["source"] == "master_transport_stop_lock"
+        assert car.last_chassis_target["source"] is None
 
     runtime._apply_motion_outputs()
 
     assert car.last_chassis_target == {
-        "source": "master_transport",
+        "source": None,
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
@@ -929,7 +870,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
     runtime._apply_motion_outputs()
 
     assert car.last_chassis_target == {
-        "source": "master_transport",
+        "source": None,
         "vx": 0.0,
         "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
@@ -964,7 +905,7 @@ def test_master_runtime_clears_local_velocity_when_assistant_event_arrives(monke
     run_runtime_cycle(runtime)
 
     assert runtime._u6v is None
-    assert ("handle_velocity", "assistant_event", 0.0, 0.0, 0.0) in cars[0].events
+    assert ("handle_velocity", None, 0.0, 0.0, 0.0) in cars[0].events
 
 
 def test_master_runtime_keeps_locked_pose_when_assistant_event_arrives(monkeypatch) -> None:
@@ -1047,13 +988,7 @@ def test_assistant_runtime_fuses_uart6_and_uart8_velocity(monkeypatch) -> None:
     uart6.push(ack_last_frame(uart6))
     clock.advance(20)
     run_runtime_cycle(runtime)
-    snapshot = runtime.build_follow_snapshot()
-
     assert cars[0].control_state == {"vx": 1.5, "vy": -0.25, "omega": 0.25}
-    assert snapshot["state"] == "active"
-    assert snapshot["assistant_state"] == module.ASSISTANT_STATE_FOLLOW
-    assert snapshot["uart6_input_status"] == "active"
-    assert snapshot["uart8_input_status"] == "active"
 
 
 def test_assistant_runtime_ignores_velocity_received_during_startup_move(monkeypatch) -> None:
@@ -1099,7 +1034,7 @@ def test_assistant_runtime_ignores_velocity_received_during_startup_move(monkeyp
     assert runtime._u6v is None
     assert runtime._u8v is None
     assert cars[0].last_chassis_target == {
-        "source": "assistant_follow",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -1375,7 +1310,7 @@ def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> N
         (0, 0, 0, 0, 0, 0),
     )
     assert cars[0].last_chassis_target == {
-        "source": "assistant_approach_object",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -1417,7 +1352,7 @@ def test_assistant_runtime_pauses_chassis_from_local_vision_control(monkeypatch)
     assert runtime._u6v is None
     assert runtime._u8v is None
     assert cars[0].last_chassis_target == {
-        "source": "local_vision_pause",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -1458,7 +1393,7 @@ def test_assistant_runtime_ignores_stale_pause_after_entering_transport(monkeypa
     assert runtime._lv_pause is False
     feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
     assert cars[0].last_chassis_target == {
-        "source": "assistant",
+        "source": None,
         "vx": 0.0,
         "vy": -4.0 * feedforward_scale,
         "omega": 0.0,
@@ -1539,7 +1474,7 @@ def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkey
 
     assert runtime._lv_pause is False
     assert runtime._u6v is None
-    assert cars[0].last_chassis_target["source"] == "assistant_follow"
+    assert cars[0].last_chassis_target["source"] is None
 
     uart6.push(
         encode_frame(
@@ -1553,7 +1488,7 @@ def test_assistant_runtime_resume_discards_cached_velocity_until_next_udp(monkey
     run_runtime_cycle(runtime)
 
     assert cars[0].last_chassis_target == {
-        "source": "assistant",
+        "source": None,
         "vx": 2.0,
         "vy": 3.0,
         "omega": 0.0,
@@ -1659,51 +1594,6 @@ def test_master_runtime_cycle_requests_each_port_once_for_normal_input(monkeypat
     assert uart8.read_calls == 1
 
 
-def test_master_runtime_logs_when_camera_sync_is_blocked_before_first_send(monkeypatch) -> None:
-    clock = ManualClock(0)
-    install_fake_core(monkeypatch)
-    module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    logs = []
-    monkeypatch.setattr(module, "log", lambda stage, detail="": logs.append((stage, detail)))
-    uart6 = BufferedUart(
-        incoming=encode_frame(
-            0x02,
-            TOPIC_MASTER_VISION_EVENT_REPORT,
-            7,
-            encode_master_vision_event_report_body(99, 6, 1),
-        )
-    )
-    uart8 = BufferedUart()
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=uart6,
-            uart8=uart8,
-            now_ms=clock,
-        ),
-    )
-
-    runtime._sm.state = module.STATE_SEARCH_OBJECT
-    runtime._last_state = module.STATE_SEARCH_OBJECT
-    runtime._p_task = _task_pending(
-        module,
-        module.RK_NONE,
-        99,
-        module.STATE_SEARCH_OBJECT,
-        module.TARGET_OBJECT,
-        1,
-    )
-
-    run_runtime_cycle(runtime)
-
-    assert any(
-        stage == "sync"
-        and "master->camera sync blocked status=dropped_priority" in detail
-        for stage, detail in logs
-    )
-
-
 def test_master_runtime_logs_role_cycle_failure_to_board_log(capsys, monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -1765,8 +1655,6 @@ def test_master_runtime_calls_state_machine_step_without_keyword_args(monkeypatc
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    logs = []
-    monkeypatch.setattr(module, "log", lambda stage, detail="": logs.append((stage, detail)))
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -1788,7 +1676,6 @@ def test_master_runtime_calls_state_machine_step_without_keyword_args(monkeypatc
 
     assert keep_running is False
     assert calls == [False]
-    assert not any(stage == "master_error" for stage, _ in logs)
 
 
 def test_master_runtime_calls_handle_event_without_keyword_args(monkeypatch) -> None:
@@ -1842,7 +1729,7 @@ def test_master_runtime_calls_transport_velocity_api_without_keyword_args(monkey
 
     runtime._apply_latest_uart6_velocity()
 
-    assert calls == [(1.0, -2.0, 0.0, "uart6", False)]
+    assert calls == [(1.0, -2.0, 0.0, None, False)]
 
 
 def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeypatch) -> None:
@@ -2031,7 +1918,7 @@ def test_master_runtime_turn_back_completes_inside_turn_back_tolerance(monkeypat
     assert runtime._sm.state == module.STATE_RETURN_GARAGE_RETREAT
     assert (
         "handle_velocity",
-        "master_turn_back_tolerance",
+        None,
         0.0,
         0.0,
         0.0,
@@ -2094,7 +1981,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
     assert cars[0].last_chassis_target == {
-        "source": "master_play",
+        "source": None,
         "vx": 0.0,
         "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
@@ -2110,7 +1997,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
 
     assert ("set_heading_transition_target", 0.0) in cars[0].events
     assert cars[0].last_chassis_target == {
-        "source": "master_play",
+        "source": None,
         "vx": 0.0,
         "vy": float(MASTER_FINAL_FORWARD_SPEED),
         "omega": 0.0,
@@ -2148,7 +2035,7 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     assert runtime.play_kind != 0
     assert runtime.play_step == 2
     assert cars[0].last_chassis_target == {
-        "source": "master_play",
+        "source": None,
         "vx": 0.0,
         "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
@@ -2159,7 +2046,7 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     runtime._apply_motion_outputs()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_play",
+        "source": None,
         "vx": 0.0,
         "vy": float(MASTER_RETURN_FORWARD_SPEED),
         "omega": 0.0,
@@ -2260,7 +2147,7 @@ def test_master_runtime_finished_stops_without_consuming_local_velocity(monkeypa
     runtime._apply_motion_outputs()
 
     assert cars[0].last_chassis_target == {
-        "source": "master_finished",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -2416,7 +2303,7 @@ def test_assistant_transport_uses_feedforward_y_without_local_vision_y(
 
     feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
     assert cars[0].last_chassis_target == {
-        "source": "assistant",
+        "source": None,
         "vx": 1.0,
         "vy": -4.0 * feedforward_scale,
         "omega": 0.0,
@@ -2516,7 +2403,7 @@ def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatc
         (0, 0, 0, 0, 0, 0),
     )
     assert cars[0].last_chassis_target == {
-        "source": "assistant_return_play",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -2557,7 +2444,6 @@ def test_assistant_runtime_return_follow_sync_uses_standard_logs(capsys, monkeyp
 
     output = capsys.readouterr().out
     assert "assistant_state: RETURN_FOLLOW\n" in output
-    assert "sync: master->assistant sync done state=6 target=0 arg=0\n" in output
     assert "assistant_return:" not in output
 
 
@@ -2619,7 +2505,7 @@ def test_assistant_runtime_finished_sync_clears_inputs_and_stops(monkeypatch) ->
     assert runtime._u6v is None
     assert runtime._u8v is None
     assert cars[0].last_chassis_target == {
-        "source": "assistant_finished",
+        "source": None,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
