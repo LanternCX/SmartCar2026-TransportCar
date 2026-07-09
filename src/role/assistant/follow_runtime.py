@@ -8,14 +8,25 @@ import time
 from config import motion as motion_params
 from config import vision as vision_params
 from protocol.codec import (
+    AE_EVENT,
+    AE_VALUE,
+    AS_ARG,
+    AS_STATE,
+    AS_TARGET,
+    AS_TH,
+    CTL_ACTION,
     LOCAL_VISION_CONTROL_PAUSE,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     LOCAL_VISION_CONTROL_RESUME,
+    VEL_HAS_W,
+    VEL_W,
+    VEL_X,
+    VEL_Y,
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
     decode_local_vision_control_body,
-    decode_velocity_body,
+    decode_velocity_body_into,
     encode_assistant_event_report_body,
     encode_assistant_vision_task_sync_body,
     encode_local_vision_control_body,
@@ -38,11 +49,7 @@ from protocol.transport import (
     WRITE_OVERWRITTEN,
     create_transport,
 )
-from play import PlayContext, PlayRunner
-from play.routines.assistant_return_garage import AssistantReturnGaragePlay
-from play.routines.startup_move import StartupMovePlay
-from utils.startup_log import log, log_exception
-from role.assistant.diagnostics import build_follow_snapshot
+from utils.startup_log import log_exception
 from role.assistant.state_machine import (
     ASSISTANT_STATE_APPROACH_OBJECT,
     ASSISTANT_STATE_CLEAR_OBJECT,
@@ -60,31 +67,47 @@ from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
 from role.transport_plan import target_edge_for_object
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-_TARGET_FOUND_EVENT = 6
-_ALIGNED_EVENT = 7
-_CLEARED_EVENT = 9
-_RETURN_LINE_ALIGNED_EVENT = 10
-_ASSISTANT_ORBIT_TARGET_DEG = getattr(motion_params, "ASSISTANT_ORBIT_TARGET_DEG")
-_ASSISTANT_ORBIT_RADIUS_SCALE = getattr(motion_params, "ASSISTANT_ORBIT_RADIUS_SCALE")
-_ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = getattr(
-    vision_params, "ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID"
+    def const(value):
+        return value
+
+
+_TARGET_FOUND_EVENT = const(6)
+_ALIGNED_EVENT = const(7)
+_CLEARED_EVENT = const(9)
+_RETURN_LINE_ALIGNED_EVENT = const(10)
+_ASSISTANT_ORBIT_TARGET_DEG = motion_params.ASSISTANT_ORBIT_TARGET_DEG
+_ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
+_ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
+_ASSISTANT_ORBIT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID
+ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = (
+    vision_params.ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID
 )
-_ASSISTANT_ORBIT_OBJECT_CONFIG_ID = getattr(
-    vision_params, "ASSISTANT_ORBIT_OBJECT_CONFIG_ID"
+ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
+_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
+    vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
 )
-ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = getattr(
-    vision_params, "ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID"
-)
-ORBIT_VISION_CORRECTION_ENABLED = bool(
-    getattr(vision_params, "ORBIT_VISION_CORRECTION_ENABLED")
-)
-_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = getattr(
-    vision_params, "ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE"
-)
-_TRANSPORT_CLEAR_STEP_DISTANCE_M = getattr(motion_params, "TRANSPORT_CLEAR_STEP_DISTANCE_M")
-MOTION_STOP_SPEED_THRESHOLD = getattr(motion_params, "MOTION_STOP_SPEED_THRESHOLD")
-MOTION_STOP_CONFIRM_TICKS = getattr(motion_params, "MOTION_STOP_CONFIRM_TICKS")
+_TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
+MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
+MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
+
+_L_STATE = const(0)
+_L_TARGET = const(1)
+_L_ARG = const(2)
+_L_THRESHOLD = const(3)
+_L_QUEUED = const(4)
+
+_R_EVENT = const(0)
+_R_VALUE = const(1)
+_R_QUEUED = const(2)
+
+_G_ACTION = const(0)
+_G_QUEUED = const(1)
+_SRC_U6 = const(6)
+_SRC_U8 = const(8)
 
 
 def _default_now_ms() -> int:
@@ -101,78 +124,78 @@ class AssistantFollowRuntime:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_ASSISTANT)
-        self._transport_car = car
-        self.wheel_states = car.wheel_states
+        # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是辅车状态机。
+        self._car = car
+        self.wheel_encoders = car.wheel_encoders
         self.imu = car.imu
         self._now_ms = now_ms or _default_now_ms
-        self.transport_service = transport or create_transport(
+        self._ts = transport or create_transport(
             ROLE_ASSISTANT,
             uart6=uart6,
             uart8=uart8,
             now_ms=self._now_ms,
         )
-        self._state_machine = AssistantStateMachine()
-        self.play = PlayRunner()
-        self._last_error_text = "none"
-        self._uart6_velocity = None
-        self._uart8_velocity = None
-        self._uart6_reset_version = 0
-        self._uart8_reset_version = 0
-        self._uart6_status = "idle"
-        self._uart8_status = "idle"
-        self.sync_context = None
+        self._sm = AssistantStateMachine()
+        self.play_kind = 0
+        self.play_step = 0
+        self.play_entered = False
+        self._err = "none"
+        # UART 缓存短字段：_u6v/_u8v 是速度槽，_u6_ver/_u8_ver 是版本线。
+        self._u6v = None
+        self._u8v = None
+        self._u6_pkt = [0.0, 0.0, 0.0, False]
+        self._u8_pkt = [0.0, 0.0, 0.0, False]
+        self._u6_ver = 0
+        self._u8_ver = 0
         self._sync_apply_count = 0
         seed_value = int(self._now_ms()) % 256
-        self._pending_local_vision_sync = None
-        self._pending_target_found_report = None
-        self._approach_target_found_done = False
+        # 本地视觉同步和主车回报 pending；object/clear 为当前任务阶段状态。
+        self._p_local = None
+        self._p_report = None
+        # object 状态保存当前目标、阈值和是否需要重新对齐。
+        self._found_done = False
         self._last_approach_arg = 0
-        self._current_object_id = 0
-        self._current_object_threshold = (0, 0, 0, 0, 0, 0)
-        self._post_orbit_realign_active = False
-        self._clear_completed = False
-        self._clear_stop_ticks = 0
-        self._velocity_body = bytearray(7)
-        self._local_vision_control_body = bytearray(1)
+        self._obj_id = 0
+        self._obj_th = (0, 0, 0, 0, 0, 0)
+        self._realign = False
+        # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
+        self._clear_done = False
+        self._clear_ticks = 0
+        # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
+        self._vel_body = bytearray(7)
+        self._ctrl_body = bytearray(1)
         self._sync_body = bytearray(10)
         self._event_body = bytearray(3)
-        self._local_vision_control_paused = False
-        self._return_line_aligned = False
-        self._return_line_gate_action = None
-        self._return_play_context = PlayContext(
-            set_position_x=self._play_set_position_x,
-            set_position_y=self._play_set_position_y,
-            set_angle=self._play_set_angle,
-            write_velocity_y=self._play_write_velocity_y,
-            is_position_x_done=self._play_motion_done,
-            is_position_y_done=self._play_motion_done,
-            is_angle_done=self._play_motion_done,
-            yellow_line_ready=self._play_yellow_line_ready,
-            clear_yellow_line_ready=self._play_clear_yellow_line_ready,
-            enable_yellow_line_ready_gate=self._play_enable_yellow_line_ready_gate,
-            disable_yellow_line_ready_gate=self._play_disable_yellow_line_ready_gate,
-        )
+        # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
+        self._lv_pause = False
+        self._line_ok = False
+        self._gate = None
+
+    def prepare_runtime(self) -> None:
+        from play import sequence as play_sequence
+
+        play_sequence.clear(self)
 
     def mark_tick(self, tick=None) -> None:
-        self._transport_car.mark_tick(tick)
+        self._car.mark_tick(tick)
 
     def set_ticker(self, ticker_obj: object) -> None:
-        self._transport_car.set_ticker(ticker_obj)
+        self._car.set_ticker(ticker_obj)
 
     def has_pending_tick(self) -> bool:
-        return self._transport_car.has_pending_tick()
+        return self._car.has_pending_tick()
 
     def step_control(self) -> bool:
-        return self._transport_car.step_control()
+        return self._car.step_control()
 
     def collect_garbage(self) -> None:
-        self._transport_car.collect_garbage()
+        self._car.collect_garbage()
 
     def poll_transport_rx(self) -> None:
-        self.transport_service.poll_rx()
+        self._ts.poll_rx()
 
     def poll_transport_tx(self) -> None:
-        self.transport_service.poll_tx()
+        self._ts.poll_tx()
 
     def step_motion_input(self) -> bool:
         try:
@@ -193,7 +216,7 @@ class AssistantFollowRuntime:
     def step(self) -> bool:
         self.step_role()
         self.step_motion_input()
-        keep_running = self._transport_car.step()
+        keep_running = self._car.step()
         return keep_running
 
     def _run_motion_input_cycle(self) -> None:
@@ -215,738 +238,664 @@ class AssistantFollowRuntime:
 
     def _check_transport_deliveries(self) -> None:
         """根据通信层交付状态释放本地视觉同步和主车回报槽."""
-        pending = self._pending_local_vision_sync
-        if pending is not None and pending.get("queued"):
+        pending = self._p_local
+        if pending is not None and pending[_L_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_ASSISTANT_VISION_TASK_SYNC)
+                self._ts.tcp_delivery(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
-                self._log_local_vision_sync_done(pending)
-                self._pending_local_vision_sync = None
-        pending_gate = self._return_line_gate_action
-        if pending_gate is not None and pending_gate.get("queued"):
+                self._p_local = None
+        pending_gate = self._gate
+        if pending_gate is not None and pending_gate[_G_QUEUED]:
             if (
-                self.transport_service.tcp(UART6).delivery(TOPIC_LOCAL_VISION_CONTROL)
+                self._ts.tcp_delivery(UART6, TOPIC_LOCAL_VISION_CONTROL)
                 == DELIVERY_DELIVERED
             ):
-                self._return_line_gate_action = None
-        pending = self._pending_target_found_report
-        if pending is not None and pending.get("queued"):
+                self._gate = None
+        pending = self._p_report
+        if pending is not None and pending[_R_QUEUED]:
             if (
-                self.transport_service.tcp(UART8).delivery(TOPIC_ASSISTANT_EVENT_REPORT)
+                self._ts.tcp_delivery(UART8, TOPIC_ASSISTANT_EVENT_REPORT)
                 == DELIVERY_DELIVERED
             ):
-                self._pending_target_found_report = None
+                self._p_report = None
 
     def _consume_master_sync(self) -> None:
         """消费主车下发的辅车状态同步."""
         if (
-            self.transport_service.tcp(UART8).read(
+            self._ts.tcp_read(
+                UART8,
                 TOPIC_ASSISTANT_STATE_SYNC, self._sync_body
             )
             != "ok"
         ):
             return
         packet = decode_assistant_state_sync_body(self._sync_body)
+        state, _, _, _ = packet
         accepted = self._apply_sync_context(packet)
         if not accepted:
-            text = "unknown assistant sync state: %s" % int(packet["state"])
+            text = "unknown assistant sync state: %s" % int(state)
             self._record_error_text(text, RuntimeError(text))
             return
-        self.sync_context = dict(packet)
         self._sync_apply_count += 1
-        self._log_master_sync_done(packet)
 
-    def _apply_sync_context(self, packet: dict) -> bool:
-        accepted = self._state_machine.apply_master_state(
-            packet["state"], packet["target"], packet["arg"]
+    def _apply_sync_context(self, packet) -> bool:
+        state, target, arg, _ = packet
+        accepted = self._sm.apply_master_state(
+            state, target, arg
         )
         if not accepted:
             return False
-        if self._state_machine.state != ASSISTANT_STATE_RETURN_FOLLOW:
-            self.play.current_play = None
-            self._return_line_aligned = False
-            self._return_line_gate_action = None
+        if self._sm.state != ASSISTANT_STATE_RETURN_FOLLOW:
+            from play import sequence as play_sequence
+
+            play_sequence.clear(self)
+            self._line_ok = False
+            self._gate = None
         self._clear_local_vision_pause_residue()
-        if self._state_machine.is_idle():
-            self._current_object_id = 0
-            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
+        if self._sm.is_idle():
+            self._obj_id = 0
+            self._obj_th = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
-            self._pending_local_vision_sync = None
-            self._pending_target_found_report = None
-            self._approach_target_found_done = False
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
-            self._write_zero_velocity("assistant_idle")
-        elif self._state_machine.state == ASSISTANT_STATE_FOLLOW:
-            self._current_object_id = 0
-            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
+            self._p_local = None
+            self._p_report = None
+            self._found_done = False
+            self._realign = False
+            self._clear_done = False
+            self._write_zero_velocity()
+        elif self._sm.state == ASSISTANT_STATE_FOLLOW:
+            self._obj_id = 0
+            self._obj_th = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
-            self._pending_target_found_report = None
-            self._approach_target_found_done = False
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
+            self._p_report = None
+            self._found_done = False
+            self._realign = False
+            self._clear_done = False
             self._enter_follow_state()
-        elif self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+        elif self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
             self._clear_motion_inputs()
-            self._pending_local_vision_sync = None
-            self._pending_target_found_report = None
-            self._approach_target_found_done = False
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
-        elif self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
+            self._p_local = None
+            self._p_report = None
+            self._found_done = False
+            self._realign = False
+            self._clear_done = False
+        elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            self._realign = False
+            self._clear_done = False
             self._enter_approach_object_state(packet)
-        elif self._state_machine.state == ASSISTANT_STATE_ORBIT:
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
+        elif self._sm.state == ASSISTANT_STATE_ORBIT:
+            self._realign = False
+            self._clear_done = False
             self._enter_orbit_state()
-        elif self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
+        elif self._sm.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+            self._realign = False
+            self._clear_done = False
             self._enter_transport_state(packet)
-        elif self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
-            self._post_orbit_realign_active = False
+        elif self._sm.state == ASSISTANT_STATE_CLEAR_OBJECT:
+            self._realign = False
             self._enter_clear_object_state()
-        elif self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
-            self._current_object_id = 0
-            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
+        elif self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
+            self._obj_id = 0
+            self._obj_th = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
-            self._pending_target_found_report = None
-            self._approach_target_found_done = False
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
-            self._return_line_aligned = False
+            self._p_report = None
+            self._found_done = False
+            self._realign = False
+            self._clear_done = False
+            self._line_ok = False
             self._enter_return_follow_state()
-        elif self._state_machine.state == ASSISTANT_STATE_FINISHED:
-            self._current_object_id = 0
-            self._current_object_threshold = (0, 0, 0, 0, 0, 0)
+        elif self._sm.state == ASSISTANT_STATE_FINISHED:
+            self._obj_id = 0
+            self._obj_th = (0, 0, 0, 0, 0, 0)
             self._clear_motion_inputs()
-            self._pending_local_vision_sync = None
-            self._pending_target_found_report = None
-            self._approach_target_found_done = False
-            self._post_orbit_realign_active = False
-            self._clear_completed = False
-            self._write_zero_velocity("assistant_finished")
+            self._p_local = None
+            self._p_report = None
+            self._found_done = False
+            self._realign = False
+            self._clear_done = False
+            self._write_zero_velocity()
         return True
 
     def _clear_local_vision_pause_residue(self) -> None:
-        self._local_vision_control_paused = False
-        self._uart6_velocity = None
-        self._uart8_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._lv_pause = False
+        self._u6v = None
+        self._u8v = None
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._uart8_reset_version = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
 
     def _consume_local_vision_event(self) -> None:
         """消费本地视觉的可靠事件回报."""
         if (
-            self.transport_service.tcp(UART6).read(
+            self._ts.tcp_read(
+                UART6,
                 TOPIC_ASSISTANT_VISION_EVENT_REPORT, self._event_body
             )
             != "ok"
         ):
             return
         packet = decode_assistant_vision_event_report_body(self._event_body)
-        event = int(packet["event"])
+        event = int(packet[AE_EVENT])
         if (
-            self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
+            self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and event == _TARGET_FOUND_EVENT
-            and not self._approach_target_found_done
-            and not self._post_orbit_realign_active
+            and not self._found_done
+            and not self._realign
         ):
-            self._handle_local_target_found(packet["value"])
+            self._handle_local_target_found(packet[AE_VALUE])
         elif (
-            self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
+            self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and event == _ALIGNED_EVENT
-            and self._post_orbit_realign_active
-            and not self._approach_target_found_done
+            and self._realign
+            and not self._found_done
         ):
-            self._handle_local_aligned(packet["value"])
+            self._handle_local_aligned(packet[AE_VALUE])
         elif (
-            self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW
+            self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW
             and event == _RETURN_LINE_ALIGNED_EVENT
         ):
-            self._return_line_aligned = True
+            self._line_ok = True
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
 
         @details 通过版本号判断状态切换后的旧值是否仍应被忽略, 不直接清底层缓存
         """
-        self._uart6_status = "idle"
-        self._uart8_status = "idle"
         if (
-            self.transport_service.tcp(UART6).read(
-                TOPIC_LOCAL_VISION_CONTROL, self._local_vision_control_body
+            self._ts.tcp_read(
+                UART6,
+                TOPIC_LOCAL_VISION_CONTROL, self._ctrl_body
             )
             == "ok"
         ):
-            packet = decode_local_vision_control_body(self._local_vision_control_body)
+            packet = decode_local_vision_control_body(self._ctrl_body)
             self._handle_local_vision_control(packet)
         if (
-            self.transport_service.udp(UART6).read(TOPIC_LOCAL_VISION_VELOCITY, self._velocity_body)
+            self._ts.udp_read(UART6, TOPIC_LOCAL_VISION_VELOCITY, self._vel_body)
             == "ok"
         ):
-            version = self.transport_service.get_udp_version(
+            version = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._uart6_reset_version and not self._local_vision_control_paused:
-                self._uart6_velocity = decode_velocity_body(self._velocity_body)
-                self._uart6_velocity["omega"] = 0.0
-                self._uart6_velocity["has_omega"] = False
-                self._uart6_status = "active"
+            if version > self._u6_ver and not self._lv_pause:
+                self._u6v = decode_velocity_body_into(
+                    self._vel_body, self._u6_pkt
+                )
+                self._u6v[VEL_W] = 0.0
+                self._u6v[VEL_HAS_W] = False
         if (
-            self.transport_service.udp(UART8).read(
+            self._ts.udp_read(
+                UART8,
                 TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
-                self._velocity_body,
+                self._vel_body,
             )
             == "ok"
         ):
-            version = self.transport_service.get_udp_version(
+            version = self._ts.get_udp_version(
                 UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
             )
-            if version > self._uart8_reset_version and not self._local_vision_control_paused:
-                self._uart8_velocity = decode_velocity_body(self._velocity_body)
-                self._uart8_status = "active"
+            if version > self._u8_ver and not self._lv_pause:
+                self._u8v = decode_velocity_body_into(
+                    self._vel_body, self._u8_pkt
+                )
 
-        if not self._should_store_velocity("uart6"):
-            self._uart6_velocity = None
-            self._uart6_status = "idle"
-        if not self._should_store_velocity("uart8"):
-            self._uart8_velocity = None
-            self._uart8_status = "idle"
+        if not self._should_store_velocity(_SRC_U6):
+            self._u6v = None
+        if not self._should_store_velocity(_SRC_U8):
+            self._u8v = None
 
-    def _handle_local_vision_control(self, packet: dict) -> None:
+    def _handle_local_vision_control(self, packet) -> None:
         """处理 OpenART 慢帧前后的可靠暂停控制."""
 
-        action = int(packet.get("action", 0))
-        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+        action = int(packet[CTL_ACTION])
+        if self._sm.state == ASSISTANT_STATE_ORBIT:
             self._clear_local_vision_pause_residue()
             return
         if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
-            self._local_vision_control_paused = False
+            self._lv_pause = False
             return
-        self._uart6_velocity = None
-        self._uart8_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._u6v = None
+        self._u8v = None
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._uart8_reset_version = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
         if action == LOCAL_VISION_CONTROL_PAUSE:
-            self._local_vision_control_paused = True
-            self._write_zero_velocity("local_vision_pause")
+            self._lv_pause = True
+            self._write_zero_velocity()
             return
         if action == LOCAL_VISION_CONTROL_RESUME:
-            self._local_vision_control_paused = False
+            self._lv_pause = False
 
     def _allows_local_vision_control(self) -> bool:
-        if self._state_machine.state == ASSISTANT_STATE_FOLLOW:
+        if self._sm.state == ASSISTANT_STATE_FOLLOW:
             return True
-        if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             return True
-        if self._state_machine.state != ASSISTANT_STATE_ORBIT:
+        if self._sm.state != ASSISTANT_STATE_ORBIT:
             return False
-        return int(unpack_task_arg_config(self._state_machine.arg)) == int(
+        return int(unpack_task_arg_config(self._sm.arg)) == int(
             _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
         )
 
     def _write_effective_velocity(self) -> None:
-        if self._local_vision_control_paused:
-            self._write_zero_velocity("local_vision_pause")
+        if self._lv_pause:
+            self._write_zero_velocity()
             return
-        if self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._write_approach_object_velocity()
             return
-        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
+        if self._sm.state == ASSISTANT_STATE_ORBIT:
             self._write_orbit_velocity_correction()
             return
-        if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return
-        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
-            self._write_zero_velocity("assistant_finished")
+        if self._sm.state == ASSISTANT_STATE_FINISHED:
+            self._write_zero_velocity()
             return
-        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+        if self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
             self._run_return_play()
             return
-        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+        if self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
             self._run_startup_move_play()
             return
-        if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             self._write_transport_object_velocity()
             return
-        uart6_velocity = self._uart6_velocity
-        uart8_velocity = self._uart8_velocity
+        uart6_velocity = self._u6v
+        uart8_velocity = self._u8v
         if uart6_velocity is None and uart8_velocity is None:
             return
         if uart6_velocity is None:
-            uart6_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "has_omega": False}
+            uart6_velocity = (0.0, 0.0, 0.0, False)
         if uart8_velocity is None:
-            uart8_velocity = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "has_omega": False}
-        vx = float(uart6_velocity.get("vx", 0.0)) + float(uart8_velocity.get("vx", 0.0))
-        vy = float(uart6_velocity.get("vy", 0.0)) + float(uart8_velocity.get("vy", 0.0))
+            uart8_velocity = (0.0, 0.0, 0.0, False)
+        vx = float(uart6_velocity[VEL_X]) + float(uart8_velocity[VEL_X])
+        vy = float(uart6_velocity[VEL_Y]) + float(uart8_velocity[VEL_Y])
         omega = 0.0
-        if uart8_velocity.get("has_omega"):
-            omega = float(uart8_velocity.get("omega", 0.0))
-        self._apply_effective_velocity(vx, vy, omega, bool(uart8_velocity.get("has_omega")))
+        if uart8_velocity[VEL_HAS_W]:
+            omega = float(uart8_velocity[VEL_W])
+        self._apply_effective_velocity(vx, vy, omega, bool(uart8_velocity[VEL_HAS_W]))
 
     def _write_approach_object_velocity(self) -> None:
-        if self._pending_local_vision_sync is not None or self._approach_target_found_done:
+        if self._p_local is not None or self._found_done:
             return
-        uart6_velocity = self._uart6_velocity
+        uart6_velocity = self._u6v
         if uart6_velocity is None:
             return
         self._apply_effective_velocity(
-            float(uart6_velocity.get("vx", 0.0)),
-            float(uart6_velocity.get("vy", 0.0)),
+            float(uart6_velocity[VEL_X]),
+            float(uart6_velocity[VEL_Y]),
             0.0,
             False,
         )
 
     def _write_transport_object_velocity(self) -> None:
-        uart6_velocity = self._uart6_velocity
-        uart8_velocity = self._uart8_velocity
+        uart6_velocity = self._u6v
+        uart8_velocity = self._u8v
         if uart6_velocity is None and uart8_velocity is None:
             return
         vx = 0.0
         vy = 0.0
         if uart8_velocity is not None:
             scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
-            vy += -float(uart8_velocity.get("vy", 0.0)) * scale
+            vy += -float(uart8_velocity[VEL_Y]) * scale
         if uart6_velocity is not None:
-            vx += float(uart6_velocity.get("vx", 0.0))
+            vx += float(uart6_velocity[VEL_X])
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
     def _write_orbit_velocity_correction(self) -> None:
         if not ORBIT_VISION_CORRECTION_ENABLED:
             return
-        if not bool(getattr(self._transport_car, "orbit_mode", False)):
+        if not bool(getattr(self._car, "orbit_mode", False)):
             return
-        if self._pending_local_vision_sync is not None:
+        if self._p_local is not None:
             return
-        uart6_velocity = self._uart6_velocity
+        uart6_velocity = self._u6v
         if uart6_velocity is None:
             return
-        self._transport_car.set_orbit_velocity_correction(
-            float(uart6_velocity.get("vx", 0.0)),
-            float(uart6_velocity.get("vy", 0.0)),
+        self._car.set_orbit_velocity_correction(
+            float(uart6_velocity[VEL_X]),
+            float(uart6_velocity[VEL_Y]),
         )
 
     def _apply_effective_velocity(self, vx: float, vy: float, omega: float, has_omega: bool) -> None:
-        self._transport_car.handle_velocity_packet(
+        self._car.handle_velocity_packet(
             vx,
             vy,
             omega,
-            "assistant",
+            None,
             has_omega,
         )
         if (
-            self._state_machine.state == ASSISTANT_STATE_APPROACH_OBJECT
-            and self._post_orbit_realign_active
+            self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
+            and self._realign
         ):
-            self._transport_car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
+            self._car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
 
-    def _should_store_velocity(self, source: str) -> bool:
-        if self._state_machine.state == ASSISTANT_STATE_IDLE:
+    def _should_store_velocity(self, source) -> bool:
+        if self._sm.state == ASSISTANT_STATE_IDLE:
             return False
-        if self._state_machine.state == ASSISTANT_STATE_STARTUP_MOVE:
+        if self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
             return False
-        if self._state_machine.state == ASSISTANT_STATE_ORBIT:
-            return source == "uart6" and self._pending_local_vision_sync is None
-        if self._state_machine.state == ASSISTANT_STATE_CLEAR_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_ORBIT:
+            return source == _SRC_U6 and self._p_local is None
+        if self._sm.state == ASSISTANT_STATE_CLEAR_OBJECT:
             return False
-        if self._state_machine.state == ASSISTANT_STATE_FINISHED:
+        if self._sm.state == ASSISTANT_STATE_FINISHED:
             return False
-        if self._state_machine.state == ASSISTANT_STATE_RETURN_FOLLOW:
+        if self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
             return False
-        if source == "uart6" and self._pending_local_vision_sync is not None:
+        if source == _SRC_U6 and self._p_local is not None:
             return False
-        if self._state_machine.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
+        if self._sm.state == ASSISTANT_STATE_TRANSPORT_OBJECT:
             return True
-        if self._state_machine.state != ASSISTANT_STATE_APPROACH_OBJECT:
+        if self._sm.state != ASSISTANT_STATE_APPROACH_OBJECT:
             return True
-        if source == "uart8":
+        if source == _SRC_U8:
             return False
-        if self._pending_local_vision_sync is not None:
+        if self._p_local is not None:
             return False
-        if self._approach_target_found_done:
+        if self._found_done:
             return False
         return True
 
     def _clear_motion_inputs(self) -> None:
         """在状态切换时丢弃当前业务视角下的旧速度输入."""
-        self._uart6_velocity = None
-        self._uart8_velocity = None
-        self._uart6_reset_version = self.transport_service.get_udp_version(
+        self._u6v = None
+        self._u8v = None
+        self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
-        self._uart8_reset_version = self.transport_service.get_udp_version(
+        self._u8_ver = self._ts.get_udp_version(
             UART8, TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY
         )
-        self._uart6_status = "idle"
-        self._uart8_status = "idle"
 
     def _enter_follow_state(self) -> None:
-        self._write_zero_velocity("assistant_follow")
-        self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_FOLLOW,
-            "target": 0,
-            "arg": 0,
-            "threshold": (0, 0, 0, 0, 0, 0),
-            "queued": False,
-        }
-
-    def _enter_return_follow_state(self) -> None:
-        self._write_zero_velocity("assistant_return_play")
-        self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_RETURN_FOLLOW,
-            "target": 0,
-            "arg": int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
-            "threshold": (0, 0, 0, 0, 0, 0),
-            "queued": False,
-        }
-
-    def _run_return_play(self) -> None:
-        if self.play.current_play is None:
-            self.play.run(AssistantReturnGaragePlay)
-        self.play.tick(self._return_play_context)
-
-    def _run_startup_move_play(self) -> None:
-        if self.play.current_play is None:
-            self.play.run(StartupMovePlay)
-        result = self.play.tick(self._return_play_context)
-        if result.status == "finished":
-            self._state_machine.mark_startup_move_completed()
-            self._enter_follow_state()
-
-    def _play_set_position_x(self, value, max_speed_cmd=None) -> None:
-        self._transport_car.set_relative_translation_target(
-            float(value),
-            0.0,
-            max_speed_cmd=max_speed_cmd,
-        )
-
-    def _play_set_position_y(self, value, max_speed_cmd=None) -> None:
-        self._transport_car.set_relative_translation_target(
-            0.0,
-            float(value),
-            max_speed_cmd=max_speed_cmd,
-        )
-
-    def _play_set_angle(self, value) -> None:
-        target_heading_deg = float(getattr(self._transport_car, "heading_est", 0.0)) + float(value)
-        self._transport_car.set_heading_transition_target(target_heading_deg)
-
-    def _play_write_velocity_y(self, value) -> None:
-        self._transport_car.handle_velocity_packet(
-            0.0,
-            float(value),
-            0.0,
-            "assistant_play",
+        self._write_zero_velocity()
+        self._p_local = (
+            ASSISTANT_STATE_FOLLOW,
+            0,
+            0,
+            (0, 0, 0, 0, 0, 0),
             False,
         )
 
-    def _play_motion_done(self) -> bool:
-        return not bool(getattr(self._transport_car, "command_lock", False))
+    def _enter_return_follow_state(self) -> None:
+        self._write_zero_velocity()
+        self._p_local = (
+            ASSISTANT_STATE_RETURN_FOLLOW,
+            0,
+            int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
+            (0, 0, 0, 0, 0, 0),
+            False,
+        )
 
-    def _play_yellow_line_ready(self) -> bool:
-        return bool(self._return_line_aligned)
+    def _run_return_play(self) -> None:
+        from play import sequence as play_sequence
 
-    def _play_clear_yellow_line_ready(self) -> None:
-        self._return_line_aligned = False
+        play_sequence.start(self, play_sequence.PLAY_ASSISTANT_RETURN)
+        play_sequence.tick(self)
 
-    def _play_enable_yellow_line_ready_gate(self) -> None:
-        self._return_line_gate_action = {
-            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
-            "queued": False,
-        }
+    def _run_startup_move_play(self) -> None:
+        from play import sequence as play_sequence
 
-    def _play_disable_yellow_line_ready_gate(self) -> None:
-        self._return_line_gate_action = {
-            "action": LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-            "queued": False,
-        }
+        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if play_sequence.tick(self):
+            self._sm.mark_startup_move_completed()
+            self._enter_follow_state()
 
-    def _write_zero_velocity(self, source: str) -> None:
-        self._transport_car.handle_velocity_packet(
+    def play_set_position_x(self, value, max_speed_cmd=None) -> None:
+        self._car.set_relative_translation_target(
+            float(value),
+            0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_position_y(self, value, max_speed_cmd=None) -> None:
+        self._car.set_relative_translation_target(
+            0.0,
+            float(value),
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_angle(self, value) -> None:
+        target_heading_deg = float(getattr(self._car, "heading_est", 0.0)) + float(value)
+        self._car.set_heading_transition_target(target_heading_deg)
+
+    def play_write_velocity_y(self, value) -> None:
+        self._car.handle_velocity_packet(
+            0.0,
+            float(value),
+            0.0,
+            None,
+            False,
+        )
+
+    def play_motion_done(self) -> bool:
+        return not bool(getattr(self._car, "command_lock", False))
+
+    def play_yellow_line_ready(self) -> bool:
+        return bool(self._line_ok)
+
+    def play_clear_yellow_line_ready(self) -> None:
+        self._line_ok = False
+
+    def play_enable_yellow_line_ready_gate(self) -> None:
+        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON, False)
+
+    def play_disable_yellow_line_ready_gate(self) -> None:
+        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF, False)
+
+    def _write_zero_velocity(self) -> None:
+        self._car.handle_velocity_packet(
             0.0,
             0.0,
             0.0,
-            source,
+            None,
             True,
         )
 
-    def _enter_approach_object_state(self, packet: dict) -> None:
-        self._last_approach_arg = int(packet["arg"])
-        self._current_object_id = unpack_task_arg_object_id(packet["arg"])
-        self._current_object_threshold = tuple(
-            packet.get("threshold", self._current_object_threshold)
-        )
-        self._approach_target_found_done = False
-        self._pending_target_found_report = None
+    def _enter_approach_object_state(self, packet) -> None:
+        self._last_approach_arg = int(packet[AS_ARG])
+        self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+        self._obj_th = tuple(packet[AS_TH])
+        self._found_done = False
+        self._p_report = None
         self._clear_motion_inputs()
-        self._write_zero_velocity("assistant_approach_object")
-        self._pending_local_vision_sync = {
-            "state": int(packet["state"]),
-            "target": int(packet["target"]),
-            "arg": int(packet["arg"]),
-            "threshold": self._current_object_threshold,
-            "queued": False,
-        }
+        self._write_zero_velocity()
+        self._p_local = (
+            int(packet[AS_STATE]),
+            int(packet[AS_TARGET]),
+            int(packet[AS_ARG]),
+            self._obj_th,
+            False,
+        )
 
     def _enter_orbit_state(self) -> None:
-        self._approach_target_found_done = False
-        self._pending_target_found_report = None
+        self._found_done = False
+        self._p_report = None
         self._clear_motion_inputs()
-        self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_ORBIT,
-            "target": ASSISTANT_TARGET_OBJECT,
-            "arg": pack_task_arg(
+        self._p_local = (
+            ASSISTANT_STATE_ORBIT,
+            ASSISTANT_TARGET_OBJECT,
+            pack_task_arg(
                 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID,
-                self._current_object_id,
+                self._obj_id,
             ),
-            "threshold": self._current_object_threshold,
-            "queued": False,
-        }
-        self._transport_car.set_orbit_target(
+            self._obj_th,
+            False,
+        )
+        self._car.set_orbit_target(
             float(_ASSISTANT_ORBIT_TARGET_DEG),
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
         )
 
     def _handle_local_target_found(self, value: int) -> None:
-        self._approach_target_found_done = True
-        self._uart6_velocity = None
-        self._write_zero_velocity("assistant_target_found")
-        self._pending_target_found_report = {
-            "event": _TARGET_FOUND_EVENT,
-            "value": int(value),
-            "queued": False,
-        }
+        self._found_done = True
+        self._u6v = None
+        self._write_zero_velocity()
+        self._p_report = (_TARGET_FOUND_EVENT, int(value), False)
 
     def _handle_local_aligned(self, value: int) -> None:
-        self._approach_target_found_done = True
-        self._uart6_velocity = None
-        self._write_zero_velocity("assistant_aligned")
-        self._pending_target_found_report = {
-            "event": _ALIGNED_EVENT,
-            "value": int(value),
-            "queued": False,
-        }
+        self._found_done = True
+        self._u6v = None
+        self._write_zero_velocity()
+        self._p_report = (_ALIGNED_EVENT, int(value), False)
 
-    def _enter_transport_state(self, packet: dict) -> None:
-        self._current_object_id = unpack_task_arg_object_id(packet["arg"])
-        self._current_object_threshold = tuple(
-            packet.get("threshold", self._current_object_threshold)
-        )
-        self._approach_target_found_done = False
-        self._pending_target_found_report = None
-        self._post_orbit_realign_active = False
-        self._clear_completed = False
+    def _enter_transport_state(self, packet) -> None:
+        self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+        self._obj_th = tuple(packet[AS_TH])
+        self._found_done = False
+        self._p_report = None
+        self._realign = False
+        self._clear_done = False
         self._clear_motion_inputs()
-        self._write_zero_velocity("assistant_transport")
-        self._pending_local_vision_sync = {
-            "state": ASSISTANT_STATE_TRANSPORT_OBJECT,
-            "target": int(packet["target"]),
-            "arg": pack_task_arg(
+        self._write_zero_velocity()
+        self._p_local = (
+            ASSISTANT_STATE_TRANSPORT_OBJECT,
+            int(packet[AS_TARGET]),
+            pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
-                self._current_object_id,
+                self._obj_id,
             ),
-            "threshold": self._current_object_threshold,
-            "queued": False,
-        }
+            self._obj_th,
+            False,
+        )
 
     def _enter_clear_object_state(self) -> None:
-        self._approach_target_found_done = False
-        self._pending_local_vision_sync = None
-        self._pending_target_found_report = None
-        self._post_orbit_realign_active = False
-        self._clear_completed = False
-        self._clear_stop_ticks = 0
+        self._found_done = False
+        self._p_local = None
+        self._p_report = None
+        self._realign = False
+        self._clear_done = False
+        self._clear_ticks = 0
         self._clear_motion_inputs()
-        self._transport_car.calibrate_pose_to_field_edge(
-            target_edge_for_object(self._current_object_id)
+        self._car.calibrate_pose_to_field_edge(
+            target_edge_for_object(self._obj_id)
         )
-        clear_phase = int(self._state_machine.arg)
+        clear_phase = int(self._sm.arg)
         if clear_phase == CLEAR_PHASE_RETREAT:
-            self._transport_car.set_relative_translation_target(
+            self._car.set_relative_translation_target(
                 0.0,
                 -float(_TRANSPORT_CLEAR_STEP_DISTANCE_M) * 0.5,
             )
             return
         if clear_phase == CLEAR_PHASE_FORWARD:
-            self._transport_car.set_relative_translation_target(
+            self._car.set_relative_translation_target(
                 0.0,
                 float(_TRANSPORT_CLEAR_STEP_DISTANCE_M),
             )
 
     def _resume_approach_after_orbit(self) -> None:
-        if self._state_machine.state != ASSISTANT_STATE_ORBIT:
+        if self._sm.state != ASSISTANT_STATE_ORBIT:
             return
-        if bool(getattr(self._transport_car, "command_lock", False)):
+        if bool(getattr(self._car, "command_lock", False)):
             return
-        if self._post_orbit_realign_active:
+        if self._realign:
             return
         if self._last_approach_arg <= 0:
             return
-        self._state_machine.apply_master_state(
+        self._sm.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,
             ASSISTANT_TARGET_OBJECT,
             pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
-                self._current_object_id,
+                self._obj_id,
             ),
         )
         self._enter_approach_object_state(
-            {
-                "state": ASSISTANT_STATE_APPROACH_OBJECT,
-                "target": ASSISTANT_TARGET_OBJECT,
-                "arg": pack_task_arg(
+            (
+                ASSISTANT_STATE_APPROACH_OBJECT,
+                ASSISTANT_TARGET_OBJECT,
+                pack_task_arg(
                     _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
-                    self._current_object_id,
+                    self._obj_id,
                 ),
-                "threshold": self._current_object_threshold,
-            }
+                self._obj_th,
+            )
         )
-        self._post_orbit_realign_active = True
+        self._realign = True
 
     def _finish_clear_if_needed(self) -> None:
-        if self._state_machine.state != ASSISTANT_STATE_CLEAR_OBJECT:
-            self._clear_stop_ticks = 0
+        if self._sm.state != ASSISTANT_STATE_CLEAR_OBJECT:
+            self._clear_ticks = 0
             return
-        if self._clear_completed:
-            self._clear_stop_ticks = 0
+        if self._clear_done:
+            self._clear_ticks = 0
             return
-        if bool(getattr(self._transport_car, "command_lock", False)):
-            self._clear_stop_ticks = 0
+        if bool(getattr(self._car, "command_lock", False)):
+            self._clear_ticks = 0
             return
         if not self._are_all_wheels_near_stop():
-            self._clear_stop_ticks = 0
+            self._clear_ticks = 0
             return
-        self._clear_stop_ticks += 1
-        if self._clear_stop_ticks < int(MOTION_STOP_CONFIRM_TICKS):
+        self._clear_ticks += 1
+        if self._clear_ticks < int(MOTION_STOP_CONFIRM_TICKS):
             return
-        self._clear_stop_ticks = 0
-        self._clear_completed = True
-        self._write_zero_velocity("assistant_clear_complete")
-        self._pending_target_found_report = {
-            "event": _CLEARED_EVENT,
-            "value": int(self._state_machine.arg),
-            "queued": False,
-        }
+        self._clear_ticks = 0
+        self._clear_done = True
+        self._write_zero_velocity()
+        self._p_report = (
+            _CLEARED_EVENT,
+            int(self._sm.arg),
+            False,
+        )
 
     def _are_all_wheels_near_stop(self) -> bool:
-        wheel_states = getattr(self._transport_car, "wheel_states", ())
-        if len(wheel_states) < 3:
-            return False
-        threshold = float(MOTION_STOP_SPEED_THRESHOLD)
-        for state in wheel_states:
-            if abs(float(state.get("filtered_speed", 0.0))) > threshold:
-                return False
-        return True
+        return bool(self._car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
 
     def _queue_pending_local_vision_sync(self) -> None:
-        pending = self._pending_local_vision_sync
-        if pending is None or pending.get("queued"):
+        pending = self._p_local
+        if pending is None or pending[_L_QUEUED]:
             return
         body = encode_assistant_vision_task_sync_body(
-            pending["state"],
-            pending["target"],
-            pending["arg"],
-            pending.get("threshold"),
+            pending[_L_STATE],
+            pending[_L_TARGET],
+            pending[_L_ARG],
+            pending[_L_THRESHOLD],
         )
-        status = self.transport_service.tcp(UART6).write(TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
+        status = self._ts.tcp_write(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            self._log_local_vision_sync_start(pending)
-            pending["queued"] = True
+            self._p_local = (
+                pending[_L_STATE],
+                pending[_L_TARGET],
+                pending[_L_ARG],
+                pending[_L_THRESHOLD],
+                True,
+            )
 
     def _queue_return_line_gate_action(self) -> None:
-        pending = self._return_line_gate_action
-        if pending is None or pending.get("queued"):
+        pending = self._gate
+        if pending is None or pending[_G_QUEUED]:
             return
-        body = encode_local_vision_control_body(pending["action"])
-        status = self.transport_service.tcp(UART6).write(TOPIC_LOCAL_VISION_CONTROL, body)
+        body = encode_local_vision_control_body(pending[_G_ACTION])
+        status = self._ts.tcp_write(UART6, TOPIC_LOCAL_VISION_CONTROL, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            pending["queued"] = True
+            self._gate = (pending[_G_ACTION], True)
 
     def _queue_pending_report(self) -> None:
-        pending = self._pending_target_found_report
-        if pending is None or pending.get("queued"):
+        pending = self._p_report
+        if pending is None or pending[_R_QUEUED]:
             return
         body = encode_assistant_event_report_body(
-            pending["event"],
-            pending["value"],
+            pending[_R_EVENT],
+            pending[_R_VALUE],
         )
-        status = self.transport_service.tcp(UART8).write(TOPIC_ASSISTANT_EVENT_REPORT, body)
+        status = self._ts.tcp_write(UART8, TOPIC_ASSISTANT_EVENT_REPORT, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            pending["queued"] = True
-
-    def build_follow_snapshot(self) -> dict:
-        return build_follow_snapshot(
-            self._state_machine.state,
-            self._state_machine.target,
-            dict(self._transport_car.control_state),
-            self._uart6_status,
-            self._uart8_status,
-            self._build_velocity_snapshot(self._uart6_velocity),
-            self._build_velocity_snapshot(self._uart8_velocity),
-            self._pending_local_vision_sync is not None,
-            self._approach_target_found_done,
-            self._last_error_text,
-        )
-
-    def _build_velocity_snapshot(self, velocity) -> dict:
-        if velocity is None:
-            return {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-        return {
-            "vx": float(velocity.get("vx", 0.0)),
-            "vy": float(velocity.get("vy", 0.0)),
-            "omega": float(velocity.get("omega", 0.0)),
-        }
+            self._p_report = (pending[_R_EVENT], pending[_R_VALUE], True)
 
     def _record_error_text(self, text: str, exc: Exception) -> None:
-        if self._last_error_text != text:
+        if self._err != text:
             log_exception("assistant_error", text, exc)
-        self._last_error_text = text
-        self._transport_car.last_exception_text = text
-
-    def _log_master_sync_done(self, packet: dict) -> None:
-        log(
-            "sync",
-            "master->assistant sync done state=%d target=%d arg=%d"
-            % (
-                int(packet["state"]),
-                int(packet["target"]),
-                int(packet["arg"]),
-            ),
-        )
-
-    def _log_local_vision_sync_start(self, pending: dict) -> None:
-        log(
-            "sync",
-            "assistant->camera sync start state=%d target=%d arg=%d"
-            % (
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
-            ),
-        )
-
-    def _log_local_vision_sync_done(self, pending: dict) -> None:
-        log(
-            "sync",
-            "assistant->camera sync done state=%d target=%d arg=%d"
-            % (
-                int(pending["state"]),
-                int(pending["target"]),
-                int(pending["arg"]),
-            ),
-        )
+        self._err = text
+        self._car.last_exception_text = text
 
 
 def create_transport_car() -> AssistantFollowRuntime:

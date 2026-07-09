@@ -33,7 +33,7 @@
 - 主 `SKILL.md` 默认只做用途、边界和最短路由说明。
 - `references/` 只保留有明确场景差异的入口; 没有差异就合并。
 - reference 的目标是降低选择成本, 不是展示分类完整性。
-- Skill 结构、路由和 reference 布局规则以 `.agents/skills/project-extension-writing-skills/` 为准。
+- Skill 结构、路由和 reference 布局规则以 `.agents/skills/AGENTS.md` 为准。
 
 ## 注释与文档字符串规则
 

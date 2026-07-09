@@ -48,7 +48,7 @@ def _ticks_diff(current, previous):
 def _build_capture_items(car):
     """构造控制周期采样对象列表."""
 
-    capture_items = [state["encoder"] for state in car.wheel_states]
+    capture_items = list(car.wheel_encoders)
     capture_items.append(car.imu)
     return capture_items
 

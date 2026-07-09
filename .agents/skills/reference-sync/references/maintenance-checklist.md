@@ -34,8 +34,7 @@
 - 正式落点：`docs/reference/wireless_uart/README.md`
 - 维护检查项：
   - [ ] 原始项目链接与说明书链接仍然可用或已替换为新的有效来源
-  - [ ] 本地只保留整理后的 Markdown 与配图, 不再恢复 PDF 副本
-  - [ ] 配图目录与正文引用保持一致, 没有失效链接
+  - [ ] 本地只保留来源入口和项目使用边界, 不恢复说明书正文、PDF 副本或配图镜像
   - [ ] 本页与 `source-registry.md` 的对象和触发条件一致
 
 ### `problem_statement` 外部链接入口

@@ -58,7 +58,8 @@ def test_tcp_resends_same_seq_until_ack() -> None:
     transport = create_transport(ROLE_MASTER, uart6=uart6, now_ms=clock)
 
     assert (
-        transport.tcp(UART6).write(
+        transport.tcp_write(
+            UART6,
             TOPIC_MASTER_VISION_TASK_SYNC,
             encode_master_vision_task_sync_body(1, 2, 3, 4),
         )
@@ -85,9 +86,9 @@ def test_duplicate_tcp_frame_is_acked_but_not_redelivered() -> None:
 
     transport.poll_rx()
 
-    assert transport.tcp(UART8).read(TOPIC_ASSISTANT_EVENT_REPORT, out_body) == "ok"
+    assert transport.tcp_read(UART8, TOPIC_ASSISTANT_EVENT_REPORT, out_body) == "ok"
     assert bytes(out_body) == body
-    assert transport.tcp(UART8).read(TOPIC_ASSISTANT_EVENT_REPORT, bytearray(3)) == "empty"
+    assert transport.tcp_read(UART8, TOPIC_ASSISTANT_EVENT_REPORT, bytearray(3)) == "empty"
 
     transport.poll_tx()
 
@@ -101,21 +102,24 @@ def test_active_seq_is_unique_per_port_until_ack() -> None:
     transport = create_transport(ROLE_MASTER, uart6=uart6, uart8=uart8, now_ms=clock)
 
     assert (
-        transport.tcp(UART6).write(
+        transport.tcp_write(
+            UART6,
             TOPIC_MASTER_VISION_TASK_SYNC,
             encode_master_vision_task_sync_body(1, 2, 3, 4),
         )
         == "accepted"
     )
     assert (
-        transport.tcp(UART6).write(
+        transport.tcp_write(
+            UART6,
             TOPIC_MASTER_VISION_TASK_SYNC,
             encode_master_vision_task_sync_body(5, 4, 3, 2),
         )
         == "overwritten"
     )
     assert (
-        transport.tcp(UART8).write(
+        transport.tcp_write(
+            UART8,
             TOPIC_ASSISTANT_STATE_SYNC,
             encode_assistant_state_sync_body(2, 1, 0),
         )
@@ -124,7 +128,8 @@ def test_active_seq_is_unique_per_port_until_ack() -> None:
 
     transport.poll_tx()
     assert (
-        transport.tcp(UART6).write(
+        transport.tcp_write(
+            UART6,
             TOPIC_MASTER_VISION_TASK_SYNC,
             encode_master_vision_task_sync_body(1, 2, 3, 4),
         )

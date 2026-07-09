@@ -19,6 +19,7 @@ from protocol.frame import (  # noqa: E402
     MODE_ACK,
     MODE_TCP,
     MODE_UDP,
+    decode_frame_fields,
     decode_frame,
     encode_frame,
 )
@@ -41,6 +42,13 @@ def test_decode_frame_returns_header_and_fixed_body_bytes() -> None:
         "seq": 0x33,
         "body": bytes([10, 11, 12, 0, 0, 0, 0, 0, 0, 0]),
     }
+
+
+def test_decode_frame_fields_returns_fixed_header_tuple_without_body_copy() -> None:
+    prefix = b"\x99"
+    frame = prefix + encode_frame(MODE_TCP, 0x20, 0x33, bytes([10, 11, 12]))
+
+    assert decode_frame_fields(frame, 1) == (MODE_TCP, 0x20, 0x33)
 
 
 def test_ack_frame_uses_empty_body_slot() -> None:

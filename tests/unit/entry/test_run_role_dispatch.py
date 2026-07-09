@@ -15,6 +15,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_PATH = PROJECT_ROOT / "src" / "script" / "run.py"
 
 
+class _WheelState:
+    def __init__(self, encoder) -> None:
+        self.encoder = encoder
+
+
 def load_run_module(monkeypatch):
     """按文件路径加载 run 模块, 并注入最小依赖桩."""
 
@@ -54,6 +59,7 @@ def load_run_module(monkeypatch):
     startup_log_module = ModuleType("utils.startup_log")
     setattr(startup_log_module, "log", lambda *_args, **_kwargs: None)
     setattr(startup_log_module, "log_exception", lambda *_args, **_kwargs: None)
+    setattr(startup_log_module, "log_memory", lambda *_args, **_kwargs: None)
     monkeypatch.setitem(sys.modules, "utils.startup_log", startup_log_module)
 
     vehicle_role_module = ModuleType("role.vehicle_role")
@@ -65,11 +71,7 @@ def load_run_module(monkeypatch):
     class _FakeCar:
         def __init__(self) -> None:
             state["car_created"] += 1
-            self.wheel_states = [
-                {"encoder": "enc_m"},
-                {"encoder": "enc_l"},
-                {"encoder": "enc_r"},
-            ]
+            self.wheel_encoders = ("enc_m", "enc_l", "enc_r")
             self.imu = "imu"
             self.ticker = None
 
@@ -139,7 +141,7 @@ def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
                 "_Car",
                 (),
                 {
-                    "wheel_states": [{"encoder": "enc_m"}],
+                        "wheel_encoders": ("enc_m",),
                     "imu": "imu",
                     "mark_tick": lambda self, _tick=None: None,
                     "set_ticker": lambda self, ticker_obj: events.append(
@@ -182,6 +184,64 @@ def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
 
 
+def test_run_main_prints_mem_info_before_ready_when_available(monkeypatch) -> None:
+    """板端提供 mem_info 时，在运行时 ready 日志前输出一次。"""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    calls = []
+    micropython_module = ModuleType("micropython")
+    setattr(
+        micropython_module,
+        "mem_info",
+        lambda *args: (calls.append(args), events.append("mem_info")),
+    )
+    monkeypatch.setitem(sys.modules, "micropython", micropython_module)
+    setattr(module, "log", lambda _stage, detail="": events.append(detail))
+
+    module.main()
+
+    assert events.index("mem_info") < events.index("TransportCar ready")
+    assert calls == [(1,)]
+
+
+def test_run_main_prepares_runtime_before_mem_info(monkeypatch) -> None:
+    """运行时预热先于详细内存诊断，避免主循环首次导入。"""
+
+    module, _state = load_run_module(monkeypatch)
+    events = []
+    micropython_module = ModuleType("micropython")
+    setattr(micropython_module, "mem_info", lambda *_args: events.append("mem_info"))
+    monkeypatch.setitem(sys.modules, "micropython", micropython_module)
+    setattr(module, "log", lambda _stage, detail="": events.append(detail))
+    setattr(
+        module,
+        "create_role_transport_car",
+        lambda _role: type(
+            "_Car",
+            (),
+            {
+                    "wheel_encoders": ("enc_m",),
+                "imu": "imu",
+                "prepare_runtime": lambda self: events.append("prepare"),
+                "mark_tick": lambda self, _tick=None: None,
+                "set_ticker": lambda self, _ticker: None,
+                "has_pending_tick": lambda self: False,
+                "poll_transport_rx": lambda self: None,
+                "step_role": lambda self: False,
+                "step_motion_input": lambda self: False,
+                "poll_transport_tx": lambda self: None,
+                "collect_garbage": lambda self: None,
+            },
+        )(),
+    )
+
+    module.main()
+
+    assert events.index("prepare") < events.index("mem_info")
+    assert events.index("prepare") < events.index("TransportCar ready")
+
+
 def test_run_main_returns_assistant_role_and_dispatches_it(
     monkeypatch,
 ) -> None:
@@ -199,7 +259,7 @@ def test_run_main_returns_assistant_role_and_dispatches_it(
                 "_Car",
                 (),
                 {
-                    "wheel_states": [{"encoder": "enc_l"}, {"encoder": "enc_r"}],
+                        "wheel_encoders": ("enc_l", "enc_r"),
                     "imu": "imu",
                     "mark_tick": lambda self, _tick=None: None,
                     "set_ticker": lambda self, _ticker: None,
@@ -244,7 +304,7 @@ def test_run_main_stops_runtime_and_reraises_fatal_error(
     events = []
 
     class _Car:
-        wheel_states = [{"encoder": "enc_m"}]
+        wheel_encoders = ("enc_m",)
         imu = "imu"
 
         def mark_tick(self, _tick=None) -> None:

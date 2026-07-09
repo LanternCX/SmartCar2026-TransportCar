@@ -10,10 +10,10 @@ import math
 import time
 
 from machine import Pin
-from control.wheel import build_wheel_state
 from control.pid_controller import SpeedPIDController, PositionalPIDController
-from control.pid_math import clamp, reset_pi_state
+from control.pid_math import clamp
 from control.kinematics import OmniKinematics, Odometry
+from filters.dual_window_regression_filter import DualWindowRegressionFilter
 from filters.lowpass_filter import LowPassFilter
 from filters.spike_filter import SpikeMedianFilter
 from filters.diff_limit_filter import DiffLimitFilter
@@ -28,35 +28,34 @@ from hardware.imu import create_imu
 from storage.param_manager import load_ident_lookup, load_gyro_offsets
 
 
-TICK_MS = getattr(motion_params, "TICK_MS")
-MAX_DUTY = getattr(safety_params, "MAX_DUTY")
-TARGET_SPEED_MAX = getattr(safety_params, "TARGET_SPEED_MAX")
-POS_MAX_SPEED = getattr(motion_params, "POS_MAX_SPEED")
-POS_KP = getattr(motion_params, "POS_KP")
-POS_TOLERANCE = getattr(motion_params, "POS_TOLERANCE")
-ANGLE_TOLERANCE = getattr(motion_params, "ANGLE_TOLERANCE")
-ACTIVE_WHEELS = getattr(motion_params, "ACTIVE_WHEELS")
-GYRO_LPF_ALPHA = getattr(motion_params, "GYRO_LPF_ALPHA")
-GYRO_SCALE = getattr(motion_params, "GYRO_SCALE")
-YAW_KP = getattr(motion_params, "YAW_KP")
-YAW_KI = getattr(motion_params, "YAW_KI")
-YAW_KD = getattr(motion_params, "YAW_KD")
-YAW_I_MAX = getattr(motion_params, "YAW_I_MAX")
-AUTO_OMEGA_MAX = getattr(motion_params, "AUTO_OMEGA_MAX")
-HEADING_TRANSITION_OMEGA_MAX = getattr(motion_params, "HEADING_TRANSITION_OMEGA_MAX")
-ORBIT_AUTO_OMEGA_MAX = getattr(motion_params, "ORBIT_AUTO_OMEGA_MAX")
-ORBIT_ANGLE_CONFIRM_TICKS = getattr(motion_params, "ORBIT_ANGLE_CONFIRM_TICKS")
-HOLD_SPEED_EPS = getattr(motion_params, "HOLD_SPEED_EPS")
-MASTER_ORBIT_RADIUS_SCALE = getattr(motion_params, "MASTER_ORBIT_RADIUS_SCALE")
-FIELD_SIZE_M = getattr(motion_params, "FIELD_SIZE_M")
-ASSISTANT_START_POSITION_M = getattr(motion_params, "ASSISTANT_START_POSITION_M")
-MASTER_ODOMETRY_DISTANCE_SCALE = getattr(motion_params, "MASTER_ODOMETRY_DISTANCE_SCALE")
-ASSISTANT_ODOMETRY_DISTANCE_SCALE = getattr(
-    motion_params, "ASSISTANT_ODOMETRY_DISTANCE_SCALE"
-)
-IDENT_RESULTS_FILE = getattr(storage_params, "IDENT_RESULTS_FILE")
-GYRO_OFFSET_FILE = getattr(storage_params, "GYRO_OFFSET_FILE")
-PID_MAP = getattr(motion_params, "PID_MAP")
+TICK_MS = motion_params.TICK_MS
+MAX_DUTY = safety_params.MAX_DUTY
+TARGET_SPEED_MAX = safety_params.TARGET_SPEED_MAX
+POS_MAX_SPEED = motion_params.POS_MAX_SPEED
+POS_KP = motion_params.POS_KP
+POS_TOLERANCE = motion_params.POS_TOLERANCE
+ANGLE_TOLERANCE = motion_params.ANGLE_TOLERANCE
+ACTIVE_WHEELS = motion_params.ACTIVE_WHEELS
+GYRO_LPF_ALPHA = motion_params.GYRO_LPF_ALPHA
+GYRO_SCALE = motion_params.GYRO_SCALE
+YAW_KP = motion_params.YAW_KP
+YAW_KI = motion_params.YAW_KI
+YAW_KD = motion_params.YAW_KD
+YAW_I_MAX = motion_params.YAW_I_MAX
+AUTO_OMEGA_MAX = motion_params.AUTO_OMEGA_MAX
+HEADING_TRANSITION_OMEGA_MAX = motion_params.HEADING_TRANSITION_OMEGA_MAX
+ORBIT_AUTO_OMEGA_MAX = motion_params.ORBIT_AUTO_OMEGA_MAX
+ORBIT_ANGLE_CONFIRM_TICKS = motion_params.ORBIT_ANGLE_CONFIRM_TICKS
+HOLD_SPEED_EPS = motion_params.HOLD_SPEED_EPS
+MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+FIELD_SIZE_M = motion_params.FIELD_SIZE_M
+ASSISTANT_START_POSITION_M = motion_params.ASSISTANT_START_POSITION_M
+MASTER_ODOMETRY_DISTANCE_SCALE = motion_params.MASTER_ODOMETRY_DISTANCE_SCALE
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
+IDENT_RESULTS_FILE = storage_params.IDENT_RESULTS_FILE
+GYRO_OFFSET_FILE = storage_params.GYRO_OFFSET_FILE
+PID_MAP = motion_params.PID_MAP
+_WHEEL_NAMES = ("m", "l", "r")
 
 
 class _NullImu:
@@ -284,43 +283,49 @@ class TransportCar:
             logger=lambda msg: log("transport_car", msg),
         )
 
-        # 轮组状态构造: 每轮包含编码器、电机、滤波器、PID 控制器
-        # @details wheel_states 是三个字典列表, 存储 [m, l, r] 三轮的完整状态
-        #          state["name"]: 轮子标识符("m"、"l"、"r")
-        #          state["encoder"]: 编码器接口, 提供原始脉冲
-        #          state["motor"]: 电机接口, 设置占空比输出
-        #          state["controller"]: SpeedPIDController, 速度环反馈控制
-        #          state["input_lpf"]: 中值滤波去尖刺, window=5
-        #          state["diff_filter"]: 差分限幅(max_delta=5.0)防止突变
-        #          state["dual_filter"]: 双窗口回归融合(来自 build_wheel_state)
-        #          state["output_lpf"]: 低通滤波平滑(来自 build_wheel_state)
-        #          state["raw_speed"]: 编码器原始速度(脉冲/周期)
-        #          state["filtered_speed"]: 多级滤波后的速度
-        #          state["duty"]: 当前电机占空比(-MAX_DUTY ~ +MAX_DUTY)
-        self.wheel_states = []
-        for name in ("m", "l", "r"):
+        # 三轮控制槽位按 [m, l, r] 固定顺序维护。
+        self.wheel_encoders = (
+            self.encoders["m"],
+            self.encoders["l"],
+            self.encoders["r"],
+        )
+        self.w_mot = (
+            self.motors["m"],
+            self.motors["l"],
+            self.motors["r"],
+        )
+        self.w_pid = []
+        self.w_dual = []
+        self.w_in = []
+        self.w_diff = []
+        self.w_out = []
+        for name in _WHEEL_NAMES:
             gain_tau = self.ident_lookup.get(name, (None, None))
-            controller = SpeedPIDController(
-                output_limit=MAX_DUTY, plant_gain=gain_tau[0], plant_tau=gain_tau[1]
+            self.w_pid.append(
+                SpeedPIDController(
+                    output_limit=MAX_DUTY, plant_gain=gain_tau[0], plant_tau=gain_tau[1]
+                )
             )
-            state = build_wheel_state(
-                name,
-                self.encoders[name],
-                self.motors[name],
-                TICK_MS,
-                30,
-                8,
-                pid_controller=controller,
+            self.w_dual.append(
+                DualWindowRegressionFilter(
+                    tick_ms=TICK_MS,
+                    long_window=30,
+                    short_window=8,
+                    combine_w=0.65,
+                )
             )
-            state["input_lpf"] = SpikeMedianFilter(window=5)
-            state["diff_filter"] = DiffLimitFilter(max_delta=5.0)
-            self.wheel_states.append(state)
+            self.w_in.append(SpikeMedianFilter(window=5))
+            self.w_diff.append(DiffLimitFilter(max_delta=5.0))
+            self.w_out.append(LowPassFilter(alpha=0.9))
+        self.w_raw = [0.0, 0.0, 0.0]
+        self.w_filt = [0.0, 0.0, 0.0]
+        self.w_duty = [0.0, 0.0, 0.0]
 
         # 运行期状态变量
         # @details pending_ticks: ticker 待处理标志, 只保留一个底盘控制请求
         #          tick_count: 控制周期计数, 用于性能监控和调试
-        #          target_speeds: 目标脉冲速度 {"m", "l", "r"}, 由逆运动学计算
-        #          control_state: 底盘控制目标, 存储 vx/vy/omega/x/y/angle
+        #          target_speed_*: 三轮目标脉冲速度, 由逆运动学计算
+        #          control_*: 底盘控制目标固定字段, 诊断边界按需生成 dict
         #          command_lock: 位置锁定标志, True 时位置/角度目标有效
         #          command_mode: 当前锁定诊断状态, 取值 locked/unlocked/none
         #          lock_start_time: 位置锁定开始时间(毫秒)
@@ -330,8 +335,8 @@ class TransportCar:
         self.pending_ticks = 0
         self.pit_flag = False
         self.tick_count = 0
-        self.target_speeds = {"m": 0.0, "l": 0.0, "r": 0.0}
-        self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        self._reset_target_speed_fields()
+        self._reset_control_fields()
         self.command_lock = False
         self.command_mode = "none"
         self.lock_start_time = 0
@@ -378,6 +383,67 @@ class TransportCar:
         self.init_pid()
 
         log("transport_car", "init complete")
+
+    @property
+    def control_state(self):
+        """按需构造底盘控制目标诊断快照."""
+
+        snapshot = {
+            "vx": float(self.control_vx),
+            "vy": float(self.control_vy),
+        }
+        if self.control_omega_active:
+            snapshot["omega"] = float(self.control_omega)
+        if self.control_x_active:
+            snapshot["x"] = float(self.control_x)
+        if self.control_y_active:
+            snapshot["y"] = float(self.control_y)
+        if self.control_angle_active:
+            snapshot["angle"] = float(self.control_angle)
+        return snapshot
+
+    @property
+    def target_speeds(self):
+        """按需构造三轮目标速度诊断快照."""
+
+        return {
+            "m": float(self.target_speed_m),
+            "l": float(self.target_speed_l),
+            "r": float(self.target_speed_r),
+        }
+
+    def _reset_control_fields(self):
+        self.control_vx = 0.0
+        self.control_vy = 0.0
+        self.control_omega = 0.0
+        self.control_omega_active = True
+        self.control_x = 0.0
+        self.control_y = 0.0
+        self.control_angle = 0.0
+        self.control_x_active = False
+        self.control_y_active = False
+        self.control_angle_active = False
+
+    def _reset_target_speed_fields(self):
+        self.target_speed_m = 0.0
+        self.target_speed_l = 0.0
+        self.target_speed_r = 0.0
+
+    def _reset_wheel_pi_state(self):
+        for controller in self.w_pid:
+            if controller:
+                controller.reset()
+        self.w_duty[0] = 0.0
+        self.w_duty[1] = 0.0
+        self.w_duty[2] = 0.0
+
+    def wheel_stop_confirmed(self, threshold):
+        threshold = float(threshold)
+        return (
+            abs(float(self.w_filt[0])) <= threshold
+            and abs(float(self.w_filt[1])) <= threshold
+            and abs(float(self.w_filt[2])) <= threshold
+        )
 
     # Public API (公开接口)
     def mark_tick(self, _tick=None): # noqa: F841
@@ -526,12 +592,13 @@ class TransportCar:
         """
 
         self._clear_orbit_mode()
-        self.control_state["vx"] = float(vx)
-        self.control_state["vy"] = float(vy)
+        self.control_vx = float(vx)
+        self.control_vy = float(vy)
         self._clear_translation_control_targets()
 
         if has_omega:
-            self.control_state["omega"] = float(omega)
+            self.control_omega = float(omega)
+            self.control_omega_active = True
             self._clear_rotation_control_targets()
 
         self._pending_lock = None
@@ -549,10 +616,12 @@ class TransportCar:
             raise ValueError("radius_scale must be positive")
 
         self._clear_translation_control_targets()
-        self.control_state["vx"] = 0.0
-        self.control_state["vy"] = 0.0
-        self.control_state["omega"] = 0.0
-        self.control_state["angle"] = float(target_angle_deg)
+        self.control_vx = 0.0
+        self.control_vy = 0.0
+        self.control_omega = 0.0
+        self.control_omega_active = True
+        self.control_angle = float(target_angle_deg)
+        self.control_angle_active = True
         self.command_lock = True
         self.heading_transition_mode = False
         self.orbit_mode = True
@@ -573,8 +642,8 @@ class TransportCar:
 
         if not self.orbit_mode:
             raise RuntimeError("orbit velocity correction requires orbit mode")
-        self.control_state["vx"] = float(vx)
-        self.control_state["vy"] = float(vy)
+        self.control_vx = float(vx)
+        self.control_vy = float(vy)
         self._clear_translation_control_targets()
         self._pending_lock = None
         self._refresh_control_mode()
@@ -586,8 +655,10 @@ class TransportCar:
         """
 
         self._clear_orbit_mode()
-        self.control_state["angle"] = float(target_angle_deg)
-        self.control_state["omega"] = 0.0
+        self.control_angle = float(target_angle_deg)
+        self.control_angle_active = True
+        self.control_omega = 0.0
+        self.control_omega_active = True
         self.command_lock = True
         self.heading_transition_mode = False
         self.heading_target = float(target_angle_deg)
@@ -603,8 +674,10 @@ class TransportCar:
         """
 
         self._clear_orbit_mode()
-        self.control_state["angle"] = float(target_angle_deg)
-        self.control_state["omega"] = 0.0
+        self.control_angle = float(target_angle_deg)
+        self.control_angle_active = True
+        self.control_omega = 0.0
+        self.control_omega_active = True
         self.command_lock = True
         self.heading_transition_mode = True
         self.heading_target = float(target_angle_deg)
@@ -640,12 +713,16 @@ class TransportCar:
         world_dy = dx * sin_t + dy * cos_t
 
         self._clear_orbit_mode()
-        self.control_state["vx"] = 0.0
-        self.control_state["vy"] = 0.0
-        self.control_state["omega"] = 0.0
-        self.control_state["x"] = float(self.odometry.x) + world_dx
-        self.control_state["y"] = float(self.odometry.y) + world_dy
-        self.control_state["angle"] = heading_deg
+        self.control_vx = 0.0
+        self.control_vy = 0.0
+        self.control_omega = 0.0
+        self.control_omega_active = True
+        self.control_x = float(self.odometry.x) + world_dx
+        self.control_y = float(self.odometry.y) + world_dy
+        self.control_x_active = True
+        self.control_y_active = True
+        self.control_angle = heading_deg
+        self.control_angle_active = True
         self.command_lock = True
         self.heading_transition_mode = False
         self.heading_target = heading_deg
@@ -668,8 +745,8 @@ class TransportCar:
         self.q_est.w, self.q_est.x, self.q_est.y, self.q_est.z = 1.0, 0.0, 0.0, 0.0
         self.last_yaw_rad = 0.0
         self.gyro_lpf.reset(0.0)
-        reset_pi_state(self.wheel_states)
-        self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+        self._reset_wheel_pi_state()
+        self._reset_control_fields()
         self.command_lock = False
         self.command_mode = "none"
         self.heading_transition_mode = False
@@ -712,16 +789,16 @@ class TransportCar:
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""
 
-        reset_pi_state(self.wheel_states)
-        for state in self.wheel_states:
-            state["motor"].duty(0)
-            state["duty"] = 0.0
+        self._reset_wheel_pi_state()
+        for idx in range(3):
+            self.w_mot[idx].duty(0)
+            self.w_duty[idx] = 0.0
 
     def _clear_translation_control_targets(self):
         """清理平移位置目标."""
 
-        self.control_state.pop("x", None)
-        self.control_state.pop("y", None)
+        self.control_x_active = False
+        self.control_y_active = False
         self._pending_dx = None
         self._pending_dy = None
         self._translation_speed_limit_cmd = None
@@ -729,7 +806,7 @@ class TransportCar:
     def _clear_rotation_control_targets(self):
         """清理角度位置目标."""
 
-        self.control_state.pop("angle", None)
+        self.control_angle_active = False
         self.heading_transition_mode = False
         self._pending_d_angle = None
 
@@ -737,8 +814,8 @@ class TransportCar:
         """清理统一绕行模式状态."""
 
         if self.orbit_mode:
-            self.control_state["vx"] = 0.0
-            self.control_state["vy"] = 0.0
+            self.control_vx = 0.0
+            self.control_vy = 0.0
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self._orbit_angle_confirm_ticks = 0
@@ -753,13 +830,13 @@ class TransportCar:
             self.command_mode = "none"
             self._translation_speed_limit_cmd = None
 
-    def handle_velocity_packet(self, vx, vy, omega=0.0, source="protocol", has_omega=True):
+    def handle_velocity_packet(self, vx, vy, omega=0.0, source=None, has_omega=True):
         """接收结构化速度短包结果
 
         @param vx 车体系 x 方向速度
         @param vy 车体系 y 方向速度
         @param omega 车体系角速度
-        @param source 输入来源标识
+        @param source 可选输入来源标识
         @param has_omega 本包是否显式携带角速度
         """
 
@@ -771,7 +848,9 @@ class TransportCar:
 
         @return 元组 (x, y), 表示目标位置坐标, 可能为 None
         """
-        return self.control_state.get("x"), self.control_state.get("y")
+        cmd_x = self.control_x if self.control_x_active else None
+        cmd_y = self.control_y if self.control_y_active else None
+        return cmd_x, cmd_y
 
     def _has_active_translation_target(self):
         """
@@ -788,7 +867,9 @@ class TransportCar:
 
         @return 目标角度值, 可能为 None
         """
-        return self.control_state.get("angle")
+        if not self.control_angle_active:
+            return None
+        return self.control_angle
 
     def _has_active_rotation_target(self):
         """
@@ -887,10 +968,10 @@ class TransportCar:
         @return 包含各轮速度的字典
         """
         snapshot = {}
-        for state in self.wheel_states:
-            name = state["name"]
-            snapshot["%s_raw" % name] = float(state.get("raw_speed", 0.0))
-            snapshot["%s_filt" % name] = float(state.get("filtered_speed", 0.0))
+        for idx in range(3):
+            name = _WHEEL_NAMES[idx]
+            snapshot["%s_raw" % name] = float(self.w_raw[idx])
+            snapshot["%s_filt" % name] = float(self.w_filt[idx])
         return snapshot
 
     def build_motor_snapshot(self):
@@ -904,13 +985,22 @@ class TransportCar:
         @return 包含各轮目标与实际的字典
         """
         snapshot = {}
-        for state in self.wheel_states:
-            name = state["name"]
-            snapshot["%s_target" % name] = float(self.target_speeds.get(name, 0.0))
-            snapshot["%s_duty" % name] = float(state.get("duty", 0.0))
+        for idx in range(3):
+            name = _WHEEL_NAMES[idx]
+            snapshot["%s_target" % name] = float(self._target_speed_for_name(name))
+            snapshot["%s_duty" % name] = float(self.w_duty[idx])
         return snapshot
 
     # Internal helpers and control loop (内部助手方法与控制循环)
+    def _target_speed_for_name(self, name):
+        if name == "m":
+            return self.target_speed_m
+        if name == "l":
+            return self.target_speed_l
+        if name == "r":
+            return self.target_speed_r
+        return 0.0
+
     def init_pid(self):
         """
         @brief 按 PID_MAP 配置表初始化三轮速度环增益
@@ -921,10 +1011,9 @@ class TransportCar:
 
         @note ki2 是二阶积分项增益, 用于增强长期稳定性
         """
-        for state in self.wheel_states:
-            kp_val, ki_val, ki2_val = PID_MAP.get(state["name"], (10.0, 0.5, 0.01))
-            state["kp"], state["ki"] = kp_val, ki_val
-            state["controller"].set_gains(kp_val, ki_val, ki2_val)
+        for idx in range(3):
+            kp_val, ki_val, ki2_val = PID_MAP.get(_WHEEL_NAMES[idx], (10.0, 0.5, 0.01))
+            self.w_pid[idx].set_gains(kp_val, ki_val, ki2_val)
 
     def _inverse_kinematics(self, vx, vy, omega):
         """
@@ -1002,18 +1091,20 @@ class TransportCar:
         @details 多级滤波流程
         1. input_lpf(SpikeMedianFilter, window=5): 去尖刺, 中值滤波去除离群值
         2. diff_filter(DiffLimitFilter, max_delta=5.0): 差分限幅, 防止速度突变
-        3. dual_filter(双窗回归融合, 来自 build_wheel_state): 低延迟融合平滑
+        3. dual_filter(双窗回归融合): 低延迟融合平滑
         4. output_lpf(低通滤波器): 最终低通平滑, 得到 filtered_speed
 
-        @note 处理结果存储在 state["filtered_speed"], 供速度环 PID 反馈使用
+        @note 处理结果存储在 w_filt, 供速度环 PID 反馈使用
         """
-        for state in self.wheel_states:
-            raw = float(state["encoder"].get())
-            state["raw_speed"] = raw
-            smooth_raw = state["input_lpf"].update(raw)
-            smooth_raw = state["diff_filter"].update(smooth_raw)
-            fused_speed, _, _ = state["dual_filter"].update(smooth_raw)
-            state["filtered_speed"] = state["output_lpf"].update(fused_speed)
+        for idx in range(3):
+            raw = float(self.wheel_encoders[idx].get())
+            self.w_raw[idx] = raw
+            smooth_raw = self.w_in[idx].update(raw)
+            smooth_raw = self.w_diff[idx].update(smooth_raw)
+            fused_speed, _, _ = self.w_dual[idx].update(smooth_raw)
+            self.w_filt[idx] = self.w_out[idx].update(
+                fused_speed
+            )
 
     def _update_attitude(self, dt_s):
         """
@@ -1059,9 +1150,9 @@ class TransportCar:
 
         yaw_rate = self.gyro_lpf.update(gz * (180.0 / math.pi))
 
-        vm_pulse = self.wheel_states[0]["filtered_speed"]
-        vl_pulse = self.wheel_states[1]["filtered_speed"]
-        vr_pulse = self.wheel_states[2]["filtered_speed"]
+        vm_pulse = self.w_filt[0]
+        vl_pulse = self.w_filt[1]
+        vr_pulse = self.w_filt[2]
 
         vm_mps = self.kinematics.velocity_pulses_to_m_s(vm_pulse, dt_s)
         vl_mps = self.kinematics.velocity_pulses_to_m_s(vl_pulse, dt_s)
@@ -1122,7 +1213,7 @@ class TransportCar:
         @warning YAW_KD 配置应使用本地微分而不是 PID 的 D 项, 因为已有低通滤波
         """
         cmd_angle = self._get_active_angle_command()
-        omega_value = self.control_state.get("omega")
+        omega_value = self.control_omega if self.control_omega_active else None
 
         if cmd_angle is not None:
             self.heading_target = float(cmd_angle)
@@ -1203,8 +1294,8 @@ class TransportCar:
         if self.orbit_mode:
             base_vx = -float(omega_cmd) * float(self.orbit_radius_scale)
             return (
-                base_vx + float(self.control_state.get("vx", 0.0)),
-                float(self.control_state.get("vy", 0.0)),
+                base_vx + float(self.control_vx),
+                float(self.control_vy),
             )
 
         cmd_x, cmd_y = self._get_active_position_targets()
@@ -1243,8 +1334,8 @@ class TransportCar:
                 target_vy_cmd *= scale
 
         else:
-            target_vx_cmd = float(self.control_state.get("vx", 0.0))
-            target_vy_cmd = float(self.control_state.get("vy", 0.0))
+            target_vx_cmd = float(self.control_vx)
+            target_vy_cmd = float(self.control_vy)
 
         return target_vx_cmd, target_vy_cmd
 
@@ -1273,26 +1364,26 @@ class TransportCar:
             target_vy_cmd,
             float(omega_cmd),
         )
-        self.target_speeds["m"] = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-        self.target_speeds["l"] = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
-        self.target_speeds["r"] = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speed_m = clamp(vm, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speed_l = clamp(vl, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
+        self.target_speed_r = clamp(vr, -TARGET_SPEED_MAX, TARGET_SPEED_MAX)
 
-        for state in self.wheel_states:
-            if state["name"] in ACTIVE_WHEELS:
+        for idx in range(3):
+            if _WHEEL_NAMES[idx] in ACTIVE_WHEELS:
                 tgt = clamp(
-                    self.target_speeds.get(state["name"], 0.0),
+                    self._target_speed_for_name(_WHEEL_NAMES[idx]),
                     -TARGET_SPEED_MAX,
                     TARGET_SPEED_MAX,
                 )
-                duty_cmd = state["controller"].update(
-                    tgt, state["filtered_speed"], dt_s
+                duty_cmd = self.w_pid[idx].update(
+                    tgt, self.w_filt[idx], dt_s
                 )
-                state["duty"] = duty_cmd
-                state["motor"].duty(int(duty_cmd))
+                self.w_duty[idx] = duty_cmd
+                self.w_mot[idx].duty(int(duty_cmd))
             else:
-                state["controller"].reset()
-                state["duty"] = 0.0
-                state["motor"].duty(0)
+                self.w_pid[idx].reset()
+                self.w_duty[idx] = 0.0
+                self.w_mot[idx].duty(0)
 
     def _check_unlock(self):
         """
@@ -1327,8 +1418,8 @@ class TransportCar:
 
         pos_ok = True
         if self._has_active_translation_target():
-            tx_chk = self.control_state.get("x")
-            ty_chk = self.control_state.get("y")
+            tx_chk = self.control_x if self.control_x_active else None
+            ty_chk = self.control_y if self.control_y_active else None
             tx_val = tx_chk if tx_chk is not None else 0.0
             ty_val = ty_chk if ty_chk is not None else 0.0
 
@@ -1351,21 +1442,22 @@ class TransportCar:
             if self.orbit_mode:
                 self.orbit_mode = False
                 self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
-                self.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-                reset_pi_state(self.wheel_states)
+                self._reset_control_fields()
+                self._reset_wheel_pi_state()
                 self.yaw_pid.reset()
                 self.yaw_integral = 0.0
                 self._orbit_angle_confirm_ticks = 0
-                for state in self.wheel_states:
-                    state["motor"].duty(0)
-                    state["duty"] = 0.0
+                for idx in range(3):
+                    self.w_mot[idx].duty(0)
+                    self.w_duty[idx] = 0.0
                 return
             if had_translation_target:
                 self._clear_translation_control_targets()
-                self.control_state["vx"] = 0.0
-                self.control_state["vy"] = 0.0
+                self.control_vx = 0.0
+                self.control_vy = 0.0
             if had_rotation_target:
                 self._clear_rotation_control_targets()
-                self.control_state["omega"] = 0.0
+                self.control_omega = 0.0
+                self.control_omega_active = True
         elif self.orbit_mode:
             self._orbit_angle_confirm_ticks = 0

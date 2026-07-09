@@ -9,6 +9,7 @@ import time
 
 
 cnt = 0
+TRACE_EXCEPTION = False
 
 
 def _now_ms() -> int:
@@ -38,6 +39,29 @@ def log(stage: str, detail: str = "") -> str:
     return message
 
 
+def log_memory(tag: str) -> str:
+    """输出短内存读数."""
+
+    try:
+        import gc
+
+        collect = getattr(gc, "collect", None)
+        if collect is not None:
+            collect()
+        mem_free = getattr(gc, "mem_free", None)
+        mem_alloc = getattr(gc, "mem_alloc", None)
+        if mem_free is None or mem_alloc is None:
+            return log("mem", "%s na" % tag)
+        free_value = int(mem_free())
+        alloc_value = int(mem_alloc())
+        return log(
+            "mem",
+            "%s f=%d a=%d t=%d" % (tag, free_value, alloc_value, free_value + alloc_value),
+        )
+    except Exception:
+        return log("mem", "%s err" % tag)
+
+
 def write_exception_trace(output, exc: Exception) -> None:
     """输出完整异常调用链."""
 
@@ -60,6 +84,8 @@ def log_exception(stage: str, detail: str, exc: Exception) -> str:
     """打印异常摘要和完整调用链."""
 
     message = log(stage, detail)
+    if not TRACE_EXCEPTION:
+        return message
     print("%s: traceback start" % stage)
     write_exception_trace(None, exc)
     print("%s: traceback end" % stage)

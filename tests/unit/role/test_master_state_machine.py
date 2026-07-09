@@ -29,6 +29,42 @@ def _load_master_state_machine():
     return module
 
 
+def _kind_name(module, kind):
+    names = {
+        module.RK_A_START: "assistant_startup",
+        module.RK_A_OBJ: "assistant_object",
+        module.RK_A_ORBIT: "assistant_orbit",
+        module.RK_A_FOLLOW: "assistant_follow",
+        module.RK_A_TRANSPORT: "assistant_transport",
+        module.RK_A_CLEAR: "assistant_clear",
+        module.RK_A_RETURN: "assistant_return_line",
+        module.RK_T_FINISH: "finish_task",
+        module.RK_T_RETURN: "return_line_task",
+    }
+    return names[int(kind)]
+
+
+def _task_request(module, request):
+    result = {
+        "context_id": request[module.RQ_CONTEXT],
+        "state": request[module.RQ_STATE],
+        "target": request[module.RQ_TARGET],
+        "arg": request[module.RQ_ARG],
+    }
+    if request[module.RQ_KIND] != module.RK_NONE:
+        result["kind"] = _kind_name(module, request[module.RQ_KIND])
+    return result
+
+
+def _assistant_request(module, request):
+    return {
+        "kind": _kind_name(module, request[module.RQ_KIND]),
+        "state": request[module.RQ_STATE],
+        "target": request[module.RQ_TARGET],
+        "arg": request[module.RQ_ARG],
+    }
+
+
 def _enter_initial_search(machine):
     machine.step(orbit_finished=False)
     machine.poll_assistant_request()
@@ -68,7 +104,7 @@ def test_master_state_machine_enters_search_and_builds_task_context() -> None:
     task_request = machine.poll_task_request()
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert task_request == {
+    assert _task_request(MasterStateMachine, task_request) == {
         "context_id": 1,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
         "target": MasterStateMachine.TARGET_OBJECT,
@@ -88,7 +124,7 @@ def test_master_state_machine_waits_for_startup_sync_before_startup_move() -> No
 
     assert machine.state == MasterStateMachine.STATE_STARTUP_SYNC
     assert machine.poll_task_request() is None
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_startup",
         "state": MasterStateMachine.ASSISTANT_STARTUP_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_STARTUP_SYNC_TARGET,
@@ -101,7 +137,7 @@ def test_master_state_machine_waits_for_startup_sync_before_startup_move() -> No
     task_request = machine.poll_task_request()
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert task_request == {
+    assert _task_request(MasterStateMachine, task_request) == {
         "context_id": 1,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
         "target": MasterStateMachine.TARGET_OBJECT,
@@ -138,7 +174,7 @@ def test_master_state_machine_matching_target_found_enters_orbiting() -> None:
     orbit_command = machine.poll_orbit_command()
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert assistant_request == {
+    assert _assistant_request(MasterStateMachine, assistant_request) == {
         "kind": "assistant_object",
         "state": 2,
         "target": 1,
@@ -160,7 +196,7 @@ def test_master_state_machine_marks_assistant_object_request_kind_before_orbit()
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
 
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_object",
         "state": 2,
         "target": 1,
@@ -187,7 +223,7 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
     machine.handle_assistant_target_found(value=300)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
@@ -211,9 +247,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     orbit_command = machine.poll_orbit_command()
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert orbit_command == {
-        "target_heading_deg": 180.0,
-    }
+    assert orbit_command == 180.0
 
 
 def test_master_state_machine_ignores_mismatched_context_event() -> None:
@@ -251,7 +285,7 @@ def test_master_state_machine_does_not_repeat_orbit_enter_action() -> None:
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
 
-    assert first_assistant_request == {
+    assert _assistant_request(MasterStateMachine, first_assistant_request) == {
         "kind": "assistant_object",
         "state": 2,
         "target": 1,
@@ -331,7 +365,7 @@ def test_master_state_machine_emits_new_transport_task_request_after_orbit_finis
 
     machine.step(orbit_finished=True)
 
-    assert machine.poll_task_request() == {
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
         "context_id": 3,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
         "target": MasterStateMachine.TARGET_OBJECT,
@@ -348,7 +382,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
     )
 
     _enter_initial_search(machine)
-    assert machine.poll_task_request() == {
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
         "context_id": 1,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
         "target": MasterStateMachine.TARGET_OBJECT,
@@ -358,7 +392,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_object",
         "state": 2,
         "target": 1,
@@ -368,9 +402,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
 
     machine.mark_assistant_object_acknowledged()
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == {
-        "target_heading_deg": 180.0,
-    }
+    assert machine.poll_orbit_command() == 180.0
 
     machine.step(orbit_finished=False)
     assert machine.poll_assistant_request() is None
@@ -398,7 +430,7 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
     machine.handle_assistant_target_found(value=300)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
@@ -511,7 +543,7 @@ def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishe
 
     machine.step(orbit_finished=True)
 
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
@@ -533,7 +565,7 @@ def test_master_state_machine_does_not_enter_transport_until_both_sides_aligned(
     machine.handle_assistant_aligned(value=0)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_transport",
         "state": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_TARGET,
@@ -555,7 +587,7 @@ def test_master_state_machine_emits_assistant_transport_request_once() -> None:
     machine.handle_assistant_aligned(value=0)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_transport",
         "state": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_TARGET,
@@ -626,7 +658,7 @@ def test_master_state_machine_transport_ready_emits_finish_task() -> None:
     machine.mark_transport_ready()
 
     assert machine.state == MasterStateMachine.STATE_TRANSPORT_OBJECT
-    assert machine.poll_task_request() == {
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
         "kind": "finish_task",
         "context_id": 4,
         "state": MasterStateMachine.STATE_TRANSPORT_OBJECT,
@@ -652,7 +684,7 @@ def test_master_state_machine_finish_event_enters_clear_and_requests_assistant_c
     )
 
     assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_clear",
         "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
@@ -676,9 +708,7 @@ def test_master_state_machine_uses_object_target_edge_for_push_heading() -> None
 
     machine.mark_assistant_object_acknowledged()
 
-    assert machine.poll_orbit_command() == {
-        "target_heading_deg": 180.0,
-    }
+    assert machine.poll_orbit_command() == 180.0
 
 
 def test_master_state_machine_clear_retreat_waits_for_both_cars_before_turn_back() -> None:
@@ -730,7 +760,7 @@ def test_master_state_machine_turn_back_completion_requests_forward_phase() -> N
     machine.mark_turn_back_completed()
 
     assert machine.state == MasterStateMachine.STATE_CLEAR_OBJECT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_clear",
         "state": MasterStateMachine.ASSISTANT_CLEAR_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_CLEAR_SYNC_TARGET,
@@ -761,13 +791,13 @@ def test_master_state_machine_forward_completion_restarts_search_and_assistant_f
     machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_FORWARD)
 
     assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert machine.poll_task_request() == {
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
         "context_id": 5,
         "state": MasterStateMachine.STATE_SEARCH_OBJECT,
         "target": MasterStateMachine.TARGET_OBJECT,
         "arg": 1,
     }
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_follow",
         "state": MasterStateMachine.ASSISTANT_FOLLOW_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_FOLLOW_SYNC_TARGET,
@@ -787,8 +817,8 @@ def test_master_state_machine_forward_completion_restarts_search_and_assistant_f
 def test_master_state_machine_forward_completion_enters_return_garage_when_all_objects_done() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = _drive_machine_to_post_assistant_orbit_request(MasterStateMachine)
-    machine._required_object_count = 1
-    machine._return_line_task_arg = 5
+    machine._obj_need = 1
+    machine._ret_task_arg = 5
     machine._return_marker_task_arg = 6
 
     machine.handle_event(
@@ -805,15 +835,15 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
     machine.mark_master_cleared()
     machine.handle_assistant_cleared(value=MasterStateMachine.CLEAR_PHASE_RETREAT)
 
-    assert machine.completed_object_count == 1
+    assert machine.obj_done == 1
     assert machine.state == MasterStateMachine.STATE_RETURN_GARAGE_RETREAT
-    assert machine.poll_assistant_request() == {
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_return_line",
         "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
         "arg": 0,
     }
-    assert machine.poll_task_request() == {
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
         "kind": "return_line_task",
         "context_id": 5,
         "state": MasterStateMachine.STATE_RETURN_GARAGE_RETREAT,
@@ -840,7 +870,7 @@ def test_master_state_machine_return_garage_events_do_not_advance_state() -> Non
     line_task = machine.poll_task_request()
 
     machine.handle_event(
-        context_id=line_task["context_id"],
+        context_id=line_task[MasterStateMachine.RQ_CONTEXT],
         event=MasterStateMachine.EVENT_RETURN_LINE_ALIGNED,
         value=0,
     )
@@ -849,7 +879,7 @@ def test_master_state_machine_return_garage_events_do_not_advance_state() -> Non
     assert machine.poll_task_request() is None
 
     machine.handle_event(
-        context_id=line_task["context_id"],
+        context_id=line_task[MasterStateMachine.RQ_CONTEXT],
         event=11,
         value=0,
     )
@@ -858,7 +888,7 @@ def test_master_state_machine_return_garage_events_do_not_advance_state() -> Non
     assert machine.poll_task_request() is None
 
     machine.handle_event(
-        context_id=line_task["context_id"],
+        context_id=line_task[MasterStateMachine.RQ_CONTEXT],
         event=12,
         value=0,
     )

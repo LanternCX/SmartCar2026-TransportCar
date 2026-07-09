@@ -81,6 +81,32 @@ class DummyTicker:
         self.stop_count += 1
 
 
+class StubWheelState:
+    """测试用固定轮状态."""
+
+    def __init__(
+        self,
+        name="m",
+        encoder=None,
+        motor=None,
+        controller=None,
+        raw_speed=0.0,
+        filtered_speed=0.0,
+        duty=0.0,
+    ) -> None:
+        self.name = name
+        self.encoder = encoder
+        self.motor = motor
+        self.controller = controller
+        self.raw_speed = float(raw_speed)
+        self.filtered_speed = float(filtered_speed)
+        self.duty = float(duty)
+        self.input_lpf = None
+        self.diff_filter = None
+        self.dual_filter = None
+        self.output_lpf = None
+
+
 def install_transport_car_stubs() -> None:
     """安装 `core.runtime` 在主机侧测试所需的最小依赖桩."""
     module_names = [
@@ -131,12 +157,12 @@ def install_transport_car_stubs() -> None:
     setattr(
         control_wheel,
         "build_wheel_state",
-        lambda *args, **kwargs: {
-            "name": args[0],
-            "motor": args[2],
-            "controller": kwargs["pid_controller"],
-            "filtered_speed": 0.0,
-        },
+        lambda *args, **kwargs: StubWheelState(
+            name=args[0],
+            encoder=args[1],
+            motor=args[2],
+            controller=kwargs["pid_controller"],
+        ),
     )
     sys.modules["control.wheel"] = control_wheel
 

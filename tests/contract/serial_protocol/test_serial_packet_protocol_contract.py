@@ -36,7 +36,10 @@ from protocol.topic import (  # noqa: E402
     UART8,
     can_role_read,
     can_role_write,
-    get_topic_spec,
+    get_topic_body_size,
+    get_topic_entry,
+    validate_mode_for_topic,
+    validate_port_for_topic,
     validate_body_bytes,
 )
 
@@ -64,60 +67,22 @@ def test_ack_frame_has_zero_body_and_points_to_confirmed_topic_and_seq() -> None
 
 
 def test_formal_topic_registry_matches_transport_contract() -> None:
-    assert get_topic_spec(TOPIC_LOCAL_VISION_VELOCITY) == {
-        "name": "LOCAL_VISION_VELOCITY",
-        "mode": MODE_UDP,
-        "port": UART6,
-        "body_size": 7,
-    }
-    assert get_topic_spec(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY) == {
-        "name": "ASSISTANT_FEEDFORWARD_VELOCITY",
-        "mode": MODE_UDP,
-        "port": UART8,
-        "body_size": 7,
-    }
-    assert get_topic_spec(TOPIC_VISION_OBSERVATION) == {
-        "name": "VISION_OBSERVATION",
-        "mode": MODE_UDP,
-        "port": UART6,
-        "body_size": 7,
-    }
-    assert get_topic_spec(TOPIC_MASTER_VISION_TASK_SYNC) == {
-        "name": "MASTER_VISION_TASK_SYNC",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 5,
-    }
-    assert get_topic_spec(TOPIC_ASSISTANT_VISION_TASK_SYNC) == {
-        "name": "ASSISTANT_VISION_TASK_SYNC",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 10,
-    }
-    assert get_topic_spec(TOPIC_MASTER_VISION_EVENT_REPORT) == {
-        "name": "MASTER_VISION_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 10,
-    }
-    assert get_topic_spec(TOPIC_ASSISTANT_VISION_EVENT_REPORT) == {
-        "name": "ASSISTANT_VISION_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART6,
-        "body_size": 3,
-    }
-    assert get_topic_spec(TOPIC_ASSISTANT_STATE_SYNC) == {
-        "name": "ASSISTANT_STATE_SYNC",
-        "mode": MODE_TCP,
-        "port": UART8,
-        "body_size": 10,
-    }
-    assert get_topic_spec(TOPIC_ASSISTANT_EVENT_REPORT) == {
-        "name": "ASSISTANT_EVENT_REPORT",
-        "mode": MODE_TCP,
-        "port": UART8,
-        "body_size": 3,
-    }
+    cases = (
+        (TOPIC_LOCAL_VISION_VELOCITY, MODE_UDP, UART6, 7),
+        (TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, MODE_UDP, UART8, 7),
+        (TOPIC_VISION_OBSERVATION, MODE_UDP, UART6, 7),
+        (TOPIC_MASTER_VISION_TASK_SYNC, MODE_TCP, UART6, 5),
+        (TOPIC_ASSISTANT_VISION_TASK_SYNC, MODE_TCP, UART6, 10),
+        (TOPIC_MASTER_VISION_EVENT_REPORT, MODE_TCP, UART6, 10),
+        (TOPIC_ASSISTANT_VISION_EVENT_REPORT, MODE_TCP, UART6, 3),
+        (TOPIC_ASSISTANT_STATE_SYNC, MODE_TCP, UART8, 10),
+        (TOPIC_ASSISTANT_EVENT_REPORT, MODE_TCP, UART8, 3),
+    )
+    for topic, mode, port, body_size in cases:
+        assert get_topic_entry(topic) is not None
+        assert validate_mode_for_topic(topic, mode) is True
+        assert validate_port_for_topic(topic, port) is True
+        assert get_topic_body_size(topic) == body_size
 
 
 def test_formal_transport_body_rejects_strings_and_wrong_lengths() -> None:

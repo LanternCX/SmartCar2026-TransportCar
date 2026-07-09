@@ -61,7 +61,7 @@ docs: update transport protocol section
 - 分支命名使用小写 + 连字符
 - 单个提交只做一类改动
 - 不提交调试垃圾和敏感信息
-- 提交前先查 `.agents/skills/using-rules/SKILL.md`，收口前再用 `.agents/skills/project-extension-requesting-code-review/SKILL.md` 自检
+- 提交前先查 `.agents/skills/using-rules/SKILL.md`，只有用户主动要求 review 时才使用 `.agents/skills/code-review/SKILL.md`
 
 # Deliverables
 

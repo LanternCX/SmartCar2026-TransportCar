@@ -1,21 +1,36 @@
-"""启动动作 Play。"""
+"""启动移动流程。"""
 
-from play.base import BasePlay
-from play.steps import AngleStep, PositionYStep
+from play.routines import OP_ANGLE, OP_END, OP_POS_Y
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-STARTUP_FIRST_FORWARD_DISTANCE = 0.70
-STARTUP_RIGHT_TURN_DEG = 90.0
-STARTUP_SECOND_FORWARD_DISTANCE = 1.10
-STARTUP_LEFT_TURN_DEG = -90.0
-STARTUP_MOVE_SPEED = 5.0
+    def const(value):
+        return value
 
+# 启动后第一段前进距离，单位 cm；解释器统一转换为 m。
+_FIRST_FORWARD_DISTANCE_CM = const(70)
+# 启动右转后第二段前进距离，单位 cm；用于进入取物搜索起点。
+_SECOND_FORWARD_DISTANCE_CM = const(110)
+_MOVE_SPEED = const(5)
+_RIGHT_TURN_DEG = const(90)
+_LEFT_TURN_DEG = const(-90)
 
-class StartupMovePlay(BasePlay):
-    def _create_steps(self):
-        return [
-            PositionYStep(STARTUP_FIRST_FORWARD_DISTANCE, max_speed_cmd=STARTUP_MOVE_SPEED),
-            AngleStep(STARTUP_RIGHT_TURN_DEG),
-            PositionYStep(STARTUP_SECOND_FORWARD_DISTANCE, max_speed_cmd=STARTUP_MOVE_SPEED),
-            AngleStep(STARTUP_LEFT_TURN_DEG),
-        ]
+SEQUENCE = (
+    OP_POS_Y,
+    _FIRST_FORWARD_DISTANCE_CM,
+    _MOVE_SPEED,
+    OP_ANGLE,
+    _RIGHT_TURN_DEG,
+    0,
+    OP_POS_Y,
+    _SECOND_FORWARD_DISTANCE_CM,
+    _MOVE_SPEED,
+    OP_ANGLE,
+    _LEFT_TURN_DEG,
+    0,
+    OP_END,
+    0,
+    0,
+)

@@ -66,7 +66,16 @@ def _make_control_car(**attrs):
     transport_car = import_transport_car_module()
     motors = [DummyMotor(), DummyMotor(), DummyMotor()]
     defaults = {
-        "control_state": {"vx": 0.0, "vy": 0.0, "omega": 0.0},
+        "control_vx": 0.0,
+        "control_vy": 0.0,
+        "control_omega": 0.0,
+        "control_omega_active": True,
+        "control_x": 0.0,
+        "control_y": 0.0,
+        "control_angle": 0.0,
+        "control_x_active": False,
+        "control_y_active": False,
+        "control_angle_active": False,
         "command_lock": False,
         "command_mode": "none",
         "lock_start_time": 0,
@@ -86,36 +95,46 @@ def _make_control_car(**attrs):
         "last_yaw_rad": 9.0,
         "odometry": _Odom(),
         "kinematics": transport_car.OmniKinematics(),
-        "target_speeds": {"m": 0.0, "l": 0.0, "r": 0.0},
-        "wheel_states": [
-            {
-                "name": "m",
-                "controller": RecordingController(return_value=0.0),
-                "filtered_speed": 0.0,
-                "motor": motors[0],
-                "duty": 7.0,
-            },
-            {
-                "name": "l",
-                "controller": RecordingController(return_value=0.0),
-                "filtered_speed": 0.0,
-                "motor": motors[1],
-                "duty": 8.0,
-            },
-            {
-                "name": "r",
-                "controller": RecordingController(return_value=0.0),
-                "filtered_speed": 0.0,
-                "motor": motors[2],
-                "duty": 9.0,
-            },
+        "target_speed_m": 0.0,
+        "target_speed_l": 0.0,
+        "target_speed_r": 0.0,
+        "wheel_encoders": (None, None, None),
+        "w_mot": (motors[0], motors[1], motors[2]),
+        "w_pid": [
+            RecordingController(return_value=0.0),
+            RecordingController(return_value=0.0),
+            RecordingController(return_value=0.0),
         ],
+        "w_filt": [0.0, 0.0, 0.0],
+        "w_raw": [0.0, 0.0, 0.0],
+        "w_duty": [7.0, 8.0, 9.0],
     }
+    control_state = attrs.pop("control_state", None)
+    target_speeds = attrs.pop("target_speeds", None)
     defaults.update(attrs)
     car = transport_car.TransportCar.__new__(transport_car.TransportCar)
     for key, value in defaults.items():
         setattr(car, key, value)
+    if control_state is not None:
+        _set_control_fields(car, control_state)
+    if target_speeds is not None:
+        car.target_speed_m = float(target_speeds.get("m", 0.0))
+        car.target_speed_l = float(target_speeds.get("l", 0.0))
+        car.target_speed_r = float(target_speeds.get("r", 0.0))
     return transport_car, car
+
+
+def _set_control_fields(car, state) -> None:
+    car.control_vx = float(state.get("vx", 0.0))
+    car.control_vy = float(state.get("vy", 0.0))
+    car.control_omega_active = "omega" in state
+    car.control_omega = float(state.get("omega", 0.0))
+    car.control_x_active = "x" in state
+    car.control_x = float(state.get("x", 0.0))
+    car.control_y_active = "y" in state
+    car.control_y = float(state.get("y", 0.0))
+    car.control_angle_active = "angle" in state
+    car.control_angle = float(state.get("angle", 0.0))
 
 
 def _load_real_positional_pid_controller():
@@ -284,10 +303,9 @@ def test_transport_car_stop_stops_ticker_and_zeroes_motors() -> None:
     motors = [DummyMotor(), DummyMotor()]
     _transport_car, car = make_minimal_transport_car(
         ticker=ticker,
-        wheel_states=[
-            {"motor": motors[0]},
-            {"motor": motors[1]},
-        ],
+        w_mot=(motors[0], motors[1], DummyMotor()),
+        w_pid=[RecordingController(), RecordingController(), RecordingController()],
+        w_duty=[0.0, 0.0, 0.0],
     )
 
     car.stop()
@@ -410,10 +428,8 @@ def test_transport_car_selects_odometry_distance_scale_by_role() -> None:
 def test_transport_car_builds_encoder_snapshot() -> None:
     """编码器快照继续按轮输出原始值与滤波值."""
     _transport_car, car = make_minimal_transport_car(
-        wheel_states=[
-            {"name": "m", "raw_speed": 1.0, "filtered_speed": 0.5},
-            {"name": "l", "raw_speed": 2.0, "filtered_speed": 1.5},
-        ]
+        w_raw=[1.0, 2.0, 0.0],
+        w_filt=[0.5, 1.5, 0.0],
     )
 
     assert car.build_encoder_snapshot() == {
@@ -421,17 +437,18 @@ def test_transport_car_builds_encoder_snapshot() -> None:
         "m_filt": 0.5,
         "l_raw": 2.0,
         "l_filt": 1.5,
+        "r_raw": 0.0,
+        "r_filt": 0.0,
     }
 
 
 def test_transport_car_builds_motor_snapshot() -> None:
     """电机快照继续暴露目标与占空比."""
     _transport_car, car = make_minimal_transport_car(
-        wheel_states=[
-            {"name": "m", "duty": 11.0},
-            {"name": "l", "duty": 12.0},
-        ],
-        target_speeds={"m": 5.0, "l": 6.0},
+        w_duty=[11.0, 12.0, 0.0],
+        target_speed_m=5.0,
+        target_speed_l=6.0,
+        target_speed_r=0.0,
     )
 
     assert car.build_motor_snapshot() == {
@@ -439,6 +456,8 @@ def test_transport_car_builds_motor_snapshot() -> None:
         "m_duty": 11.0,
         "l_target": 6.0,
         "l_duty": 12.0,
+        "r_target": 0.0,
+        "r_duty": 0.0,
     }
 
 
@@ -452,6 +471,18 @@ def test_transport_car_set_velocity_target_updates_control_state() -> None:
     assert car.command_mode == "none"
 
 
+def test_transport_car_control_targets_use_fixed_fields() -> None:
+    """底盘长期控制目标不保存在实例 dict 字段中."""
+    _transport_car, car = _make_control_car()
+
+    car.set_velocity_target(1.0, -2.5, 0.5, has_omega=True)
+
+    assert "control_state" not in car.__dict__
+    assert car.control_vx == pytest.approx(1.0)
+    assert car.control_vy == pytest.approx(-2.5)
+    assert car.control_omega == pytest.approx(0.5)
+
+
 def test_transport_car_velocity_target_keeps_current_speed_limit() -> None:
     """结构化速度目标沿用底盘轮速限幅边界."""
     transport_car, car = _make_control_car()
@@ -463,6 +494,10 @@ def test_transport_car_velocity_target_keeps_current_speed_limit() -> None:
     assert car.target_speeds == pytest.approx(
         {"m": -limit, "l": limit / 2.0, "r": limit / 2.0}
     )
+    assert "target_speeds" not in car.__dict__
+    assert car.target_speed_m == pytest.approx(-limit)
+    assert car.target_speed_l == pytest.approx(limit / 2.0)
+    assert car.target_speed_r == pytest.approx(limit / 2.0)
 
 
 def test_transport_car_translation_velocity_keeps_angle_target() -> None:
@@ -671,7 +706,7 @@ def test_transport_car_orbit_target_uses_orbit_specific_omega_limit() -> None:
         yaw_pid=RecordingController(return_value=50.0),
     )
 
-    car.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+    _set_control_fields(car, {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0})
     car.command_lock = True
     car.command_mode = "locked"
     non_orbit_omega = car._compute_omega_cmd(0.005)
@@ -692,7 +727,7 @@ def test_transport_car_heading_transition_target_uses_transition_specific_omega_
         yaw_pid=RecordingController(return_value=50.0),
     )
 
-    car.control_state = {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+    _set_control_fields(car, {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0})
     car.command_lock = True
     car.command_mode = "locked"
     non_transition_omega = car._compute_omega_cmd(0.005)
@@ -886,15 +921,15 @@ def test_transport_car_orbit_target_runs_through_existing_inverse_kinematics_cha
     }
 
     assert car.target_speeds == pytest.approx(expected_targets)
-    for state, target in zip(
-        car.wheel_states,
+    for controller, target in zip(
+        car.w_pid,
         (
             expected_targets["m"],
             expected_targets["l"],
             expected_targets["r"],
         ),
     ):
-        assert state["controller"].update_calls == [(target, 0.0, 0.005)]
+        assert controller.update_calls == [(target, 0.0, 0.005)]
 
 
 def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
@@ -916,9 +951,9 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
     assert car.command_lock is False
     assert car.command_mode == "none"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0}
-    for state in car.wheel_states:
-        assert state["duty"] == 0.0
-        assert state["motor"].duties == [0]
+    assert car.w_duty == [0.0, 0.0, 0.0]
+    for motor in car.w_mot:
+        assert motor.duties == [0]
 
 
 def test_transport_car_orbit_angle_confirm_ticks_must_be_consecutive() -> None:
@@ -1035,6 +1070,6 @@ def test_transport_car_zero_motors_keeps_motor_clear_behavior() -> None:
 
     car.zero_motors()
 
-    for state in car.wheel_states:
-        assert state["duty"] == 0.0
-        assert state["motor"].duties == [0]
+    assert car.w_duty == [0.0, 0.0, 0.0]
+    for motor in car.w_mot:
+        assert motor.duties == [0]

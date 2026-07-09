@@ -3,18 +3,56 @@
 @brief 业务 body bytes 编解码
 """
 
+try:
+    from micropython import const  # pyright: ignore[reportMissingImports]
+except ImportError:
 
-_I16_MIN = -32768
-_I16_MAX = 32767
-_I8_MIN = -128
-_I8_MAX = 127
-_SCALE = 1000
+    def const(value):
+        return value
+
+
+_I16_MIN = const(-32768)
+_I16_MAX = const(32767)
+_I8_MIN = const(-128)
+_I8_MAX = const(127)
+_SCALE = const(1000)
 _ZERO_THRESHOLD = (0, 0, 0, 0, 0, 0)
 
-LOCAL_VISION_CONTROL_PAUSE = 1
-LOCAL_VISION_CONTROL_RESUME = 2
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = 3
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = 4
+# 解码结果统一使用 tuple + const 索引，避免固定字段名进入板端 qstr 池。
+VEL_X = const(0)
+VEL_Y = const(1)
+VEL_W = const(2)
+VEL_HAS_W = const(3)
+
+VO_CTX = const(0)
+VO_X = const(1)
+VO_Y = const(2)
+VO_VALUE = const(3)
+
+CTL_ACTION = const(0)
+
+MT_CTX = const(0)
+MT_STATE = const(1)
+MT_TARGET = const(2)
+MT_ARG = const(3)
+
+AS_STATE = const(0)
+AS_TARGET = const(1)
+AS_ARG = const(2)
+AS_TH = const(3)
+
+ME_CTX = const(0)
+ME_EVENT = const(1)
+ME_VALUE = const(2)
+ME_TH = const(3)
+
+AE_EVENT = const(0)
+AE_VALUE = const(1)
+
+LOCAL_VISION_CONTROL_PAUSE = const(1)
+LOCAL_VISION_CONTROL_RESUME = const(2)
+LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = const(3)
+LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = const(4)
 
 
 def _require_u8(value):
@@ -97,12 +135,20 @@ def encode_velocity_body(vx, vy, omega, has_omega):
 
 
 def decode_velocity_body(body):
-    return {
-        "vx": _unpack_scaled(body, 0),
-        "vy": _unpack_scaled(body, 2),
-        "omega": _unpack_scaled(body, 4),
-        "has_omega": bool(body[6]),
-    }
+    return (
+        _unpack_scaled(body, 0),
+        _unpack_scaled(body, 2),
+        _unpack_scaled(body, 4),
+        bool(body[6]),
+    )
+
+
+def decode_velocity_body_into(body, out):
+    out[VEL_X] = _unpack_scaled(body, 0)
+    out[VEL_Y] = _unpack_scaled(body, 2)
+    out[VEL_W] = _unpack_scaled(body, 4)
+    out[VEL_HAS_W] = bool(body[6])
+    return out
 
 
 def encode_vision_observation_body(context_id, x, y, value):
@@ -110,12 +156,7 @@ def encode_vision_observation_body(context_id, x, y, value):
 
 
 def decode_vision_observation_body(body):
-    return {
-        "context_id": int(body[0]),
-        "x": _unpack_scaled(body, 1),
-        "y": _unpack_scaled(body, 3),
-        "value": _unpack_scaled(body, 5),
-    }
+    return (int(body[0]), _unpack_scaled(body, 1), _unpack_scaled(body, 3), _unpack_scaled(body, 5))
 
 
 def encode_local_vision_control_body(action):
@@ -123,7 +164,7 @@ def encode_local_vision_control_body(action):
 
 
 def decode_local_vision_control_body(body):
-    return {"action": int(body[0])}
+    return (int(body[0]),)
 
 
 def encode_master_vision_task_sync_body(context_id, state, target, arg):
@@ -131,12 +172,7 @@ def encode_master_vision_task_sync_body(context_id, state, target, arg):
 
 
 def decode_master_vision_task_sync_body(body):
-    return {
-        "context_id": int(body[0]),
-        "state": int(body[1]),
-        "target": int(body[2]),
-        "arg": _unpack_i16(body, 3),
-    }
+    return (int(body[0]), int(body[1]), int(body[2]), _unpack_i16(body, 3))
 
 
 def encode_assistant_vision_task_sync_body(state, target, arg, threshold=None):
@@ -144,12 +180,7 @@ def encode_assistant_vision_task_sync_body(state, target, arg, threshold=None):
 
 
 def decode_assistant_vision_task_sync_body(body):
-    return {
-        "state": int(body[0]),
-        "target": int(body[1]),
-        "arg": _unpack_i16(body, 2),
-        "threshold": _unpack_threshold(body, 4),
-    }
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
 
 
 def encode_master_vision_event_report_body(context_id, event, value, threshold=None):
@@ -157,12 +188,7 @@ def encode_master_vision_event_report_body(context_id, event, value, threshold=N
 
 
 def decode_master_vision_event_report_body(body):
-    return {
-        "context_id": int(body[0]),
-        "event": int(body[1]),
-        "value": _unpack_i16(body, 2),
-        "threshold": _unpack_threshold(body, 4),
-    }
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
 
 
 def encode_assistant_vision_event_report_body(event, value):
@@ -170,10 +196,7 @@ def encode_assistant_vision_event_report_body(event, value):
 
 
 def decode_assistant_vision_event_report_body(body):
-    return {
-        "event": int(body[0]),
-        "value": _unpack_i16(body, 1),
-    }
+    return (int(body[0]), _unpack_i16(body, 1))
 
 
 def encode_assistant_state_sync_body(state, target, arg, threshold=None):
@@ -181,12 +204,7 @@ def encode_assistant_state_sync_body(state, target, arg, threshold=None):
 
 
 def decode_assistant_state_sync_body(body):
-    return {
-        "state": int(body[0]),
-        "target": int(body[1]),
-        "arg": _unpack_i16(body, 2),
-        "threshold": _unpack_threshold(body, 4),
-    }
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
 
 
 def encode_assistant_event_report_body(event, value):
@@ -194,7 +212,4 @@ def encode_assistant_event_report_body(event, value):
 
 
 def decode_assistant_event_report_body(body):
-    return {
-        "event": int(body[0]),
-        "value": _unpack_i16(body, 1),
-    }
+    return (int(body[0]), _unpack_i16(body, 1))

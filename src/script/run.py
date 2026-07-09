@@ -11,14 +11,14 @@ import time
 
 from smartcar import ticker
 from config import motion as motion_params
-from utils.startup_log import log, log_exception
+from utils.startup_log import log, log_exception, log_memory
 from role import create_role_transport_car
 from role.vehicle_role import read_vehicle_role
 
 
-TICK_MS = getattr(motion_params, "TICK_MS")
-ROLE_STEP_MS = getattr(motion_params, "ROLE_STEP_MS")
-MOTION_INPUT_STEP_MS = getattr(motion_params, "MOTION_INPUT_STEP_MS")
+TICK_MS = motion_params.TICK_MS
+ROLE_STEP_MS = motion_params.ROLE_STEP_MS
+MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 LOG_STAGE = "run"
 
 
@@ -75,7 +75,7 @@ def _build_capture_items(car):
 
     @return 包含编码器和 IMU 对象的列表, ticker 每周期调用这些对象的采样方法
     """
-    capture_items = [state["encoder"] for state in car.wheel_states]
+    capture_items = list(car.wheel_encoders)
     capture_items.append(car.imu)
     return capture_items
 
@@ -98,6 +98,26 @@ def _step_motion_input(car) -> bool:
 
 def _collect_runtime_garbage(car) -> None:
     car.collect_garbage()
+
+
+def _prepare_runtime_before_ready(car) -> None:
+    prepare = getattr(car, "prepare_runtime", None)
+    if prepare is not None:
+        prepare()
+
+
+def _print_mem_info_before_ready() -> None:
+    try:
+        import gc
+        import micropython  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    mem_info = getattr(micropython, "mem_info", None)
+    if mem_info is None:
+        return
+    gc.collect()
+    log(LOG_STAGE, "mem_info verbose before ready")
+    mem_info(1)
 
 
 def _run_control_loop(car, now_ms=None) -> None:
@@ -195,7 +215,11 @@ def main():
         log(LOG_STAGE, "vision runtime ready=%s" % role)
 
         log(LOG_STAGE, "creating TransportCar")
+        log_memory("r0")
         car = _create_transport_car(role)
+        log_memory("r1")
+        _prepare_runtime_before_ready(car)
+        _print_mem_info_before_ready()
         log(LOG_STAGE, "TransportCar ready")
 
         log(LOG_STAGE, "creating ticker")
