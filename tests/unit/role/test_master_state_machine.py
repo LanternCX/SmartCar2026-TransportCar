@@ -292,7 +292,13 @@ def test_master_state_machine_avoidance_demo_queues_assistant_orbit_after_master
 
     machine.step(orbit_finished=True)
 
-    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
+        "context_id": 3,
+        "state": MasterStateMachine.STATE_SEARCH_OBJECT,
+        "target": MasterStateMachine.TARGET_OBJECT,
+        "arg": 2,
+    }
     assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
@@ -321,12 +327,47 @@ def test_master_state_machine_avoidance_demo_accepts_late_assistant_target_found
 
     machine.handle_assistant_target_found(value=300)
 
-    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
     assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
         "arg": _pack_task_arg(0, 2),
+    }
+
+
+def test_master_state_machine_avoidance_demo_finishes_after_both_align() -> None:
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_delta_deg=90.0,
+        avoidance_enabled=True,
+        avoidance_orbit_offset_deg=90.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+    machine.mark_assistant_object_acknowledged()
+    machine.poll_orbit_command()
+    machine.handle_assistant_target_found(value=300)
+    machine.step(orbit_finished=True)
+    machine.poll_task_request()
+    machine.poll_assistant_request()
+
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+    machine.handle_assistant_aligned(value=0)
+
+    assert machine.state == MasterStateMachine.STATE_FINISHED
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_finished",
+        "state": MasterStateMachine.ASSISTANT_FINISHED_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_FINISHED_SYNC_TARGET,
+        "arg": 0,
     }
 
 

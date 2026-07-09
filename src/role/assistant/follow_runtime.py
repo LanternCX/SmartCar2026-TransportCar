@@ -60,7 +60,6 @@ from role.assistant.state_machine import (
     ASSISTANT_STATE_RETURN_FOLLOW,
     ASSISTANT_STATE_STARTUP_MOVE,
     ASSISTANT_STATE_TRANSPORT_OBJECT,
-    ASSISTANT_TARGET_NONE,
     ASSISTANT_TARGET_OBJECT,
     AssistantStateMachine,
 )
@@ -166,6 +165,7 @@ class AssistantFollowRuntime:
         self._obj_th = (0, 0, 0, 0, 0, 0)
         self._realign = False
         self._av_orbit = False
+        self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
@@ -310,6 +310,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._clear_done = False
             self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
@@ -320,6 +321,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._clear_done = False
             self._enter_follow_state()
         elif self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
@@ -329,6 +331,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             self._realign = False
@@ -353,6 +356,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._clear_done = False
             self._line_ok = False
             self._enter_return_follow_state()
@@ -365,6 +369,7 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
             self._clear_done = False
             self._write_zero_velocity()
         return True
@@ -589,7 +594,7 @@ class AssistantFollowRuntime:
             self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and self._realign
         ):
-            self._car.set_heading_target(float(_ASSISTANT_ORBIT_TARGET_DEG))
+            self._car.set_heading_target(float(self._align_heading))
 
     def _should_store_velocity(self, source) -> bool:
         if self._sm.state == ASSISTANT_STATE_IDLE:
@@ -752,6 +757,7 @@ class AssistantFollowRuntime:
                 push_heading_for_edge(target_edge_for_object(self._obj_id)),
                 -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
             )
+        self._align_heading = float(orbit_target)
         self._car.set_orbit_target(
             orbit_target,
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
@@ -820,20 +826,10 @@ class AssistantFollowRuntime:
             return
         if self._realign:
             return
-        if self._av_orbit:
+        av_orbit = self._av_orbit
+        if av_orbit:
             self._av_orbit = False
-            self._sm.apply_master_state(
-                ASSISTANT_STATE_FINISHED,
-                ASSISTANT_TARGET_NONE,
-                0,
-            )
-            self._clear_motion_inputs()
-            self._p_local = None
-            self._p_report = None
-            self._found_done = False
-            self._write_zero_velocity()
-            return
-        if self._last_approach_arg <= 0:
+        if not av_orbit and self._last_approach_arg <= 0:
             return
         self._sm.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,

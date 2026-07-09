@@ -157,6 +157,7 @@ class MasterStateMachine:
         self._obj_id = 0
         self._edge = None
         self._av_m_orbit = False
+        self._av_align = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -185,6 +186,19 @@ class MasterStateMachine:
         if self.state == STATE_ORBITING and orbit_finished:
             if self._av_m_orbit:
                 self._av_m_orbit = False
+                self._av_align = True
+                self._enter_state(STATE_SEARCH_OBJECT)
+                self._orbit_done = True
+                self._m_aligned = False
+                self._a_aligned = False
+                self._ctx = (self._ctx + 1) % 256
+                self._p_task = (
+                    RK_NONE,
+                    self._ctx,
+                    STATE_SEARCH_OBJECT,
+                    TARGET_OBJECT,
+                    self._tr_task_arg,
+                )
                 if self._obj_pending:
                     self._obj_pending = False
                     self._orbit_req = True
@@ -195,7 +209,6 @@ class MasterStateMachine:
                         ASSISTANT_ORBIT_SYNC_TARGET,
                         pack_task_arg(0, self._obj_id),
                     )
-                self._enter_state(STATE_FINISHED)
                 return
             self._enter_state(STATE_SEARCH_OBJECT)
             self._orbit_done = True
@@ -302,17 +315,6 @@ class MasterStateMachine:
         """消费辅车目标命中回报"""
 
         _ = value
-        if self.state == STATE_FINISHED and self._av_on:
-            if self._obj_req and not self._orbit_req:
-                self._orbit_req = True
-                self._p_ast = (
-                    RK_A_ORBIT,
-                    0,
-                    ASSISTANT_ORBIT_SYNC_STATE,
-                    ASSISTANT_ORBIT_SYNC_TARGET,
-                    pack_task_arg(0, self._obj_id),
-                )
-            return
         if self.state == STATE_ORBITING:
             if self._obj_req and not self._orbit_req:
                 self._obj_pending = True
@@ -355,6 +357,17 @@ class MasterStateMachine:
         if not self._m_aligned or not self._a_aligned:
             return
         if self._tr_req:
+            return
+        if self._av_align:
+            self._av_align = False
+            self._p_ast = (
+                RK_A_FINISHED,
+                0,
+                ASSISTANT_FINISHED_SYNC_STATE,
+                ASSISTANT_FINISHED_SYNC_TARGET,
+                0,
+            )
+            self._enter_state(STATE_FINISHED)
             return
         self._tr_req = True
         self._p_ast = (
@@ -479,6 +492,7 @@ class MasterStateMachine:
         self._obj_id = 0
         self._edge = None
         self._av_m_orbit = False
+        self._av_align = False
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
         self._p_ast = (
@@ -564,7 +578,10 @@ class MasterStateMachine:
     def get_push_heading_deg(self):
         """返回当前物体目标边对应的推动朝向."""
 
-        return push_heading_for_edge(self._edge)
+        push_heading = push_heading_for_edge(self._edge)
+        if self._av_align:
+            return heading_with_offset(push_heading, self._av_offset)
+        return push_heading
 
     def _enter_clear_phase(self, clear_phase):
         """进入指定的搬运收尾阶段并按需同步辅车"""
