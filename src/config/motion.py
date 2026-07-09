@@ -66,6 +66,8 @@ MASTER_ORBIT_RADIUS_SCALE = 2.5
 TRANSPORT_AVOIDANCE_DEMO_ENABLED = True
 # 主车避障绕行相对正式推动朝向的角度偏移, 单位度
 TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = 90.0
+# 避障平移目标距离, 单位米, 由辅车里程计判断到位
+TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M = 0.70
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

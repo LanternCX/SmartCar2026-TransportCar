@@ -96,6 +96,10 @@ ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENA
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
     vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
 )
+_TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
+_TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M = (
+    motion_params.TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M
+)
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
 MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
@@ -165,7 +169,11 @@ class AssistantFollowRuntime:
         self._obj_th = (0, 0, 0, 0, 0, 0)
         self._realign = False
         self._av_orbit = False
+        self._av_shift = False
         self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+        self._shift_done = False
+        self._shift_x = 0.0
+        self._shift_y = 0.0
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
@@ -211,6 +219,7 @@ class AssistantFollowRuntime:
         except Exception as exc:
             self._record_error_text("motion_input failed: %s" % exc, exc)
         self._finish_clear_if_needed()
+        self._finish_shift_if_needed()
         self._resume_approach_after_orbit()
         return True
 
@@ -310,7 +319,9 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._av_shift = False
             self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+            self._shift_done = False
             self._clear_done = False
             self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
@@ -321,7 +332,9 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._av_shift = False
             self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+            self._shift_done = False
             self._clear_done = False
             self._enter_follow_state()
         elif self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
@@ -331,9 +344,13 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._av_shift = False
             self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+            self._shift_done = False
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
+            self._av_shift = False
+            self._shift_done = False
             self._realign = False
             self._clear_done = False
             self._enter_approach_object_state(packet)
@@ -356,7 +373,9 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._av_shift = False
             self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+            self._shift_done = False
             self._clear_done = False
             self._line_ok = False
             self._enter_return_follow_state()
@@ -369,7 +388,9 @@ class AssistantFollowRuntime:
             self._found_done = False
             self._realign = False
             self._av_orbit = False
+            self._av_shift = False
             self._align_heading = float(_ASSISTANT_ORBIT_TARGET_DEG)
+            self._shift_done = False
             self._clear_done = False
             self._write_zero_velocity()
         return True
@@ -555,14 +576,9 @@ class AssistantFollowRuntime:
 
     def _write_transport_object_velocity(self) -> None:
         uart6_velocity = self._u6v
-        uart8_velocity = self._u8v
-        if uart6_velocity is None and uart8_velocity is None:
-            return
         vx = 0.0
-        vy = 0.0
-        if uart8_velocity is not None:
-            scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
-            vy += -float(uart8_velocity[VEL_Y]) * scale
+        scale = float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+        vy = -float(_TRANSPORT_FORWARD_SPEED) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity[VEL_X])
         self._apply_effective_velocity(vx, vy, 0.0, False)
@@ -784,6 +800,10 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_motion_inputs()
         self._write_zero_velocity()
+        if self._av_shift:
+            self._shift_done = False
+            self._shift_x = float(self._car.odometry.x)
+            self._shift_y = float(self._car.odometry.y)
         self._p_local = (
             ASSISTANT_STATE_TRANSPORT_OBJECT,
             int(packet[AS_TARGET]),
@@ -829,6 +849,7 @@ class AssistantFollowRuntime:
         av_orbit = self._av_orbit
         if av_orbit:
             self._av_orbit = False
+            self._av_shift = True
         if not av_orbit and self._last_approach_arg <= 0:
             return
         self._sm.apply_master_state(
@@ -876,6 +897,24 @@ class AssistantFollowRuntime:
             int(self._sm.arg),
             False,
         )
+
+    def _finish_shift_if_needed(self) -> None:
+        if self._sm.state != ASSISTANT_STATE_TRANSPORT_OBJECT:
+            return
+        if not self._av_shift:
+            return
+        if self._shift_done:
+            return
+        if self._p_report is not None:
+            return
+        dx = float(self._car.odometry.x) - float(self._shift_x)
+        dy = float(self._car.odometry.y) - float(self._shift_y)
+        target = float(_TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M)
+        if dx * dx + dy * dy < target * target:
+            return
+        self._shift_done = True
+        self._write_zero_velocity()
+        self._p_report = (_CLEARED_EVENT, 0, False)
 
     def _are_all_wheels_near_stop(self) -> bool:
         return bool(self._car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))

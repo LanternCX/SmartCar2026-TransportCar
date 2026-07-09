@@ -336,7 +336,7 @@ def test_master_state_machine_avoidance_demo_accepts_late_assistant_target_found
     }
 
 
-def test_master_state_machine_avoidance_demo_finishes_after_both_align() -> None:
+def test_master_state_machine_avoidance_demo_finishes_after_shift_report() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -361,6 +361,18 @@ def test_master_state_machine_avoidance_demo_finishes_after_both_align() -> None
         context_id=3, event=MasterStateMachine.EVENT_ALIGNED, value=0
     )
     machine.handle_assistant_aligned(value=0)
+
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_transport",
+        "state": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_TARGET,
+        "arg": _pack_task_arg(1, 2),
+    }
+    machine.mark_transport_ready()
+    assert machine.state == MasterStateMachine.STATE_TRANSPORT_OBJECT
+
+    machine.handle_assistant_cleared(value=0)
 
     assert machine.state == MasterStateMachine.STATE_FINISHED
     assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {

@@ -282,6 +282,23 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
             master_uart6,
             assistant_uart6,
             lambda: (
+                master._sm.state == master_module.STATE_TRANSPORT_OBJECT
+                and assistant._sm.state
+                == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT
+            ),
+        )
+        assistant_car.odometry.y = -float(
+            assistant_module._TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M
+        )
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+            lambda: (
                 master._sm.state == master_module.STATE_FINISHED
                 and assistant._sm.state == assistant_module.ASSISTANT_STATE_FINISHED
             ),

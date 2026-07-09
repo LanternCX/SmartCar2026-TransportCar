@@ -883,7 +883,6 @@ class MasterForwardRuntime:
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
             elif request_kind == RK_A_TRANSPORT:
-                self._act_ctx = None
                 self._u6v = None
                 self._u6_has_w = False
                 self._u6_ver = self._ts.get_udp_version(
@@ -891,7 +890,7 @@ class MasterForwardRuntime:
                 )
                 self._p_event = None
                 self._tr_sync_ack = False
-                self._tr_task_ack = False
+                self._tr_task_ack = bool(self._sm._av_shift)
                 self._tr_ticks = 0
                 self._tr_unlock = False
                 self._car.handle_velocity_packet(
@@ -901,14 +900,16 @@ class MasterForwardRuntime:
                     None,
                     True,
                 )
-                self._p_task = (
-                    RK_T_TRANSPORT,
-                    int(self._sm._ctx),
-                    STATE_SEARCH_OBJECT,
-                    int(assistant_request[RQ_TARGET]),
-                    int(MASTER_TRANSPORT_TASK_CONFIG_ID),
-                    False,
-                )
+                if not self._sm._av_shift:
+                    self._act_ctx = None
+                    self._p_task = (
+                        RK_T_TRANSPORT,
+                        int(self._sm._ctx),
+                        STATE_SEARCH_OBJECT,
+                        int(assistant_request[RQ_TARGET]),
+                        int(MASTER_TRANSPORT_TASK_CONFIG_ID),
+                        False,
+                    )
             elif request_kind == RK_A_CLEAR:
                 self._u6v = None
                 self._u6_has_w = False

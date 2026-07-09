@@ -158,6 +158,7 @@ class MasterStateMachine:
         self._edge = None
         self._av_m_orbit = False
         self._av_align = False
+        self._av_shift = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -360,14 +361,18 @@ class MasterStateMachine:
             return
         if self._av_align:
             self._av_align = False
+            self._av_shift = True
+            self._tr_req = True
             self._p_ast = (
-                RK_A_FINISHED,
+                RK_A_TRANSPORT,
                 0,
-                ASSISTANT_FINISHED_SYNC_STATE,
-                ASSISTANT_FINISHED_SYNC_TARGET,
-                0,
+                ASSISTANT_TRANSPORT_SYNC_STATE,
+                ASSISTANT_TRANSPORT_SYNC_TARGET,
+                pack_task_arg(
+                    self._a_tr_arg,
+                    self._obj_id,
+                ),
             )
-            self._enter_state(STATE_FINISHED)
             return
         self._tr_req = True
         self._p_ast = (
@@ -391,6 +396,9 @@ class MasterStateMachine:
         if not self._m_aligned or not self._a_aligned:
             return
         self._tr_ready = True
+        if self._av_shift:
+            self._enter_state(STATE_TRANSPORT_OBJECT)
+            return
         self._enter_state(STATE_TRANSPORT_OBJECT)
         self._ctx = (self._ctx + 1) % 256
         self._p_task = (
@@ -417,6 +425,20 @@ class MasterStateMachine:
     def handle_assistant_cleared(self, value):
         """消费辅车搬运后脱离完成回报"""
 
+        if self.state == STATE_TRANSPORT_OBJECT and self._av_shift:
+            _ = value
+            self._av_shift = False
+            self._tr_req = False
+            self._tr_ready = False
+            self._p_ast = (
+                RK_A_FINISHED,
+                0,
+                ASSISTANT_FINISHED_SYNC_STATE,
+                ASSISTANT_FINISHED_SYNC_TARGET,
+                0,
+            )
+            self._enter_state(STATE_FINISHED)
+            return
         if self.state != STATE_CLEAR_OBJECT:
             return
         if int(value) != int(self._clr_phase):
@@ -491,6 +513,7 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._av_shift = False
         self._av_m_orbit = False
         self._av_align = False
         self._enter_state(STATE_SEARCH_OBJECT)
@@ -656,8 +679,6 @@ class MasterStateMachine:
     def allows_assistant_velocity_forward(self):
         """当前状态是否允许向辅车转发速度前馈"""
 
-        if self.state == STATE_TRANSPORT_OBJECT:
-            return True
         return self.allows_search_velocity()
 
     def needs_assistant_report_turn(self):

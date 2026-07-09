@@ -101,6 +101,7 @@ def install_fake_core(monkeypatch):
     class FakeTransportCar:
         def __init__(self, vehicle_role=None) -> None:
             self.vehicle_role = vehicle_role
+            self.odometry = type("FakeOdometry", (), {"x": 0.0, "y": 0.0})()
             self.wheel_encoders = ("enc-m", "enc-l", "enc-r")
             self.w_filt = [0.0, 0.0, 0.0]
             self.imu = "imu"
