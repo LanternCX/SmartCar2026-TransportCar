@@ -21,9 +21,9 @@ MOTION_STOP_CONFIRM_TICKS = 3
 # 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
 WHEEL_DIAMETER_M = 0.038
 # 主车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-MASTER_ODOMETRY_DISTANCE_SCALE = 0.5107
+MASTER_ODOMETRY_DISTANCE_SCALE = 0.648589
 # 辅车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-ASSISTANT_ODOMETRY_DISTANCE_SCALE = 0.5107
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = 0.73290557
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
@@ -60,12 +60,12 @@ ORBIT_ANGLE_CONFIRM_TICKS = 3
 HOLD_SPEED_EPS = 0.01
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
-# 避障 Demo 开关, 启用后先执行避障角度绕行
-TRANSPORT_AVOIDANCE_DEMO_ENABLED = True
+# 绕行定位使用的车辆参考点到物体中心固定半径, 单位米
+ORBIT_POSITION_RADIUS_M = 0.13
+# 障碍区间两端用于生成避障触发范围的余量, 单位米
+TRANSPORT_OBSTACLE_MARGIN_M = 0.20
 # 主车避障绕行相对正式推动朝向的角度偏移, 单位度
-TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = 90.0
-# 避障平移目标距离, 单位米, 由辅车里程计判断到位
-TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M = 0.70
+TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = -90.0
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

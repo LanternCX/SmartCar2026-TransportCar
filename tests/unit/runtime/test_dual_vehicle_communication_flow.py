@@ -213,7 +213,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         lambda: master._sm.state == master_module.STATE_ORBITING,
     )
 
-    if master_module.TRANSPORT_AVOIDANCE_DEMO_ENABLED:
+    if master._sm._av_m_orbit:
         master_uart8.push(
             encode_frame(
                 0x02,
@@ -287,9 +287,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
                 == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT
             ),
         )
-        assistant_car.odometry.y = -float(
-            assistant_module._TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M
-        )
+        assistant_car.odometry.y = -float(assistant._shift_distance_m)
         _pump_until(
             clock,
             master,

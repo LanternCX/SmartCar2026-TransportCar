@@ -86,7 +86,7 @@ class OmniKinematics:
         @return 元组 (vx, vy, omega), 其中
                 - vx: x 轴速度(正向右移)
                 - vy: y 轴速度(正向前进)
-                - omega: 角速度(正向逆时针)
+                - omega: 角速度(正向顺时针)
         """
         vx = 0.5 * (vl + vr) - vm
         vy = (math.sqrt(3) / 2.0) * (vl - vr)
@@ -141,9 +141,9 @@ class Odometry:
         并积分更新位置
 
         @details
-        变换矩阵:
-            [v_world_x]   [cos(theta)  -sin(theta)]   [vx_robot]
-            [v_world_y] = [sin(theta)   cos(theta)] * [vy_robot]
+        变换矩阵采用 0° 指向世界系 +Y、顺时针为正的航向约定:
+            [v_world_x]   [ cos(theta)  sin(theta)]   [vx_robot]
+            [v_world_y] = [-sin(theta)  cos(theta)] * [vy_robot]
 
         @param vx_robot 机器人坐标系 X 速度 (m/s), 正向右移
         @param vy_robot 机器人坐标系 Y 速度 (m/s), 正向前进
@@ -153,10 +153,44 @@ class Odometry:
         cos_t = math.cos(theta_rad)
         sin_t = math.sin(theta_rad)
 
-        v_world_x = vx_robot * cos_t - vy_robot * sin_t
-        v_world_y = vx_robot * sin_t + vy_robot * cos_t
+        v_world_x = vx_robot * cos_t + vy_robot * sin_t
+        v_world_y = -vx_robot * sin_t + vy_robot * cos_t
         self.x += v_world_x * dt * self.distance_scale
         self.y += v_world_y * dt * self.distance_scale
+
+    def apply_orbit_displacement(
+        self,
+        start_x,
+        start_y,
+        start_heading_deg,
+        end_heading_deg,
+        radius_m,
+    ):
+        """@brief 根据固定半径和起止航向设置绕行结束位置
+
+        @param start_x 绕行起始世界坐标 X, 单位米
+        @param start_y 绕行起始世界坐标 Y, 单位米
+        @param start_heading_deg 绕行起始航向, 单位度
+        @param end_heading_deg 绕行结束航向, 单位度
+        @param radius_m 车辆参考点到物体中心的固定半径, 单位米
+        """
+        if not radius_m > 0.0:
+            raise ValueError
+
+        start_rad = math.radians(start_heading_deg)
+        end_rad = math.radians(end_heading_deg)
+        self.x = start_x + radius_m * (math.sin(start_rad) - math.sin(end_rad))
+        self.y = start_y + radius_m * (math.cos(start_rad) - math.cos(end_rad))
+
+    def apply_forward_displacement(self, distance_m, heading_deg):
+        """@brief 根据固定距离和世界航向累加直线位移
+
+        @param distance_m 沿车辆前方移动的距离, 单位米
+        @param heading_deg 位移阶段的世界航向, 单位度
+        """
+        heading_rad = math.radians(heading_deg)
+        self.x += distance_m * math.sin(heading_rad)
+        self.y += distance_m * math.cos(heading_rad)
 
     def reset(self, x=0.0, y=0.0):
         """@brief 重置里程计

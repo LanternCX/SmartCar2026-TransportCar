@@ -48,6 +48,7 @@ ORBIT_AUTO_OMEGA_MAX = motion_params.ORBIT_AUTO_OMEGA_MAX
 ORBIT_ANGLE_CONFIRM_TICKS = motion_params.ORBIT_ANGLE_CONFIRM_TICKS
 HOLD_SPEED_EPS = motion_params.HOLD_SPEED_EPS
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+ORBIT_POSITION_RADIUS_M = motion_params.ORBIT_POSITION_RADIUS_M
 FIELD_SIZE_M = motion_params.FIELD_SIZE_M
 ASSISTANT_START_POSITION_M = motion_params.ASSISTANT_START_POSITION_M
 MASTER_ODOMETRY_DISTANCE_SCALE = motion_params.MASTER_ODOMETRY_DISTANCE_SCALE
@@ -344,6 +345,9 @@ class TransportCar:
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self._orbit_angle_confirm_ticks = 0
+        self._orbit_pose_start = None
+        self._orbit_restore_integration = True
+        self._integrate_position = True
 
         # 时间与性能监控
         # @details ticker: ticker 对象引用, 用于停止中断
@@ -615,6 +619,14 @@ class TransportCar:
         if radius_scale <= 0.0:
             raise ValueError("radius_scale must be positive")
 
+        if not self.orbit_mode:
+            self._orbit_pose_start = (
+                float(self.odometry.x),
+                float(self.odometry.y),
+                float(self.heading_est),
+            )
+            self._orbit_restore_integration = self._integrate_position
+            self._integrate_position = False
         self._clear_translation_control_targets()
         self.control_vx = 0.0
         self.control_vy = 0.0
@@ -632,6 +644,21 @@ class TransportCar:
         self.yaw_integral = 0.0
         self._pending_lock = None
         self._refresh_control_mode()
+
+    def set_position_integration_enabled(self, enabled):
+        """@brief 控制轮速是否更新世界坐标位置
+
+        @param enabled True 时允许轮速积分更新 x/y
+        """
+        self._integrate_position = bool(enabled)
+
+    def apply_forward_pose_distance(self, distance_m, heading_deg):
+        """@brief 按已知距离和航向更新世界坐标位置
+
+        @param distance_m 沿车辆前方移动的距离, 单位米
+        @param heading_deg 位移阶段的世界航向, 单位度
+        """
+        self.odometry.apply_forward_displacement(distance_m, heading_deg)
 
     def set_orbit_velocity_correction(self, vx, vy):
         """写入统一绕行平移修正量
@@ -709,8 +736,8 @@ class TransportCar:
         heading_rad = math.radians(heading_deg)
         cos_t = math.cos(heading_rad)
         sin_t = math.sin(heading_rad)
-        world_dx = dx * cos_t - dy * sin_t
-        world_dy = dx * sin_t + dy * cos_t
+        world_dx = dx * cos_t + dy * sin_t
+        world_dy = -dx * sin_t + dy * cos_t
 
         self._clear_orbit_mode()
         self.control_vx = 0.0
@@ -753,6 +780,9 @@ class TransportCar:
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self._orbit_angle_confirm_ticks = 0
+        self._orbit_pose_start = None
+        self._orbit_restore_integration = True
+        self._integrate_position = True
         self._pending_lock = None
         self._pending_dx = None
         self._pending_dy = None
@@ -816,6 +846,8 @@ class TransportCar:
         if self.orbit_mode:
             self.control_vx = 0.0
             self.control_vy = 0.0
+            self._integrate_position = self._orbit_restore_integration
+        self._orbit_pose_start = None
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
         self._orbit_angle_confirm_ticks = 0
@@ -1029,7 +1061,7 @@ class TransportCar:
 
         @param vx 车体 x 轴速度(脉冲/周期), 正向右移
         @param vy 车体 y 轴速度(脉冲/周期), 正向前进
-        @param omega 角速度(脉冲/周期), 逆时针为正
+        @param omega 角速度(脉冲/周期), 顺时针为正
 
         @return 元组 (vm, vl, vr), 分别对应中轮、左轮、右轮的目标脉冲速度
                 均限制在 ±TARGET_SPEED_MAX 范围内
@@ -1162,9 +1194,10 @@ class TransportCar:
             vm_mps, vl_mps, vr_mps
         )
 
-        self.odometry.update(
-            vx_rob_mps, vy_rob_mps, math.radians(self.heading_est), dt_s
-        )
+        if self._integrate_position:
+            self.odometry.update(
+                vx_rob_mps, vy_rob_mps, math.radians(self.heading_est), dt_s
+            )
         self.heading_est += math.degrees(delta_yaw)
 
         self._yaw_rate = yaw_rate
@@ -1314,8 +1347,8 @@ class TransportCar:
             cos_t = math.cos(t_rad)
             sin_t = math.sin(t_rad)
 
-            vx_rob_ctrl = v_world_x * cos_t + v_world_y * sin_t
-            vy_rob_ctrl = -v_world_x * sin_t + v_world_y * cos_t
+            vx_rob_ctrl = v_world_x * cos_t - v_world_y * sin_t
+            vy_rob_ctrl = v_world_x * sin_t + v_world_y * cos_t
 
             vx_pulses = self.kinematics.velocity_m_s_to_pulses(vx_rob_ctrl, dt_s)
             vy_pulses = self.kinematics.velocity_m_s_to_pulses(vy_rob_ctrl, dt_s)
@@ -1440,6 +1473,19 @@ class TransportCar:
             self.command_lock = False
             self.command_mode = "none"
             if self.orbit_mode:
+                orbit_pose_start = self._orbit_pose_start
+                if orbit_pose_start is None:
+                    raise RuntimeError
+                start_x, start_y, start_heading_deg = orbit_pose_start
+                self.odometry.apply_orbit_displacement(
+                    start_x,
+                    start_y,
+                    start_heading_deg,
+                    self.heading_est,
+                    ORBIT_POSITION_RADIUS_M,
+                )
+                self._orbit_pose_start = None
+                self._integrate_position = self._orbit_restore_integration
                 self.orbit_mode = False
                 self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
                 self._reset_control_fields()

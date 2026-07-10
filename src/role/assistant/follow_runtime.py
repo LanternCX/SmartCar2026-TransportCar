@@ -64,7 +64,17 @@ from role.assistant.state_machine import (
     AssistantStateMachine,
 )
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from role.task_sync import pack_task_arg, unpack_task_arg_config, unpack_task_arg_object_id
+from role.task_sync import (
+    ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
+    ASSISTANT_ORBIT_MODE_AVOID_POSITIVE,
+    ASSISTANT_ORBIT_MODE_NORMAL,
+    pack_task_arg,
+    unpack_assistant_avoidance_shift_distance_cm,
+    unpack_assistant_avoidance_shift_object_id,
+    unpack_assistant_orbit_mode,
+    unpack_assistant_orbit_object_id,
+    unpack_task_arg_object_id,
+)
 from role.transport_plan import (
     heading_with_offset,
     push_heading_for_edge,
@@ -84,8 +94,6 @@ _ALIGNED_EVENT = const(7)
 _CLEARED_EVENT = const(9)
 _RETURN_LINE_ALIGNED_EVENT = const(10)
 _ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
-_TRANSPORT_AVOIDANCE_DEMO_ENABLED = bool(motion_params.TRANSPORT_AVOIDANCE_DEMO_ENABLED)
-_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID
 ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = (
@@ -96,9 +104,6 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
     vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
 )
 _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
-_TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M = (
-    motion_params.TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M
-)
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
 MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
@@ -168,10 +173,12 @@ class AssistantFollowRuntime:
         self._obj_th = (0, 0, 0, 0, 0, 0)
         self._realign = False
         self._av_orbit = False
+        self._av_orbit_offset = 0.0
         self._av_shift = False
         self._shift_done = False
         self._shift_x = 0.0
         self._shift_y = 0.0
+        self._shift_distance_m = 0.0
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
@@ -509,11 +516,7 @@ class AssistantFollowRuntime:
             return True
         if self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
             return True
-        if self._sm.state != ASSISTANT_STATE_ORBIT:
-            return False
-        return int(unpack_task_arg_config(self._sm.arg)) == int(
-            _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
-        )
+        return False
 
     def _write_effective_velocity(self) -> None:
         if self._lv_pause:
@@ -606,7 +609,7 @@ class AssistantFollowRuntime:
             push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
             offset = 180.0
             if self._av_shift:
-                offset = -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG)
+                offset = self._av_orbit_offset
             self._car.set_heading_target(heading_with_offset(push_heading, offset))
 
     def _should_store_velocity(self, source) -> bool:
@@ -752,7 +755,7 @@ class AssistantFollowRuntime:
         self._found_done = False
         self._p_report = None
         self._clear_motion_inputs()
-        self._obj_id = unpack_task_arg_object_id(self._sm.arg)
+        self._obj_id = unpack_assistant_orbit_object_id(self._sm.arg)
         self._p_local = (
             ASSISTANT_STATE_ORBIT,
             ASSISTANT_TARGET_OBJECT,
@@ -763,20 +766,27 @@ class AssistantFollowRuntime:
             self._obj_th,
             False,
         )
+        push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
         orbit_target = heading_with_offset(
-            push_heading_for_edge(target_edge_for_object(self._obj_id)),
+            push_heading,
             180.0,
         )
-        self._av_orbit = (
-            bool(_TRANSPORT_AVOIDANCE_DEMO_ENABLED)
-            and int(unpack_task_arg_config(self._sm.arg)) == 0
-        )
-        if self._av_orbit:
+        orbit_mode = unpack_assistant_orbit_mode(self._sm.arg)
+        self._av_orbit = orbit_mode != ASSISTANT_ORBIT_MODE_NORMAL
+        self._av_orbit_offset = 0.0
+        if orbit_mode == ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE:
+            self._av_orbit_offset = -90.0
             orbit_target = heading_with_offset(
-                push_heading_for_edge(target_edge_for_object(self._obj_id)),
-                -float(_TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG),
+                push_heading,
+                self._av_orbit_offset,
             )
-        else:
+        elif orbit_mode == ASSISTANT_ORBIT_MODE_AVOID_POSITIVE:
+            self._av_orbit_offset = 90.0
+            orbit_target = heading_with_offset(
+                push_heading,
+                self._av_orbit_offset,
+            )
+        if not self._av_orbit:
             self._av_shift = False
         self._car.set_orbit_target(
             orbit_target,
@@ -796,7 +806,15 @@ class AssistantFollowRuntime:
         self._p_report = (_ALIGNED_EVENT, int(value), False)
 
     def _enter_transport_state(self, packet) -> None:
-        self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+        if self._av_shift:
+            self._obj_id = unpack_assistant_avoidance_shift_object_id(packet[AS_ARG])
+            self._shift_distance_m = (
+                float(unpack_assistant_avoidance_shift_distance_cm(packet[AS_ARG]))
+                / 100.0
+            )
+        else:
+            self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+            self._shift_distance_m = 0.0
         self._obj_th = tuple(packet[AS_TH])
         self._found_done = False
         self._p_report = None
@@ -913,7 +931,7 @@ class AssistantFollowRuntime:
             return
         dx = float(self._car.odometry.x) - float(self._shift_x)
         dy = float(self._car.odometry.y) - float(self._shift_y)
-        target = float(_TRANSPORT_AVOIDANCE_SHIFT_DISTANCE_M)
+        target = self._shift_distance_m
         if dx * dx + dy * dy < target * target:
             return
         self._shift_done = True

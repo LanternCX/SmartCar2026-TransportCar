@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,3 +13,7 @@ if str(SRC) not in sys.path:
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+micropython = ModuleType("micropython")
+setattr(micropython, "const", lambda value: value)
+sys.modules.setdefault("micropython", micropython)
