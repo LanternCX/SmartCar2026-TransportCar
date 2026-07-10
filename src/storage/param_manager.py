@@ -1,12 +1,64 @@
 """@file param_manager.py
-@brief 辨识参数与陀螺仪零偏的加载工具
+@brief 辨识参数、陀螺仪零偏和障碍配置的加载工具
 
-此模块提供从文件系统加载电机辨识参数和IMU零偏的功能,
-支持六轴零偏格式和单轴零偏格式
+此模块提供从文件系统加载电机辨识参数、IMU零偏和障碍配置的功能
 """
 import io
 
 from control.pid_store import load_ident_params
+
+
+def _parse_obstacle_slot(line, field_size_m):
+    parts = line.split(",")
+    if len(parts) != 3:
+        raise ValueError
+
+    edge = parts[0].strip()
+    left = float(parts[1].strip())
+    right = float(parts[2].strip())
+
+    if edge == "none":
+        if left != -1.0 or right != -1.0:
+            raise ValueError
+        return (None, -1.0, -1.0)
+
+    if edge not in ("top", "bottom", "left", "right"):
+        raise ValueError
+
+    if edge == "top" or edge == "bottom":
+        axis_size = float(field_size_m[0])
+    else:
+        axis_size = float(field_size_m[1])
+    if not (0.0 <= left < right <= axis_size):
+        raise ValueError
+    return (edge, left, right)
+
+
+def load_obstacle_slots(path, field_size_m):
+    """读取并严格校验固定三个障碍槽位
+
+    @brief 将障碍配置转换为固定长度 tuple
+    @param path 障碍配置文件路径
+    @param field_size_m 场地尺寸, 按宽度和高度排列, 单位米
+    @return 三个障碍槽位组成的 tuple
+    @exception OSError 文件无法读取
+    @exception ValueError 配置行数、字段或数值不符合约束
+    """
+
+    with open(path, "r") as obstacle_file:
+        content = obstacle_file.read()
+
+    if content.endswith("\n"):
+        content = content[:-1]
+    lines = content.split("\n")
+    if len(lines) != 3:
+        raise ValueError
+
+    return (
+        _parse_obstacle_slot(lines[0], field_size_m),
+        _parse_obstacle_slot(lines[1], field_size_m),
+        _parse_obstacle_slot(lines[2], field_size_m),
+    )
 
 
 def load_ident_lookup(path, logger=None):

@@ -3,7 +3,7 @@
 @file src/script/calibrate_gyro.py
 @brief 通过静止测量来校准 IMU 的陀螺仪和加速度计零飘
 
-@details 脚本采集 2000 个样本, 计算各轴传感器的平均值作为零飘偏移, 保存至 /flash/gyro_offset.txt, 用于后续在线控制中消除传感器系统误差
+@details 脚本采集 2000 个样本, 计算各轴传感器的平均值作为零飘偏移, 保存至 /flash/storage/gyro_offset.txt, 用于后续在线控制中消除传感器系统误差
 
 操作步骤:
 1. 启动脚本

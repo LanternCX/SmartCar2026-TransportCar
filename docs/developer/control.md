@@ -19,8 +19,8 @@
 - `UART3` 用作 REPL 与现场调试链路。
 - `UART8` 用作主辅直连链路。
 - 两台车各自用本车 `UART6` 连接本车 OpenART。
-- 陀螺仪零飘结果保存到 `/flash/gyro_offset.txt`。
-- 电机辨识结果保存到 `/flash/ident_params.txt`。
+- 陀螺仪零飘结果保存到 `/flash/storage/gyro_offset.txt`。
+- 电机辨识结果保存到 `/flash/storage/ident_params.txt`。
 
 ## 场地坐标约定
 
