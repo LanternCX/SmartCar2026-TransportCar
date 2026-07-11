@@ -50,6 +50,7 @@ HOLD_SPEED_EPS = motion_params.HOLD_SPEED_EPS
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 ORBIT_POSITION_RADIUS_M = motion_params.ORBIT_POSITION_RADIUS_M
 FIELD_SIZE_M = motion_params.FIELD_SIZE_M
+MASTER_START_POSITION_M = motion_params.MASTER_START_POSITION_M
 ASSISTANT_START_POSITION_M = motion_params.ASSISTANT_START_POSITION_M
 MASTER_ODOMETRY_DISTANCE_SCALE = motion_params.MASTER_ODOMETRY_DISTANCE_SCALE
 ASSISTANT_ODOMETRY_DISTANCE_SCALE = motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
@@ -251,12 +252,13 @@ class TransportCar:
             if self.vehicle_role == "master"
             else ASSISTANT_ODOMETRY_DISTANCE_SCALE
         )
-        self.odometry = Odometry(distance_scale)
-        if self.vehicle_role == "assistant":
-            self.odometry.reset(
-                float(ASSISTANT_START_POSITION_M[0]),
-                float(ASSISTANT_START_POSITION_M[1]),
-            )
+        self.odometry = Odometry(*distance_scale)
+        start_position = (
+            MASTER_START_POSITION_M
+            if self.vehicle_role == "master"
+            else ASSISTANT_START_POSITION_M
+        )
+        self.odometry.reset(float(start_position[0]), float(start_position[1]))
 
         # 航向角目标值(度), 由角度控制目标或当前航向初始化, 用于偏航 PID 反馈
         self.heading_target = 0.0

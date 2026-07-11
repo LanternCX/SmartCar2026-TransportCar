@@ -1,6 +1,7 @@
 """推动目标边解析测试."""
 
 import pytest
+import role.transport_plan as transport_plan
 
 from role.transport_plan import (
     FIELD_EDGE_BOTTOM,
@@ -106,6 +107,25 @@ def test_transport_avoidance_returns_none_outside_matching_intervals() -> None:
         )
         is None
     )
+
+
+def test_transport_avoidance_logs_world_position_on_each_check(monkeypatch) -> None:
+    """每次避障判断都输出当前世界系坐标."""
+    messages = []
+    monkeypatch.setattr(
+        transport_plan,
+        "log",
+        lambda stage, detail: messages.append((stage, detail)),
+    )
+    slots = ((None, -1.0, -1.0),) * 3
+
+    plan_transport_avoidance(FIELD_EDGE_TOP, 1.2, 0.3, slots, 0.20, -90.0)
+    plan_transport_avoidance(FIELD_EDGE_RIGHT, 2.4, 1.5, slots, 0.20, -90.0)
+
+    assert messages == [
+        ("av", "top x=1.200 y=0.300"),
+        ("av", "right x=2.400 y=1.500"),
+    ]
 
 
 @pytest.mark.parametrize(

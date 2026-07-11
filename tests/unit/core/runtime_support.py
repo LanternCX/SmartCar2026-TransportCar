@@ -210,10 +210,11 @@ def install_transport_car_stubs() -> None:
             return float(vm), float(vl), float(vr)
 
     class _Odometry:
-        def __init__(self, distance_scale=1.0) -> None:
+        def __init__(self, x_scale=1.0, y_scale=1.0) -> None:
             self.x = 0.0
             self.y = 0.0
-            self.distance_scale = float(distance_scale)
+            self.x_scale = float(x_scale)
+            self.y_scale = float(y_scale)
 
         def update(self, *_args) -> None:
             return None
@@ -324,9 +325,10 @@ def install_transport_car_stubs() -> None:
         "MOTION_STOP_CONFIRM_TICKS": 3,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
-        "MASTER_ODOMETRY_DISTANCE_SCALE": 1.25,
-        "ASSISTANT_ODOMETRY_DISTANCE_SCALE": 0.75,
+        "MASTER_ODOMETRY_DISTANCE_SCALE": (1.25, 1.5),
+        "ASSISTANT_ODOMETRY_DISTANCE_SCALE": (0.75, 0.5),
         "FIELD_SIZE_M": (3.2, 2.4),
+        "MASTER_START_POSITION_M": (0.10, 0.0),
         "ASSISTANT_START_POSITION_M": (0.10, -0.50),
         "TRANSPORT_OBJECT_TARGET_EDGE": {-1: "bottom"},
         "POS_TOLERANCE": 0.01,

@@ -61,7 +61,7 @@ def plan_transport_avoidance(
     @return 未命中时返回 None, 命中时返回 (绕行偏移角, 平移距离厘米)
     """
     target_edge = str(target_edge)
-    log("av", "%s %.3f %.3f" % (target_edge, position_x, position_y))
+    log("av", "%s x=%.3f y=%.3f" % (target_edge, position_x, position_y))
     margin_m = float(margin_m)
     default_offset_deg = float(default_offset_deg)
     if margin_m < 0.0:

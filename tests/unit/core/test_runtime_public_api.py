@@ -255,9 +255,14 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
-    assert float(motion_params.MASTER_ODOMETRY_DISTANCE_SCALE) > 0.0
-    assert float(motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE) > 0.0
+    assert len(motion_params.MASTER_ODOMETRY_DISTANCE_SCALE) == 2
+    assert len(motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE) == 2
+    assert all(float(value) > 0.0 for value in motion_params.MASTER_ODOMETRY_DISTANCE_SCALE)
+    assert all(
+        float(value) > 0.0 for value in motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
+    )
     assert len(motion_params.FIELD_SIZE_M) == 2
+    assert len(motion_params.MASTER_START_POSITION_M) == 2
     assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
     assert float(motion_params.FIELD_SIZE_M[0]) > 0.0
     assert float(motion_params.FIELD_SIZE_M[1]) > 0.0
@@ -308,13 +313,6 @@ def test_position_control_params_compensate_encoder_count_scale() -> None:
     )
 
 
-def test_field_pose_params_are_coordinate_tuples() -> None:
-    """场地坐标配置使用二元元组保持坐标语义."""
-
-    assert motion_params.ASSISTANT_START_POSITION_M == pytest.approx((0.10, -0.50))
-    assert motion_params.FIELD_SIZE_M == pytest.approx((3.2, 2.4))
-
-
 def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
     """全向轮运动学使用运动配置中的轮径计算脉冲距离."""
 
@@ -333,16 +331,15 @@ def test_omni_kinematics_uses_measured_encoder_counts_per_wheel_rev() -> None:
     assert kinematics.counts_per_rev == pytest.approx(7 * 30)
 
 
-def test_odometry_applies_configured_distance_scale() -> None:
-    """里程计按传入的距离标定比例积分平移距离."""
+def test_odometry_applies_axis_scales_in_robot_frame() -> None:
+    """里程计先按车体系方向标定速度, 再转换到世界系积分."""
 
-    scale = 0.5
-    odometry = Odometry(distance_scale=scale)
+    odometry = Odometry(x_scale=0.5, y_scale=2.0)
 
-    odometry.update(0.0, 1.0, 0.0, 1.0)
+    odometry.update(1.0, 1.0, math.pi / 2.0, 1.0)
 
-    assert odometry.x == pytest.approx(0.0)
-    assert odometry.y == pytest.approx(scale)
+    assert odometry.x == pytest.approx(2.0)
+    assert odometry.y == pytest.approx(-0.5)
 
 
 @pytest.mark.parametrize(
@@ -557,27 +554,39 @@ def test_transport_car_calibrates_single_axis_to_field_edge() -> None:
     }
 
 
-def test_assistant_transport_car_starts_from_configured_position() -> None:
-    """辅车构造时使用配置中的发车坐标初始化里程计."""
+@pytest.mark.parametrize(
+    ("vehicle_role", "config_name"),
+    (
+        ("master", "MASTER_START_POSITION_M"),
+        ("assistant", "ASSISTANT_START_POSITION_M"),
+    ),
+)
+def test_transport_car_starts_from_configured_position(
+    vehicle_role: str, config_name: str
+) -> None:
+    """主辅车构造时使用对应发车坐标初始化里程计."""
     transport_car = import_transport_car_module()
 
-    car = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
+    car = transport_car.TransportCar(
+        diagnostic_mode=True,
+        vehicle_role=vehicle_role,
+    )
+    expected = getattr(motion_params, config_name)
 
-    assert car.odometry.x == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[0])
-    assert car.odometry.y == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[1])
+    assert (car.odometry.x, car.odometry.y) == pytest.approx(expected)
 
 
-def test_transport_car_selects_odometry_distance_scale_by_role() -> None:
-    """底盘构造时按车辆角色选择对应里程计标定比例."""
+def test_transport_car_selects_odometry_axis_scales_by_role() -> None:
+    """底盘构造时按车辆角色选择对应方向的里程计标定比例."""
     transport_car = import_transport_car_module()
 
     master = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="master")
     assistant = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
 
-    assert master.odometry.distance_scale == pytest.approx(
+    assert (master.odometry.x_scale, master.odometry.y_scale) == pytest.approx(
         transport_car.MASTER_ODOMETRY_DISTANCE_SCALE
     )
-    assert assistant.odometry.distance_scale == pytest.approx(
+    assert (assistant.odometry.x_scale, assistant.odometry.y_scale) == pytest.approx(
         transport_car.ASSISTANT_ODOMETRY_DISTANCE_SCALE
     )
 
