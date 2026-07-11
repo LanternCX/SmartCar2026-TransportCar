@@ -5,16 +5,13 @@
 
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
 from role.task_sync import (
-    ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
-    ASSISTANT_ORBIT_MODE_AVOID_POSITIVE,
-    ASSISTANT_ORBIT_MODE_NORMAL,
-    pack_assistant_avoidance_shift_arg,
     pack_assistant_orbit_arg,
     pack_task_arg,
+    unpack_assistant_orbit_offset_deg,
 )
 from role.transport_plan import (
     heading_with_offset,
-    plan_transport_avoidance,
+    plan_transport_heading,
     push_heading_for_edge,
     target_edge_for_object,
 )
@@ -107,16 +104,6 @@ RQ_TARGET = const(3)
 RQ_ARG = const(4)
 
 
-def _assistant_orbit_mode_for_master_offset(offset_deg):
-    """把主车避障偏移转换为辅车相反方向的绕行模式"""
-
-    if offset_deg == 90.0:
-        return ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE
-    if offset_deg == -90.0:
-        return ASSISTANT_ORBIT_MODE_AVOID_POSITIVE
-    return ASSISTANT_ORBIT_MODE_NORMAL
-
-
 class MasterStateMachine:
     """维护主车单车寻找、搬运与回身状态"""
 
@@ -125,8 +112,7 @@ class MasterStateMachine:
         search_task_arg,
         boot_heading_deg,
         obstacle_slots,
-        avoidance_margin_m,
-        avoidance_default_offset_deg,
+        obstacle_margin_m,
         assistant_object_arg=1,
         assistant_transport_arg=1,
         transport_task_arg=2,
@@ -147,10 +133,9 @@ class MasterStateMachine:
         self._ret_task_arg = int(return_line_task_arg)
         self._obj_need = int(total_object_count)
         self._obstacles = tuple(obstacle_slots)
-        self._av_margin = float(avoidance_margin_m)
-        self._av_default = float(avoidance_default_offset_deg)
-        self._av_offset = None
-        self._av_shift_cm = 0
+        self._path_margin = float(obstacle_margin_m)
+        self._push_heading = None
+        self._orbit_arg = 0
         self.obj_done = 0
         self._ctx = int(initial_context_id) % 256
         # _p_task: 本车视觉 task；_p_ast: 辅车同步；_p_orbit: 本车绕行动作。
@@ -176,10 +161,6 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
-        self._av_m_orbit = False
-        self._av_align = False
-        self._av_shift = False
-        self._av_f_orbit = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -206,35 +187,6 @@ class MasterStateMachine:
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
-            if self._av_m_orbit:
-                self._av_m_orbit = False
-                self._av_align = True
-                self._enter_state(STATE_SEARCH_OBJECT)
-                self._orbit_done = True
-                self._m_aligned = False
-                self._a_aligned = False
-                self._ctx = (self._ctx + 1) % 256
-                self._p_task = (
-                    RK_NONE,
-                    self._ctx,
-                    STATE_SEARCH_OBJECT,
-                    TARGET_OBJECT,
-                    self._tr_task_arg,
-                )
-                if self._obj_pending:
-                    self._obj_pending = False
-                    self._orbit_req = True
-                    orbit_mode = _assistant_orbit_mode_for_master_offset(
-                        self._av_offset
-                    )
-                    self._p_ast = (
-                        RK_A_ORBIT,
-                        0,
-                        ASSISTANT_ORBIT_SYNC_STATE,
-                        ASSISTANT_ORBIT_SYNC_TARGET,
-                        pack_assistant_orbit_arg(orbit_mode, self._obj_id),
-                    )
-                return
             self._enter_state(STATE_SEARCH_OBJECT)
             self._orbit_done = True
             self._m_aligned = False
@@ -250,17 +202,12 @@ class MasterStateMachine:
             if self._obj_pending and not self._orbit_req:
                 self._obj_pending = False
                 self._orbit_req = True
-                if self._av_f_orbit:
-                    self._av_f_orbit = False
                 self._p_ast = (
                     RK_A_ORBIT,
                     0,
                     ASSISTANT_ORBIT_SYNC_STATE,
                     ASSISTANT_ORBIT_SYNC_TARGET,
-                    pack_assistant_orbit_arg(
-                        ASSISTANT_ORBIT_MODE_NORMAL,
-                        self._obj_id,
-                    ),
+                    self._orbit_arg,
                 )
 
     def mark_startup_move_completed(self):
@@ -333,24 +280,21 @@ class MasterStateMachine:
             self._ctx = (self._ctx + 1) % 256
             self._enter_state(STATE_ORBITING)
             push_heading = push_heading_for_edge(self._edge)
-            plan = plan_transport_avoidance(
+            planned_heading = plan_transport_heading(
                 self._edge,
                 position_x,
                 position_y,
                 self._obstacles,
-                self._av_margin,
-                self._av_default,
+                self._path_margin,
             )
-            if plan is not None:
-                self._av_offset, self._av_shift_cm = plan
-                self._av_m_orbit = True
-                self._p_orbit = heading_with_offset(
-                    push_heading, self._av_offset
-                )
-                return
-            self._av_offset = None
-            self._av_shift_cm = 0
-            self._p_orbit = float(push_heading)
+            offset_deg = heading_with_offset(planned_heading, -push_heading)
+            self._orbit_arg = pack_assistant_orbit_arg(
+                offset_deg,
+                self._obj_id,
+            )
+            offset_deg = unpack_assistant_orbit_offset_deg(self._orbit_arg)
+            self._push_heading = heading_with_offset(push_heading, offset_deg)
+            self._p_orbit = self._push_heading
 
     def handle_assistant_target_found(self, value):
         """消费辅车目标命中回报"""
@@ -367,15 +311,12 @@ class MasterStateMachine:
         if self._orbit_req:
             return
         self._orbit_req = True
-        orbit_mode = ASSISTANT_ORBIT_MODE_NORMAL
-        if self._av_align:
-            orbit_mode = _assistant_orbit_mode_for_master_offset(self._av_offset)
         self._p_ast = (
             RK_A_ORBIT,
             0,
             ASSISTANT_ORBIT_SYNC_STATE,
             ASSISTANT_ORBIT_SYNC_TARGET,
-            pack_assistant_orbit_arg(orbit_mode, self._obj_id),
+            self._orbit_arg,
         )
 
     def handle_assistant_aligned(self, value):
@@ -402,21 +343,6 @@ class MasterStateMachine:
             return
         if self._tr_req:
             return
-        if self._av_align:
-            self._av_align = False
-            self._av_shift = True
-            self._tr_req = True
-            self._p_ast = (
-                RK_A_TRANSPORT,
-                0,
-                ASSISTANT_TRANSPORT_SYNC_STATE,
-                ASSISTANT_TRANSPORT_SYNC_TARGET,
-                pack_assistant_avoidance_shift_arg(
-                    self._av_shift_cm,
-                    self._obj_id,
-                ),
-            )
-            return
         self._tr_req = True
         self._p_ast = (
             RK_A_TRANSPORT,
@@ -439,9 +365,6 @@ class MasterStateMachine:
         if not self._m_aligned or not self._a_aligned:
             return
         self._tr_ready = True
-        if self._av_shift:
-            self._enter_state(STATE_TRANSPORT_OBJECT)
-            return
         self._enter_state(STATE_TRANSPORT_OBJECT)
         self._ctx = (self._ctx + 1) % 256
         self._p_task = (
@@ -468,17 +391,6 @@ class MasterStateMachine:
     def handle_assistant_cleared(self, value):
         """消费辅车搬运后脱离完成回报"""
 
-        if self.state == STATE_TRANSPORT_OBJECT and self._av_shift:
-            _ = value
-            self._av_shift = False
-            self._tr_req = False
-            self._tr_ready = False
-            self._obj_pending = True
-            self._orbit_req = False
-            self._av_f_orbit = True
-            self._enter_state(STATE_ORBITING)
-            self._p_orbit = push_heading_for_edge(self._edge)
-            return
         if self.state != STATE_CLEAR_OBJECT:
             return
         if int(value) != int(self._clr_phase):
@@ -553,12 +465,8 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
-        self._av_shift = False
-        self._av_m_orbit = False
-        self._av_align = False
-        self._av_f_orbit = False
-        self._av_offset = None
-        self._av_shift_cm = 0
+        self._push_heading = None
+        self._orbit_arg = 0
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
         self._p_ast = (
@@ -588,10 +496,8 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
-        self._av_shift = False
-        self._av_f_orbit = False
-        self._av_offset = None
-        self._av_shift_cm = 0
+        self._push_heading = None
+        self._orbit_arg = 0
 
     def _enter_return_retreat(self):
         """进入主车回库后退找黄线段"""
@@ -648,15 +554,9 @@ class MasterStateMachine:
     def get_push_heading_deg(self):
         """返回当前物体目标边对应的推动朝向."""
 
-        push_heading = push_heading_for_edge(self._edge)
-        if self._av_align and self._av_offset is not None:
-            return heading_with_offset(push_heading, self._av_offset)
-        return push_heading
-
-    def get_avoidance_shift_distance_cm(self):
-        """返回当前轮次规划的避障平移距离厘米数"""
-
-        return self._av_shift_cm
+        if self._push_heading is not None:
+            return self._push_heading
+        return push_heading_for_edge(self._edge)
 
     def get_target_edge(self):
         """返回当前轮次物体目标边"""

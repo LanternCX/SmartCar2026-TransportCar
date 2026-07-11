@@ -133,7 +133,6 @@ TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
-TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -172,8 +171,7 @@ class MasterForwardRuntime:
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             obstacle_slots=obstacle_slots,
-            avoidance_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
-            avoidance_default_offset_deg=TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG,
+            obstacle_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
@@ -205,7 +203,6 @@ class MasterForwardRuntime:
         self._tr_task_ack = False
         self._tr_ticks = 0
         self._tr_unlock = False
-        self._av_shift_heading = None
         self._clr_sync_ack = False
         self._clr_move = False
         self._clr_done_phase = None
@@ -318,10 +315,9 @@ class MasterForwardRuntime:
         previous_state = int(self._last_state)
         if (
             previous_state == STATE_TRANSPORT_OBJECT
-            and current_state not in (STATE_TRANSPORT_OBJECT, STATE_ORBITING)
+            and current_state != STATE_TRANSPORT_OBJECT
         ):
             self._car.set_position_integration_enabled(True)
-            self._av_shift_heading = None
         self._clear_local_vision_pause_residue()
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
@@ -435,15 +431,6 @@ class MasterForwardRuntime:
             elif int(packet[AE_EVENT]) == EVENT_ALIGNED:
                 self._sm.handle_assistant_aligned(packet[AE_VALUE])
             elif int(packet[AE_EVENT]) == EVENT_CLEARED:
-                if self._sm.state == STATE_TRANSPORT_OBJECT and self._sm._av_shift:
-                    if self._av_shift_heading is None:
-                        raise RuntimeError
-                    self._car.apply_forward_pose_distance(
-                        float(self._sm.get_avoidance_shift_distance_cm()) / 100.0,
-                        self._av_shift_heading,
-                    )
-                    self._car.set_position_integration_enabled(True)
-                    self._av_shift_heading = None
                 self._sm.handle_assistant_cleared(packet[AE_VALUE])
 
     def _handle_task_event(self, packet) -> None:
@@ -910,14 +897,10 @@ class MasterForwardRuntime:
                 )
                 self._p_event = None
                 self._tr_sync_ack = False
-                self._tr_task_ack = bool(self._sm._av_shift)
+                self._tr_task_ack = False
                 self._tr_ticks = 0
                 self._tr_unlock = False
                 self._car.set_position_integration_enabled(False)
-                if self._sm._av_shift:
-                    self._av_shift_heading = float(self._car.heading_est)
-                else:
-                    self._av_shift_heading = None
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -925,16 +908,15 @@ class MasterForwardRuntime:
                     None,
                     True,
                 )
-                if not self._sm._av_shift:
-                    self._act_ctx = None
-                    self._p_task = (
-                        RK_T_TRANSPORT,
-                        int(self._sm._ctx),
-                        STATE_SEARCH_OBJECT,
-                        int(assistant_request[RQ_TARGET]),
-                        int(MASTER_TRANSPORT_TASK_CONFIG_ID),
-                        False,
-                    )
+                self._act_ctx = None
+                self._p_task = (
+                    RK_T_TRANSPORT,
+                    int(self._sm._ctx),
+                    STATE_SEARCH_OBJECT,
+                    int(assistant_request[RQ_TARGET]),
+                    int(MASTER_TRANSPORT_TASK_CONFIG_ID),
+                    False,
+                )
             elif request_kind == RK_A_CLEAR:
                 self._u6v = None
                 self._u6_has_w = False

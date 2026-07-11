@@ -13,6 +13,65 @@ if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
 
+from config import motion as motion_params
+from role.task_sync import pack_assistant_orbit_arg
+
+
+MARGIN_M = float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M)
+FIELD_WIDTH_M = float(motion_params.FIELD_SIZE_M[0])
+FIELD_HEIGHT_M = float(motion_params.FIELD_SIZE_M[1])
+TARGET_EDGE = motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1]
+
+
+def _target_obstacle_slots():
+    axis_size = (
+        FIELD_WIDTH_M
+        if TARGET_EDGE in ("top", "bottom")
+        else FIELD_HEIGHT_M
+    )
+    return (
+        (TARGET_EDGE, axis_size * 0.45, axis_size * 0.55),
+        (None, -1.0, -1.0),
+        (None, -1.0, -1.0),
+    )
+
+
+def _target_diagonal_position(use_lower_endpoint=True):
+    slots = _target_obstacle_slots()
+    left, right = slots[0][1], slots[0][2]
+    lower = left - MARGIN_M
+    upper = right + MARGIN_M
+    if use_lower_endpoint:
+        coordinate = (left + right) * 0.5
+        endpoint = lower
+    else:
+        coordinate = upper - MARGIN_M * 0.5
+        endpoint = upper
+    distance = abs(coordinate - endpoint)
+    if TARGET_EDGE == "top":
+        return coordinate, FIELD_HEIGHT_M - distance
+    if TARGET_EDGE == "bottom":
+        return coordinate, distance
+    if TARGET_EDGE == "left":
+        return distance, coordinate
+    return FIELD_WIDTH_M - distance, coordinate
+
+
+def _expected_diagonal_heading(use_lower_endpoint=True):
+    if use_lower_endpoint:
+        return {
+            "top": -45.0,
+            "bottom": -135.0,
+            "left": -135.0,
+            "right": 135.0,
+        }[TARGET_EDGE]
+    return {
+        "top": 45.0,
+        "bottom": 135.0,
+        "left": -45.0,
+        "right": 45.0,
+    }[TARGET_EDGE]
+
 
 def _pack_task_arg(config_id, object_id):
     packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
@@ -35,8 +94,7 @@ def _load_master_state_machine():
             "obstacle_slots",
             ((None, -1.0, -1.0),) * 3,
         )
-        kwargs.setdefault("avoidance_margin_m", 0.20)
-        kwargs.setdefault("avoidance_default_offset_deg", -90.0)
+        kwargs.setdefault("obstacle_margin_m", MARGIN_M)
         machine = machine_type(*args, **kwargs)
         acknowledge = machine.mark_assistant_object_acknowledged
 
@@ -246,7 +304,7 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": _pack_task_arg(MasterStateMachine.ASSISTANT_ORBIT_MODE_NORMAL, 2),
+        "arg": pack_assistant_orbit_arg(0, 2),
     }
 
 def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> None:
@@ -268,13 +326,12 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     assert orbit_command == _push_heading_for_object(MasterStateMachine, 2)
 
 
-def test_master_state_machine_dynamic_avoidance_uses_planned_master_orbit() -> None:
+def test_master_state_machine_dynamic_heading_uses_planned_master_orbit() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        obstacle_slots=(("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0)),
-        avoidance_default_offset_deg=90.0,
+        obstacle_slots=_target_obstacle_slots(),
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -282,35 +339,30 @@ def test_master_state_machine_dynamic_avoidance_uses_planned_master_orbit() -> N
     )
     machine.poll_assistant_request()
 
-    machine.mark_assistant_object_acknowledged(1.60, 0.0)
+    position_x, position_y = _target_diagonal_position()
+    machine.mark_assistant_object_acknowledged(position_x, position_y)
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == MasterStateMachine.heading_with_offset(
-        _push_heading_for_object(MasterStateMachine, 2),
-        90.0,
-    )
+    assert machine.poll_orbit_command() == _expected_diagonal_heading()
 
 
 @pytest.mark.parametrize(
-    ("position_x", "expected_offset"),
+    ("use_lower_endpoint", "expected_heading"),
     (
-        (1.30, -90.0),
-        (1.90, 90.0),
+        (True, _expected_diagonal_heading(True)),
+        (False, _expected_diagonal_heading(False)),
     ),
 )
-def test_master_state_machine_plans_each_avoidance_direction_and_distance(
-    position_x: float, expected_offset: float
+def test_master_state_machine_plans_each_dynamic_transport_heading(
+    use_lower_endpoint: bool, expected_heading: float
 ) -> None:
-    """主车状态机保存当前位置生成的单轮偏移和厘米距离."""
+    """主车状态机保存当前位置生成的斜向推动角度."""
     MasterStateMachine = _load_master_state_machine()
+    obstacle_slots = _target_obstacle_slots()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        obstacle_slots=(
-            ("top", 1.45, 1.75),
-            (None, -1.0, -1.0),
-            (None, -1.0, -1.0),
-        ),
+        obstacle_slots=obstacle_slots,
     )
     _enter_initial_search(machine)
     machine.handle_event(
@@ -318,27 +370,28 @@ def test_master_state_machine_plans_each_avoidance_direction_and_distance(
     )
     machine.poll_assistant_request()
 
-    machine.mark_assistant_object_acknowledged(position_x, 0.0)
+    position_x, position_y = _target_diagonal_position(use_lower_endpoint)
+    machine.mark_assistant_object_acknowledged(position_x, position_y)
 
-    assert machine.poll_orbit_command() == expected_offset
-    assert machine.get_avoidance_shift_distance_cm() == 5
-    assert machine.get_target_edge() == "top"
+    assert machine.poll_orbit_command() == expected_heading
+    assert machine.get_push_heading_deg() == expected_heading
+    assert machine.get_target_edge() == TARGET_EDGE
 
 
-def test_master_state_machine_dynamic_avoidance_queues_assistant_orbit_after_master_orbit() -> None:
+def test_master_state_machine_dynamic_heading_queues_assistant_orbit_after_master_orbit() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        obstacle_slots=(("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0)),
-        avoidance_default_offset_deg=90.0,
+        obstacle_slots=_target_obstacle_slots(),
     )
     _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
     machine.poll_assistant_request()
-    machine.mark_assistant_object_acknowledged(1.60, 0.0)
+    position_x, position_y = _target_diagonal_position()
+    machine.mark_assistant_object_acknowledged(position_x, position_y)
     machine.poll_orbit_command()
     machine.handle_assistant_target_found(value=300)
 
@@ -355,27 +408,30 @@ def test_master_state_machine_dynamic_avoidance_queues_assistant_orbit_after_mas
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
-        "arg": _pack_task_arg(
-            MasterStateMachine.ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
+        "arg": pack_assistant_orbit_arg(
+            MasterStateMachine.heading_with_offset(
+                _expected_diagonal_heading(),
+                -_push_heading_for_object(MasterStateMachine, 2),
+            ),
             2,
         ),
     }
 
 
-def test_master_state_machine_dynamic_avoidance_accepts_late_assistant_target_found() -> None:
+def test_master_state_machine_dynamic_heading_accepts_late_assistant_target_found() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        obstacle_slots=(("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0)),
-        avoidance_default_offset_deg=90.0,
+        obstacle_slots=_target_obstacle_slots(),
     )
     _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
     machine.poll_assistant_request()
-    machine.mark_assistant_object_acknowledged(1.60, 0.0)
+    position_x, position_y = _target_diagonal_position()
+    machine.mark_assistant_object_acknowledged(position_x, position_y)
     machine.poll_orbit_command()
     machine.step(orbit_finished=True)
 
@@ -386,27 +442,30 @@ def test_master_state_machine_dynamic_avoidance_accepts_late_assistant_target_fo
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
-        "arg": _pack_task_arg(
-            MasterStateMachine.ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
+        "arg": pack_assistant_orbit_arg(
+            MasterStateMachine.heading_with_offset(
+                _expected_diagonal_heading(),
+                -_push_heading_for_object(MasterStateMachine, 2),
+            ),
             2,
         ),
     }
 
 
-def test_master_state_machine_dynamic_avoidance_hands_off_to_formal_transport() -> None:
+def test_master_state_machine_dynamic_heading_enters_formal_transport_directly() -> None:
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
-        obstacle_slots=(("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0)),
-        avoidance_default_offset_deg=90.0,
+        obstacle_slots=_target_obstacle_slots(),
     )
     _enter_initial_search(machine)
     machine.handle_event(
         context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
     )
     machine.poll_assistant_request()
-    machine.mark_assistant_object_acknowledged(1.60, 0.0)
+    position_x, position_y = _target_diagonal_position()
+    machine.mark_assistant_object_acknowledged(position_x, position_y)
     machine.poll_orbit_command()
     machine.handle_assistant_target_found(value=300)
     machine.step(orbit_finished=True)
@@ -423,38 +482,12 @@ def test_master_state_machine_dynamic_avoidance_hands_off_to_formal_transport() 
         "kind": "assistant_transport",
         "state": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_TARGET,
-        "arg": _pack_task_arg(35, 2),
+        "arg": _pack_task_arg(1, 2),
     }
     machine.mark_transport_ready()
     assert machine.state == MasterStateMachine.STATE_TRANSPORT_OBJECT
-
+    assert _task_request(MasterStateMachine, machine.poll_task_request())["kind"] == "finish_task"
     machine.handle_assistant_cleared(value=0)
-
-    assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == _push_heading_for_object(
-        MasterStateMachine, 2
-    )
-    machine.step(orbit_finished=True)
-    task = _task_request(MasterStateMachine, machine.poll_task_request())
-    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
-    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
-        "kind": "assistant_orbit",
-        "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
-        "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
-        "arg": _pack_task_arg(
-            MasterStateMachine.ASSISTANT_ORBIT_MODE_NORMAL,
-            2,
-        ),
-    }
-    machine.handle_event(
-        context_id=task["context_id"],
-        event=MasterStateMachine.EVENT_ALIGNED,
-        value=0,
-    )
-    machine.handle_assistant_aligned(value=0)
-
-    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())["kind"] == "assistant_transport"
-    machine.mark_transport_ready()
     assert machine.state == MasterStateMachine.STATE_TRANSPORT_OBJECT
 
 
@@ -637,7 +670,7 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": _pack_task_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(0, 2),
     }
     assert machine.poll_orbit_command() is None
 
@@ -745,7 +778,7 @@ def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishe
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": _pack_task_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(0, 2),
     }
 
 

@@ -1,4 +1,4 @@
-"""推动目标边解释
+"""搬运目标边与直线路径规划
 
 @file src/role/transport_plan.py
 """
@@ -41,32 +41,18 @@ def push_heading_for_edge(edge):
     raise ValueError("unknown field edge")
 
 
-def _avoidance_offset_for_endpoint(edge, use_lower_endpoint):
-    lower_is_negative = edge in (FIELD_EDGE_TOP, FIELD_EDGE_LEFT)
-    if bool(use_lower_endpoint) == lower_is_negative:
-        return -90.0
-    return 90.0
-
-
-def plan_transport_avoidance(
+def plan_transport_heading(
     target_edge,
     position_x,
     position_y,
     obstacle_slots,
     margin_m,
-    default_offset_deg,
 ):
-    """按目标边、当前位置和障碍槽位生成单轮避障计划
-
-    @return 未命中时返回 None, 命中时返回 (绕行偏移角, 平移距离厘米)
-    """
+    """按目标边、当前位置和障碍槽位生成直线推动朝向"""
     target_edge = str(target_edge)
-    log("av", "%s x=%.3f y=%.3f" % (target_edge, position_x, position_y))
+    log("path", "%s x=%.3f y=%.3f" % (target_edge, position_x, position_y))
     margin_m = float(margin_m)
-    default_offset_deg = float(default_offset_deg)
     if margin_m < 0.0:
-        raise ValueError
-    if default_offset_deg not in (-90.0, 90.0):
         raise ValueError
 
     if target_edge in (FIELD_EDGE_TOP, FIELD_EDGE_BOTTOM):
@@ -103,20 +89,20 @@ def plan_transport_avoidance(
             continue
         lower_distance = coordinate - left
         upper_distance = right - coordinate
-        if abs(lower_distance - upper_distance) < 1e-9:
-            offset_deg = default_offset_deg
-            distance_m = lower_distance
-        elif lower_distance < upper_distance:
-            offset_deg = _avoidance_offset_for_endpoint(target_edge, True)
-            distance_m = lower_distance
+        endpoint = left if lower_distance <= upper_distance + 1e-9 else right
+        if target_edge == FIELD_EDGE_TOP:
+            target_x, target_y = endpoint, float(motion_params.FIELD_SIZE_M[1])
+        elif target_edge == FIELD_EDGE_BOTTOM:
+            target_x, target_y = endpoint, 0.0
+        elif target_edge == FIELD_EDGE_LEFT:
+            target_x, target_y = 0.0, endpoint
         else:
-            offset_deg = _avoidance_offset_for_endpoint(target_edge, False)
-            distance_m = upper_distance
-        distance_cm = max(1, int(math.ceil(distance_m * 100.0 - 1e-9)))
-        if distance_cm > 255:
-            raise ValueError
-        return (offset_deg, distance_cm)
-    return None
+            target_x, target_y = float(motion_params.FIELD_SIZE_M[0]), endpoint
+        return math.atan2(
+            target_x - float(position_x),
+            target_y - float(position_y),
+        ) * 180.0 / math.pi
+    return push_heading_for_edge(target_edge)
 
 
 def heading_with_offset(heading_deg, offset_deg):

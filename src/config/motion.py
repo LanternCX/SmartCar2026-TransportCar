@@ -31,7 +31,7 @@ MASTER_START_POSITION_M = (0.10, 0.0)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
 ASSISTANT_START_POSITION_M = (0.10, -0.50)
 # 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "top"}
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -67,9 +67,7 @@ ORBIT_POSITION_RADIUS_M = 0.13
 # 主动原地转向时车辆参考点绕旋转中心的半径, 单位米
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
-TRANSPORT_OBSTACLE_MARGIN_M = 0.20
-# 主车避障绕行相对正式推动朝向的角度偏移, 单位度
-TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = -90.0
+TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度
