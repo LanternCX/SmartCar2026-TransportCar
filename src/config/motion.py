@@ -20,16 +20,18 @@ MOTION_STOP_SPEED_THRESHOLD = 0.5
 MOTION_STOP_CONFIRM_TICKS = 3
 # 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
 WHEEL_DIAMETER_M = 0.038
-# 主车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-MASTER_ODOMETRY_DISTANCE_SCALE = 0.5107
-# 辅车里程计距离补偿系数, 用于把编码器积分距离换算到现场实测距离
-ASSISTANT_ODOMETRY_DISTANCE_SCALE = 0.5107
+# 主车里程计距离补偿系数, 格式为 (x, y), 对应车体系右移与前进
+MASTER_ODOMETRY_DISTANCE_SCALE = (0.65723685, 0.648589)
+# 辅车里程计距离补偿系数, 格式为 (x, y), 对应车体系右移与前进
+ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
+# 主车发车坐标, 单位米, 格式为 (x, y)
+MASTER_START_POSITION_M = (0.10, 0.0)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
 ASSISTANT_START_POSITION_M = (0.10, -0.50)
 # 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "bottom"}
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "top"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -58,16 +60,20 @@ ORBIT_AUTO_OMEGA_MAX = 1
 ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
 HOLD_SPEED_EPS = 0.01
-# 主车绕行的绝对目标角度增量, 单位度
-MASTER_ORBIT_TARGET_DEG = 180
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
+# 绕行定位使用的车辆参考点到物体中心固定半径, 单位米
+ORBIT_POSITION_RADIUS_M = 0.13
+# 主动原地转向时车辆参考点绕旋转中心的半径, 单位米
+IN_PLACE_ROTATION_RADIUS_M = 0.08
+# 障碍区间两端用于生成避障触发范围的余量, 单位米
+TRANSPORT_OBSTACLE_MARGIN_M = 0.20
+# 主车避障绕行相对正式推动朝向的角度偏移, 单位度
+TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = -90.0
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度
 MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG = 8.0
-# 辅车绕行的绝对目标角度, 单位度
-ASSISTANT_ORBIT_TARGET_DEG = 0
 # 辅车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 ASSISTANT_ORBIT_RADIUS_SCALE = 2.5
 # 三轮速度环 PID 参数映射

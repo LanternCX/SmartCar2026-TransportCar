@@ -210,10 +210,11 @@ def install_transport_car_stubs() -> None:
             return float(vm), float(vl), float(vr)
 
     class _Odometry:
-        def __init__(self, distance_scale=1.0) -> None:
+        def __init__(self, x_scale=1.0, y_scale=1.0) -> None:
             self.x = 0.0
             self.y = 0.0
-            self.distance_scale = float(distance_scale)
+            self.x_scale = float(x_scale)
+            self.y_scale = float(y_scale)
 
         def update(self, *_args) -> None:
             return None
@@ -324,9 +325,10 @@ def install_transport_car_stubs() -> None:
         "MOTION_STOP_CONFIRM_TICKS": 3,
         "POS_MAX_SPEED": 1.0,
         "POS_KP": 1.0,
-        "MASTER_ODOMETRY_DISTANCE_SCALE": 1.25,
-        "ASSISTANT_ODOMETRY_DISTANCE_SCALE": 0.75,
+        "MASTER_ODOMETRY_DISTANCE_SCALE": (1.25, 1.5),
+        "ASSISTANT_ODOMETRY_DISTANCE_SCALE": (0.75, 0.5),
         "FIELD_SIZE_M": (3.2, 2.4),
+        "MASTER_START_POSITION_M": (0.10, 0.0),
         "ASSISTANT_START_POSITION_M": (0.10, -0.50),
         "TRANSPORT_OBJECT_TARGET_EDGE": {-1: "bottom"},
         "POS_TOLERANCE": 0.01,
@@ -343,11 +345,11 @@ def install_transport_car_stubs() -> None:
         "ORBIT_AUTO_OMEGA_MAX": 1.5,
         "ORBIT_ANGLE_CONFIRM_TICKS": 3,
         "HOLD_SPEED_EPS": 0.1,
-        "MASTER_ORBIT_TARGET_DEG": 90,
         "MASTER_TURN_BACK_DELTA_DEG": 180,
         "MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG": 8.0,
         "MASTER_ORBIT_RADIUS_SCALE": 1.20,
-        "ASSISTANT_ORBIT_TARGET_DEG": -90,
+        "ORBIT_POSITION_RADIUS_M": 0.13,
+        "IN_PLACE_ROTATION_RADIUS_M": 0.2,
         "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
         "ACTIVE_WHEELS": ("m", "l", "r"),
         "PID_MAP": {"m": (1.0, 0.0, 0.0), "l": (1.0, 0.0, 0.0), "r": (1.0, 0.0, 0.0)},
@@ -434,6 +436,9 @@ def make_minimal_transport_car(**attrs):
     defaults = {
         "orbit_mode": False,
         "orbit_radius_scale": 1.0,
+        "_orbit_pose_start": None,
+        "_orbit_restore_integration": True,
+        "_integrate_position": True,
     }
     defaults.update(attrs)
     for key, value in defaults.items():

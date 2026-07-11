@@ -34,6 +34,13 @@ def import_runtime_module(module_name, monkeypatch):
     """按正常包路径导入指定角色运行模块."""
 
     monkeypatch.syspath_prepend(str(SRC_ROOT))
+    for loaded_name in (
+        "config",
+        "config.motion",
+        "config.storage",
+        "storage.param_manager",
+    ):
+        sys.modules.pop(loaded_name, None)
     sys.modules.pop(module_name, None)
     return import_module(module_name)
 
@@ -139,6 +146,13 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", _TransportCar)
     monkeypatch.setitem(sys.modules, "core.runtime", core_module)
+    param_manager = import_module("storage.param_manager")
+    monkeypatch.setattr(
+        param_manager,
+        "load_obstacle_slots",
+        lambda _path, _field_size: ((None, -1.0, -1.0),) * 3,
+        raising=False,
+    )
 
     car = runtime_module.create_transport_car()
 
@@ -147,6 +161,58 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     assert car.imu == "imu"
     assert hasattr(car, "step")
     assert created_roles == ["master"]
+
+
+def test_master_runtime_loads_obstacles_once_before_forward_runtime(monkeypatch) -> None:
+    """主车正式装配只加载一次障碍配置并显式传给运行流程."""
+    runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
+    slots = (("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0))
+    load_calls = []
+    received = []
+
+    param_manager = import_module("storage.param_manager")
+
+    def _load(path, field_size):
+        load_calls.append((path, field_size))
+        return slots
+
+    monkeypatch.setattr(param_manager, "load_obstacle_slots", _load, raising=False)
+    forward_module = ModuleType("role.master.forward_runtime")
+    setattr(
+        forward_module,
+        "MasterForwardRuntime",
+        lambda obstacle_slots: received.append(obstacle_slots) or object(),
+    )
+    monkeypatch.setitem(sys.modules, "role.master.forward_runtime", forward_module)
+
+    runtime_module.create_transport_car()
+
+    assert len(load_calls) == 1
+    assert received == [slots]
+
+
+def test_master_runtime_stops_when_obstacle_loading_fails(monkeypatch) -> None:
+    """障碍文件读取失败时不创建主车运行流程."""
+    runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
+    param_manager = import_module("storage.param_manager")
+    monkeypatch.setattr(
+        param_manager,
+        "load_obstacle_slots",
+        lambda _path, _field_size: (_ for _ in ()).throw(ValueError()),
+        raising=False,
+    )
+    forward_module = ModuleType("role.master.forward_runtime")
+    setattr(
+        forward_module,
+        "MasterForwardRuntime",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("forward runtime must not be created")
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "role.master.forward_runtime", forward_module)
+
+    with pytest.raises(ValueError):
+        runtime_module.create_transport_car()
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:

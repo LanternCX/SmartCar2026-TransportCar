@@ -19,13 +19,15 @@
 - `UART3` 用作 REPL 与现场调试链路。
 - `UART8` 用作主辅直连链路。
 - 两台车各自用本车 `UART6` 连接本车 OpenART。
-- 陀螺仪零飘结果保存到 `/flash/gyro_offset.txt`。
-- 电机辨识结果保存到 `/flash/ident_params.txt`。
+- 陀螺仪零飘结果保存到 `/flash/storage/gyro_offset.txt`。
+- 电机辨识结果保存到 `/flash/storage/ident_params.txt`。
 
 ## 场地坐标约定
 
 - 蚂蚁搬家场地坐标与边线校准示意图: [`field_coordinate_calibration.svg`](./field_coordinate_calibration.svg)。
+- 场地左下角为原点, 主车发车朝向为 `+Y`。
 - 坐标单位使用 m, `x+` 向右, `y+` 向前。
+- 航向 `0°` 指向 `+Y`, 顺时针为正, `+90°` 指向 `+X`。
 - 边线校准只重置单轴位置, 不重置航向角。
 
 ## 调试取舍

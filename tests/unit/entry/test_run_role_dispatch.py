@@ -184,8 +184,8 @@ def test_run_main_reads_role_before_runtime_setup(monkeypatch) -> None:
     assert any(event[0] == "loop" for event in events if isinstance(event, tuple))
 
 
-def test_run_main_prints_mem_info_before_ready_when_available(monkeypatch) -> None:
-    """板端提供 mem_info 时，在运行时 ready 日志前输出一次。"""
+def test_run_main_does_not_print_mem_info_before_ready(monkeypatch) -> None:
+    """正式启动不输出详细内存信息。"""
 
     module, _state = load_run_module(monkeypatch)
     events = []
@@ -201,12 +201,12 @@ def test_run_main_prints_mem_info_before_ready_when_available(monkeypatch) -> No
 
     module.main()
 
-    assert events.index("mem_info") < events.index("TransportCar ready")
-    assert calls == [(1,)]
+    assert "TransportCar ready" in events
+    assert calls == []
 
 
-def test_run_main_prepares_runtime_before_mem_info(monkeypatch) -> None:
-    """运行时预热先于详细内存诊断，避免主循环首次导入。"""
+def test_run_main_prepares_runtime_before_ready(monkeypatch) -> None:
+    """运行时预热先于 ready 日志。"""
 
     module, _state = load_run_module(monkeypatch)
     events = []
@@ -238,8 +238,8 @@ def test_run_main_prepares_runtime_before_mem_info(monkeypatch) -> None:
 
     module.main()
 
-    assert events.index("prepare") < events.index("mem_info")
     assert events.index("prepare") < events.index("TransportCar ready")
+    assert "mem_info" not in events
 
 
 def test_run_main_returns_assistant_role_and_dispatches_it(

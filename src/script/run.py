@@ -11,7 +11,7 @@ import time
 
 from smartcar import ticker
 from config import motion as motion_params
-from utils.startup_log import log, log_exception, log_memory
+from utils.startup_log import log, log_exception
 from role import create_role_transport_car
 from role.vehicle_role import read_vehicle_role
 
@@ -215,11 +215,11 @@ def main():
         log(LOG_STAGE, "vision runtime ready=%s" % role)
 
         log(LOG_STAGE, "creating TransportCar")
-        log_memory("r0")
+        # log_memory("r0")
         car = _create_transport_car(role)
-        log_memory("r1")
+        # log_memory("r1")
         _prepare_runtime_before_ready(car)
-        _print_mem_info_before_ready()
+        # _print_mem_info_before_ready()
         log(LOG_STAGE, "TransportCar ready")
 
         log(LOG_STAGE, "creating ticker")

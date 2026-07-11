@@ -4,6 +4,7 @@
 """
 
 from importlib import import_module
+import math
 from pathlib import Path
 from types import ModuleType
 import sys
@@ -83,11 +84,26 @@ def import_module_clean(module_name: str, monkeypatch):
         "role.master.forward_runtime",
         "role.assistant",
         "role.assistant.follow_runtime",
+        "config",
+        "config.motion",
+        "config.vision",
         "utils.startup_log",
         module_name,
     ):
         sys.modules.pop(loaded_name, None)
-    return import_module(module_name)
+    module = import_module(module_name)
+    if module_name == "role.master.forward_runtime":
+        runtime_type = module.MasterForwardRuntime
+
+        def _master_runtime_factory(*args, **kwargs):
+            kwargs.setdefault(
+                "obstacle_slots",
+                ((None, -1.0, -1.0),) * 3,
+            )
+            return runtime_type(*args, **kwargs)
+
+        setattr(module, "MasterForwardRuntime", _master_runtime_factory)
+    return module
 
 
 def install_fake_core(monkeypatch):
@@ -95,9 +111,15 @@ def install_fake_core(monkeypatch):
     core_package = ModuleType("core")
     core_module = ModuleType("core.runtime")
 
+    class _FakeOdometry:
+        def __init__(self) -> None:
+            self.x = 0.0
+            self.y = 0.0
+
     class FakeTransportCar:
         def __init__(self, vehicle_role=None) -> None:
             self.vehicle_role = vehicle_role
+            self.odometry = _FakeOdometry()
             self.wheel_encoders = ("enc-m", "enc-l", "enc-r")
             self.w_filt = [0.0, 0.0, 0.0]
             self.imu = "imu"
@@ -122,6 +144,7 @@ def install_fake_core(monkeypatch):
                 "has_omega": False,
             }
             self.last_exception_text = "none"
+            self.position_integration_enabled = True
             self.events = []
             cars.append(self)
 
@@ -176,6 +199,25 @@ def install_fake_core(monkeypatch):
             self.events.append(("set_orbit_velocity_correction", float(vx), float(vy)))
             self.control_vx = float(vx)
             self.control_vy = float(vy)
+
+        def set_position_integration_enabled(self, enabled) -> None:
+            self.position_integration_enabled = bool(enabled)
+            self.events.append(
+                ("set_position_integration_enabled", bool(enabled))
+            )
+
+        def apply_forward_pose_distance(self, distance_m, heading_deg) -> None:
+            heading_rad = math.radians(float(heading_deg))
+            distance_m = float(distance_m)
+            self.odometry.x += distance_m * math.sin(heading_rad)
+            self.odometry.y += distance_m * math.cos(heading_rad)
+            self.events.append(
+                (
+                    "apply_forward_pose_distance",
+                    distance_m,
+                    float(heading_deg),
+                )
+            )
 
         def set_heading_target(self, angle_deg) -> None:
             self.events.append(("set_heading_target", float(angle_deg)))

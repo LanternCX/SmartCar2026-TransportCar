@@ -2,6 +2,7 @@
 
 import importlib.util
 import inspect
+import math
 import sys
 from pathlib import Path
 
@@ -50,6 +51,32 @@ class _Odom:
         self.x = float(x)
         self.y = float(y)
 
+    def apply_orbit_displacement(
+        self,
+        start_x,
+        start_y,
+        start_heading_deg,
+        end_heading_deg,
+        radius_m,
+    ) -> None:
+        odometry = Odometry()
+        odometry.apply_orbit_displacement(
+            start_x,
+            start_y,
+            start_heading_deg,
+            end_heading_deg,
+            radius_m,
+        )
+        self.x = odometry.x
+        self.y = odometry.y
+
+    def apply_forward_displacement(self, distance_m, heading_deg) -> None:
+        odometry = Odometry()
+        odometry.reset(self.x, self.y)
+        odometry.apply_forward_displacement(distance_m, heading_deg)
+        self.x = odometry.x
+        self.y = odometry.y
+
 
 class _Quat:
     """最小四元数桩."""
@@ -59,6 +86,33 @@ class _Quat:
         self.x = 1.0
         self.y = 2.0
         self.z = 3.0
+
+
+class _YawQuat:
+    """返回可控偏航角的最小四元数桩."""
+
+    def __init__(self, yaw_rad: float) -> None:
+        self.yaw_rad = float(yaw_rad)
+
+    def update(self, _gx, _gy, _gz, _dt_s) -> None:
+        return None
+
+    def to_euler_yaw(self) -> float:
+        return self.yaw_rad
+
+
+class _StaticImu:
+    """返回静止六轴数据的最小 IMU 桩."""
+
+    def get(self):
+        return [0.0] * 6
+
+
+class _PassFilter:
+    """直接返回输入的最小滤波器桩."""
+
+    def update(self, value):
+        return value
 
 
 def _make_control_car(**attrs):
@@ -81,6 +135,9 @@ def _make_control_car(**attrs):
         "lock_start_time": 0,
         "orbit_mode": False,
         "orbit_radius_scale": 1.0,
+        "_orbit_pose_start": None,
+        "_orbit_restore_integration": True,
+        "_integrate_position": True,
         "_pending_dx": None,
         "_pending_dy": None,
         "_pending_d_angle": None,
@@ -194,12 +251,19 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M) >= 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
+    assert float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M) >= 0.0
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
-    assert float(motion_params.MASTER_ODOMETRY_DISTANCE_SCALE) > 0.0
-    assert float(motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE) > 0.0
+    assert len(motion_params.MASTER_ODOMETRY_DISTANCE_SCALE) == 2
+    assert len(motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE) == 2
+    assert all(float(value) > 0.0 for value in motion_params.MASTER_ODOMETRY_DISTANCE_SCALE)
+    assert all(
+        float(value) > 0.0 for value in motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
+    )
+    assert float(motion_params.IN_PLACE_ROTATION_RADIUS_M) > 0.0
     assert len(motion_params.FIELD_SIZE_M) == 2
+    assert len(motion_params.MASTER_START_POSITION_M) == 2
     assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
     assert float(motion_params.FIELD_SIZE_M[0]) > 0.0
     assert float(motion_params.FIELD_SIZE_M[1]) > 0.0
@@ -250,13 +314,6 @@ def test_position_control_params_compensate_encoder_count_scale() -> None:
     )
 
 
-def test_field_pose_params_are_coordinate_tuples() -> None:
-    """场地坐标配置使用二元元组保持坐标语义."""
-
-    assert motion_params.ASSISTANT_START_POSITION_M == pytest.approx((0.10, -0.50))
-    assert motion_params.FIELD_SIZE_M == pytest.approx((3.2, 2.4))
-
-
 def test_omni_kinematics_uses_configured_wheel_diameter() -> None:
     """全向轮运动学使用运动配置中的轮径计算脉冲距离."""
 
@@ -275,16 +332,114 @@ def test_omni_kinematics_uses_measured_encoder_counts_per_wheel_rev() -> None:
     assert kinematics.counts_per_rev == pytest.approx(7 * 30)
 
 
-def test_odometry_applies_configured_distance_scale() -> None:
-    """里程计按传入的距离标定比例积分平移距离."""
+def test_odometry_applies_axis_scales_in_robot_frame() -> None:
+    """里程计先按车体系方向标定速度, 再转换到世界系积分."""
 
-    scale = 0.5
-    odometry = Odometry(distance_scale=scale)
+    odometry = Odometry(x_scale=0.5, y_scale=2.0)
 
-    odometry.update(0.0, 1.0, 0.0, 1.0)
+    odometry.update(1.0, 1.0, math.pi / 2.0, 1.0)
 
-    assert odometry.x == pytest.approx(0.0)
-    assert odometry.y == pytest.approx(scale)
+    assert odometry.x == pytest.approx(2.0)
+    assert odometry.y == pytest.approx(-0.5)
+
+
+@pytest.mark.parametrize(
+    ("heading_deg", "expected_x", "expected_y"),
+    (
+        (0.0, 1.0, 2.5),
+        (90.0, 1.5, 2.0),
+        (180.0, 1.0, 1.5),
+        (-90.0, 0.5, 2.0),
+    ),
+)
+def test_odometry_integrates_forward_velocity_in_clockwise_world_heading(
+    heading_deg: float, expected_x: float, expected_y: float
+) -> None:
+    """轮速里程计按顺时针世界航向积分前进速度。"""
+    odometry = Odometry()
+    odometry.reset(1.0, 2.0)
+
+    odometry.update(0.0, 0.5, math.radians(heading_deg), 1.0)
+
+    assert odometry.x == pytest.approx(expected_x)
+    assert odometry.y == pytest.approx(expected_y)
+
+
+@pytest.mark.parametrize(
+    (
+        "start_heading_deg",
+        "end_heading_deg",
+        "radius_m",
+        "expected_x",
+        "expected_y",
+    ),
+    (
+        (0.0, 90.0, 0.13, 0.87, 2.13),
+        (0.0, -90.0, 0.13, 1.13, 2.13),
+        (90.0, 180.0, 0.13, 1.13, 2.13),
+        (180.0, 270.0, 0.13, 1.13, 1.87),
+        (270.0, 360.0, 0.13, 0.87, 1.87),
+        (350.0, 10.0, 0.13, 0.9548515, 2.0),
+        (45.0, 405.0, 0.13, 1.0, 2.0),
+        (0.0, 90.0, 0.26, 0.74, 2.26),
+    ),
+)
+def test_odometry_applies_orbit_displacement(
+    start_heading_deg: float,
+    end_heading_deg: float,
+    radius_m: float,
+    expected_x: float,
+    expected_y: float,
+) -> None:
+    """绕行位移覆盖方向、半径、航向边界和完整一周."""
+    odometry = Odometry()
+
+    odometry.apply_orbit_displacement(
+        1.0,
+        2.0,
+        start_heading_deg,
+        end_heading_deg,
+        radius_m,
+    )
+
+    assert odometry.x == pytest.approx(expected_x)
+    assert odometry.y == pytest.approx(expected_y)
+
+
+@pytest.mark.parametrize("radius_m", (0.0, -0.13, float("nan")))
+def test_odometry_rejects_non_positive_orbit_radius(radius_m: float) -> None:
+    """固定半径绕行拒绝无效半径且保持原位置."""
+    odometry = Odometry()
+    odometry.reset(1.0, 2.0)
+
+    with pytest.raises(ValueError):
+        odometry.apply_orbit_displacement(1.0, 2.0, 0.0, 90.0, radius_m)
+
+    assert odometry.x == pytest.approx(1.0)
+    assert odometry.y == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("heading_deg", "expected_x", "expected_y"),
+    (
+        (0.0, 1.0, 2.5),
+        (90.0, 1.5, 2.0),
+        (180.0, 1.0, 1.5),
+        (-90.0, 0.5, 2.0),
+        (30.0, 1.25, 2.4330127),
+    ),
+)
+def test_odometry_applies_forward_displacement(
+    heading_deg: float, expected_x: float, expected_y: float
+) -> None:
+    """里程计按顺时针世界航向应用固定直线位移."""
+    odometry = Odometry()
+    odometry.reset(1.0, 2.0)
+
+    odometry.apply_forward_displacement(0.5, heading_deg)
+
+    assert odometry.x == pytest.approx(expected_x)
+    assert odometry.y == pytest.approx(expected_y)
 
 
 def test_transport_car_has_no_query_uart_public_api() -> None:
@@ -400,27 +555,39 @@ def test_transport_car_calibrates_single_axis_to_field_edge() -> None:
     }
 
 
-def test_assistant_transport_car_starts_from_configured_position() -> None:
-    """辅车构造时使用配置中的发车坐标初始化里程计."""
+@pytest.mark.parametrize(
+    ("vehicle_role", "config_name"),
+    (
+        ("master", "MASTER_START_POSITION_M"),
+        ("assistant", "ASSISTANT_START_POSITION_M"),
+    ),
+)
+def test_transport_car_starts_from_configured_position(
+    vehicle_role: str, config_name: str
+) -> None:
+    """主辅车构造时使用对应发车坐标初始化里程计."""
     transport_car = import_transport_car_module()
 
-    car = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
+    car = transport_car.TransportCar(
+        diagnostic_mode=True,
+        vehicle_role=vehicle_role,
+    )
+    expected = getattr(motion_params, config_name)
 
-    assert car.odometry.x == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[0])
-    assert car.odometry.y == pytest.approx(motion_params.ASSISTANT_START_POSITION_M[1])
+    assert (car.odometry.x, car.odometry.y) == pytest.approx(expected)
 
 
-def test_transport_car_selects_odometry_distance_scale_by_role() -> None:
-    """底盘构造时按车辆角色选择对应里程计标定比例."""
+def test_transport_car_selects_odometry_axis_scales_by_role() -> None:
+    """底盘构造时按车辆角色选择对应方向的里程计标定比例."""
     transport_car = import_transport_car_module()
 
     master = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="master")
     assistant = transport_car.TransportCar(diagnostic_mode=True, vehicle_role="assistant")
 
-    assert master.odometry.distance_scale == pytest.approx(
+    assert (master.odometry.x_scale, master.odometry.y_scale) == pytest.approx(
         transport_car.MASTER_ODOMETRY_DISTANCE_SCALE
     )
-    assert assistant.odometry.distance_scale == pytest.approx(
+    assert (assistant.odometry.x_scale, assistant.odometry.y_scale) == pytest.approx(
         transport_car.ASSISTANT_ODOMETRY_DISTANCE_SCALE
     )
 
@@ -603,9 +770,24 @@ def test_transport_car_set_relative_translation_target_builds_world_target_and_h
     assert car.control_state["vy"] == pytest.approx(0.0)
     assert car.control_state["omega"] == pytest.approx(0.0)
     assert car.control_state["angle"] == pytest.approx(90.0)
-    assert car.control_state["x"] == pytest.approx(1.1)
-    assert car.control_state["y"] == pytest.approx(2.2)
+    assert car.control_state["x"] == pytest.approx(0.9)
+    assert car.control_state["y"] == pytest.approx(1.8)
     assert car.heading_target == pytest.approx(90.0)
+
+
+def test_transport_car_position_control_uses_clockwise_world_heading() -> None:
+    """朝向正 X 时，世界系正 X 误差生成车体系前进命令。"""
+    _transport_car, car = _make_control_car(
+        heading_est=90.0,
+        odometry=_Odom(x=0.0, y=0.0),
+        control_state={"x": 1.0, "y": 0.0, "angle": 90.0},
+        _translation_speed_limit_cmd=None,
+    )
+
+    vx_cmd, vy_cmd = car._compute_planar_targets(0.005, 0.0)
+
+    assert vx_cmd == pytest.approx(0.0, abs=1e-9)
+    assert vy_cmd > 0.0
 
 
 def test_transport_car_set_relative_translation_target_accepts_hold_heading_override() -> None:
@@ -622,7 +804,7 @@ def test_transport_car_set_relative_translation_target_accepts_hold_heading_over
 
     assert car.control_state["angle"] == pytest.approx(270.0)
     assert car.control_state["x"] == pytest.approx(1.0)
-    assert car.control_state["y"] == pytest.approx(1.8)
+    assert car.control_state["y"] == pytest.approx(2.2)
     assert car.heading_target == pytest.approx(270.0)
 
 
@@ -954,6 +1136,121 @@ def test_transport_car_set_orbit_target_unlock_clears_mode_and_output() -> None:
     assert car.w_duty == [0.0, 0.0, 0.0]
     for motor in car.w_mot:
         assert motor.duties == [0]
+
+
+@pytest.mark.parametrize("radius_scale", (1.0, 4.0))
+def test_transport_car_orbit_completion_applies_fixed_radius_pose_once(
+    radius_scale: float,
+) -> None:
+    """绕行完成使用独立物理半径更新位置且不受控制倍率影响."""
+    _transport_car, car = _make_control_car(
+        heading_est=0.0,
+        odometry=Odometry(),
+    )
+    car.odometry.reset(1.0, 2.0)
+
+    car.set_orbit_target(90.0, radius_scale)
+    car.heading_est = 90.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS)):
+        car._check_unlock()
+
+    assert car.odometry.x == pytest.approx(0.87)
+    assert car.odometry.y == pytest.approx(2.13)
+
+    car._check_unlock()
+
+    assert car.odometry.x == pytest.approx(0.87)
+    assert car.odometry.y == pytest.approx(2.13)
+
+
+def test_transport_car_position_integration_gate_keeps_heading_updates() -> None:
+    """暂停轮速位置积分时继续维护陀螺仪航向."""
+    odometry = Odometry()
+    _transport_car, car = _make_control_car(
+        odometry=odometry,
+        imu=_StaticImu(),
+        imu_offsets=[0.0] * 6,
+        q_est=_YawQuat(0.1),
+        last_yaw_rad=0.0,
+        gyro_lpf=_PassFilter(),
+        w_filt=[0.0, 1.0, -1.0],
+        kinematics=OmniKinematics(),
+    )
+
+    car.set_position_integration_enabled(False)
+    car._update_attitude(0.1)
+
+    assert odometry.x == pytest.approx(0.0)
+    assert odometry.y == pytest.approx(0.0)
+    assert car.heading_est > 0.0
+
+    car.set_position_integration_enabled(True)
+    car._update_attitude(0.1)
+
+    assert abs(odometry.x) + abs(odometry.y) > 0.0
+
+
+def test_heading_transition_uses_fixed_radius_instead_of_wheel_translation() -> None:
+    """主动原地转向按固定半径和航向变化更新位置."""
+    odometry = Odometry()
+    transport_car, car = _make_control_car(
+        odometry=odometry,
+        heading_est=0.0,
+        heading_transition_mode=True,
+        imu=_StaticImu(),
+        imu_offsets=[0.0] * 6,
+        q_est=_YawQuat(math.pi / 2.0),
+        last_yaw_rad=0.0,
+        gyro_lpf=_PassFilter(),
+        w_filt=[100.0, 0.0, 0.0],
+        kinematics=OmniKinematics(),
+    )
+    odometry.reset(1.0, 2.0)
+
+    car._update_attitude(0.1)
+
+    radius_m = float(transport_car.IN_PLACE_ROTATION_RADIUS_M)
+    assert odometry.x == pytest.approx(1.0 - radius_m)
+    assert odometry.y == pytest.approx(2.0 + radius_m)
+
+
+def test_transport_car_orbit_pauses_and_cancellation_restores_wheel_odometry() -> None:
+    """绕行自动暂停轮速积分，取消绕行后恢复原积分状态."""
+    odometry = Odometry()
+    _transport_car, car = _make_control_car(
+        odometry=odometry,
+        imu=_StaticImu(),
+        imu_offsets=[0.0] * 6,
+        q_est=_YawQuat(0.1),
+        last_yaw_rad=0.0,
+        gyro_lpf=_PassFilter(),
+        w_filt=[0.0, 1.0, -1.0],
+        kinematics=OmniKinematics(),
+    )
+
+    car.set_orbit_target(90.0, 1.0)
+    car._update_attitude(0.1)
+
+    assert odometry.x == pytest.approx(0.0)
+    assert odometry.y == pytest.approx(0.0)
+    assert car.heading_est > 0.0
+
+    car.set_heading_target(car.heading_est)
+    car._update_attitude(0.1)
+
+    assert abs(odometry.x) + abs(odometry.y) > 0.0
+
+
+def test_transport_car_applies_forward_pose_distance() -> None:
+    """共享底盘把已知直线距离交给里程计 owner 应用."""
+    odometry = Odometry()
+    odometry.reset(1.0, 2.0)
+    _transport_car, car = _make_control_car(odometry=odometry)
+
+    car.apply_forward_pose_distance(0.5, 90.0)
+
+    assert odometry.x == pytest.approx(1.5)
+    assert odometry.y == pytest.approx(2.0)
 
 
 def test_transport_car_orbit_angle_confirm_ticks_must_be_consecutive() -> None:

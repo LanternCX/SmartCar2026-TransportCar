@@ -69,6 +69,7 @@ from role.master.state_machine import (
     RQ_STATE,
     RQ_TARGET,
     RK_A_CLEAR,
+    RK_A_FINISHED,
     RK_A_FOLLOW,
     RK_A_OBJ,
     RK_A_ORBIT,
@@ -130,8 +131,9 @@ MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = (
 )
 TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
-MASTER_ORBIT_TARGET_DEG = motion_params.MASTER_ORBIT_TARGET_DEG
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
+TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -152,7 +154,7 @@ def _default_now_ms():
 class MasterForwardRuntime:
     """基于共享底盘装配主车角色运行时外观."""
 
-    def __init__(self, now_ms=None, transport=None) -> None:
+    def __init__(self, obstacle_slots, now_ms=None, transport=None) -> None:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_MASTER)
@@ -169,7 +171,9 @@ class MasterForwardRuntime:
         self._sm = MasterStateMachine(
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
-            orbit_delta_deg=MASTER_ORBIT_TARGET_DEG,
+            obstacle_slots=obstacle_slots,
+            avoidance_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
+            avoidance_default_offset_deg=TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
@@ -201,6 +205,7 @@ class MasterForwardRuntime:
         self._tr_task_ack = False
         self._tr_ticks = 0
         self._tr_unlock = False
+        self._av_shift_heading = None
         self._clr_sync_ack = False
         self._clr_move = False
         self._clr_done_phase = None
@@ -310,6 +315,13 @@ class MasterForwardRuntime:
         current_state = int(self._sm.state)
         if current_state == int(self._last_state):
             return
+        previous_state = int(self._last_state)
+        if (
+            previous_state == STATE_TRANSPORT_OBJECT
+            and current_state not in (STATE_TRANSPORT_OBJECT, STATE_ORBITING)
+        ):
+            self._car.set_position_integration_enabled(True)
+            self._av_shift_heading = None
         self._clear_local_vision_pause_residue()
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
@@ -423,6 +435,15 @@ class MasterForwardRuntime:
             elif int(packet[AE_EVENT]) == EVENT_ALIGNED:
                 self._sm.handle_assistant_aligned(packet[AE_VALUE])
             elif int(packet[AE_EVENT]) == EVENT_CLEARED:
+                if self._sm.state == STATE_TRANSPORT_OBJECT and self._sm._av_shift:
+                    if self._av_shift_heading is None:
+                        raise RuntimeError
+                    self._car.apply_forward_pose_distance(
+                        float(self._sm.get_avoidance_shift_distance_cm()) / 100.0,
+                        self._av_shift_heading,
+                    )
+                    self._car.set_position_integration_enabled(True)
+                    self._av_shift_heading = None
                 self._sm.handle_assistant_cleared(packet[AE_VALUE])
 
     def _handle_task_event(self, packet) -> None:
@@ -435,6 +456,7 @@ class MasterForwardRuntime:
                 and int(packet[ME_EVENT]) == int(EVENT_RETURN_LINE_ALIGNED)
             ):
                 self._line_ok = True
+            self._apply_transport_arrival_pose(packet[ME_EVENT])
             self._sm.handle_event(
                 context_id,
                 packet[ME_EVENT],
@@ -520,7 +542,10 @@ class MasterForwardRuntime:
                 == DELIVERY_DELIVERED
             ):
                 if pending[_S_KIND] == RK_A_OBJ:
-                    self._sm.mark_assistant_object_acknowledged()
+                    self._sm.mark_assistant_object_acknowledged(
+                        self._car.odometry.x,
+                        self._car.odometry.y,
+                    )
                 elif pending[_S_KIND] == RK_A_START:
                     self._sm.mark_startup_sync_acknowledged()
                 elif pending[_S_KIND] == RK_A_FOLLOW:
@@ -531,6 +556,8 @@ class MasterForwardRuntime:
                         self._sm.mark_transport_ready()
                 elif pending[_S_KIND] == RK_A_CLEAR:
                     self._clr_sync_ack = True
+                elif pending[_S_KIND] == RK_A_FINISHED:
+                    pass
                 self._p_ast = None
 
         pending = self._p_sync
@@ -648,7 +675,7 @@ class MasterForwardRuntime:
         )
 
     def play_set_angle(self, value) -> None:
-        target_heading_deg = float(getattr(self._car, "heading_est", 0.0)) + float(value)
+        target_heading_deg = float(value)
         self._car.set_heading_transition_target(target_heading_deg)
 
     def play_write_velocity_y(self, value) -> None:
@@ -876,7 +903,6 @@ class MasterForwardRuntime:
                     UART6, TOPIC_LOCAL_VISION_VELOCITY
                 )
             elif request_kind == RK_A_TRANSPORT:
-                self._act_ctx = None
                 self._u6v = None
                 self._u6_has_w = False
                 self._u6_ver = self._ts.get_udp_version(
@@ -884,9 +910,14 @@ class MasterForwardRuntime:
                 )
                 self._p_event = None
                 self._tr_sync_ack = False
-                self._tr_task_ack = False
+                self._tr_task_ack = bool(self._sm._av_shift)
                 self._tr_ticks = 0
                 self._tr_unlock = False
+                self._car.set_position_integration_enabled(False)
+                if self._sm._av_shift:
+                    self._av_shift_heading = float(self._car.heading_est)
+                else:
+                    self._av_shift_heading = None
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -894,14 +925,16 @@ class MasterForwardRuntime:
                     None,
                     True,
                 )
-                self._p_task = (
-                    RK_T_TRANSPORT,
-                    int(self._sm._ctx),
-                    STATE_SEARCH_OBJECT,
-                    int(assistant_request[RQ_TARGET]),
-                    int(MASTER_TRANSPORT_TASK_CONFIG_ID),
-                    False,
-                )
+                if not self._sm._av_shift:
+                    self._act_ctx = None
+                    self._p_task = (
+                        RK_T_TRANSPORT,
+                        int(self._sm._ctx),
+                        STATE_SEARCH_OBJECT,
+                        int(assistant_request[RQ_TARGET]),
+                        int(MASTER_TRANSPORT_TASK_CONFIG_ID),
+                        False,
+                    )
             elif request_kind == RK_A_CLEAR:
                 self._u6v = None
                 self._u6_has_w = False
@@ -1070,6 +1103,7 @@ class MasterForwardRuntime:
         context_id, event, value, threshold = pending_event
         if self._threshold_has_value(threshold):
             self._obj_th = threshold
+        self._apply_transport_arrival_pose(event)
         self._sm.handle_event(
             context_id,
             event,
@@ -1085,6 +1119,16 @@ class MasterForwardRuntime:
             self._u6_ver = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
+
+    def _apply_transport_arrival_pose(self, event) -> None:
+        """在正式推动到边事件进入状态机前完成位置校准"""
+
+        if int(event) != int(EVENT_ARRIVED):
+            return
+        if self._sm.state != STATE_TRANSPORT_OBJECT:
+            return
+        self._car.calibrate_pose_to_field_edge(self._sm.get_target_edge())
+        self._car.set_position_integration_enabled(True)
 
     def _threshold_for_assistant_request(self, assistant_request: tuple) -> tuple:
         if int(assistant_request[RQ_TARGET]) == TARGET_OBJECT:

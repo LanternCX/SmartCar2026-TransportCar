@@ -213,6 +213,133 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         lambda: master._sm.state == master_module.STATE_ORBITING,
     )
 
+    if master._sm._av_m_orbit:
+        master_uart8.push(
+            encode_frame(
+                0x02,
+                TOPIC_ASSISTANT_EVENT_REPORT,
+                11,
+                encode_assistant_vision_event_report_body(
+                    master_module.EVENT_TARGET_FOUND,
+                    300,
+                ),
+            )
+        )
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+            lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_ORBIT,
+        )
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+                lambda: (
+                    master._sm.state == master_module.STATE_SEARCH_OBJECT
+                    and master._act_ctx is not None
+                    and assistant._realign
+                    and assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+                ),
+        )
+        master_uart6.push(
+            encode_frame(
+                0x02,
+                TOPIC_MASTER_VISION_EVENT_REPORT,
+                2,
+                encode_master_vision_event_report_body(
+                    master._act_ctx,
+                    master_module.EVENT_ALIGNED,
+                    0,
+                ),
+            )
+        )
+        master_uart8.push(
+            encode_frame(
+                0x02,
+                TOPIC_ASSISTANT_EVENT_REPORT,
+                12,
+                encode_assistant_vision_event_report_body(
+                    master_module.EVENT_ALIGNED,
+                    0,
+                ),
+            )
+        )
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+            lambda: (
+                master._sm.state == master_module.STATE_TRANSPORT_OBJECT
+                and assistant._sm.state
+                == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT
+            ),
+        )
+        assistant_car.odometry.y = -float(assistant._shift_distance_m)
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+            lambda: (
+                master._sm.state == master_module.STATE_SEARCH_OBJECT
+                and master._act_ctx is not None
+                and assistant._realign
+                and assistant._sm.state
+                == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
+            ),
+        )
+        master_uart6.push(
+            encode_frame(
+                0x02,
+                TOPIC_MASTER_VISION_EVENT_REPORT,
+                13,
+                encode_master_vision_event_report_body(
+                    master._act_ctx,
+                    master_module.EVENT_ALIGNED,
+                    0,
+                ),
+            )
+        )
+        assistant_uart6.push(
+            encode_frame(
+                0x02,
+                TOPIC_ASSISTANT_VISION_EVENT_REPORT,
+                13,
+                encode_assistant_vision_event_report_body(
+                    assistant_module._ALIGNED_EVENT,
+                    0,
+                ),
+            )
+        )
+        _pump_until(
+            clock,
+            master,
+            assistant,
+            master_car,
+            assistant_car,
+            master_uart6,
+            assistant_uart6,
+            lambda: master._sm.state == master_module.STATE_TRANSPORT_OBJECT
+            and assistant._sm.state == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT,
+        )
+        return
+
     _pump_until(
         clock,
         master,

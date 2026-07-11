@@ -3,7 +3,7 @@
 @file src/role/assistant/runtime.py
 """
 
-from utils.startup_log import log_memory
+# from utils.startup_log import log_memory
 
 
 def create_transport_car():
@@ -12,8 +12,8 @@ def create_transport_car():
     @return 辅车专用运行时实例
     """
 
-    log_memory("ai0")
+    # log_memory("ai0")
     from role.assistant.follow_runtime import AssistantFollowRuntime
 
-    log_memory("ai1")
+    # log_memory("ai1")
     return AssistantFollowRuntime()

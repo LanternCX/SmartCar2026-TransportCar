@@ -13,10 +13,5 @@
 7. 有关参数的测试都不要写死，对于有明确依据的参数，可以加上参数范围或者枚举值进行测试，其余保持动态引入。
 8. 更新 vision/ 或 controller/ 后，需要同步提交主仓库中的 submodule 指针。
 9. 主仓库 LSP 契约只检查主仓库 `src/` 和 `tests/`，不要用主仓库 Pyright 配置扫描 `vision/`、`controller/` 或子仓库 stub；视觉仓库测试在 `vision/` 目录内按其 README 和 `pyrightconfig.json` 单独运行。
-10. 由于我对当前项目的代码足够熟悉，使用 Superpowers 时:
-   1. 除非我提及，否则不要撰写长期 Spec / Plan，而是直接进行修改
-   2. 允许在我对当前改动描述不够明确的时候，向我提出澄清问题
-   3. 允许在你认为当前的改动不适合当前方向的时候拒绝我提出的改动并给出理由
-   4. 在需要撰写长期协作记忆的场景，写入 Serena memory
-   5. 不要向我推荐 Web View
-   6. 长期文档记忆只进入 Serena memory
+10. 在需要撰写长期协作记忆的场景，写入 Serena memory。
+11. 不创建 `CONTEXT.md`、`CONTEXT-MAP.md` 或 `docs/adr/`；相关长期信息只进入 Serena memory。
