@@ -261,6 +261,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert all(
         float(value) > 0.0 for value in motion_params.ASSISTANT_ODOMETRY_DISTANCE_SCALE
     )
+    assert float(motion_params.IN_PLACE_ROTATION_RADIUS_M) > 0.0
     assert len(motion_params.FIELD_SIZE_M) == 2
     assert len(motion_params.MASTER_START_POSITION_M) == 2
     assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
@@ -1187,6 +1188,30 @@ def test_transport_car_position_integration_gate_keeps_heading_updates() -> None
     car._update_attitude(0.1)
 
     assert abs(odometry.x) + abs(odometry.y) > 0.0
+
+
+def test_heading_transition_uses_fixed_radius_instead_of_wheel_translation() -> None:
+    """主动原地转向按固定半径和航向变化更新位置."""
+    odometry = Odometry()
+    transport_car, car = _make_control_car(
+        odometry=odometry,
+        heading_est=0.0,
+        heading_transition_mode=True,
+        imu=_StaticImu(),
+        imu_offsets=[0.0] * 6,
+        q_est=_YawQuat(math.pi / 2.0),
+        last_yaw_rad=0.0,
+        gyro_lpf=_PassFilter(),
+        w_filt=[100.0, 0.0, 0.0],
+        kinematics=OmniKinematics(),
+    )
+    odometry.reset(1.0, 2.0)
+
+    car._update_attitude(0.1)
+
+    radius_m = float(transport_car.IN_PLACE_ROTATION_RADIUS_M)
+    assert odometry.x == pytest.approx(1.0 - radius_m)
+    assert odometry.y == pytest.approx(2.0 + radius_m)
 
 
 def test_transport_car_orbit_pauses_and_cancellation_restores_wheel_odometry() -> None:

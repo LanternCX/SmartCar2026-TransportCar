@@ -49,6 +49,7 @@ ORBIT_ANGLE_CONFIRM_TICKS = motion_params.ORBIT_ANGLE_CONFIRM_TICKS
 HOLD_SPEED_EPS = motion_params.HOLD_SPEED_EPS
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 ORBIT_POSITION_RADIUS_M = motion_params.ORBIT_POSITION_RADIUS_M
+IN_PLACE_ROTATION_RADIUS_M = motion_params.IN_PLACE_ROTATION_RADIUS_M
 FIELD_SIZE_M = motion_params.FIELD_SIZE_M
 MASTER_START_POSITION_M = motion_params.MASTER_START_POSITION_M
 ASSISTANT_START_POSITION_M = motion_params.ASSISTANT_START_POSITION_M
@@ -1196,11 +1197,22 @@ class TransportCar:
             vm_mps, vl_mps, vr_mps
         )
 
-        if self._integrate_position:
+        next_heading_deg = self.heading_est + math.degrees(delta_yaw)
+        if self._integrate_position and bool(
+            getattr(self, "heading_transition_mode", False)
+        ):
+            self.odometry.apply_orbit_displacement(
+                self.odometry.x,
+                self.odometry.y,
+                self.heading_est,
+                next_heading_deg,
+                IN_PLACE_ROTATION_RADIUS_M,
+            )
+        elif self._integrate_position:
             self.odometry.update(
                 vx_rob_mps, vy_rob_mps, math.radians(self.heading_est), dt_s
             )
-        self.heading_est += math.degrees(delta_yaw)
+        self.heading_est = next_heading_deg
 
         self._yaw_rate = yaw_rate
 

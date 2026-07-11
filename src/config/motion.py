@@ -64,6 +64,8 @@ HOLD_SPEED_EPS = 0.01
 MASTER_ORBIT_RADIUS_SCALE = 2.5
 # 绕行定位使用的车辆参考点到物体中心固定半径, 单位米
 ORBIT_POSITION_RADIUS_M = 0.13
+# 主动原地转向时车辆参考点绕旋转中心的半径, 单位米
+IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
 TRANSPORT_OBSTACLE_MARGIN_M = 0.20
 # 主车避障绕行相对正式推动朝向的角度偏移, 单位度

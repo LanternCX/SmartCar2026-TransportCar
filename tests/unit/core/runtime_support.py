@@ -349,6 +349,7 @@ def install_transport_car_stubs() -> None:
         "MASTER_TURN_BACK_UNLOCK_TOLERANCE_DEG": 8.0,
         "MASTER_ORBIT_RADIUS_SCALE": 1.20,
         "ORBIT_POSITION_RADIUS_M": 0.13,
+        "IN_PLACE_ROTATION_RADIUS_M": 0.2,
         "ASSISTANT_ORBIT_RADIUS_SCALE": 1.20,
         "ACTIVE_WHEELS": ("m", "l", "r"),
         "PID_MAP": {"m": (1.0, 0.0, 0.0), "l": (1.0, 0.0, 0.0), "r": (1.0, 0.0, 0.0)},
