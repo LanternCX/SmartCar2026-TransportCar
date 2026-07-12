@@ -43,7 +43,7 @@ from protocol.topic import (
     UART8,
 )
 from protocol.transport import create_transport
-from play.routines import assistant_return_garage, master_return_garage
+from play.routines import assistant_return_garage, master_return_garage, startup_move
 from role.task_sync import pack_assistant_orbit_arg
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
@@ -2081,12 +2081,19 @@ def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", 90.0) in cars[0].events
+    assert (
+        "set_heading_transition_target",
+        float(startup_move.SEQUENCE[4]),
+    ) in cars[0].events
     cars[0].command_lock = False
-    cars[0].heading_est = 90.0
+    cars[0].heading_est = float(startup_move.SEQUENCE[4])
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", 0.0) not in cars[0].events
+    assert sum(
+        event[0] == "set_heading_transition_target"
+        for event in cars[0].events
+        if isinstance(event, tuple)
+    ) == 1
 
 
 def test_both_runtimes_limit_startup_move_to_left_obstacle(monkeypatch) -> None:

@@ -96,5 +96,5 @@ def test_assistant_startup_finishes_immediately_after_right_turn() -> None:
     assert sequence.tick(runtime) is True
     assert runtime.events == [
         ("position", 0.1, 0.45, int(startup_move.ASSISTANT_SEQUENCE[2])),
-        ("angle", 90.0),
+        ("angle", float(startup_move.ASSISTANT_SEQUENCE[4])),
     ]
