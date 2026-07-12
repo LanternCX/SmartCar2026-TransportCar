@@ -569,13 +569,19 @@ def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None
     runtime._sm.state = module.STATE_TRANSPORT_OBJECT
     runtime._sm._ctx = 9
     runtime._sm._edge = "top"
+    runtime._sm._push_heading = 30.0
     runtime._act_ctx = 9
 
     runtime._handle_task_event(_master_event(9, module.EVENT_ARRIVED, 0))
 
     assert runtime._sm.state == module.STATE_CLEAR_OBJECT
     assert runtime._act_ctx is None
-    assert ("calibrate_pose_to_field_edge", "top") in cars[0].events
+    assert (
+        "calibrate_pose_to_field_edge",
+        "top",
+        30.0,
+        0.0,
+    ) in cars[0].events
     assert cars[0].position_integration_enabled is True
 
 
@@ -1694,7 +1700,8 @@ def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) 
     assert (
         "set_relative_translation_target",
         0.0,
-        ASSISTANT_LEAD_DISTANCE,
+        ASSISTANT_LEAD_DISTANCE
+        + float(module.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M),
         float(ASSISTANT_RETURN_POSITION_SPEED),
     ) in cars[0].events
 
@@ -2017,6 +2024,16 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     cars[0].odometry.y = 1.5
     cars[0].heading_est = -90.0
     runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
+    expected_distance, expected_heading = module.plan_return_garage(
+        cars[0].odometry.x,
+        cars[0].odometry.y,
+        cars[0].heading_est,
+        -1,
+        runtime._obstacles,
+        module.TRANSPORT_OBSTACLE_MARGIN_M,
+        module.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+        module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+    )
 
     runtime._apply_motion_outputs()
 
@@ -2024,7 +2041,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     assert (
         "set_relative_translation_target",
         0.0,
-        -0.25 - float(module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M),
+        pytest.approx(expected_distance),
         float(MASTER_RETURN_POSITION_SPEED),
     ) in cars[0].events
     cars[0].command_lock = False
@@ -2033,7 +2050,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
 
     assert (
         "set_heading_transition_target",
-        pytest.approx(-138.0127875),
+        pytest.approx(expected_heading),
     ) == cars[0].events[-1]
 
 
@@ -2502,6 +2519,16 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     cars[0].heading_est = 90.0
     runtime._sm.state = module.ASSISTANT_STATE_RETURN_FOLLOW
     runtime._p_local = None
+    expected_distance, expected_heading = module.plan_return_garage(
+        cars[0].odometry.x,
+        cars[0].odometry.y,
+        cars[0].heading_est,
+        1,
+        runtime._obstacles,
+        module.TRANSPORT_OBSTACLE_MARGIN_M,
+        module.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+        module.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M,
+    )
 
     runtime._write_effective_velocity()
 
@@ -2509,7 +2536,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     assert (
         "set_relative_translation_target",
         0.0,
-        0.25,
+        pytest.approx(expected_distance),
         float(ASSISTANT_RETURN_POSITION_SPEED),
     ) in cars[0].events
     cars[0].command_lock = False
@@ -2517,10 +2544,10 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     runtime._write_effective_velocity()
     assert (
         "set_heading_transition_target",
-        pytest.approx(-153.4349488),
+        pytest.approx(expected_heading),
     ) == cars[0].events[-1]
     cars[0].command_lock = False
-    cars[0].heading_est = -153.4349488
+    cars[0].heading_est = expected_heading
     runtime._write_effective_velocity()
     runtime._line_ok = True
     runtime._write_effective_velocity()
@@ -2709,6 +2736,9 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
             _pack_task_arg(2, 1),
         )
     )
+    runtime._orbit_offset = 30.0
+
+    assert cars[0].position_integration_enabled is False
 
     accepted = runtime._apply_sync_context(
         _assistant_sync(
@@ -2721,7 +2751,13 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     assert accepted is True
     from role.transport_plan import target_edge_for_object
 
-    assert ("calibrate_pose_to_field_edge", target_edge_for_object(1)) in cars[0].events
+    assert (
+        "calibrate_pose_to_field_edge",
+        target_edge_for_object(1),
+        -60.0,
+        pytest.approx(module.ASSISTANT_TRANSPORT_EDGE_INSET_M),
+    ) in cars[0].events
+    assert cars[0].position_integration_enabled is True
 
 
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:

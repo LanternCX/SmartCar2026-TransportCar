@@ -50,25 +50,25 @@ text{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",Arial,sans-s
 
 <rect x="895" y="135" width="160" height="68" class="good"/>
 <text x="975" y="161" text-anchor="middle" class="label">贴上边</text>
-<text x="975" y="185" text-anchor="middle" class="small">只校准 y = 2.4</text>
+<text x="975" y="185" text-anchor="middle" class="small">推动直线与 y = 2.4 相交</text>
 <path d="M895,169 C875,150 860,136 842,124" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="895" y="332" width="160" height="68" class="good"/>
 <text x="975" y="358" text-anchor="middle" class="label">贴右边</text>
-<text x="975" y="382" text-anchor="middle" class="small">只校准 x = 3.2</text>
+<text x="975" y="382" text-anchor="middle" class="small">推动直线与 x = 3.2 相交</text>
 <path d="M895,366 L858,390" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="895" y="496" width="160" height="68" class="good"/>
 <text x="975" y="522" text-anchor="middle" class="label">贴底边</text>
-<text x="975" y="546" text-anchor="middle" class="small">只校准 y = 0</text>
+<text x="975" y="546" text-anchor="middle" class="small">推动直线与 y = 0 相交</text>
 <path d="M895,530 C875,562 860,586 842,596" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="25" y="332" width="160" height="68" class="good"/>
 <text x="105" y="358" text-anchor="middle" class="label">贴左边</text>
-<text x="105" y="382" text-anchor="middle" class="small">只校准 x = 0</text>
+<text x="105" y="382" text-anchor="middle" class="small">推动直线与 x = 0 相交</text>
 <path d="M185,366 L202,390" class="line" marker-end="url(#arrowDark)"/>
 
 <rect x="302" y="660" width="456" height="48" class="accent"/>
-<text x="530" y="690" text-anchor="middle" class="label">边线校准只重置单轴，不改 angle</text>
+<text x="530" y="690" text-anchor="middle" class="label">推动轨迹与车辆参考点边界的交点重建 x/y，不改 angle</text>
 <text x="550" y="744" text-anchor="middle" class="tiny">规则依据：蚂蚁搬家正式场地 3.2m × 2.4m，黄色胶带为边界</text>
 </svg>

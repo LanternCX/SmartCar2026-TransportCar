@@ -103,6 +103,10 @@ _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
 RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
+ASSISTANT_TRANSPORT_EDGE_INSET_M = motion_params.ASSISTANT_TRANSPORT_EDGE_INSET_M
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = (
+    motion_params.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M
+)
 MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
 MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
 
@@ -673,6 +677,7 @@ class AssistantFollowRuntime:
                 self._obstacles,
                 TRANSPORT_OBSTACLE_MARGIN_M,
                 RETURN_GARAGE_OBSTACLE_DEPTH_M,
+                ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M,
             )
             play_sequence.start(
                 self,
@@ -805,6 +810,7 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_motion_inputs()
         self._write_zero_velocity()
+        self._car.set_position_integration_enabled(False)
         self._p_local = (
             ASSISTANT_STATE_TRANSPORT_OBJECT,
             int(packet[AS_TARGET]),
@@ -824,9 +830,16 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_ticks = 0
         self._clear_motion_inputs()
+        target_edge = target_edge_for_object(self._obj_id)
         self._car.calibrate_pose_to_field_edge(
-            target_edge_for_object(self._obj_id)
+            target_edge,
+            heading_with_offset(
+                push_heading_for_edge(target_edge),
+                self._orbit_offset,
+            ),
+            ASSISTANT_TRANSPORT_EDGE_INSET_M,
         )
+        self._car.set_position_integration_enabled(True)
         clear_phase = int(self._sm.arg)
         if clear_phase == CLEAR_PHASE_RETREAT:
             self._car.set_relative_translation_target(

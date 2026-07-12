@@ -1132,7 +1132,11 @@ class MasterForwardRuntime:
             return
         if self._sm.state != STATE_TRANSPORT_OBJECT:
             return
-        self._car.calibrate_pose_to_field_edge(self._sm.get_target_edge())
+        self._car.calibrate_pose_to_field_edge(
+            self._sm.get_target_edge(),
+            self._sm.get_push_heading_deg(),
+            0.0,
+        )
         self._car.set_position_integration_enabled(True)
 
     def _threshold_for_assistant_request(self, assistant_request: tuple) -> tuple:

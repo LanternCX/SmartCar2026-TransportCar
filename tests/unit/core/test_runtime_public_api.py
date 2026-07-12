@@ -539,18 +539,18 @@ def test_transport_car_builds_pose_snapshot_from_odometry_and_heading() -> None:
     }
 
 
-def test_transport_car_calibrates_single_axis_to_field_edge() -> None:
-    """边线校准只重置对应单轴, 不改另一轴和航向."""
+def test_transport_car_rebuilds_oblique_pose_from_inset_field_edge() -> None:
+    """斜向到边时按推动直线与内缩边界的交点重建位置."""
     _transport_car, car = _make_control_car(
-        odometry=_Odom(x=1.25, y=1.50),
+        odometry=_Odom(x=0.50, y=1.00),
         heading_est=33.0,
     )
 
-    car.calibrate_pose_to_field_edge("right")
+    car.calibrate_pose_to_field_edge("left", -135.0, 0.08)
 
     assert car.build_pose_snapshot() == {
-        "x": pytest.approx(motion_params.FIELD_SIZE_M[0]),
-        "y": 1.50,
+        "x": pytest.approx(0.08),
+        "y": pytest.approx(0.58),
         "angle": 33.0,
     }
 

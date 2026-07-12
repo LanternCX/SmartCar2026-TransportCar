@@ -70,8 +70,12 @@ IN_PLACE_ROTATION_RADIUS_M = 0.08
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
 RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
+# 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米
+ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
 # 主车越过第一段规划边界后继续后退的距离, 单位米
-MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
+# 辅车越过第一段规划边界后继续后退的距离, 单位米
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

@@ -275,8 +275,15 @@ def install_fake_core(monkeypatch):
                 snapshot["angle"] = float(self.control_angle)
             return snapshot
 
-        def calibrate_pose_to_field_edge(self, edge) -> None:
-            self.events.append(("calibrate_pose_to_field_edge", str(edge)))
+        def calibrate_pose_to_field_edge(self, edge, heading_deg, inset_m) -> None:
+            self.events.append(
+                (
+                    "calibrate_pose_to_field_edge",
+                    str(edge),
+                    float(heading_deg),
+                    float(inset_m),
+                )
+            )
 
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", FakeTransportCar)

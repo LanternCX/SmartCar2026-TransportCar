@@ -801,23 +801,44 @@ class TransportCar:
             "angle": float(self.heading_est),
         }
 
-    def calibrate_pose_to_field_edge(self, edge):
-        """按贴边结果校准单轴位置.
+    def calibrate_pose_to_field_edge(self, edge, heading_deg, inset_m):
+        """按直线推动轨迹与内缩边界的交点校准位置.
 
         @param edge 边线名称, 支持 left/right/bottom/top
+        @param heading_deg 推动物体时的世界系绝对航向, 单位度
+        @param inset_m 车辆参考点相对场地边界的内缩距离, 单位米
         """
 
         edge = str(edge)
+        inset = float(inset_m)
+        if inset < 0.0:
+            raise ValueError("field edge inset must be non-negative")
+        heading_rad = math.radians(float(heading_deg))
+        ray_x = math.sin(heading_rad)
+        ray_y = math.cos(heading_rad)
         if edge == "left":
-            self.odometry.x = 0.0
+            target = inset
+            ray = ray_x
+            start = self.odometry.x
         elif edge == "right":
-            self.odometry.x = float(FIELD_SIZE_M[0])
+            target = float(FIELD_SIZE_M[0]) - inset
+            ray = ray_x
+            start = self.odometry.x
         elif edge == "bottom":
-            self.odometry.y = 0.0
+            target = inset
+            ray = ray_y
+            start = self.odometry.y
         elif edge == "top":
-            self.odometry.y = float(FIELD_SIZE_M[1])
+            target = float(FIELD_SIZE_M[1]) - inset
+            ray = ray_y
+            start = self.odometry.y
         else:
             raise ValueError("unknown field edge")
+        if abs(ray) <= 1e-9:
+            raise ValueError("transport path is parallel to field edge")
+        distance = (target - start) / ray
+        self.odometry.x += distance * ray_x
+        self.odometry.y += distance * ray_y
 
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""
