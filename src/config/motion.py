@@ -78,9 +78,9 @@ TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
 # 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米
 ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
-# 主车越过第一段规划边界后继续后退的距离, 单位米
+# 主车回库第一阶段至少后退的距离, 单位米
 MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
-# 辅车越过第一段规划边界后继续后退的距离, 单位米
+# 辅车回库第一阶段至少后退的距离, 单位米
 ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
