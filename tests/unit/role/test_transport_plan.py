@@ -204,7 +204,7 @@ def test_master_return_plan_uses_negative_relative_y_to_reach_boundary() -> None
 
 
 def test_master_return_extra_retreat_updates_distance_and_approach_heading() -> None:
-    """第一段额外移动后从更新终点重新计算第二段航向."""
+    """第一段额外移动后从更新终点重新计算指向原点的航向."""
     slots = (
         (FIELD_EDGE_LEFT, 1.0, 1.4),
         (None, -1.0, -1.0),
@@ -223,7 +223,7 @@ def test_master_return_extra_retreat_updates_distance_and_approach_heading() -> 
     )
 
     assert relative_y_m == pytest.approx(-0.45)
-    assert heading_deg == pytest.approx(-138.0127875)
+    assert heading_deg == pytest.approx(-147.6525565)
 
 
 def test_assistant_return_plan_uses_positive_relative_y_to_reach_boundary() -> None:
@@ -248,8 +248,8 @@ def test_assistant_return_plan_uses_positive_relative_y_to_reach_boundary() -> N
     assert heading_deg == pytest.approx(-153.4349488)
 
 
-def test_return_plan_targets_nearest_reachable_point_on_safe_edge() -> None:
-    """第二阶段选择安全边上距离规划终点最近的可达点."""
+def test_return_plan_targets_origin_instead_of_nearest_safe_edge_point() -> None:
+    """第二阶段始终从第一阶段终点朝向原点."""
     slots = (
         (FIELD_EDGE_LEFT, 1.0, 1.4),
         (None, -1.0, -1.0),
@@ -267,11 +267,11 @@ def test_return_plan_targets_nearest_reachable_point_on_safe_edge() -> None:
     )
 
     assert relative_y_m == pytest.approx(-0.25)
-    assert heading_deg == pytest.approx(-90.0)
+    assert heading_deg == pytest.approx(-153.4349488)
 
 
-def test_return_plan_avoids_bottom_obstacle_and_allows_tangent_path() -> None:
-    """非 left 障碍遮挡最近点时选择与扩展边界相切的最近点."""
+def test_return_plan_ignores_non_left_obstacles_when_targeting_origin() -> None:
+    """非 left 障碍不改变第一阶段距离和第二阶段原点目标."""
     slots = (
         (FIELD_EDGE_BOTTOM, 0.4, 0.6),
         (None, -1.0, -1.0),
@@ -289,11 +289,11 @@ def test_return_plan_avoids_bottom_obstacle_and_allows_tangent_path() -> None:
     )
 
     assert relative_y_m == 0.0
-    assert heading_deg == pytest.approx(-53.1301024)
+    assert heading_deg == pytest.approx(-101.3099325)
 
 
 def test_return_plan_uses_full_left_edge_without_left_obstacle() -> None:
-    """没有 left 障碍时完整左边线作为安全边."""
+    """没有 left 障碍时原地规划第二阶段指向原点."""
     slots = ((None, -1.0, -1.0),) * 3
 
     relative_y_m, heading_deg = plan_return_garage(
@@ -307,7 +307,7 @@ def test_return_plan_uses_full_left_edge_without_left_obstacle() -> None:
     )
 
     assert relative_y_m == 0.0
-    assert heading_deg == pytest.approx(-90.0)
+    assert heading_deg == pytest.approx(-140.1944289)
 
 
 def test_return_plan_margin_only_expands_obstacle_along_left_edge() -> None:
@@ -334,7 +334,7 @@ def test_return_plan_margin_only_expands_obstacle_along_left_edge() -> None:
 
 
 def test_return_plan_keeps_stage_one_when_margin_closes_safe_edge() -> None:
-    """margin 使安全边收缩为空时只把第二阶段目标改为原点."""
+    """margin 使安全边收缩为空时仍保留第一阶段."""
     slots = (
         (FIELD_EDGE_LEFT, 0.2, 0.5),
         (None, -1.0, -1.0),
