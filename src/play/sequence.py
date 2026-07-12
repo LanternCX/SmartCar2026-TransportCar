@@ -14,20 +14,24 @@ _OP_POS_Y = 1
 _OP_ANGLE = 2
 _OP_LINE_Y = 3
 _OP_HOLD_Y = 4
+_OP_POS_Y_PARAM = 5
+_OP_ANGLE_PARAM = 6
 
 
-def start(runtime, kind):
+def start(runtime, kind, params=None):
     if int(runtime.play_kind) == int(kind):
         return
     runtime.play_kind = int(kind)
     runtime.play_step = 0
     runtime.play_entered = False
+    runtime.play_params = params
 
 
 def clear(runtime):
     runtime.play_kind = PLAY_NONE
     runtime.play_step = 0
     runtime.play_entered = False
+    runtime.play_params = None
 
 
 def tick(runtime):
@@ -37,8 +41,14 @@ def tick(runtime):
     while True:
         index = int(runtime.play_step) * 3
         op = int(table[index])
-        value = int(table[index + 1])
+        value = table[index + 1]
         arg = int(table[index + 2])
+        if op == _OP_POS_Y_PARAM or op == _OP_ANGLE_PARAM:
+            params = runtime.play_params
+            if params is None:
+                raise ValueError
+            value = params[int(value)]
+            op = _OP_POS_Y if op == _OP_POS_Y_PARAM else _OP_ANGLE
         if op == _OP_END:
             clear(runtime)
             return True

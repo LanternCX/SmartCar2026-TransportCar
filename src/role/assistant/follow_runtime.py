@@ -72,6 +72,7 @@ from role.task_sync import (
 )
 from role.transport_plan import (
     heading_with_offset,
+    plan_return_garage,
     push_heading_for_edge,
     target_edge_for_object,
 )
@@ -100,6 +101,8 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
 )
 _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
+TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
+RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
 MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
 MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
 
@@ -129,10 +132,18 @@ def _default_now_ms() -> int:
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观."""
 
-    def __init__(self, now_ms=None, transport=None, uart6=None, uart8=None) -> None:
+    def __init__(
+        self,
+        obstacle_slots,
+        now_ms=None,
+        transport=None,
+        uart6=None,
+        uart8=None,
+    ) -> None:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_ASSISTANT)
+        self._obstacles = tuple(obstacle_slots)
         # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是辅车状态机。
         self._car = car
         self.wheel_encoders = car.wheel_encoders
@@ -148,6 +159,7 @@ class AssistantFollowRuntime:
         self.play_kind = 0
         self.play_step = 0
         self.play_entered = False
+        self.play_params = None
         self._err = "none"
         # UART 缓存短字段：_u6v/_u8v 是速度槽，_u6_ver/_u8_ver 是版本线。
         self._u6v = None
@@ -652,7 +664,21 @@ class AssistantFollowRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_ASSISTANT_RETURN)
+        if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_RETURN):
+            relative_y_m, heading_deg = plan_return_garage(
+                self._car.odometry.x,
+                self._car.odometry.y,
+                self._car.heading_est,
+                1,
+                self._obstacles,
+                TRANSPORT_OBSTACLE_MARGIN_M,
+                RETURN_GARAGE_OBSTACLE_DEPTH_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_ASSISTANT_RETURN,
+                (relative_y_m * 100.0, heading_deg),
+            )
         play_sequence.tick(self)
 
     def _run_startup_move_play(self) -> None:
@@ -918,9 +944,3 @@ class AssistantFollowRuntime:
             log_exception("assistant_error", text, exc)
         self._err = text
         self._car.last_exception_text = text
-
-
-def create_transport_car() -> AssistantFollowRuntime:
-    """创建辅车角色运行时对象."""
-
-    return AssistantFollowRuntime()

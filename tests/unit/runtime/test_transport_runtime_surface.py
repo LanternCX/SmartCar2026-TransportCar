@@ -69,7 +69,6 @@ def _assistant_sync(state, target, arg, threshold=(0, 0, 0, 0, 0, 0)):
 
 MASTER_STATE_STARTUP_MOVE = 9
 ASSISTANT_STATE_STARTUP_MOVE = 8
-MASTER_LEAD_DISTANCE = master_return_garage.SEQUENCE[1] / 100.0
 MASTER_RETURN_POSITION_SPEED = master_return_garage.SEQUENCE[2]
 MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
 MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
@@ -1999,7 +1998,13 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.MasterForwardRuntime(
+        obstacle_slots=(
+            ("left", obstacle_start_y, obstacle_start_y + 0.2),
+            (None, -1.0, -1.0),
+            (None, -1.0, -1.0),
+        ),
         now_ms=clock,
         transport=create_transport(
             ROLE_MASTER,
@@ -2008,6 +2013,9 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
             now_ms=clock,
         ),
     )
+    cars[0].odometry.x = 0.5
+    cars[0].odometry.y = 1.5
+    cars[0].heading_est = -90.0
     runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
 
     runtime._apply_motion_outputs()
@@ -2016,9 +2024,17 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     assert (
         "set_relative_translation_target",
         0.0,
-        MASTER_LEAD_DISTANCE,
+        -0.25 - float(module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M),
         float(MASTER_RETURN_POSITION_SPEED),
     ) in cars[0].events
+    cars[0].command_lock = False
+
+    runtime._apply_motion_outputs()
+
+    assert (
+        "set_heading_transition_target",
+        pytest.approx(-138.0127875),
+    ) == cars[0].events[-1]
 
 
 def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
@@ -2124,7 +2140,7 @@ def test_master_runtime_starts_return_play_after_assistant_return_sync(monkeypat
     assert (
         "set_relative_translation_target",
         0.0,
-        MASTER_LEAD_DISTANCE,
+        -float(module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M),
         float(MASTER_RETURN_POSITION_SPEED),
     ) in cars[0].events
     frame = decode_frame(uart8.messages[-1])
@@ -2251,8 +2267,8 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", -90.0) in cars[0].events
-    cars[0].heading_est = -90.0
+    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    cars[0].heading_est = 0.0
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
@@ -2266,7 +2282,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     }
     runtime._line_ok = True
     runtime._apply_motion_outputs()
-    cars[0].heading_est = -90.0
+    cars[0].heading_est = 0.0
     runtime._apply_motion_outputs()
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
@@ -2466,7 +2482,13 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.AssistantFollowRuntime(
+        obstacle_slots=(
+            ("left", obstacle_start_y, obstacle_start_y + 0.2),
+            (None, -1.0, -1.0),
+            (None, -1.0, -1.0),
+        ),
         now_ms=clock,
         transport=create_transport(
             ROLE_ASSISTANT,
@@ -2475,6 +2497,9 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
             now_ms=clock,
         ),
     )
+    cars[0].odometry.x = 0.5
+    cars[0].odometry.y = 1.5
+    cars[0].heading_est = 90.0
     runtime._sm.state = module.ASSISTANT_STATE_RETURN_FOLLOW
     runtime._p_local = None
 
@@ -2484,16 +2509,18 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     assert (
         "set_relative_translation_target",
         0.0,
-        ASSISTANT_LEAD_DISTANCE,
+        0.25,
         float(ASSISTANT_RETURN_POSITION_SPEED),
     ) in cars[0].events
     cars[0].command_lock = False
-    cars[0].heading_est = 0.0
     runtime._write_effective_velocity()
     runtime._write_effective_velocity()
-    assert ("set_heading_transition_target", -90.0) in cars[0].events
+    assert (
+        "set_heading_transition_target",
+        pytest.approx(-153.4349488),
+    ) == cars[0].events[-1]
     cars[0].command_lock = False
-    cars[0].heading_est = -90.0
+    cars[0].heading_est = -153.4349488
     runtime._write_effective_velocity()
     runtime._line_ok = True
     runtime._write_effective_velocity()

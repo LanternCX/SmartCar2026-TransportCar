@@ -68,6 +68,10 @@ ORBIT_POSITION_RADIUS_M = 0.13
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
+# 回库规划中边线障碍向场内延伸的物理深度, 单位米
+RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
+# 主车越过第一段规划边界后继续后退的距离, 单位米
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

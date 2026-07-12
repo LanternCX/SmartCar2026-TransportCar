@@ -56,7 +56,6 @@ from protocol.transport import (
 )
 
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from role.master.state_machine import MasterStateMachine
 from role.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
@@ -92,7 +91,9 @@ from role.master.state_machine import (
     STATE_TRANSPORT_OBJECT,
     TARGET_EDGE_LINE,
     TARGET_OBJECT,
+    MasterStateMachine,
 )
+from role.transport_plan import plan_return_garage
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -133,6 +134,10 @@ TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
+RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
+    motion_params.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M
+)
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -157,6 +162,7 @@ class MasterForwardRuntime:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_MASTER)
+        obstacle_slots = tuple(obstacle_slots)
         # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是主车状态机。
         self._car = car
         self.wheel_encoders = car.wheel_encoders
@@ -166,6 +172,7 @@ class MasterForwardRuntime:
             ROLE_MASTER,
             now_ms=self._now_ms,
         )
+        self._obstacles = obstacle_slots
         seed_value = int(self._now_ms()) % 256
         self._sm = MasterStateMachine(
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
@@ -198,6 +205,7 @@ class MasterForwardRuntime:
         self.play_kind = 0
         self.play_step = 0
         self.play_entered = False
+        self.play_params = None
         # transport/clear/turn-back 阶段状态：tr/clr/tb 分别对应运输、清障、回正。
         self._tr_sync_ack = False
         self._tr_task_ack = False
@@ -637,7 +645,22 @@ class MasterForwardRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_MASTER_RETURN)
+        if int(self.play_kind) != int(play_sequence.PLAY_MASTER_RETURN):
+            relative_y_m, heading_deg = plan_return_garage(
+                self._car.odometry.x,
+                self._car.odometry.y,
+                self._car.heading_est,
+                -1,
+                self._obstacles,
+                TRANSPORT_OBSTACLE_MARGIN_M,
+                RETURN_GARAGE_OBSTACLE_DEPTH_M,
+                MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_MASTER_RETURN,
+                (relative_y_m * 100.0, heading_deg),
+            )
         play_sequence.tick(self)
 
     def _run_startup_move_play(self) -> None:
