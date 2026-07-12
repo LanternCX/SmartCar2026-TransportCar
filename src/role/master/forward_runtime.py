@@ -133,6 +133,8 @@ MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = (
 TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+MASTER_ORBIT_AVOID_TRIGGER_DEG = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
+MASTER_ORBIT_AVOID_HEADING_DEG = motion_params.MASTER_ORBIT_AVOID_HEADING_DEG
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
 RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
 MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
@@ -179,6 +181,8 @@ class MasterForwardRuntime:
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             obstacle_slots=obstacle_slots,
             obstacle_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
+            orbit_avoid_trigger_deg=MASTER_ORBIT_AVOID_TRIGGER_DEG,
+            orbit_avoid_heading_deg=MASTER_ORBIT_AVOID_HEADING_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
@@ -541,6 +545,8 @@ class MasterForwardRuntime:
                         self._car.odometry.x,
                         self._car.odometry.y,
                     )
+                elif pending[_S_KIND] == RK_A_ORBIT:
+                    self._sm.mark_assistant_orbit_acknowledged()
                 elif pending[_S_KIND] == RK_A_START:
                     self._sm.mark_startup_sync_acknowledged()
                 elif pending[_S_KIND] == RK_A_FOLLOW:
@@ -887,6 +893,7 @@ class MasterForwardRuntime:
         if self._orb_act:
             orbit_finished = not bool(getattr(self._car, "command_lock", False))
             if orbit_finished:
+                self._orb_act = False
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,

@@ -54,6 +54,14 @@ def _ack_latest_tcp_if_needed(uart):
     uart.push(ack_last_frame(uart))
 
 
+def _orbit_targets(car):
+    return [
+        event[1]
+        for event in car.events
+        if isinstance(event, tuple) and event[0] == "set_orbit_target"
+    ]
+
+
 def _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6, assistant_uart6, steps=1):
     for _ in range(steps):
         run_runtime_cycle(master)
@@ -213,6 +221,9 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: master._sm.state == master_module.STATE_ORBITING,
     )
+    master_orbit_targets = _orbit_targets(master_car)
+    assert len(master_orbit_targets) == 1
+    assert master_orbit_targets[0] != master._sm.get_push_heading_deg()
 
     _pump_until(
         clock,
@@ -247,6 +258,18 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_ORBIT,
     )
+    assert len(_orbit_targets(master_car)) == 1
+    _pump_until(
+        clock,
+        master,
+        assistant,
+        master_car,
+        assistant_car,
+        master_uart6,
+        assistant_uart6,
+        lambda: len(_orbit_targets(master_car)) == 2,
+    )
+    assert _orbit_targets(master_car)[1] == master._sm.get_push_heading_deg()
 
     _pump_until(
         clock,

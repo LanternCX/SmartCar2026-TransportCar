@@ -83,6 +83,11 @@ EVENT_RETURN_LINE_ALIGNED = const(10)
 
 _CLEAR_STAGE_TURN_BACK = const(3)
 
+_ORBIT_PHASE_NORMAL = const(0)
+_ORBIT_PHASE_AVOID = const(1)
+_ORBIT_PHASE_WAIT_RETURN = const(2)
+_ORBIT_PHASE_RETURN = const(3)
+
 RK_NONE = const(0)
 RK_A_START = const(1)
 RK_A_OBJ = const(2)
@@ -113,6 +118,8 @@ class MasterStateMachine:
         boot_heading_deg,
         obstacle_slots,
         obstacle_margin_m,
+        orbit_avoid_trigger_deg,
+        orbit_avoid_heading_deg,
         assistant_object_arg=1,
         assistant_transport_arg=1,
         transport_task_arg=2,
@@ -134,8 +141,11 @@ class MasterStateMachine:
         self._obj_need = int(total_object_count)
         self._obstacles = tuple(obstacle_slots)
         self._path_margin = float(obstacle_margin_m)
+        self._av_tr = float(orbit_avoid_trigger_deg)
+        self._av_hd = float(orbit_avoid_heading_deg)
         self._push_heading = None
         self._orbit_arg = 0
+        self._orb_phase = _ORBIT_PHASE_NORMAL
         self.obj_done = 0
         self._ctx = int(initial_context_id) % 256
         # _p_task: 本车视觉 task；_p_ast: 辅车同步；_p_orbit: 本车绕行动作。
@@ -187,10 +197,15 @@ class MasterStateMachine:
             return
 
         if self.state == STATE_ORBITING and orbit_finished:
+            if self._orb_phase == _ORBIT_PHASE_AVOID:
+                self._orb_phase = _ORBIT_PHASE_WAIT_RETURN
+                if self._obj_pending:
+                    self._queue_assistant_orbit()
+                return
             self._enter_state(STATE_SEARCH_OBJECT)
             self._orbit_done = True
             self._m_aligned = False
-            self._a_aligned = False
+            self._orb_phase = _ORBIT_PHASE_NORMAL
             self._ctx = (self._ctx + 1) % 256
             self._p_task = (
                 RK_NONE,
@@ -200,15 +215,7 @@ class MasterStateMachine:
                 self._tr_task_arg,
             )
             if self._obj_pending and not self._orbit_req:
-                self._obj_pending = False
-                self._orbit_req = True
-                self._p_ast = (
-                    RK_A_ORBIT,
-                    0,
-                    ASSISTANT_ORBIT_SYNC_STATE,
-                    ASSISTANT_ORBIT_SYNC_TARGET,
-                    self._orbit_arg,
-                )
+                self._queue_assistant_orbit()
 
     def mark_startup_move_completed(self):
         """标记启动动作完成并进入找物体状态"""
@@ -294,7 +301,17 @@ class MasterStateMachine:
             )
             offset_deg = unpack_assistant_orbit_offset_deg(self._orbit_arg)
             self._push_heading = heading_with_offset(push_heading, offset_deg)
-            self._p_orbit = self._push_heading
+            self._m_aligned = False
+            self._a_aligned = False
+            if abs(offset_deg) < self._av_tr:
+                self._orb_phase = _ORBIT_PHASE_AVOID
+                avoid_offset = self._av_hd
+                if offset_deg < 0:
+                    avoid_offset = -avoid_offset
+                self._p_orbit = heading_with_offset(push_heading, avoid_offset)
+            else:
+                self._orb_phase = _ORBIT_PHASE_NORMAL
+                self._p_orbit = self._push_heading
 
     def handle_assistant_target_found(self, value):
         """消费辅车目标命中回报"""
@@ -302,7 +319,10 @@ class MasterStateMachine:
         _ = value
         if self.state == STATE_ORBITING:
             if self._obj_req and not self._orbit_req:
-                self._obj_pending = True
+                if self._orb_phase == _ORBIT_PHASE_WAIT_RETURN:
+                    self._queue_assistant_orbit()
+                else:
+                    self._obj_pending = True
             return
         if self.state != STATE_SEARCH_OBJECT:
             return
@@ -310,6 +330,12 @@ class MasterStateMachine:
             return
         if self._orbit_req:
             return
+        self._queue_assistant_orbit()
+
+    def _queue_assistant_orbit(self):
+        """下发一次辅车绕行同步请求"""
+
+        self._obj_pending = False
         self._orbit_req = True
         self._p_ast = (
             RK_A_ORBIT,
@@ -319,10 +345,26 @@ class MasterStateMachine:
             self._orbit_arg,
         )
 
+    def mark_assistant_orbit_acknowledged(self):
+        """辅车开始绕行后触发主车从避让位置返回"""
+
+        if self.state != STATE_ORBITING:
+            return
+        if self._orb_phase != _ORBIT_PHASE_WAIT_RETURN:
+            return
+        if not self._orbit_req:
+            return
+        self._orb_phase = _ORBIT_PHASE_RETURN
+        self._p_orbit = self._push_heading
+
     def handle_assistant_aligned(self, value):
         """消费辅车二次对正完成回报"""
 
         _ = value
+        if self.state == STATE_ORBITING:
+            if self._orb_phase == _ORBIT_PHASE_RETURN and self._orbit_req:
+                self._a_aligned = True
+            return
         if self.state != STATE_SEARCH_OBJECT:
             return
         if not self._orbit_req:
@@ -467,6 +509,7 @@ class MasterStateMachine:
         self._edge = None
         self._push_heading = None
         self._orbit_arg = 0
+        self._orb_phase = _ORBIT_PHASE_NORMAL
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
         self._p_ast = (
@@ -498,6 +541,7 @@ class MasterStateMachine:
         self._edge = None
         self._push_heading = None
         self._orbit_arg = 0
+        self._orb_phase = _ORBIT_PHASE_NORMAL
 
     def _enter_return_retreat(self):
         """进入主车回库后退找黄线段"""
