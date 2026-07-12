@@ -29,7 +29,7 @@ FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
 MASTER_START_POSITION_M = (0.10, 0.0)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, -0.50)
+ASSISTANT_START_POSITION_M = (0.10, -0.30)
 # 物体目标边配置, -1 表示覆盖所有物体
 TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
 # 位置控制最大命令速度, 单位脉冲/控制拍

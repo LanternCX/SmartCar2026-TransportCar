@@ -572,7 +572,7 @@ def test_transport_car_starts_from_configured_position(
         diagnostic_mode=True,
         vehicle_role=vehicle_role,
     )
-    expected = getattr(motion_params, config_name)
+    expected = getattr(transport_car, config_name)
 
     assert (car.odometry.x, car.odometry.y) == pytest.approx(expected)
 

@@ -1,6 +1,7 @@
 """Play 启动参数行为测试."""
 
 from play import sequence
+from play.routines import master_return_garage
 
 
 class _Runtime:
@@ -51,7 +52,9 @@ def test_return_play_uses_startup_distance_and_angle_parameters() -> None:
     )
     sequence.tick(runtime)
 
-    assert runtime.events == [("position_y", -0.255, 5)]
+    assert runtime.events == [
+        ("position_y", -0.255, int(master_return_garage.SEQUENCE[2]))
+    ]
     runtime.motion_done = True
 
     sequence.tick(runtime)
