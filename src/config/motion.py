@@ -27,9 +27,11 @@ ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
-MASTER_START_POSITION_M = (0.10, 0.0)
+MASTER_START_POSITION_M = (0.30, 0.0)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, -0.30)
+ASSISTANT_START_POSITION_M = (0.10, 0.0)
+# 出库第一段世界系 Y 目标, 单位米
+STARTUP_TARGET_Y_M = 0.70
 # 物体目标边配置, -1 表示覆盖所有物体
 TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
 # 位置控制最大命令速度, 单位脉冲/控制拍

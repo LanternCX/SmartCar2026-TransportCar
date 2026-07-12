@@ -716,6 +716,47 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_translation_target(
+        self,
+        x,
+        y,
+        hold_heading_deg=None,
+        max_speed_cmd=None,
+    ):
+        """写入世界系绝对平移目标并保持当前朝向
+
+        @param x 世界系 x 目标, 单位米
+        @param y 世界系 y 目标, 单位米
+        @param hold_heading_deg 可选的保持朝向角, 单位度
+        @param max_speed_cmd 可选的该段位置控制最大命令速度
+        """
+
+        heading_deg = float(self.heading_est)
+        if hold_heading_deg is not None:
+            heading_deg = float(hold_heading_deg)
+
+        self._clear_orbit_mode()
+        self.control_vx = 0.0
+        self.control_vy = 0.0
+        self.control_omega = 0.0
+        self.control_omega_active = True
+        self.control_x = float(x)
+        self.control_y = float(y)
+        self.control_x_active = True
+        self.control_y_active = True
+        self.control_angle = heading_deg
+        self.control_angle_active = True
+        self.command_lock = True
+        self.heading_transition_mode = False
+        self.heading_target = heading_deg
+        self._translation_speed_limit_cmd = (
+            None if max_speed_cmd is None else float(max_speed_cmd)
+        )
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def set_relative_translation_target(
         self,
         dx,
@@ -741,28 +782,12 @@ class TransportCar:
         sin_t = math.sin(heading_rad)
         world_dx = dx * cos_t + dy * sin_t
         world_dy = -dx * sin_t + dy * cos_t
-
-        self._clear_orbit_mode()
-        self.control_vx = 0.0
-        self.control_vy = 0.0
-        self.control_omega = 0.0
-        self.control_omega_active = True
-        self.control_x = float(self.odometry.x) + world_dx
-        self.control_y = float(self.odometry.y) + world_dy
-        self.control_x_active = True
-        self.control_y_active = True
-        self.control_angle = heading_deg
-        self.control_angle_active = True
-        self.command_lock = True
-        self.heading_transition_mode = False
-        self.heading_target = heading_deg
-        self._translation_speed_limit_cmd = (
-            None if max_speed_cmd is None else float(max_speed_cmd)
+        self.set_translation_target(
+            float(self.odometry.x) + world_dx,
+            float(self.odometry.y) + world_dy,
+            hold_heading_deg=heading_deg,
+            max_speed_cmd=max_speed_cmd,
         )
-        self.yaw_pid.reset()
-        self.yaw_integral = 0.0
-        self._pending_lock = None
-        self._refresh_control_mode()
 
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""

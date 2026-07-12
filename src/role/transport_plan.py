@@ -116,7 +116,7 @@ def heading_with_offset(heading_deg, offset_deg):
     return heading
 
 
-def _return_safe_end_y(obstacle_slots, margin_m):
+def _left_safe_end_y(obstacle_slots, margin_m):
     """计算原点到最近 left 障碍之间的安全边终点."""
     height = float(motion_params.FIELD_SIZE_M[1])
     safe_end_y = height
@@ -129,6 +129,12 @@ def _return_safe_end_y(obstacle_slots, margin_m):
         if low < safe_end_y:
             safe_end_y = low
     return safe_end_y, has_left_obstacle
+
+
+def plan_startup_target_y(obstacle_slots, target_y):
+    """规划出库第一段的世界系绝对 Y 目标."""
+    safe_end_y, _ = _left_safe_end_y(obstacle_slots, 0.0)
+    return min(float(target_y), safe_end_y)
 
 
 def plan_return_garage(
@@ -151,7 +157,7 @@ def plan_return_garage(
     if margin_m < 0.0 or depth_m <= 0.0 or extra_m < 0.0:
         raise ValueError
 
-    safe_end_y, has_left_obstacle = _return_safe_end_y(
+    safe_end_y, has_left_obstacle = _left_safe_end_y(
         obstacle_slots,
         margin_m,
     )

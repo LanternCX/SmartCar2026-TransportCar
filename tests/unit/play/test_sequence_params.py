@@ -1,7 +1,7 @@
 """Play 启动参数行为测试."""
 
 from play import sequence
-from play.routines import master_return_garage
+from play.routines import master_return_garage, startup_move
 
 
 class _Runtime:
@@ -16,6 +16,11 @@ class _Runtime:
     def play_set_position_y(self, value, max_speed_cmd=None) -> None:
         assert max_speed_cmd is not None
         self.events.append(("position_y", float(value), int(max_speed_cmd)))
+        self.motion_done = False
+
+    def play_set_position_xy(self, x, y, max_speed_cmd=None) -> None:
+        assert max_speed_cmd is not None
+        self.events.append(("position", float(x), float(y), int(max_speed_cmd)))
         self.motion_done = False
 
     def play_set_angle(self, value) -> None:
@@ -62,11 +67,34 @@ def test_return_play_uses_startup_distance_and_angle_parameters() -> None:
     assert runtime.events[-1] == ("angle", -153.4349488)
 
 
-def test_static_play_starts_without_parameters() -> None:
-    """静态 Play 不注入参数时继续读取序列内固定值."""
+def test_startup_play_uses_planned_absolute_position() -> None:
+    """启动 Play 从启动参数读取第一段世界系绝对目标点."""
     runtime = _Runtime()
 
-    sequence.start(runtime, sequence.PLAY_STARTUP)
+    sequence.start(runtime, sequence.PLAY_STARTUP, ((10.0, 45.0),))
     sequence.tick(runtime)
 
-    assert runtime.events == [("position_y", 0.7, 5)]
+    assert runtime.events == [
+        ("position", 0.1, 0.45, int(startup_move.SEQUENCE[2]))
+    ]
+
+
+def test_assistant_startup_finishes_immediately_after_right_turn() -> None:
+    """辅车启动 Play 不执行主车的第二段固定前进."""
+    runtime = _Runtime()
+
+    sequence.start(
+        runtime,
+        sequence.PLAY_ASSISTANT_STARTUP,
+        ((10.0, 45.0),),
+    )
+    sequence.tick(runtime)
+    runtime.motion_done = True
+    sequence.tick(runtime)
+    runtime.motion_done = True
+
+    assert sequence.tick(runtime) is True
+    assert runtime.events == [
+        ("position", 0.1, 0.45, int(startup_move.ASSISTANT_SEQUENCE[2])),
+        ("angle", 90.0),
+    ]

@@ -2072,6 +2072,12 @@ def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     runtime._apply_motion_outputs()
 
     assert runtime.play_kind != 0
+    assert (
+        "set_translation_target",
+        pytest.approx(module.motion_params.MASTER_START_POSITION_M[0]),
+        pytest.approx(module.motion_params.STARTUP_TARGET_Y_M),
+        5.0,
+    ) in cars[0].events
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
@@ -2080,11 +2086,52 @@ def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     cars[0].heading_est = 90.0
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    runtime._apply_motion_outputs()
-    cars[0].command_lock = False
-    runtime._apply_motion_outputs()
-    runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    assert ("set_heading_transition_target", 0.0) not in cars[0].events
+
+
+def test_both_runtimes_limit_startup_move_to_left_obstacle(monkeypatch) -> None:
+    """主辅车分别按自身坐标移动到同一 left 障碍边界."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    obstacles = (
+        ("left", 0.45, 0.8),
+        ("bottom", 0.2, 0.4),
+        (None, -1.0, -1.0),
+    )
+    master = master_module.MasterForwardRuntime(
+        obstacle_slots=obstacles,
+        now_ms=clock,
+        transport=create_transport(ROLE_MASTER, now_ms=clock),
+    )
+    assistant = assistant_module.AssistantFollowRuntime(
+        obstacle_slots=obstacles,
+        now_ms=clock,
+        transport=create_transport(ROLE_ASSISTANT, now_ms=clock),
+    )
+    cars[0].odometry.x = 0.25
+    cars[0].odometry.y = 0.1
+    cars[0].heading_est = 37.0
+    cars[1].odometry.x = 0.15
+    cars[1].odometry.y = 0.2
+    cars[1].heading_est = -18.0
+
+    master._run_startup_move_play()
+    assistant._run_startup_move_play()
+
+    assert (
+        "set_translation_target",
+        master_module.motion_params.MASTER_START_POSITION_M[0],
+        0.45,
+        5.0,
+    ) in cars[0].events
+    assert (
+        "set_translation_target",
+        assistant_module.motion_params.ASSISTANT_START_POSITION_M[0],
+        0.45,
+        5.0,
+    ) in cars[1].events
 
 
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:

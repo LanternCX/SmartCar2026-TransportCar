@@ -242,6 +242,25 @@ def install_fake_core(monkeypatch):
             self.control_angle = float(angle_deg)
             self.control_angle_active = True
 
+        def set_translation_target(
+            self,
+            x,
+            y,
+            hold_heading_deg=None,
+            max_speed_cmd=None,
+        ) -> None:
+            event = ["set_translation_target", float(x), float(y)]
+            if hold_heading_deg is not None:
+                event.append(float(hold_heading_deg))
+            if max_speed_cmd is not None:
+                event.append(float(max_speed_cmd))
+            self.events.append(tuple(event))
+            self.command_lock = True
+            self.control_x = float(x)
+            self.control_y = float(y)
+            self.control_x_active = True
+            self.control_y_active = True
+
         def set_relative_translation_target(self, dx, dy, hold_heading_deg=None, max_speed_cmd=None) -> None:
             event = ["set_relative_translation_target", float(dx), float(dy)]
             if hold_heading_deg is not None:

@@ -11,6 +11,7 @@ from role.transport_plan import (
     FIELD_EDGE_TOP,
     heading_with_offset,
     plan_return_garage,
+    plan_startup_target_y,
     plan_transport_heading,
     push_heading_for_edge,
     target_edge_for_object,
@@ -20,6 +21,28 @@ from role.transport_plan import (
 MARGIN_M = float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M)
 FIELD_WIDTH_M = float(motion_params.FIELD_SIZE_M[0])
 FIELD_HEIGHT_M = float(motion_params.FIELD_SIZE_M[1])
+
+
+def test_startup_target_stops_at_nearest_left_obstacle_boundary() -> None:
+    """出库第一段只受最近 left 障碍的原始边界限制."""
+    slots = (
+        (FIELD_EDGE_BOTTOM, 0.2, 0.4),
+        (FIELD_EDGE_LEFT, 0.45, 0.8),
+        (FIELD_EDGE_RIGHT, 0.3, 0.6),
+    )
+
+    assert plan_startup_target_y(slots, 0.7) == pytest.approx(0.45)
+
+
+def test_startup_target_uses_configured_y_without_left_obstacle() -> None:
+    """没有 left 障碍时使用配置的世界系绝对 Y 目标."""
+    slots = (
+        (FIELD_EDGE_BOTTOM, 0.2, 0.4),
+        (FIELD_EDGE_RIGHT, 0.3, 0.6),
+        (None, -1.0, -1.0),
+    )
+
+    assert plan_startup_target_y(slots, 0.7) == pytest.approx(0.7)
 
 
 def _centered_obstacle(edge: str):

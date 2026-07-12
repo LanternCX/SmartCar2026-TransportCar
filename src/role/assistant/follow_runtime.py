@@ -73,6 +73,7 @@ from role.task_sync import (
 from role.transport_plan import (
     heading_with_offset,
     plan_return_garage,
+    plan_startup_target_y,
     push_heading_for_edge,
     target_edge_for_object,
 )
@@ -689,7 +690,21 @@ class AssistantFollowRuntime:
     def _run_startup_move_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_STARTUP):
+            target_y_m = plan_startup_target_y(
+                self._obstacles,
+                motion_params.STARTUP_TARGET_Y_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_ASSISTANT_STARTUP,
+                (
+                    (
+                        motion_params.ASSISTANT_START_POSITION_M[0] * 100.0,
+                        target_y_m * 100.0,
+                    ),
+                ),
+            )
         if play_sequence.tick(self):
             self._sm.mark_startup_move_completed()
             self._enter_follow_state()
@@ -698,6 +713,13 @@ class AssistantFollowRuntime:
         self._car.set_relative_translation_target(
             float(value),
             0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_position_xy(self, x, y, max_speed_cmd=None) -> None:
+        self._car.set_translation_target(
+            float(x),
+            float(y),
             max_speed_cmd=max_speed_cmd,
         )
 

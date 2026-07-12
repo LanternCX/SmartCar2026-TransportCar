@@ -93,7 +93,7 @@ from role.master.state_machine import (
     TARGET_OBJECT,
     MasterStateMachine,
 )
-from role.transport_plan import plan_return_garage
+from role.transport_plan import plan_return_garage, plan_startup_target_y
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -666,7 +666,21 @@ class MasterForwardRuntime:
     def _run_startup_move_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if int(self.play_kind) != int(play_sequence.PLAY_STARTUP):
+            target_y_m = plan_startup_target_y(
+                self._obstacles,
+                motion_params.STARTUP_TARGET_Y_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_STARTUP,
+                (
+                    (
+                        motion_params.MASTER_START_POSITION_M[0] * 100.0,
+                        target_y_m * 100.0,
+                    ),
+                ),
+            )
         if play_sequence.tick(self):
             self._sm.mark_startup_move_completed()
 
@@ -674,6 +688,13 @@ class MasterForwardRuntime:
         self._car.set_relative_translation_target(
             float(value),
             0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_position_xy(self, x, y, max_speed_cmd=None) -> None:
+        self._car.set_translation_target(
+            float(x),
+            float(y),
             max_speed_cmd=max_speed_cmd,
         )
 
