@@ -20,6 +20,7 @@ from protocol.topic import (
 )
 from protocol.transport import create_transport
 from role.task_sync import pack_assistant_orbit_arg
+from role.transport_plan import push_heading_for_edge, target_edge_for_object
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -198,6 +199,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: master._act_ctx is not None,
     )
+    master_car.heading_est = push_heading_for_edge(target_edge_for_object(2))
 
     master_uart6.push(
         encode_frame(

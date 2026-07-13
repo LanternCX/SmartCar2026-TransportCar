@@ -279,8 +279,13 @@ class MasterStateMachine:
         if self.state == STATE_RETURN_GARAGE_RETREAT:
             return
 
-    def mark_assistant_object_acknowledged(self, position_x, position_y):
-        """标记辅车找物体同步已确认并开始主车绕行"""
+    def mark_assistant_object_acknowledged(
+        self,
+        position_x,
+        position_y,
+        heading_deg,
+    ):
+        """按主车当前世界位姿开始主车绕行"""
 
         if self._wait_obj_ack:
             self._wait_obj_ack = False
@@ -301,12 +306,16 @@ class MasterStateMachine:
             )
             offset_deg = unpack_assistant_orbit_offset_deg(self._orbit_arg)
             self._push_heading = heading_with_offset(push_heading, offset_deg)
+            orbit_delta_deg = heading_with_offset(
+                self._push_heading,
+                -float(heading_deg),
+            )
             self._m_aligned = False
             self._a_aligned = False
-            if abs(offset_deg) < self._av_tr:
+            if abs(orbit_delta_deg) < self._av_tr:
                 self._orb_phase = _ORBIT_PHASE_AVOID
                 avoid_offset = self._av_hd
-                if offset_deg < 0:
+                if orbit_delta_deg < 0:
                     avoid_offset = -avoid_offset
                 self._p_orbit = heading_with_offset(push_heading, avoid_offset)
             else:

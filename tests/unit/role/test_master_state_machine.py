@@ -103,8 +103,8 @@ def _load_master_state_machine():
         machine = machine_type(*args, **kwargs)
         acknowledge = machine.mark_assistant_object_acknowledged
 
-        def _acknowledge(position_x=0.0, position_y=0.0):
-            return acknowledge(position_x, position_y)
+        def _acknowledge(position_x=0.0, position_y=0.0, heading_deg=0.0):
+            return acknowledge(position_x, position_y, heading_deg)
 
         machine.mark_assistant_object_acknowledged = _acknowledge
         return machine
@@ -331,8 +331,8 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     assert orbit_command == _push_heading_for_object(MasterStateMachine, 2)
 
 
-def test_master_state_machine_avoids_before_zero_offset_assistant_orbit() -> None:
-    """零偏角遮挡场景先让位, 辅车开始绕行后主车返回规划航向."""
+def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
+    """主车无需绕行的遮挡场景先让位, 辅车开始绕行后主车返回规划航向."""
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -347,8 +347,8 @@ def test_master_state_machine_avoids_before_zero_offset_assistant_orbit() -> Non
     )
     machine.poll_assistant_request()
 
-    machine.mark_assistant_object_acknowledged()
     push_heading = _push_heading_for_object(MasterStateMachine, 2)
+    machine.mark_assistant_object_acknowledged(0.0, 0.0, push_heading)
 
     assert machine.poll_orbit_command() == MasterStateMachine.heading_with_offset(
         push_heading,
@@ -372,21 +372,43 @@ def test_master_state_machine_avoids_before_zero_offset_assistant_orbit() -> Non
     assert machine.poll_orbit_command() == push_heading
 
 
-def test_master_state_machine_avoidance_follows_negative_planned_direction() -> None:
-    """负规划偏角沿负方向避让到垂直搬运方向的位置."""
+def test_master_state_machine_skips_avoidance_when_actual_orbit_exceeds_trigger() -> None:
+    """最终推动偏角为零但主车仍需明显绕行时直接执行普通绕行."""
+    MasterStateMachine = _load_master_state_machine()
+    push_heading = _push_heading_for_object(MasterStateMachine, 2)
+    trigger_deg = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_avoid_trigger_deg=trigger_deg,
+        orbit_avoid_heading_deg=motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+
+    current_heading = MasterStateMachine.heading_with_offset(
+        push_heading,
+        -(trigger_deg + 1.0),
+    )
+    machine.mark_assistant_object_acknowledged(0.0, 0.0, current_heading)
+
+    assert machine.poll_orbit_command() == push_heading
+
+
+def test_master_state_machine_avoidance_follows_negative_orbit_direction() -> None:
+    """主车实际绕行角为负时沿负方向避让."""
     MasterStateMachine = _load_master_state_machine()
     planned_heading = _expected_diagonal_heading()
     push_heading = _push_heading_for_object(MasterStateMachine, 2)
-    planned_offset = MasterStateMachine.heading_with_offset(
-        planned_heading,
-        -push_heading,
-    )
-    assert planned_offset < 0.0
+    orbit_delta_deg = -(motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG - 1.0)
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
         obstacle_slots=_target_obstacle_slots(),
-        orbit_avoid_trigger_deg=abs(planned_offset) + 1.0,
+        orbit_avoid_trigger_deg=motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG,
         orbit_avoid_heading_deg=motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
     )
     _enter_initial_search(machine)
@@ -396,7 +418,15 @@ def test_master_state_machine_avoidance_follows_negative_planned_direction() -> 
     machine.poll_assistant_request()
 
     position_x, position_y = _target_diagonal_position()
-    machine.mark_assistant_object_acknowledged(position_x, position_y)
+    current_heading = MasterStateMachine.heading_with_offset(
+        planned_heading,
+        -orbit_delta_deg,
+    )
+    machine.mark_assistant_object_acknowledged(
+        position_x,
+        position_y,
+        current_heading,
+    )
 
     assert machine.poll_orbit_command() == MasterStateMachine.heading_with_offset(
         push_heading,
@@ -405,19 +435,15 @@ def test_master_state_machine_avoidance_follows_negative_planned_direction() -> 
 
 
 def test_master_state_machine_avoidance_excludes_trigger_boundary() -> None:
-    """规划偏角等于触发角时执行普通绕行."""
+    """主车实际绕行角等于触发角时执行普通绕行."""
     MasterStateMachine = _load_master_state_machine()
     planned_heading = _expected_diagonal_heading()
-    push_heading = _push_heading_for_object(MasterStateMachine, 2)
-    planned_offset = MasterStateMachine.heading_with_offset(
-        planned_heading,
-        -push_heading,
-    )
+    trigger_deg = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
         obstacle_slots=_target_obstacle_slots(),
-        orbit_avoid_trigger_deg=abs(planned_offset),
+        orbit_avoid_trigger_deg=trigger_deg,
         orbit_avoid_heading_deg=motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
     )
     _enter_initial_search(machine)
@@ -427,7 +453,15 @@ def test_master_state_machine_avoidance_excludes_trigger_boundary() -> None:
     machine.poll_assistant_request()
 
     position_x, position_y = _target_diagonal_position()
-    machine.mark_assistant_object_acknowledged(position_x, position_y)
+    current_heading = MasterStateMachine.heading_with_offset(
+        planned_heading,
+        -trigger_deg,
+    )
+    machine.mark_assistant_object_acknowledged(
+        position_x,
+        position_y,
+        current_heading,
+    )
 
     assert machine.poll_orbit_command() == planned_heading
 

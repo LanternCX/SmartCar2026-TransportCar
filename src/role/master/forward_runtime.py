@@ -544,6 +544,7 @@ class MasterForwardRuntime:
                     self._sm.mark_assistant_object_acknowledged(
                         self._car.odometry.x,
                         self._car.odometry.y,
+                        self._car.heading_est,
                     )
                 elif pending[_S_KIND] == RK_A_ORBIT:
                     self._sm.mark_assistant_orbit_acknowledged()

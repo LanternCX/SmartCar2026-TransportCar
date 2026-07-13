@@ -64,7 +64,7 @@ ORBIT_ANGLE_CONFIRM_TICKS = 3
 HOLD_SPEED_EPS = 0.01
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
-# 主车规划偏角小于该值时进入辅车绕行避让流程, 单位度
+# 主车实际绕行角小于该值时进入辅车绕行避让流程, 单位度
 MASTER_ORBIT_AVOID_TRIGGER_DEG = 30
 # 主车为辅车让出绕行视野时相对搬运方向的目标偏角, 单位度
 MASTER_ORBIT_AVOID_HEADING_DEG = 90
