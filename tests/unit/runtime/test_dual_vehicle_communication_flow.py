@@ -586,7 +586,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
             if (
                 frame["mode"] == 0x02
                 and frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
-                and frame["body"][:10] == orbit_sync_body
+                and frame["body"][:4] == orbit_sync_body
             ):
                 orbit_sync_count += 1
         if orbit_sync_count >= 1:
@@ -605,7 +605,7 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
         if (
             frame["mode"] == 0x02
             and frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
-            and frame["body"][:10] == orbit_sync_body
+            and frame["body"][:4] == orbit_sync_body
         ):
             orbit_sync_count_after_duplicate += 1
 

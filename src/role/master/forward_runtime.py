@@ -13,20 +13,15 @@ from config import vision as vision_params
 from protocol.codec import (
     AE_EVENT,
     AE_VALUE,
-    CTL_ACTION,
-    LOCAL_VISION_CONTROL_PAUSE,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
     LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
-    LOCAL_VISION_CONTROL_RESUME,
     ME_CTX,
     ME_EVENT,
-    ME_TH,
     ME_VALUE,
     VEL_HAS_W,
     VEL_X,
     VEL_Y,
     decode_assistant_event_report_body,
-    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_velocity_body_into,
     encode_assistant_state_sync_body,
@@ -114,8 +109,7 @@ _S_KIND = const(0)
 _S_STATE = const(1)
 _S_TARGET = const(2)
 _S_ARG = const(3)
-_S_THRESHOLD = const(4)
-_S_QUEUED = const(5)
+_S_QUEUED = const(4)
 
 _G_ACTION = const(0)
 _G_QUEUED = const(1)
@@ -201,7 +195,6 @@ class MasterForwardRuntime:
         self._act_ctx = None
         self._p_task = None
         self._p_event = None
-        self._obj_th = (0, 0, 0, 0, 0, 0)
         self._p_sync = None
         self._p_ast = None
         self._orb_act = False
@@ -225,11 +218,9 @@ class MasterForwardRuntime:
         self._task_status = None
         # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
         self._vel_body = bytearray(7)
-        self._ctrl_body = bytearray(1)
-        self._task_body = bytearray(10)
+        self._task_body = bytearray(4)
         self._ast_body = bytearray(3)
         # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
-        self._lv_pause = False
         self._last_state = int(self._sm.state)
         self._line_ok = False
         self._gate = None
@@ -286,7 +277,6 @@ class MasterForwardRuntime:
             int(state),
             int(target),
             int(arg),
-            (0, 0, 0, 0, 0, 0),
             False,
         )
         return int(state)
@@ -330,7 +320,7 @@ class MasterForwardRuntime:
             and current_state != STATE_TRANSPORT_OBJECT
         ):
             self._car.set_position_integration_enabled(True)
-        self._clear_local_vision_pause_residue()
+        self._clear_local_vision_velocity_residue()
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
             self._gate = None
@@ -342,8 +332,7 @@ class MasterForwardRuntime:
             self._tr_unlock = False
         self._last_state = current_state
 
-    def _clear_local_vision_pause_residue(self) -> None:
-        self._lv_pause = False
+    def _clear_local_vision_velocity_residue(self) -> None:
         self._u6v = None
         self._u6_has_w = False
         self._u6_ver = self._ts.get_udp_version(
@@ -352,15 +341,6 @@ class MasterForwardRuntime:
 
     def _consume_uart6_reliable_inputs(self) -> None:
         """消费本车视觉链路上的 TCP 控制与事件."""
-        if (
-            self._ts.tcp_read(
-                UART6,
-                TOPIC_LOCAL_VISION_CONTROL, self._ctrl_body
-            )
-            == "ok"
-        ):
-            packet = decode_local_vision_control_body(self._ctrl_body)
-            self._handle_local_vision_control(packet)
         if (
             self._ts.tcp_read(
                 UART6,
@@ -383,7 +363,7 @@ class MasterForwardRuntime:
             version = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-            if version > self._u6_ver and not self._lv_pause:
+            if version > self._u6_ver:
                 packet = decode_velocity_body_into(
                     self._vel_body, self._u6_pkt
                 )
@@ -397,35 +377,6 @@ class MasterForwardRuntime:
                 ):
                     self._u6v = packet
                     self._u6_has_w = bool(packet[VEL_HAS_W])
-
-    def _handle_local_vision_control(self, packet) -> None:
-        """处理 OpenART 慢帧前后的可靠暂停控制."""
-
-        action = int(packet[CTL_ACTION])
-        if action == LOCAL_VISION_CONTROL_PAUSE and not self._allows_local_vision_control():
-            self._lv_pause = False
-            return
-        self._u6v = None
-        self._u6_has_w = False
-        self._u6_ver = self._ts.get_udp_version(
-            UART6, TOPIC_LOCAL_VISION_VELOCITY
-        )
-        if action == LOCAL_VISION_CONTROL_PAUSE:
-            self._lv_pause = True
-            if not bool(getattr(self._car, "command_lock", False)):
-                self._car.handle_velocity_packet(
-                    0.0,
-                    0.0,
-                    0.0,
-                    None,
-                    True,
-                )
-            return
-        if action == LOCAL_VISION_CONTROL_RESUME:
-            self._lv_pause = False
-
-    def _allows_local_vision_control(self) -> bool:
-        return int(self._sm.state) == int(STATE_SEARCH_OBJECT)
 
     def _consume_uart8_inputs(self) -> None:
         """消费辅车回报的可靠事件."""
@@ -449,7 +400,6 @@ class MasterForwardRuntime:
         context_id = int(packet[ME_CTX])
         if self._act_ctx == context_id:
             self._clear_local_velocity_for_reliable_event()
-            self._remember_task_event_threshold(packet)
             if (
                 self._sm.state == STATE_RETURN_GARAGE_RETREAT
                 and int(packet[ME_EVENT]) == int(EVENT_RETURN_LINE_ALIGNED)
@@ -476,20 +426,8 @@ class MasterForwardRuntime:
                 int(context_id),
                 int(packet[ME_EVENT]),
                 int(packet[ME_VALUE]),
-                tuple(packet[ME_TH]),
             )
             return
-
-    def _remember_task_event_threshold(self, packet) -> None:
-        threshold = tuple(packet[ME_TH])
-        if self._threshold_has_value(threshold):
-            self._obj_th = threshold
-
-    def _threshold_has_value(self, threshold: tuple) -> bool:
-        for value in threshold:
-            if int(value) != 0:
-                return True
-        return False
 
     def _clear_local_velocity_for_reliable_event(self) -> None:
         """可靠业务事件到达时, 丢弃旧 UDP 速度并按需写入零速度语义."""
@@ -571,16 +509,6 @@ class MasterForwardRuntime:
                 self._p_sync = None
 
     def _apply_motion_outputs(self) -> None:
-        if self._lv_pause:
-            if not bool(getattr(self._car, "command_lock", False)):
-                self._car.handle_velocity_packet(
-                    0.0,
-                    0.0,
-                    0.0,
-                    None,
-                    True,
-                )
-            return
         if self._sm.state == STATE_TRANSPORT_OBJECT:
             if not self._is_transport_finish_task_ready():
                 self._tr_ticks = 0
@@ -826,7 +754,6 @@ class MasterForwardRuntime:
             pending[_S_STATE],
             pending[_S_TARGET],
             pending[_S_ARG],
-            self._threshold_for_assistant_sync(pending),
         )
         status = self._ts.tcp_write(UART8, TOPIC_ASSISTANT_STATE_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
@@ -836,7 +763,6 @@ class MasterForwardRuntime:
                     pending[_S_STATE],
                     pending[_S_TARGET],
                     pending[_S_ARG],
-                    pending[_S_THRESHOLD],
                     True,
                 )
             else:
@@ -845,7 +771,6 @@ class MasterForwardRuntime:
                     pending[_S_STATE],
                     pending[_S_TARGET],
                     pending[_S_ARG],
-                    pending[_S_THRESHOLD],
                     True,
                 )
 
@@ -991,7 +916,6 @@ class MasterForwardRuntime:
                 int(assistant_request[RQ_STATE]),
                 int(assistant_request[RQ_TARGET]),
                 int(assistant_request[RQ_ARG]),
-                self._threshold_for_assistant_request(assistant_request),
                 False,
             )
 
@@ -1134,9 +1058,7 @@ class MasterForwardRuntime:
         if pending_event is None:
             return
         self._p_event = None
-        context_id, event, value, threshold = pending_event
-        if self._threshold_has_value(threshold):
-            self._obj_th = threshold
+        context_id, event, value = pending_event
         self._apply_transport_arrival_pose(event)
         self._sm.handle_event(
             context_id,
@@ -1167,16 +1089,6 @@ class MasterForwardRuntime:
             0.0,
         )
         self._car.set_position_integration_enabled(True)
-
-    def _threshold_for_assistant_request(self, assistant_request: tuple) -> tuple:
-        if int(assistant_request[RQ_TARGET]) == TARGET_OBJECT:
-            return tuple(self._obj_th)
-        return (0, 0, 0, 0, 0, 0)
-
-    def _threshold_for_assistant_sync(self, pending: tuple) -> tuple:
-        if int(pending[_S_TARGET]) == TARGET_OBJECT:
-            return tuple(self._obj_th)
-        return tuple(pending[_S_THRESHOLD])
 
     def _record_error(self, text: str, exc: Exception) -> None:
         if self._err != text:
