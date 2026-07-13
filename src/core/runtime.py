@@ -716,6 +716,47 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
+    def set_translation_target(
+        self,
+        x,
+        y,
+        hold_heading_deg=None,
+        max_speed_cmd=None,
+    ):
+        """写入世界系绝对平移目标并保持当前朝向
+
+        @param x 世界系 x 目标, 单位米
+        @param y 世界系 y 目标, 单位米
+        @param hold_heading_deg 可选的保持朝向角, 单位度
+        @param max_speed_cmd 可选的该段位置控制最大命令速度
+        """
+
+        heading_deg = float(self.heading_est)
+        if hold_heading_deg is not None:
+            heading_deg = float(hold_heading_deg)
+
+        self._clear_orbit_mode()
+        self.control_vx = 0.0
+        self.control_vy = 0.0
+        self.control_omega = 0.0
+        self.control_omega_active = True
+        self.control_x = float(x)
+        self.control_y = float(y)
+        self.control_x_active = True
+        self.control_y_active = True
+        self.control_angle = heading_deg
+        self.control_angle_active = True
+        self.command_lock = True
+        self.heading_transition_mode = False
+        self.heading_target = heading_deg
+        self._translation_speed_limit_cmd = (
+            None if max_speed_cmd is None else float(max_speed_cmd)
+        )
+        self.yaw_pid.reset()
+        self.yaw_integral = 0.0
+        self._pending_lock = None
+        self._refresh_control_mode()
+
     def set_relative_translation_target(
         self,
         dx,
@@ -741,28 +782,12 @@ class TransportCar:
         sin_t = math.sin(heading_rad)
         world_dx = dx * cos_t + dy * sin_t
         world_dy = -dx * sin_t + dy * cos_t
-
-        self._clear_orbit_mode()
-        self.control_vx = 0.0
-        self.control_vy = 0.0
-        self.control_omega = 0.0
-        self.control_omega_active = True
-        self.control_x = float(self.odometry.x) + world_dx
-        self.control_y = float(self.odometry.y) + world_dy
-        self.control_x_active = True
-        self.control_y_active = True
-        self.control_angle = heading_deg
-        self.control_angle_active = True
-        self.command_lock = True
-        self.heading_transition_mode = False
-        self.heading_target = heading_deg
-        self._translation_speed_limit_cmd = (
-            None if max_speed_cmd is None else float(max_speed_cmd)
+        self.set_translation_target(
+            float(self.odometry.x) + world_dx,
+            float(self.odometry.y) + world_dy,
+            hold_heading_deg=heading_deg,
+            max_speed_cmd=max_speed_cmd,
         )
-        self.yaw_pid.reset()
-        self.yaw_integral = 0.0
-        self._pending_lock = None
-        self._refresh_control_mode()
 
     def reset_control_state(self):
         """复位底盘控制状态、姿态估计和控制器积分."""
@@ -801,23 +826,44 @@ class TransportCar:
             "angle": float(self.heading_est),
         }
 
-    def calibrate_pose_to_field_edge(self, edge):
-        """按贴边结果校准单轴位置.
+    def calibrate_pose_to_field_edge(self, edge, heading_deg, inset_m):
+        """按直线推动轨迹与内缩边界的交点校准位置.
 
         @param edge 边线名称, 支持 left/right/bottom/top
+        @param heading_deg 推动物体时的世界系绝对航向, 单位度
+        @param inset_m 车辆参考点相对场地边界的内缩距离, 单位米
         """
 
         edge = str(edge)
+        inset = float(inset_m)
+        if inset < 0.0:
+            raise ValueError("field edge inset must be non-negative")
+        heading_rad = math.radians(float(heading_deg))
+        ray_x = math.sin(heading_rad)
+        ray_y = math.cos(heading_rad)
         if edge == "left":
-            self.odometry.x = 0.0
+            target = inset
+            ray = ray_x
+            start = self.odometry.x
         elif edge == "right":
-            self.odometry.x = float(FIELD_SIZE_M[0])
+            target = float(FIELD_SIZE_M[0]) - inset
+            ray = ray_x
+            start = self.odometry.x
         elif edge == "bottom":
-            self.odometry.y = 0.0
+            target = inset
+            ray = ray_y
+            start = self.odometry.y
         elif edge == "top":
-            self.odometry.y = float(FIELD_SIZE_M[1])
+            target = float(FIELD_SIZE_M[1]) - inset
+            ray = ray_y
+            start = self.odometry.y
         else:
             raise ValueError("unknown field edge")
+        if abs(ray) <= 1e-9:
+            raise ValueError("transport path is parallel to field edge")
+        distance = (target - start) / ray
+        self.odometry.x += distance * ray_x
+        self.odometry.y += distance * ray_y
 
     def zero_motors(self):
         """清零速度环积分和三轮电机输出."""

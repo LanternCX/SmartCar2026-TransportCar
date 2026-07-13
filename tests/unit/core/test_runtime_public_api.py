@@ -265,8 +265,19 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert len(motion_params.FIELD_SIZE_M) == 2
     assert len(motion_params.MASTER_START_POSITION_M) == 2
     assert len(motion_params.ASSISTANT_START_POSITION_M) == 2
+    assert (
+        motion_params.MASTER_START_POSITION_M[1]
+        == motion_params.ASSISTANT_START_POSITION_M[1]
+    )
+    assert (
+        motion_params.MASTER_START_POSITION_M[0]
+        != motion_params.ASSISTANT_START_POSITION_M[0]
+    )
     assert float(motion_params.FIELD_SIZE_M[0]) > 0.0
     assert float(motion_params.FIELD_SIZE_M[1]) > 0.0
+    assert 0.0 <= float(motion_params.STARTUP_TARGET_Y_M) <= float(
+        motion_params.FIELD_SIZE_M[1]
+    )
     assert isinstance(motion_params.TRANSPORT_OBJECT_TARGET_EDGE, dict)
     assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1] in {
         "bottom",
@@ -539,18 +550,18 @@ def test_transport_car_builds_pose_snapshot_from_odometry_and_heading() -> None:
     }
 
 
-def test_transport_car_calibrates_single_axis_to_field_edge() -> None:
-    """边线校准只重置对应单轴, 不改另一轴和航向."""
+def test_transport_car_rebuilds_oblique_pose_from_inset_field_edge() -> None:
+    """斜向到边时按推动直线与内缩边界的交点重建位置."""
     _transport_car, car = _make_control_car(
-        odometry=_Odom(x=1.25, y=1.50),
+        odometry=_Odom(x=0.50, y=1.00),
         heading_est=33.0,
     )
 
-    car.calibrate_pose_to_field_edge("right")
+    car.calibrate_pose_to_field_edge("left", -135.0, 0.08)
 
     assert car.build_pose_snapshot() == {
-        "x": pytest.approx(motion_params.FIELD_SIZE_M[0]),
-        "y": 1.50,
+        "x": pytest.approx(0.08),
+        "y": pytest.approx(0.58),
         "angle": 33.0,
     }
 
@@ -572,7 +583,7 @@ def test_transport_car_starts_from_configured_position(
         diagnostic_mode=True,
         vehicle_role=vehicle_role,
     )
-    expected = getattr(motion_params, config_name)
+    expected = getattr(transport_car, config_name)
 
     assert (car.odometry.x, car.odometry.y) == pytest.approx(expected)
 
@@ -788,6 +799,22 @@ def test_transport_car_position_control_uses_clockwise_world_heading() -> None:
 
     assert vx_cmd == pytest.approx(0.0, abs=1e-9)
     assert vy_cmd > 0.0
+
+
+def test_transport_car_accepts_world_absolute_translation_target() -> None:
+    """绝对平移入口直接写入世界系目标点并保持指定朝向."""
+    _transport_car, car = _make_control_car(
+        heading_est=37.0,
+        odometry=_Odom(x=0.3, y=0.2),
+        control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0},
+    )
+
+    car.set_translation_target(0.1, 0.45, max_speed_cmd=5)
+
+    assert car.control_state["x"] == pytest.approx(0.1)
+    assert car.control_state["y"] == pytest.approx(0.45)
+    assert car.control_state["angle"] == pytest.approx(37.0)
+    assert car._translation_speed_limit_cmd == pytest.approx(5.0)
 
 
 def test_transport_car_set_relative_translation_target_accepts_hold_heading_override() -> None:
@@ -1319,6 +1346,7 @@ def test_transport_car_has_no_legacy_mode_entry() -> None:
         "set_heading_transition_target",
         "set_orbit_target",
         "set_relative_translation_target",
+        "set_translation_target",
         "set_velocity_target",
     ]
 

@@ -56,7 +56,6 @@ from protocol.transport import (
 )
 
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
-from role.master.state_machine import MasterStateMachine
 from role.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
@@ -92,7 +91,9 @@ from role.master.state_machine import (
     STATE_TRANSPORT_OBJECT,
     TARGET_EDGE_LINE,
     TARGET_OBJECT,
+    MasterStateMachine,
 )
+from role.transport_plan import plan_return_garage, plan_startup_target_y
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -132,8 +133,13 @@ MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = (
 TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
+MASTER_ORBIT_AVOID_TRIGGER_DEG = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
+MASTER_ORBIT_AVOID_HEADING_DEG = motion_params.MASTER_ORBIT_AVOID_HEADING_DEG
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
-TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = motion_params.TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG
+RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
+    motion_params.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M
+)
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -158,6 +164,7 @@ class MasterForwardRuntime:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_MASTER)
+        obstacle_slots = tuple(obstacle_slots)
         # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是主车状态机。
         self._car = car
         self.wheel_encoders = car.wheel_encoders
@@ -167,13 +174,15 @@ class MasterForwardRuntime:
             ROLE_MASTER,
             now_ms=self._now_ms,
         )
+        self._obstacles = obstacle_slots
         seed_value = int(self._now_ms()) % 256
         self._sm = MasterStateMachine(
             search_task_arg=MASTER_SEARCH_TASK_CONFIG_ID,
             boot_heading_deg=float(getattr(car, "heading_est", 0.0)),
             obstacle_slots=obstacle_slots,
-            avoidance_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
-            avoidance_default_offset_deg=TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG,
+            obstacle_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
+            orbit_avoid_trigger_deg=MASTER_ORBIT_AVOID_TRIGGER_DEG,
+            orbit_avoid_heading_deg=MASTER_ORBIT_AVOID_HEADING_DEG,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
@@ -200,12 +209,12 @@ class MasterForwardRuntime:
         self.play_kind = 0
         self.play_step = 0
         self.play_entered = False
+        self.play_params = None
         # transport/clear/turn-back 阶段状态：tr/clr/tb 分别对应运输、清障、回正。
         self._tr_sync_ack = False
         self._tr_task_ack = False
         self._tr_ticks = 0
         self._tr_unlock = False
-        self._av_shift_heading = None
         self._clr_sync_ack = False
         self._clr_move = False
         self._clr_done_phase = None
@@ -318,10 +327,9 @@ class MasterForwardRuntime:
         previous_state = int(self._last_state)
         if (
             previous_state == STATE_TRANSPORT_OBJECT
-            and current_state not in (STATE_TRANSPORT_OBJECT, STATE_ORBITING)
+            and current_state != STATE_TRANSPORT_OBJECT
         ):
             self._car.set_position_integration_enabled(True)
-            self._av_shift_heading = None
         self._clear_local_vision_pause_residue()
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
@@ -435,15 +443,6 @@ class MasterForwardRuntime:
             elif int(packet[AE_EVENT]) == EVENT_ALIGNED:
                 self._sm.handle_assistant_aligned(packet[AE_VALUE])
             elif int(packet[AE_EVENT]) == EVENT_CLEARED:
-                if self._sm.state == STATE_TRANSPORT_OBJECT and self._sm._av_shift:
-                    if self._av_shift_heading is None:
-                        raise RuntimeError
-                    self._car.apply_forward_pose_distance(
-                        float(self._sm.get_avoidance_shift_distance_cm()) / 100.0,
-                        self._av_shift_heading,
-                    )
-                    self._car.set_position_integration_enabled(True)
-                    self._av_shift_heading = None
                 self._sm.handle_assistant_cleared(packet[AE_VALUE])
 
     def _handle_task_event(self, packet) -> None:
@@ -545,7 +544,10 @@ class MasterForwardRuntime:
                     self._sm.mark_assistant_object_acknowledged(
                         self._car.odometry.x,
                         self._car.odometry.y,
+                        self._car.heading_est,
                     )
+                elif pending[_S_KIND] == RK_A_ORBIT:
+                    self._sm.mark_assistant_orbit_acknowledged()
                 elif pending[_S_KIND] == RK_A_START:
                     self._sm.mark_startup_sync_acknowledged()
                 elif pending[_S_KIND] == RK_A_FOLLOW:
@@ -650,13 +652,42 @@ class MasterForwardRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_MASTER_RETURN)
+        if int(self.play_kind) != int(play_sequence.PLAY_MASTER_RETURN):
+            relative_y_m, heading_deg = plan_return_garage(
+                self._car.odometry.x,
+                self._car.odometry.y,
+                self._car.heading_est,
+                -1,
+                self._obstacles,
+                TRANSPORT_OBSTACLE_MARGIN_M,
+                RETURN_GARAGE_OBSTACLE_DEPTH_M,
+                MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_MASTER_RETURN,
+                (relative_y_m * 100.0, heading_deg),
+            )
         play_sequence.tick(self)
 
     def _run_startup_move_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if int(self.play_kind) != int(play_sequence.PLAY_STARTUP):
+            target_y_m = plan_startup_target_y(
+                self._obstacles,
+                motion_params.STARTUP_TARGET_Y_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_STARTUP,
+                (
+                    (
+                        motion_params.MASTER_START_POSITION_M[0] * 100.0,
+                        target_y_m * 100.0,
+                    ),
+                ),
+            )
         if play_sequence.tick(self):
             self._sm.mark_startup_move_completed()
 
@@ -664,6 +695,13 @@ class MasterForwardRuntime:
         self._car.set_relative_translation_target(
             float(value),
             0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_position_xy(self, x, y, max_speed_cmd=None) -> None:
+        self._car.set_translation_target(
+            float(x),
+            float(y),
             max_speed_cmd=max_speed_cmd,
         )
 
@@ -856,6 +894,7 @@ class MasterForwardRuntime:
         if self._orb_act:
             orbit_finished = not bool(getattr(self._car, "command_lock", False))
             if orbit_finished:
+                self._orb_act = False
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -910,14 +949,10 @@ class MasterForwardRuntime:
                 )
                 self._p_event = None
                 self._tr_sync_ack = False
-                self._tr_task_ack = bool(self._sm._av_shift)
+                self._tr_task_ack = False
                 self._tr_ticks = 0
                 self._tr_unlock = False
                 self._car.set_position_integration_enabled(False)
-                if self._sm._av_shift:
-                    self._av_shift_heading = float(self._car.heading_est)
-                else:
-                    self._av_shift_heading = None
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -925,16 +960,15 @@ class MasterForwardRuntime:
                     None,
                     True,
                 )
-                if not self._sm._av_shift:
-                    self._act_ctx = None
-                    self._p_task = (
-                        RK_T_TRANSPORT,
-                        int(self._sm._ctx),
-                        STATE_SEARCH_OBJECT,
-                        int(assistant_request[RQ_TARGET]),
-                        int(MASTER_TRANSPORT_TASK_CONFIG_ID),
-                        False,
-                    )
+                self._act_ctx = None
+                self._p_task = (
+                    RK_T_TRANSPORT,
+                    int(self._sm._ctx),
+                    STATE_SEARCH_OBJECT,
+                    int(assistant_request[RQ_TARGET]),
+                    int(MASTER_TRANSPORT_TASK_CONFIG_ID),
+                    False,
+                )
             elif request_kind == RK_A_CLEAR:
                 self._u6v = None
                 self._u6_has_w = False
@@ -1127,7 +1161,11 @@ class MasterForwardRuntime:
             return
         if self._sm.state != STATE_TRANSPORT_OBJECT:
             return
-        self._car.calibrate_pose_to_field_edge(self._sm.get_target_edge())
+        self._car.calibrate_pose_to_field_edge(
+            self._sm.get_target_edge(),
+            self._sm.get_push_heading_deg(),
+            0.0,
+        )
         self._car.set_position_integration_enabled(True)
 
     def _threshold_for_assistant_request(self, assistant_request: tuple) -> tuple:

@@ -65,18 +65,15 @@ from role.assistant.state_machine import (
 )
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import (
-    ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
-    ASSISTANT_ORBIT_MODE_AVOID_POSITIVE,
-    ASSISTANT_ORBIT_MODE_NORMAL,
     pack_task_arg,
-    unpack_assistant_avoidance_shift_distance_cm,
-    unpack_assistant_avoidance_shift_object_id,
-    unpack_assistant_orbit_mode,
     unpack_assistant_orbit_object_id,
+    unpack_assistant_orbit_offset_deg,
     unpack_task_arg_object_id,
 )
 from role.transport_plan import (
     heading_with_offset,
+    plan_return_garage,
+    plan_startup_target_y,
     push_heading_for_edge,
     target_edge_for_object,
 )
@@ -105,6 +102,12 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
 )
 _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
+TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
+RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
+ASSISTANT_TRANSPORT_EDGE_INSET_M = motion_params.ASSISTANT_TRANSPORT_EDGE_INSET_M
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = (
+    motion_params.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M
+)
 MOTION_STOP_SPEED_THRESHOLD = motion_params.MOTION_STOP_SPEED_THRESHOLD
 MOTION_STOP_CONFIRM_TICKS = motion_params.MOTION_STOP_CONFIRM_TICKS
 
@@ -134,10 +137,18 @@ def _default_now_ms() -> int:
 class AssistantFollowRuntime:
     """基于共享底盘装配辅车角色运行时外观."""
 
-    def __init__(self, now_ms=None, transport=None, uart6=None, uart8=None) -> None:
+    def __init__(
+        self,
+        obstacle_slots,
+        now_ms=None,
+        transport=None,
+        uart6=None,
+        uart8=None,
+    ) -> None:
         from core.runtime import TransportCar
 
         car = TransportCar(vehicle_role=ROLE_ASSISTANT)
+        self._obstacles = tuple(obstacle_slots)
         # 主路径长期 owner 使用短字段：_car 是底盘，_sm 是辅车状态机。
         self._car = car
         self.wheel_encoders = car.wheel_encoders
@@ -153,6 +164,7 @@ class AssistantFollowRuntime:
         self.play_kind = 0
         self.play_step = 0
         self.play_entered = False
+        self.play_params = None
         self._err = "none"
         # UART 缓存短字段：_u6v/_u8v 是速度槽，_u6_ver/_u8_ver 是版本线。
         self._u6v = None
@@ -172,13 +184,7 @@ class AssistantFollowRuntime:
         self._obj_id = 0
         self._obj_th = (0, 0, 0, 0, 0, 0)
         self._realign = False
-        self._av_orbit = False
-        self._av_orbit_offset = 0.0
-        self._av_shift = False
-        self._shift_done = False
-        self._shift_x = 0.0
-        self._shift_y = 0.0
-        self._shift_distance_m = 0.0
+        self._orbit_offset = 0.0
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
@@ -224,7 +230,6 @@ class AssistantFollowRuntime:
         except Exception as exc:
             self._record_error_text("motion_input failed: %s" % exc, exc)
         self._finish_clear_if_needed()
-        self._finish_shift_if_needed()
         self._resume_approach_after_orbit()
         return True
 
@@ -323,9 +328,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
-            self._av_orbit = False
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._clear_done = False
             self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
@@ -335,9 +338,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
-            self._av_orbit = False
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._clear_done = False
             self._enter_follow_state()
         elif self._sm.state == ASSISTANT_STATE_STARTUP_MOVE:
@@ -346,13 +347,10 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
-            self._av_orbit = False
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._realign = False
             self._clear_done = False
             self._enter_approach_object_state(packet)
@@ -374,9 +372,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
-            self._av_orbit = False
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._clear_done = False
             self._line_ok = False
             self._enter_return_follow_state()
@@ -388,9 +384,7 @@ class AssistantFollowRuntime:
             self._p_report = None
             self._found_done = False
             self._realign = False
-            self._av_orbit = False
-            self._av_shift = False
-            self._shift_done = False
+            self._orbit_offset = 0.0
             self._clear_done = False
             self._write_zero_velocity()
         return True
@@ -607,10 +601,12 @@ class AssistantFollowRuntime:
             and self._realign
         ):
             push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
-            offset = 180.0
-            if self._av_shift:
-                offset = self._av_orbit_offset
-            self._car.set_heading_target(heading_with_offset(push_heading, offset))
+            self._car.set_heading_target(
+                heading_with_offset(
+                    push_heading,
+                    self._orbit_offset + 180.0,
+                )
+            )
 
     def _should_store_velocity(self, source) -> bool:
         if self._sm.state == ASSISTANT_STATE_IDLE:
@@ -673,13 +669,42 @@ class AssistantFollowRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_ASSISTANT_RETURN)
+        if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_RETURN):
+            relative_y_m, heading_deg = plan_return_garage(
+                self._car.odometry.x,
+                self._car.odometry.y,
+                self._car.heading_est,
+                1,
+                self._obstacles,
+                TRANSPORT_OBSTACLE_MARGIN_M,
+                RETURN_GARAGE_OBSTACLE_DEPTH_M,
+                ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_ASSISTANT_RETURN,
+                (relative_y_m * 100.0, heading_deg),
+            )
         play_sequence.tick(self)
 
     def _run_startup_move_play(self) -> None:
         from play import sequence as play_sequence
 
-        play_sequence.start(self, play_sequence.PLAY_STARTUP)
+        if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_STARTUP):
+            target_y_m = plan_startup_target_y(
+                self._obstacles,
+                motion_params.STARTUP_TARGET_Y_M,
+            )
+            play_sequence.start(
+                self,
+                play_sequence.PLAY_ASSISTANT_STARTUP,
+                (
+                    (
+                        motion_params.ASSISTANT_START_POSITION_M[0] * 100.0,
+                        target_y_m * 100.0,
+                    ),
+                ),
+            )
         if play_sequence.tick(self):
             self._sm.mark_startup_move_completed()
             self._enter_follow_state()
@@ -688,6 +713,13 @@ class AssistantFollowRuntime:
         self._car.set_relative_translation_target(
             float(value),
             0.0,
+            max_speed_cmd=max_speed_cmd,
+        )
+
+    def play_set_position_xy(self, x, y, max_speed_cmd=None) -> None:
+        self._car.set_translation_target(
+            float(x),
+            float(y),
             max_speed_cmd=max_speed_cmd,
         )
 
@@ -767,27 +799,13 @@ class AssistantFollowRuntime:
             False,
         )
         push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
+        self._orbit_offset = float(
+            unpack_assistant_orbit_offset_deg(self._sm.arg)
+        )
         orbit_target = heading_with_offset(
             push_heading,
-            180.0,
+            self._orbit_offset + 180.0,
         )
-        orbit_mode = unpack_assistant_orbit_mode(self._sm.arg)
-        self._av_orbit = orbit_mode != ASSISTANT_ORBIT_MODE_NORMAL
-        self._av_orbit_offset = 0.0
-        if orbit_mode == ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE:
-            self._av_orbit_offset = -90.0
-            orbit_target = heading_with_offset(
-                push_heading,
-                self._av_orbit_offset,
-            )
-        elif orbit_mode == ASSISTANT_ORBIT_MODE_AVOID_POSITIVE:
-            self._av_orbit_offset = 90.0
-            orbit_target = heading_with_offset(
-                push_heading,
-                self._av_orbit_offset,
-            )
-        if not self._av_orbit:
-            self._av_shift = False
         self._car.set_orbit_target(
             orbit_target,
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
@@ -806,15 +824,7 @@ class AssistantFollowRuntime:
         self._p_report = (_ALIGNED_EVENT, int(value), False)
 
     def _enter_transport_state(self, packet) -> None:
-        if self._av_shift:
-            self._obj_id = unpack_assistant_avoidance_shift_object_id(packet[AS_ARG])
-            self._shift_distance_m = (
-                float(unpack_assistant_avoidance_shift_distance_cm(packet[AS_ARG]))
-                / 100.0
-            )
-        else:
-            self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
-            self._shift_distance_m = 0.0
+        self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
         self._obj_th = tuple(packet[AS_TH])
         self._found_done = False
         self._p_report = None
@@ -822,10 +832,7 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_motion_inputs()
         self._write_zero_velocity()
-        if self._av_shift:
-            self._shift_done = False
-            self._shift_x = float(self._car.odometry.x)
-            self._shift_y = float(self._car.odometry.y)
+        self._car.set_position_integration_enabled(False)
         self._p_local = (
             ASSISTANT_STATE_TRANSPORT_OBJECT,
             int(packet[AS_TARGET]),
@@ -845,9 +852,16 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_ticks = 0
         self._clear_motion_inputs()
+        target_edge = target_edge_for_object(self._obj_id)
         self._car.calibrate_pose_to_field_edge(
-            target_edge_for_object(self._obj_id)
+            target_edge,
+            heading_with_offset(
+                push_heading_for_edge(target_edge),
+                self._orbit_offset,
+            ),
+            ASSISTANT_TRANSPORT_EDGE_INSET_M,
         )
+        self._car.set_position_integration_enabled(True)
         clear_phase = int(self._sm.arg)
         if clear_phase == CLEAR_PHASE_RETREAT:
             self._car.set_relative_translation_target(
@@ -868,11 +882,7 @@ class AssistantFollowRuntime:
             return
         if self._realign:
             return
-        av_orbit = self._av_orbit
-        if av_orbit:
-            self._av_orbit = False
-            self._av_shift = True
-        if not av_orbit and self._last_approach_arg <= 0:
+        if self._last_approach_arg <= 0:
             return
         self._sm.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,
@@ -919,24 +929,6 @@ class AssistantFollowRuntime:
             int(self._sm.arg),
             False,
         )
-
-    def _finish_shift_if_needed(self) -> None:
-        if self._sm.state != ASSISTANT_STATE_TRANSPORT_OBJECT:
-            return
-        if not self._av_shift:
-            return
-        if self._shift_done:
-            return
-        if self._p_report is not None:
-            return
-        dx = float(self._car.odometry.x) - float(self._shift_x)
-        dy = float(self._car.odometry.y) - float(self._shift_y)
-        target = self._shift_distance_m
-        if dx * dx + dy * dy < target * target:
-            return
-        self._shift_done = True
-        self._write_zero_velocity()
-        self._p_report = (_CLEARED_EVENT, 0, False)
 
     def _are_all_wheels_near_stop(self) -> bool:
         return bool(self._car.wheel_stop_confirmed(MOTION_STOP_SPEED_THRESHOLD))
@@ -987,9 +979,3 @@ class AssistantFollowRuntime:
             log_exception("assistant_error", text, exc)
         self._err = text
         self._car.last_exception_text = text
-
-
-def create_transport_car() -> AssistantFollowRuntime:
-    """创建辅车角色运行时对象."""
-
-    return AssistantFollowRuntime()

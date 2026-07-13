@@ -103,6 +103,17 @@ def import_module_clean(module_name: str, monkeypatch):
             return runtime_type(*args, **kwargs)
 
         setattr(module, "MasterForwardRuntime", _master_runtime_factory)
+    if module_name == "role.assistant.follow_runtime":
+        runtime_type = module.AssistantFollowRuntime
+
+        def _assistant_runtime_factory(*args, **kwargs):
+            kwargs.setdefault(
+                "obstacle_slots",
+                ((None, -1.0, -1.0),) * 3,
+            )
+            return runtime_type(*args, **kwargs)
+
+        setattr(module, "AssistantFollowRuntime", _assistant_runtime_factory)
     return module
 
 
@@ -231,6 +242,25 @@ def install_fake_core(monkeypatch):
             self.control_angle = float(angle_deg)
             self.control_angle_active = True
 
+        def set_translation_target(
+            self,
+            x,
+            y,
+            hold_heading_deg=None,
+            max_speed_cmd=None,
+        ) -> None:
+            event = ["set_translation_target", float(x), float(y)]
+            if hold_heading_deg is not None:
+                event.append(float(hold_heading_deg))
+            if max_speed_cmd is not None:
+                event.append(float(max_speed_cmd))
+            self.events.append(tuple(event))
+            self.command_lock = True
+            self.control_x = float(x)
+            self.control_y = float(y)
+            self.control_x_active = True
+            self.control_y_active = True
+
         def set_relative_translation_target(self, dx, dy, hold_heading_deg=None, max_speed_cmd=None) -> None:
             event = ["set_relative_translation_target", float(dx), float(dy)]
             if hold_heading_deg is not None:
@@ -264,8 +294,15 @@ def install_fake_core(monkeypatch):
                 snapshot["angle"] = float(self.control_angle)
             return snapshot
 
-        def calibrate_pose_to_field_edge(self, edge) -> None:
-            self.events.append(("calibrate_pose_to_field_edge", str(edge)))
+        def calibrate_pose_to_field_edge(self, edge, heading_deg, inset_m) -> None:
+            self.events.append(
+                (
+                    "calibrate_pose_to_field_edge",
+                    str(edge),
+                    float(heading_deg),
+                    float(inset_m),
+                )
+            )
 
     monkeypatch.setitem(sys.modules, "core", core_package)
     setattr(core_module, "TransportCar", FakeTransportCar)

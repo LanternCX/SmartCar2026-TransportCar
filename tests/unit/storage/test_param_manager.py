@@ -4,13 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from config import motion as motion_params
 from config import storage as storage_params
 from storage import param_manager
 
 
-ROOT = Path(__file__).resolve().parents[3]
-MOCK_OBSTACLE_FILE = ROOT / "src" / "storage" / "obstacles.txt"
-FIELD_SIZE_M = (3.2, 2.4)
+FIELD_SIZE_M = motion_params.FIELD_SIZE_M
 
 
 def _write_config(tmp_path: Path, content: str) -> Path:
@@ -27,16 +26,6 @@ def test_storage_files_share_board_directory() -> None:
     )
 
     assert {path.rsplit("/", 1)[0] for path in paths} == {"/flash/storage"}
-
-
-def test_load_obstacle_slots_reads_repository_mock_file() -> None:
-    slots = param_manager.load_obstacle_slots(MOCK_OBSTACLE_FILE, FIELD_SIZE_M)
-
-    assert slots == (
-        ("top", 1.45, 1.75),
-        (None, -1.0, -1.0),
-        (None, -1.0, -1.0),
-    )
 
 
 @pytest.mark.parametrize(

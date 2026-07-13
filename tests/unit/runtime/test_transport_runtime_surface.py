@@ -43,7 +43,8 @@ from protocol.topic import (
     UART8,
 )
 from protocol.transport import create_transport
-from play.routines import assistant_return_garage, master_return_garage
+from play.routines import assistant_return_garage, master_return_garage, startup_move
+from role.task_sync import pack_assistant_orbit_arg
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -68,7 +69,6 @@ def _assistant_sync(state, target, arg, threshold=(0, 0, 0, 0, 0, 0)):
 
 MASTER_STATE_STARTUP_MOVE = 9
 ASSISTANT_STATE_STARTUP_MOVE = 8
-MASTER_LEAD_DISTANCE = master_return_garage.SEQUENCE[1] / 100.0
 MASTER_RETURN_POSITION_SPEED = master_return_garage.SEQUENCE[2]
 MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
 MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
@@ -520,7 +520,7 @@ def test_master_runtime_blocks_transport_feedforward_after_finish_task_ready(
     assert uart8.messages == []
 
 
-def test_master_runtime_avoidance_alignment_enters_shift_transport(
+def test_master_runtime_dynamic_alignment_enters_formal_transport(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
@@ -539,107 +539,18 @@ def test_master_runtime_avoidance_alignment_enters_shift_transport(
     runtime._sm._ctx = 9
     runtime._act_ctx = 9
     runtime._sm._obj_id = 2
-    runtime._sm._av_align = True
-    runtime._sm._av_shift_cm = 35
     runtime._sm._orbit_done = True
     runtime._sm._orbit_req = True
     runtime._sm._m_aligned = True
-    cars[0].heading_est = 30.0
-
     runtime._sm.handle_assistant_aligned(0)
     runtime._drain_state_machine_outputs()
 
     assert runtime._sm.state == module.STATE_SEARCH_OBJECT
-    assert runtime._sm._av_shift is True
     assert runtime._p_ast is not None
     assert runtime._p_ast[0] == module.RK_A_TRANSPORT
-    assert runtime._p_task is None
-    assert runtime._av_shift_heading == pytest.approx(30.0)
-    assert cars[0].position_integration_enabled is False
-
-
-def test_master_runtime_avoidance_shift_starts_formal_orbit_then_aligns(
-    monkeypatch,
-) -> None:
-    clock = ManualClock(0)
-    cars = install_fake_core(monkeypatch)
-    module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
-    )
-    runtime._sm.state = module.STATE_TRANSPORT_OBJECT
-    runtime._sm._edge = "bottom"
-    runtime._sm._av_shift = True
-    runtime._sm._tr_req = True
-    runtime._sm._tr_ready = True
-
-    runtime._sm.handle_assistant_cleared(0)
-    runtime._drain_state_machine_outputs()
-
-    assert ("set_orbit_target", 180.0, float(module.MASTER_ORBIT_RADIUS_SCALE)) in cars[0].events
-    assert runtime._sm.state == module.STATE_ORBITING
-    assert runtime._p_ast is None
-    cars[0].command_lock = False
-    runtime._advance_state_machine()
-    runtime._drain_state_machine_outputs()
-
-    assert runtime._sm.state == module.STATE_SEARCH_OBJECT
-    assert runtime._p_ast is not None
-    assert runtime._p_ast[0] == module.RK_A_ORBIT
     assert runtime._p_task is not None
-
-
-def test_master_runtime_applies_planned_shift_once_before_formal_orbit(
-    monkeypatch,
-) -> None:
-    """辅车平移完成事件先应用主车规划位移，再进入正式绕行."""
-    clock = ManualClock(0)
-    cars = install_fake_core(monkeypatch)
-    module = import_module_clean("role.master.forward_runtime", monkeypatch)
-    uart8 = BufferedUart(
-        incoming=encode_frame(
-            0x02,
-            TOPIC_ASSISTANT_EVENT_REPORT,
-            7,
-            encode_assistant_event_report_body(module.EVENT_CLEARED, 0),
-        )
-    )
-    runtime = module.MasterForwardRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=uart8,
-            now_ms=clock,
-        ),
-    )
-    runtime._sm.state = module.STATE_TRANSPORT_OBJECT
-    runtime._sm._edge = "top"
-    runtime._sm._av_shift = True
-    runtime._sm._av_shift_cm = 50
-    runtime._sm._tr_req = True
-    runtime._sm._tr_ready = True
-    runtime._av_shift_heading = 90.0
-    cars[0].set_position_integration_enabled(False)
-
-    runtime.poll_transport_rx()
-    runtime._consume_uart8_inputs()
-
-    assert cars[0].odometry.x == pytest.approx(0.50)
-    assert cars[0].odometry.y == pytest.approx(0.0)
-    assert cars[0].position_integration_enabled is True
-    assert runtime._sm.state == module.STATE_ORBITING
-
-    runtime._consume_uart8_inputs()
-
-    assert cars[0].odometry.x == pytest.approx(0.50)
-    assert cars[0].odometry.y == pytest.approx(0.0)
+    assert runtime._p_task[0] == module.RK_T_TRANSPORT
+    assert cars[0].position_integration_enabled is False
 
 
 def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None:
@@ -658,13 +569,19 @@ def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None
     runtime._sm.state = module.STATE_TRANSPORT_OBJECT
     runtime._sm._ctx = 9
     runtime._sm._edge = "top"
+    runtime._sm._push_heading = 30.0
     runtime._act_ctx = 9
 
     runtime._handle_task_event(_master_event(9, module.EVENT_ARRIVED, 0))
 
     assert runtime._sm.state == module.STATE_CLEAR_OBJECT
     assert runtime._act_ctx is None
-    assert ("calibrate_pose_to_field_edge", "top") in cars[0].events
+    assert (
+        "calibrate_pose_to_field_edge",
+        "top",
+        30.0,
+        0.0,
+    ) in cars[0].events
     assert cars[0].position_integration_enabled is True
 
 
@@ -1364,7 +1281,7 @@ def test_assistant_runtime_skips_orbit_correction_after_chassis_orbit_finished(
     assert runtime._sm.state == module.ASSISTANT_STATE_APPROACH_OBJECT
 
 
-def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
+def test_assistant_runtime_dynamic_orbit_enters_realign(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
@@ -1377,7 +1294,7 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
             encode_assistant_state_sync_body(
                 module.ASSISTANT_STATE_ORBIT,
                 module.ASSISTANT_TARGET_OBJECT,
-                _pack_task_arg(module.ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE, 2),
+                pack_assistant_orbit_arg(-45, 2),
             ),
         )
     )
@@ -1391,6 +1308,10 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
         ),
     )
     car = cars[0]
+    runtime._last_approach_arg = _pack_task_arg(
+        module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+        2,
+    )
 
     run_runtime_cycle(runtime)
     from role.transport_plan import (
@@ -1403,7 +1324,7 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
         "set_orbit_target",
         heading_with_offset(
             push_heading_for_edge(target_edge_for_object(2)),
-            -90.0,
+            135.0,
         ),
         float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
     ) in car.events
@@ -1436,13 +1357,13 @@ def test_assistant_runtime_avoidance_orbit_enters_realign(monkeypatch) -> None:
         "set_heading_target",
         heading_with_offset(
             push_heading_for_edge(target_edge_for_object(2)),
-            -90.0,
+            135.0,
         ),
     ) in car.events
 
 
-def test_assistant_runtime_accepts_positive_avoidance_orbit_mode(monkeypatch) -> None:
-    """辅车按状态参数执行正九十度避障绕行."""
+def test_assistant_runtime_accepts_dynamic_orbit_offset(monkeypatch) -> None:
+    """辅车按状态参数执行动态斜向绕行."""
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
@@ -1460,18 +1381,26 @@ def test_assistant_runtime_accepts_positive_avoidance_orbit_mode(monkeypatch) ->
         _assistant_sync(
             module.ASSISTANT_STATE_ORBIT,
             module.ASSISTANT_TARGET_OBJECT,
-            _pack_task_arg(module.ASSISTANT_ORBIT_MODE_AVOID_POSITIVE, 2),
+            pack_assistant_orbit_arg(35, 2),
         )
+    )
+    from role.transport_plan import (
+        heading_with_offset,
+        push_heading_for_edge,
+        target_edge_for_object,
     )
 
     assert (
         "set_orbit_target",
-        90.0,
+        heading_with_offset(
+            push_heading_for_edge(target_edge_for_object(2)),
+            35.0 + 180.0,
+        ),
         float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
     ) in cars[0].events
 
 
-def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
+def test_assistant_runtime_zero_offset_uses_opposite_push_heading(
     monkeypatch,
 ) -> None:
     clock = ManualClock(0)
@@ -1486,7 +1415,7 @@ def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
             encode_assistant_state_sync_body(
                 module.ASSISTANT_STATE_ORBIT,
                 module.ASSISTANT_TARGET_OBJECT,
-                _pack_task_arg(module.ASSISTANT_ORBIT_MODE_NORMAL, 2),
+                pack_assistant_orbit_arg(0, 2),
             ),
         )
     )
@@ -1499,7 +1428,6 @@ def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
             now_ms=clock,
         ),
     )
-    runtime._av_shift = True
     runtime._last_approach_arg = _pack_task_arg(
         module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
         2,
@@ -1520,8 +1448,6 @@ def test_assistant_runtime_formal_orbit_uses_formal_heading_after_avoidance(
         ),
         float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
     ) in cars[0].events
-    assert runtime._av_orbit is False
-
     cars[0].command_lock = False
     cars[0].orbit_mode = False
     clock.advance(20)
@@ -1774,7 +1700,8 @@ def test_assistant_runtime_ignores_pause_during_return_follow_play(monkeypatch) 
     assert (
         "set_relative_translation_target",
         0.0,
-        ASSISTANT_LEAD_DISTANCE,
+        ASSISTANT_LEAD_DISTANCE
+        + float(module.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M),
         float(ASSISTANT_RETURN_POSITION_SPEED),
     ) in cars[0].events
 
@@ -2078,7 +2005,13 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.MasterForwardRuntime(
+        obstacle_slots=(
+            ("left", obstacle_start_y, obstacle_start_y + 0.2),
+            (None, -1.0, -1.0),
+            (None, -1.0, -1.0),
+        ),
         now_ms=clock,
         transport=create_transport(
             ROLE_MASTER,
@@ -2087,7 +2020,20 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
             now_ms=clock,
         ),
     )
+    cars[0].odometry.x = 0.5
+    cars[0].odometry.y = 1.5
+    cars[0].heading_est = -90.0
     runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
+    expected_distance, expected_heading = module.plan_return_garage(
+        cars[0].odometry.x,
+        cars[0].odometry.y,
+        cars[0].heading_est,
+        -1,
+        runtime._obstacles,
+        module.TRANSPORT_OBSTACLE_MARGIN_M,
+        module.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+        module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+    )
 
     runtime._apply_motion_outputs()
 
@@ -2095,9 +2041,17 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     assert (
         "set_relative_translation_target",
         0.0,
-        MASTER_LEAD_DISTANCE,
+        pytest.approx(expected_distance),
         float(MASTER_RETURN_POSITION_SPEED),
     ) in cars[0].events
+    cars[0].command_lock = False
+
+    runtime._apply_motion_outputs()
+
+    assert (
+        "set_heading_transition_target",
+        pytest.approx(expected_heading),
+    ) == cars[0].events[-1]
 
 
 def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
@@ -2118,19 +2072,73 @@ def test_master_runtime_startup_play_uses_light_sequence(monkeypatch) -> None:
     runtime._apply_motion_outputs()
 
     assert runtime.play_kind != 0
+    assert (
+        "set_translation_target",
+        pytest.approx(module.motion_params.MASTER_START_POSITION_M[0]),
+        pytest.approx(module.motion_params.STARTUP_TARGET_Y_M),
+        5.0,
+    ) in cars[0].events
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", 90.0) in cars[0].events
+    assert (
+        "set_heading_transition_target",
+        float(startup_move.SEQUENCE[4]),
+    ) in cars[0].events
     cars[0].command_lock = False
-    cars[0].heading_est = 90.0
+    cars[0].heading_est = float(startup_move.SEQUENCE[4])
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    runtime._apply_motion_outputs()
-    cars[0].command_lock = False
-    runtime._apply_motion_outputs()
-    runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    assert sum(
+        event[0] == "set_heading_transition_target"
+        for event in cars[0].events
+        if isinstance(event, tuple)
+    ) == 1
+
+
+def test_both_runtimes_limit_startup_move_to_left_obstacle(monkeypatch) -> None:
+    """主辅车分别按自身坐标移动到同一 left 障碍边界."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    obstacles = (
+        ("left", 0.45, 0.8),
+        ("bottom", 0.2, 0.4),
+        (None, -1.0, -1.0),
+    )
+    master = master_module.MasterForwardRuntime(
+        obstacle_slots=obstacles,
+        now_ms=clock,
+        transport=create_transport(ROLE_MASTER, now_ms=clock),
+    )
+    assistant = assistant_module.AssistantFollowRuntime(
+        obstacle_slots=obstacles,
+        now_ms=clock,
+        transport=create_transport(ROLE_ASSISTANT, now_ms=clock),
+    )
+    cars[0].odometry.x = 0.25
+    cars[0].odometry.y = 0.1
+    cars[0].heading_est = 37.0
+    cars[1].odometry.x = 0.15
+    cars[1].odometry.y = 0.2
+    cars[1].heading_est = -18.0
+
+    master._run_startup_move_play()
+    assistant._run_startup_move_play()
+
+    assert (
+        "set_translation_target",
+        master_module.motion_params.MASTER_START_POSITION_M[0],
+        0.45,
+        5.0,
+    ) in cars[0].events
+    assert (
+        "set_translation_target",
+        assistant_module.motion_params.ASSISTANT_START_POSITION_M[0],
+        0.45,
+        5.0,
+    ) in cars[1].events
 
 
 def test_master_runtime_final_clear_retreat_enters_return_and_queues_assistant_sync(monkeypatch) -> None:
@@ -2203,7 +2211,7 @@ def test_master_runtime_starts_return_play_after_assistant_return_sync(monkeypat
     assert (
         "set_relative_translation_target",
         0.0,
-        MASTER_LEAD_DISTANCE,
+        -float(module.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M),
         float(MASTER_RETURN_POSITION_SPEED),
     ) in cars[0].events
     frame = decode_frame(uart8.messages[-1])
@@ -2330,8 +2338,8 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
-    assert ("set_heading_transition_target", -90.0) in cars[0].events
-    cars[0].heading_est = -90.0
+    assert ("set_heading_transition_target", 0.0) in cars[0].events
+    cars[0].heading_est = 0.0
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
     runtime._apply_motion_outputs()
@@ -2345,7 +2353,7 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_yellow_ready(mon
     }
     runtime._line_ok = True
     runtime._apply_motion_outputs()
-    cars[0].heading_est = -90.0
+    cars[0].heading_est = 0.0
     runtime._apply_motion_outputs()
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
@@ -2545,7 +2553,13 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.AssistantFollowRuntime(
+        obstacle_slots=(
+            ("left", obstacle_start_y, obstacle_start_y + 0.2),
+            (None, -1.0, -1.0),
+            (None, -1.0, -1.0),
+        ),
         now_ms=clock,
         transport=create_transport(
             ROLE_ASSISTANT,
@@ -2554,8 +2568,21 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
             now_ms=clock,
         ),
     )
+    cars[0].odometry.x = 0.5
+    cars[0].odometry.y = 1.5
+    cars[0].heading_est = 90.0
     runtime._sm.state = module.ASSISTANT_STATE_RETURN_FOLLOW
     runtime._p_local = None
+    expected_distance, expected_heading = module.plan_return_garage(
+        cars[0].odometry.x,
+        cars[0].odometry.y,
+        cars[0].heading_est,
+        1,
+        runtime._obstacles,
+        module.TRANSPORT_OBSTACLE_MARGIN_M,
+        module.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+        module.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M,
+    )
 
     runtime._write_effective_velocity()
 
@@ -2563,16 +2590,18 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     assert (
         "set_relative_translation_target",
         0.0,
-        ASSISTANT_LEAD_DISTANCE,
+        pytest.approx(expected_distance),
         float(ASSISTANT_RETURN_POSITION_SPEED),
     ) in cars[0].events
     cars[0].command_lock = False
-    cars[0].heading_est = 0.0
     runtime._write_effective_velocity()
     runtime._write_effective_velocity()
-    assert ("set_heading_transition_target", -90.0) in cars[0].events
+    assert (
+        "set_heading_transition_target",
+        pytest.approx(expected_heading),
+    ) == cars[0].events[-1]
     cars[0].command_lock = False
-    cars[0].heading_est = -90.0
+    cars[0].heading_est = expected_heading
     runtime._write_effective_velocity()
     runtime._line_ok = True
     runtime._write_effective_velocity()
@@ -2709,43 +2738,6 @@ def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(
     }
 
 
-def test_assistant_avoidance_shift_reports_when_odometry_distance_reaches_target(
-    monkeypatch,
-) -> None:
-    clock = ManualClock(0)
-    cars = install_fake_core(monkeypatch)
-    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
-    runtime = module.AssistantFollowRuntime(
-        now_ms=clock,
-        transport=create_transport(
-            ROLE_ASSISTANT,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
-    )
-    runtime._av_shift = True
-    runtime._apply_sync_context(
-        _assistant_sync(
-            module.ASSISTANT_STATE_TRANSPORT_OBJECT,
-            module.ASSISTANT_TARGET_OBJECT,
-            _pack_task_arg(50, 2),
-        )
-    )
-    cars[0].odometry.y = -0.50
-
-    runtime.step_motion_input()
-
-    assert runtime._p_report == (module._CLEARED_EVENT, 0, False)
-    assert cars[0].last_chassis_target == {
-        "source": None,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "has_omega": True,
-    }
-
-
 def test_assistant_runtime_transport_syncs_local_transport_object_task(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
@@ -2782,6 +2774,13 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    from role import transport_plan
+
+    monkeypatch.setattr(
+        transport_plan.motion_params,
+        "TRANSPORT_OBJECT_TARGET_EDGE",
+        {-1: "right"},
+    )
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -2798,6 +2797,9 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
             _pack_task_arg(2, 1),
         )
     )
+    runtime._orbit_offset = 30.0
+
+    assert cars[0].position_integration_enabled is False
 
     accepted = runtime._apply_sync_context(
         _assistant_sync(
@@ -2808,9 +2810,19 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     )
 
     assert accepted is True
-    from role.transport_plan import target_edge_for_object
+    target_edge = transport_plan.target_edge_for_object(1)
+    expected_heading = module.heading_with_offset(
+        module.push_heading_for_edge(target_edge),
+        runtime._orbit_offset,
+    )
 
-    assert ("calibrate_pose_to_field_edge", target_edge_for_object(1)) in cars[0].events
+    assert (
+        "calibrate_pose_to_field_edge",
+        target_edge,
+        expected_heading,
+        pytest.approx(module.ASSISTANT_TRANSPORT_EDGE_INSET_M),
+    ) in cars[0].events
+    assert cars[0].position_integration_enabled is True
 
 
 def test_assistant_runtime_return_follow_syncs_local_yellow_line_task(monkeypatch) -> None:

@@ -27,11 +27,13 @@ ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
-MASTER_START_POSITION_M = (0.10, 0.0)
+MASTER_START_POSITION_M = (0.30, 0.0)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, -0.50)
+ASSISTANT_START_POSITION_M = (0.10, 0.0)
+# 出库第一段世界系 Y 目标, 单位米
+STARTUP_TARGET_Y_M = 0.70
 # 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "top"}
+TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -62,14 +64,24 @@ ORBIT_ANGLE_CONFIRM_TICKS = 3
 HOLD_SPEED_EPS = 0.01
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
+# 主车实际绕行角小于该值时进入辅车绕行避让流程, 单位度
+MASTER_ORBIT_AVOID_TRIGGER_DEG = 30
+# 主车为辅车让出绕行视野时相对搬运方向的目标偏角, 单位度
+MASTER_ORBIT_AVOID_HEADING_DEG = 90
 # 绕行定位使用的车辆参考点到物体中心固定半径, 单位米
 ORBIT_POSITION_RADIUS_M = 0.13
 # 主动原地转向时车辆参考点绕旋转中心的半径, 单位米
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
-TRANSPORT_OBSTACLE_MARGIN_M = 0.20
-# 主车避障绕行相对正式推动朝向的角度偏移, 单位度
-TRANSPORT_AVOIDANCE_ORBIT_OFFSET_DEG = -90.0
+TRANSPORT_OBSTACLE_MARGIN_M = 0.45
+# 回库规划中边线障碍向场内延伸的物理深度, 单位米
+RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
+# 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米
+ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
+# 主车回库第一阶段至少后退的距离, 单位米
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
+# 辅车回库第一阶段至少后退的距离, 单位米
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

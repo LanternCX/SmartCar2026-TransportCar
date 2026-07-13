@@ -6,14 +6,7 @@
 from micropython import const  # pyright: ignore[reportMissingImports]
 
 
-ASSISTANT_ORBIT_MODE_NORMAL = const(0)
-ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE = const(1)
-ASSISTANT_ORBIT_MODE_AVOID_POSITIVE = const(2)
-_ASSISTANT_ORBIT_MODES = (
-    ASSISTANT_ORBIT_MODE_NORMAL,
-    ASSISTANT_ORBIT_MODE_AVOID_NEGATIVE,
-    ASSISTANT_ORBIT_MODE_AVOID_POSITIVE,
-)
+_ASSISTANT_ORBIT_OFFSET_BIAS = const(90)
 
 
 def pack_task_arg(config_id, object_id):
@@ -44,49 +37,32 @@ def _validate_object_id(object_id):
     return object_id
 
 
-def pack_assistant_orbit_arg(mode, object_id):
-    """按辅车绕行状态打包绕行模式和物体编号"""
+def pack_assistant_orbit_arg(offset_deg, object_id):
+    """按辅车绕行状态打包相对推动角度和物体编号"""
 
-    mode = int(mode)
-    if mode not in _ASSISTANT_ORBIT_MODES:
+    offset_deg = float(offset_deg)
+    if not -90.0 <= offset_deg <= 90.0:
         raise ValueError
-    return pack_task_arg(mode, _validate_object_id(object_id))
+    if offset_deg >= 0.0:
+        offset_deg = int(offset_deg + 0.5)
+    else:
+        offset_deg = int(offset_deg - 0.5)
+    return pack_task_arg(
+        offset_deg + _ASSISTANT_ORBIT_OFFSET_BIAS,
+        _validate_object_id(object_id),
+    )
 
 
-def unpack_assistant_orbit_mode(arg):
-    """按辅车绕行状态读取有名绕行模式"""
+def unpack_assistant_orbit_offset_deg(arg):
+    """按辅车绕行状态读取相对推动角度"""
 
-    mode = unpack_task_arg_config(arg)
-    if mode not in _ASSISTANT_ORBIT_MODES:
+    encoded = unpack_task_arg_config(arg)
+    if encoded > _ASSISTANT_ORBIT_OFFSET_BIAS * 2:
         raise ValueError
-    return mode
+    return encoded - _ASSISTANT_ORBIT_OFFSET_BIAS
 
 
 def unpack_assistant_orbit_object_id(arg):
     """按辅车绕行状态读取物体编号"""
-
-    return unpack_task_arg_object_id(arg)
-
-
-def pack_assistant_avoidance_shift_arg(distance_cm, object_id):
-    """按辅车避障平移状态打包厘米距离和物体编号"""
-
-    distance_cm = int(distance_cm)
-    if not 1 <= distance_cm <= 255:
-        raise ValueError
-    return pack_task_arg(distance_cm, _validate_object_id(object_id))
-
-
-def unpack_assistant_avoidance_shift_distance_cm(arg):
-    """按辅车避障平移状态读取厘米距离"""
-
-    distance_cm = unpack_task_arg_config(arg)
-    if distance_cm == 0:
-        raise ValueError
-    return distance_cm
-
-
-def unpack_assistant_avoidance_shift_object_id(arg):
-    """按辅车避障平移状态读取物体编号"""
 
     return unpack_task_arg_object_id(arg)

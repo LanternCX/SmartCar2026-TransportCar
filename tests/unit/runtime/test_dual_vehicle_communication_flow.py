@@ -19,6 +19,8 @@ from protocol.topic import (
     UART8,
 )
 from protocol.transport import create_transport
+from role.task_sync import pack_assistant_orbit_arg
+from role.transport_plan import push_heading_for_edge, target_edge_for_object
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -51,6 +53,14 @@ def _ack_latest_tcp_if_needed(uart):
     if frame["mode"] != 0x02:
         return
     uart.push(ack_last_frame(uart))
+
+
+def _orbit_targets(car):
+    return [
+        event[1]
+        for event in car.events
+        if isinstance(event, tuple) and event[0] == "set_orbit_target"
+    ]
 
 
 def _pump_pair(clock, master, assistant, master_car, assistant_car, master_uart6, assistant_uart6, steps=1):
@@ -189,6 +199,7 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: master._act_ctx is not None,
     )
+    master_car.heading_est = push_heading_for_edge(target_edge_for_object(2))
 
     master_uart6.push(
         encode_frame(
@@ -212,133 +223,9 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: master._sm.state == master_module.STATE_ORBITING,
     )
-
-    if master._sm._av_m_orbit:
-        master_uart8.push(
-            encode_frame(
-                0x02,
-                TOPIC_ASSISTANT_EVENT_REPORT,
-                11,
-                encode_assistant_vision_event_report_body(
-                    master_module.EVENT_TARGET_FOUND,
-                    300,
-                ),
-            )
-        )
-        _pump_until(
-            clock,
-            master,
-            assistant,
-            master_car,
-            assistant_car,
-            master_uart6,
-            assistant_uart6,
-            lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_ORBIT,
-        )
-        _pump_until(
-            clock,
-            master,
-            assistant,
-            master_car,
-            assistant_car,
-            master_uart6,
-            assistant_uart6,
-                lambda: (
-                    master._sm.state == master_module.STATE_SEARCH_OBJECT
-                    and master._act_ctx is not None
-                    and assistant._realign
-                    and assistant._sm.state == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
-                ),
-        )
-        master_uart6.push(
-            encode_frame(
-                0x02,
-                TOPIC_MASTER_VISION_EVENT_REPORT,
-                2,
-                encode_master_vision_event_report_body(
-                    master._act_ctx,
-                    master_module.EVENT_ALIGNED,
-                    0,
-                ),
-            )
-        )
-        master_uart8.push(
-            encode_frame(
-                0x02,
-                TOPIC_ASSISTANT_EVENT_REPORT,
-                12,
-                encode_assistant_vision_event_report_body(
-                    master_module.EVENT_ALIGNED,
-                    0,
-                ),
-            )
-        )
-        _pump_until(
-            clock,
-            master,
-            assistant,
-            master_car,
-            assistant_car,
-            master_uart6,
-            assistant_uart6,
-            lambda: (
-                master._sm.state == master_module.STATE_TRANSPORT_OBJECT
-                and assistant._sm.state
-                == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT
-            ),
-        )
-        assistant_car.odometry.y = -float(assistant._shift_distance_m)
-        _pump_until(
-            clock,
-            master,
-            assistant,
-            master_car,
-            assistant_car,
-            master_uart6,
-            assistant_uart6,
-            lambda: (
-                master._sm.state == master_module.STATE_SEARCH_OBJECT
-                and master._act_ctx is not None
-                and assistant._realign
-                and assistant._sm.state
-                == assistant_module.ASSISTANT_STATE_APPROACH_OBJECT
-            ),
-        )
-        master_uart6.push(
-            encode_frame(
-                0x02,
-                TOPIC_MASTER_VISION_EVENT_REPORT,
-                13,
-                encode_master_vision_event_report_body(
-                    master._act_ctx,
-                    master_module.EVENT_ALIGNED,
-                    0,
-                ),
-            )
-        )
-        assistant_uart6.push(
-            encode_frame(
-                0x02,
-                TOPIC_ASSISTANT_VISION_EVENT_REPORT,
-                13,
-                encode_assistant_vision_event_report_body(
-                    assistant_module._ALIGNED_EVENT,
-                    0,
-                ),
-            )
-        )
-        _pump_until(
-            clock,
-            master,
-            assistant,
-            master_car,
-            assistant_car,
-            master_uart6,
-            assistant_uart6,
-            lambda: master._sm.state == master_module.STATE_TRANSPORT_OBJECT
-            and assistant._sm.state == assistant_module.ASSISTANT_STATE_TRANSPORT_OBJECT,
-        )
-        return
+    master_orbit_targets = _orbit_targets(master_car)
+    assert len(master_orbit_targets) == 1
+    assert master_orbit_targets[0] != master._sm.get_push_heading_deg()
 
     _pump_until(
         clock,
@@ -373,6 +260,18 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: assistant._sm.state == assistant_module.ASSISTANT_STATE_ORBIT,
     )
+    assert len(_orbit_targets(master_car)) == 1
+    _pump_until(
+        clock,
+        master,
+        assistant,
+        master_car,
+        assistant_car,
+        master_uart6,
+        assistant_uart6,
+        lambda: len(_orbit_targets(master_car)) == 2,
+    )
+    assert _orbit_targets(master_car)[1] == master._sm.get_push_heading_deg()
 
     _pump_until(
         clock,
@@ -674,7 +573,11 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
     )
     master_uart8.push(report)
     run_runtime_cycle(master)
-    orbit_sync_body = encode_assistant_state_sync_body(3, 1, _pack_task_arg(0, 2))
+    orbit_sync_body = encode_assistant_state_sync_body(
+        3,
+        1,
+        pack_assistant_orbit_arg(0, 2),
+    )
     for _ in range(10):
         orbit_sync_count = 0
         for message in master_uart8.messages:
