@@ -2774,6 +2774,13 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    from role import transport_plan
+
+    monkeypatch.setattr(
+        transport_plan.motion_params,
+        "TRANSPORT_OBJECT_TARGET_EDGE",
+        {-1: "right"},
+    )
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
         transport=create_transport(
@@ -2803,12 +2810,16 @@ def test_assistant_runtime_calibrates_pose_when_entering_clear_state(monkeypatch
     )
 
     assert accepted is True
-    from role.transport_plan import target_edge_for_object
+    target_edge = transport_plan.target_edge_for_object(1)
+    expected_heading = module.heading_with_offset(
+        module.push_heading_for_edge(target_edge),
+        runtime._orbit_offset,
+    )
 
     assert (
         "calibrate_pose_to_field_edge",
-        target_edge_for_object(1),
-        -60.0,
+        target_edge,
+        expected_heading,
         pytest.approx(module.ASSISTANT_TRANSPORT_EDGE_INSET_M),
     ) in cars[0].events
     assert cars[0].position_integration_enabled is True
