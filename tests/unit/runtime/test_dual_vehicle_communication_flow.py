@@ -331,18 +331,17 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         lambda: master._act_ctx is not None,
     )
 
-    master_uart6.push(
-        encode_frame(
-            0x02,
-            TOPIC_MASTER_VISION_EVENT_REPORT,
-            3,
-            encode_master_vision_event_report_body(
-                master._act_ctx,
-                master_module.EVENT_ARRIVED,
-                0,
-            ),
-        )
+    _pump_until(
+        clock,
+        master,
+        assistant,
+        master_car,
+        assistant_car,
+        master_uart6,
+        assistant_uart6,
+        lambda: master._tr_unlock,
     )
+    master_car.grayscale_edges.extend((1, -1))
     _pump_until(
         clock,
         master,

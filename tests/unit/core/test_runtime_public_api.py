@@ -603,6 +603,18 @@ def test_transport_car_selects_odometry_axis_scales_by_role() -> None:
     )
 
 
+def test_transport_car_reports_grayscale_edges_once() -> None:
+    """灰度输入只在电平变化时报告对应边沿."""
+    transport_car = import_transport_car_module()
+    car = transport_car.TransportCar(diagnostic_mode=True)
+
+    car.grayscale._value = 1
+    assert car.read_grayscale_edge() == -1
+    assert car.read_grayscale_edge() == 0
+    car.grayscale._value = 0
+    assert car.read_grayscale_edge() == 1
+
+
 def test_transport_car_builds_encoder_snapshot() -> None:
     """编码器快照继续按轮输出原始值与滤波值."""
     _transport_car, car = make_minimal_transport_car(

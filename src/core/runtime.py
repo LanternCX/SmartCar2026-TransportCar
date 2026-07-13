@@ -212,6 +212,8 @@ class TransportCar:
         self.led = Pin("C4", Pin.OUT, value=True)
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
+        self.grayscale = Pin("C23", Pin.IN)
+        self._grayscale_on = not bool(self.grayscale.value())
 
         # IMU 传感器(陀螺仪+加速度计), 用于姿态估计与航向角反馈
         # 诊断模式下使用空占位对象避免硬件依赖
@@ -453,6 +455,15 @@ class TransportCar:
         )
 
     # Public API (公开接口)
+    def read_grayscale_edge(self):
+        """读取灰度传感器边沿, 上升沿为 1, 下降沿为 -1"""
+
+        current = not bool(self.grayscale.value())
+        if current == self._grayscale_on:
+            return 0
+        self._grayscale_on = current
+        return 1 if current else -1
+
     def mark_tick(self, _tick=None): # noqa: F841
         """
         @brief ticker 中断回调函数, 中断处理中置位控制周期标志

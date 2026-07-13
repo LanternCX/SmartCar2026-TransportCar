@@ -156,8 +156,14 @@ def install_fake_core(monkeypatch):
             }
             self.last_exception_text = "none"
             self.position_integration_enabled = True
+            self.grayscale_edges = []
             self.events = []
             cars.append(self)
+
+        def read_grayscale_edge(self) -> int:
+            if self.grayscale_edges:
+                return int(self.grayscale_edges.pop(0))
+            return 0
 
         def mark_tick(self, tick=None) -> None:
             self.events.append(("mark_tick", tick))

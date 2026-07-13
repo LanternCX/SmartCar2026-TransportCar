@@ -223,6 +223,7 @@ class MasterForwardRuntime:
         # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
         self._last_state = int(self._sm.state)
         self._line_ok = False
+        self._gray_seen = False
         self._gate = None
 
     def prepare_runtime(self) -> None:
@@ -303,6 +304,7 @@ class MasterForwardRuntime:
         self._sync_role_state_transition()
         self._consume_uart6_velocity_input()
         self._apply_motion_outputs()
+        self._consume_grayscale_edge()
         self._run_clear_phase()
         self._sync_role_state_transition()
         self._run_turn_back_phase()
@@ -330,6 +332,7 @@ class MasterForwardRuntime:
         if current_state == STATE_TRANSPORT_OBJECT:
             self._tr_ticks = 0
             self._tr_unlock = False
+            self._gray_seen = False
         self._last_state = current_state
 
     def _clear_local_vision_velocity_residue(self) -> None:
@@ -398,13 +401,13 @@ class MasterForwardRuntime:
 
     def _handle_task_event(self, packet) -> None:
         context_id = int(packet[ME_CTX])
+        if int(packet[ME_EVENT]) in (
+            int(EVENT_ARRIVED),
+            int(EVENT_RETURN_LINE_ALIGNED),
+        ):
+            return
         if self._act_ctx == context_id:
             self._clear_local_velocity_for_reliable_event()
-            if (
-                self._sm.state == STATE_RETURN_GARAGE_RETREAT
-                and int(packet[ME_EVENT]) == int(EVENT_RETURN_LINE_ALIGNED)
-            ):
-                self._line_ok = True
             self._apply_transport_arrival_pose(packet[ME_EVENT])
             self._sm.handle_event(
                 context_id,
@@ -573,6 +576,30 @@ class MasterForwardRuntime:
             return
         if self._sm.allows_search_velocity():
             self._apply_latest_uart6_velocity()
+
+    def _consume_grayscale_edge(self) -> None:
+        edge = int(self._car.read_grayscale_edge())
+        if self._sm.state == STATE_RETURN_GARAGE_RETREAT:
+            if edge > 0:
+                self._line_ok = True
+            return
+        if self._sm.state != STATE_TRANSPORT_OBJECT or not self._tr_unlock:
+            return
+        if edge > 0:
+            self._gray_seen = True
+            return
+        if edge >= 0 or not self._gray_seen:
+            return
+        self._gray_seen = False
+        self._apply_transport_arrival_pose(EVENT_ARRIVED)
+        self._sm.handle_event(self._sm._ctx, EVENT_ARRIVED, 0)
+        if self._sm.state != STATE_TRANSPORT_OBJECT:
+            self._act_ctx = None
+            self._u6v = None
+            self._u6_has_w = False
+            self._u6_ver = self._ts.get_udp_version(
+                UART6, TOPIC_LOCAL_VISION_VELOCITY
+            )
 
     def _is_transport_finish_task_ready(self) -> bool:
         return self._act_ctx == int(self._sm._ctx)

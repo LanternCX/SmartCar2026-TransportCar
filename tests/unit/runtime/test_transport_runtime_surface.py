@@ -549,7 +549,7 @@ def test_master_runtime_dynamic_alignment_enters_formal_transport(
     assert cars[0].position_integration_enabled is False
 
 
-def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None:
+def test_master_runtime_ignores_visual_arrived_for_transport_completion(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -570,6 +570,39 @@ def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None
 
     runtime._handle_task_event(_master_event(9, module.EVENT_ARRIVED, 0))
 
+    assert runtime._sm.state == module.STATE_TRANSPORT_OBJECT
+    assert runtime._act_ctx == 9
+    assert not any(event[0] == "calibrate_pose_to_field_edge" for event in cars[0].events)
+
+
+def test_master_runtime_finishes_transport_after_grayscale_rise_then_fall(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.STATE_TRANSPORT_OBJECT
+    runtime._sm._ctx = 9
+    runtime._sm._edge = "top"
+    runtime._sm._push_heading = 30.0
+    runtime._act_ctx = 9
+    runtime._last_state = module.STATE_TRANSPORT_OBJECT
+    runtime._tr_unlock = True
+
+    cars[0].grayscale_edges.extend((-1, 1, -1))
+    runtime._run_motion_input_cycle()
+    assert runtime._sm.state == module.STATE_TRANSPORT_OBJECT
+    runtime._run_motion_input_cycle()
+    assert runtime._sm.state == module.STATE_TRANSPORT_OBJECT
+    runtime._run_motion_input_cycle()
+
     assert runtime._sm.state == module.STATE_CLEAR_OBJECT
     assert runtime._act_ctx is None
     assert (
@@ -578,7 +611,6 @@ def test_master_runtime_closes_finish_context_after_arrived(monkeypatch) -> None
         30.0,
         0.0,
     ) in cars[0].events
-    assert cars[0].position_integration_enabled is True
 
 
 def test_master_runtime_holds_zero_during_clear_sync(monkeypatch) -> None:
@@ -2000,6 +2032,50 @@ def test_master_runtime_clears_stale_yellow_ready_when_entering_forward_step(mon
     }
 
 
+def test_master_runtime_marks_return_line_on_grayscale_rise(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
+    cars[0].grayscale_edges.append(1)
+
+    runtime._run_motion_input_cycle()
+
+    assert runtime._line_ok is True
+
+
+def test_master_runtime_ignores_visual_return_line_event(monkeypatch) -> None:
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
+    runtime._act_ctx = 9
+
+    runtime._handle_task_event(
+        _master_event(9, module.EVENT_RETURN_LINE_ALIGNED, 0)
+    )
+
+    assert runtime._line_ok is False
+
+
 def test_master_runtime_step_two_queues_return_line_gate_on_and_off(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
@@ -2476,7 +2552,7 @@ def test_assistant_runtime_return_follow_sync_uses_standard_logs(capsys, monkeyp
     assert "assistant_return:" not in output
 
 
-def test_assistant_runtime_return_follow_event_only_marks_alignment(monkeypatch) -> None:
+def test_assistant_runtime_ignores_visual_return_line_event(monkeypatch) -> None:
     clock = ManualClock(0)
     install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
@@ -2507,6 +2583,27 @@ def test_assistant_runtime_return_follow_event_only_marks_alignment(monkeypatch)
     run_runtime_cycle(runtime)
 
     assert runtime._sm.state == module.ASSISTANT_STATE_RETURN_FOLLOW
+    assert runtime._line_ok is False
+
+
+def test_assistant_runtime_marks_return_line_on_grayscale_rise(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.ASSISTANT_STATE_RETURN_FOLLOW
+    cars[0].grayscale_edges.append(1)
+
+    runtime._run_motion_input_cycle()
+
     assert runtime._line_ok is True
 
 

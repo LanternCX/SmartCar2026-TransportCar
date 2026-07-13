@@ -241,6 +241,7 @@ class AssistantFollowRuntime:
         """执行视觉速度输入和底盘目标写入."""
         self._consume_velocity_inputs()
         self._write_effective_velocity()
+        self._consume_grayscale_edge()
 
     def _run_role_cycle(self) -> None:
         """执行辅车单拍业务编排.
@@ -412,11 +413,11 @@ class AssistantFollowRuntime:
             and not self._found_done
         ):
             self._handle_local_aligned(packet[AE_VALUE])
-        elif (
-            self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW
-            and event == _RETURN_LINE_ALIGNED_EVENT
-        ):
-            self._line_ok = True
+
+    def _consume_grayscale_edge(self) -> None:
+        if int(self._car.read_grayscale_edge()) > 0:
+            if self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
+                self._line_ok = True
 
     def _consume_velocity_inputs(self) -> None:
         """消费两路 UDP 最新值速度输入.
