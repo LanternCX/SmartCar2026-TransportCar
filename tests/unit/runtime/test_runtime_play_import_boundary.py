@@ -34,23 +34,28 @@ def _assert_only_sequence_loaded() -> None:
     }
 
 
+class StartupTransport:
+    def __init__(self) -> None:
+        self.events = []
+
+    def wait_local_vision_ready(self) -> None:
+        self.events.append("vision_ready")
+
+
 def test_master_prepare_runtime_imports_only_light_play_sequence(monkeypatch) -> None:
     _clear_play_modules()
     install_fake_core(monkeypatch)
     clock = ManualClock(0)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    transport = StartupTransport()
     runtime = module.MasterForwardRuntime(
         now_ms=clock,
-        transport=create_transport(
-            ROLE_MASTER,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
+        transport=transport,
     )
 
     runtime.prepare_runtime()
 
+    assert transport.events == ["vision_ready"]
     _assert_only_sequence_loaded()
 
 
@@ -59,16 +64,13 @@ def test_assistant_prepare_runtime_imports_only_light_play_sequence(monkeypatch)
     install_fake_core(monkeypatch)
     clock = ManualClock(0)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    transport = StartupTransport()
     runtime = module.AssistantFollowRuntime(
         now_ms=clock,
-        transport=create_transport(
-            ROLE_ASSISTANT,
-            uart6=BufferedUart(),
-            uart8=BufferedUart(),
-            now_ms=clock,
-        ),
+        transport=transport,
     )
 
     runtime.prepare_runtime()
 
+    assert transport.events == ["vision_ready"]
     _assert_only_sequence_loaded()

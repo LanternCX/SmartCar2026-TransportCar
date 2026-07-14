@@ -17,6 +17,8 @@ from protocol.frame import (
 from protocol.topic import (
     ROLE_ASSISTANT,
     ROLE_MASTER,
+    TOPIC_VISION_BOOT_CONFIRM,
+    TOPIC_VISION_BOOT_READY,
     UART6,
     UART8,
     can_role_read,
@@ -79,6 +81,14 @@ def _default_now_ms():
     if ticks_ms is not None:
         return int(ticks_ms())
     return int(time.time() * 1000)
+
+
+def _sleep_ms(delay_ms):
+    sleep_ms = getattr(time, "sleep_ms", None)
+    if sleep_ms is not None:
+        sleep_ms(int(delay_ms))
+        return
+    time.sleep(float(delay_ms) / 1000.0)
 
 
 _OP_WRITE = const(1)
@@ -230,6 +240,30 @@ class TransportService:
         if self._send_udp_if_due():
             return True
         return False
+
+    def wait_local_vision_ready(self):
+        """阻塞完成本车视觉链路的双向启动握手."""
+
+        empty_body = bytearray(0)
+        ready_received = False
+        confirm_queued = False
+        while True:
+            self._poll_port_rx(UART6)
+            if not ready_received:
+                ready_received = (
+                    self._tcp_read(UART6, TOPIC_VISION_BOOT_READY, empty_body)
+                    == READ_OK
+                )
+            self.poll_tx()
+            if ready_received and not confirm_queued:
+                status = self._tcp_write(UART6, TOPIC_VISION_BOOT_CONFIRM, b"")
+                confirm_queued = status in (WRITE_ACCEPTED, WRITE_OVERWRITTEN)
+            if confirm_queued and (
+                self._tcp_delivery(UART6, TOPIC_VISION_BOOT_CONFIRM)
+                == DELIVERY_DELIVERED
+            ):
+                return
+            _sleep_ms(1)
 
     def clear_udp(self, port, topic):
         state = self._find_port_state(port)

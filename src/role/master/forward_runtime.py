@@ -209,6 +209,7 @@ class MasterForwardRuntime:
     def prepare_runtime(self) -> None:
         from play import sequence as play_sequence
 
+        self._ts.wait_local_vision_ready()
         play_sequence.clear(self)
 
     def mark_tick(self, tick=None) -> None:

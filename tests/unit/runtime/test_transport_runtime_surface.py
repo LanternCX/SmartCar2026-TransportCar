@@ -18,7 +18,7 @@ from protocol.codec import (
     encode_master_vision_event_report_body,
     encode_velocity_body,
 )
-from protocol.frame import decode_frame, encode_frame
+from protocol.frame import MODE_ACK, MODE_TCP, decode_frame, encode_frame
 from protocol.topic import (
     TOPIC_ASSISTANT_EVENT_REPORT,
     ROLE_ASSISTANT,
@@ -30,6 +30,8 @@ from protocol.topic import (
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
+    TOPIC_VISION_BOOT_CONFIRM,
+    TOPIC_VISION_BOOT_READY,
     UART6,
     UART8,
 )
@@ -84,6 +86,46 @@ def _sync_pending(module, kind, state, target, arg, queued=False):
 
 def _local_sync(module, state, target, arg, queued=False):
     return (state, target, arg, queued)
+
+
+class AutoBootVisionUart(BufferedUart):
+    def write(self, data) -> int:
+        written = super().write(data)
+        frame = decode_frame(bytes(data))
+        if (
+            frame is not None
+            and frame["mode"] == MODE_TCP
+            and frame["topic"] == TOPIC_VISION_BOOT_CONFIRM
+        ):
+            self.push(
+                encode_frame(
+                    MODE_ACK,
+                    TOPIC_VISION_BOOT_CONFIRM,
+                    frame["seq"],
+                    b"",
+                )
+            )
+        return written
+
+
+def test_transport_waits_for_visual_ready_and_confirms_full_duplex() -> None:
+    uart6 = AutoBootVisionUart(
+        encode_frame(MODE_TCP, TOPIC_VISION_BOOT_READY, 7, b"")
+    )
+    transport = create_transport(
+        ROLE_MASTER,
+        uart6=uart6,
+        uart8=BufferedUart(),
+        now_ms=ManualClock(0),
+    )
+
+    transport.wait_local_vision_ready()
+
+    frames = [decode_frame(message) for message in uart6.messages]
+    assert [(frame["mode"], frame["topic"]) for frame in frames if frame] == [
+        (MODE_ACK, TOPIC_VISION_BOOT_READY),
+        (MODE_TCP, TOPIC_VISION_BOOT_CONFIRM),
+    ]
 
 
 def _complete_master_startup_move(runtime, car) -> None:
