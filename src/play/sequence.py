@@ -99,13 +99,11 @@ def _tick_op(runtime, op, value, arg):
         return bool(runtime.play_motion_done())
     if op == _OP_LINE_Y:
         if not runtime.play_entered:
-            runtime.play_clear_yellow_line_ready()
-            runtime.play_enable_yellow_line_ready_gate()
+            runtime.play_clear_line_ready()
             runtime.play_entered = True
         runtime.play_write_velocity_y(value)
-        if not runtime.play_yellow_line_ready():
+        if not runtime.play_line_ready():
             return False
-        runtime.play_disable_yellow_line_ready_gate()
         return True
     if op == _OP_HOLD_Y:
         runtime.play_write_velocity_y(value)

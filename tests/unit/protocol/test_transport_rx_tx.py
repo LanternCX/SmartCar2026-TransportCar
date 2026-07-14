@@ -16,7 +16,6 @@ from protocol.topic import (  # noqa: E402
     ROLE_MASTER,
     TOPIC_ASSISTANT_EVENT_REPORT,
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
-    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
@@ -192,20 +191,6 @@ def test_ack_frame_has_higher_priority_than_udp() -> None:
     transport.poll_tx()
 
     assert uart8.messages == [encode_frame(0x03, TOPIC_ASSISTANT_EVENT_REPORT, 0x22, b"")]
-
-
-def test_poll_rx_accepts_local_vision_control_and_schedules_ack() -> None:
-    uart6 = _FakeUart(incoming=encode_frame(0x02, TOPIC_LOCAL_VISION_CONTROL, 0x23, b"\x01"))
-    transport = create_transport(ROLE_MASTER, uart6=uart6)
-
-    transport.poll_rx()
-    out_body = bytearray(1)
-    status = transport.tcp_read(UART6, TOPIC_LOCAL_VISION_CONTROL, out_body)
-    transport.poll_tx()
-
-    assert status == "ok"
-    assert bytes(out_body) == b"\x01"
-    assert uart6.messages == [encode_frame(0x03, TOPIC_LOCAL_VISION_CONTROL, 0x23, b"")]
 
 
 def test_poll_rx_reassembles_fragmented_udp_frame_across_cycles() -> None:

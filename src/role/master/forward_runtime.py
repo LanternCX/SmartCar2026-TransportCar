@@ -13,8 +13,6 @@ from config import vision as vision_params
 from protocol.codec import (
     AE_EVENT,
     AE_VALUE,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     ME_CTX,
     ME_EVENT,
     ME_VALUE,
@@ -25,7 +23,6 @@ from protocol.codec import (
     decode_master_vision_event_report_body,
     decode_velocity_body_into,
     encode_assistant_state_sync_body,
-    encode_local_vision_control_body,
     encode_master_vision_task_sync_body,
     encode_velocity_body,
 )
@@ -36,7 +33,6 @@ from protocol.topic import (
     TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY,
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
     UART6,
@@ -55,7 +51,6 @@ from role.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
     EVENT_CLEARED,
-    EVENT_RETURN_LINE_ALIGNED,
     EVENT_TARGET_FOUND,
     RQ_ARG,
     RQ_CONTEXT,
@@ -71,20 +66,16 @@ from role.master.state_machine import (
     RK_A_START,
     RK_A_TRANSPORT,
     RK_NONE,
-    RK_T_FINISH,
     RK_T_ORBIT,
-    RK_T_RETURN,
     RK_T_TRANSPORT,
     STATE_CLEAR_OBJECT,
     STATE_FINISHED,
     STATE_ORBITING,
-    STATE_RETURN_GARAGE_LINE,
     STATE_RETURN_GARAGE_RETREAT,
     STATE_SEARCH_OBJECT,
     STATE_STARTUP_MOVE,
     STATE_STOP,
     STATE_TRANSPORT_OBJECT,
-    TARGET_EDGE_LINE,
     TARGET_OBJECT,
     MasterStateMachine,
 )
@@ -111,19 +102,11 @@ _S_TARGET = const(2)
 _S_ARG = const(3)
 _S_QUEUED = const(4)
 
-_G_ACTION = const(0)
-_G_QUEUED = const(1)
-
-
 MASTER_SEARCH_TASK_CONFIG_ID = vision_params.MASTER_SEARCH_TASK_CONFIG_ID
 ASSISTANT_APPROACH_OBJECT_CONFIG_ID = vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID
 ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
 MASTER_TRANSPORT_TASK_CONFIG_ID = vision_params.MASTER_TRANSPORT_TASK_CONFIG_ID
-MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID = vision_params.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID
 MASTER_ORBIT_TASK_CONFIG_ID = vision_params.MASTER_ORBIT_TASK_CONFIG_ID
-MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID = (
-    vision_params.MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID
-)
 TRANSPORT_OBJECT_TOTAL_COUNT = vision_params.TRANSPORT_OBJECT_TOTAL_COUNT
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
@@ -180,8 +163,6 @@ class MasterForwardRuntime:
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
-            finish_task_arg=MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID,
-            return_line_task_arg=MASTER_RETURN_GARAGE_LINE_TASK_CONFIG_ID,
             total_object_count=TRANSPORT_OBJECT_TOTAL_COUNT,
             initial_context_id=seed_value,
         )
@@ -220,11 +201,10 @@ class MasterForwardRuntime:
         self._vel_body = bytearray(7)
         self._task_body = bytearray(4)
         self._ast_body = bytearray(3)
-        # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
+        # 回库灰度线状态和运输阶段灰度边沿锁存
         self._last_state = int(self._sm.state)
         self._line_ok = False
         self._gray_seen = False
-        self._gate = None
 
     def prepare_runtime(self) -> None:
         from play import sequence as play_sequence
@@ -325,7 +305,6 @@ class MasterForwardRuntime:
         self._clear_local_vision_velocity_residue()
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
-            self._gate = None
             from play import sequence as play_sequence
 
             play_sequence.clear(self)
@@ -401,10 +380,7 @@ class MasterForwardRuntime:
 
     def _handle_task_event(self, packet) -> None:
         context_id = int(packet[ME_CTX])
-        if int(packet[ME_EVENT]) in (
-            int(EVENT_ARRIVED),
-            int(EVENT_RETURN_LINE_ALIGNED),
-        ):
+        if int(packet[ME_EVENT]) not in (int(EVENT_TARGET_FOUND), int(EVENT_ALIGNED)):
             return
         if self._act_ctx == context_id:
             self._clear_local_velocity_for_reliable_event()
@@ -414,14 +390,6 @@ class MasterForwardRuntime:
                 packet[ME_EVENT],
                 packet[ME_VALUE],
             )
-            if int(packet[ME_EVENT]) == int(EVENT_ARRIVED):
-                if self._sm.state != STATE_TRANSPORT_OBJECT:
-                    self._act_ctx = None
-                    self._u6v = None
-                    self._u6_has_w = False
-                    self._u6_ver = self._ts.get_udp_version(
-                        UART6, TOPIC_LOCAL_VISION_VELOCITY
-                    )
             return
         if self._p_task is not None and context_id == int(self._p_task[_P_CTX]):
             self._clear_local_velocity_for_reliable_event()
@@ -467,14 +435,6 @@ class MasterForwardRuntime:
                     self._sm.mark_restart_search_task_acknowledged()
                 self._p_task = None
                 self._drain_pending_task_event()
-        pending_gate = self._gate
-        if pending_gate is not None and pending_gate[_G_QUEUED]:
-            if (
-                self._ts.tcp_delivery(UART6, TOPIC_LOCAL_VISION_CONTROL)
-                == DELIVERY_DELIVERED
-            ):
-                self._gate = None
-
         pending = self._p_ast
         if pending is not None and pending[_S_QUEUED]:
             if (
@@ -513,17 +473,6 @@ class MasterForwardRuntime:
 
     def _apply_motion_outputs(self) -> None:
         if self._sm.state == STATE_TRANSPORT_OBJECT:
-            if not self._is_transport_finish_task_ready():
-                self._tr_ticks = 0
-                self._tr_unlock = False
-                self._car.handle_velocity_packet(
-                    0.0,
-                    0.0,
-                    0.0,
-                    None,
-                    True,
-                )
-                return
             if not self._is_transport_push_unlocked():
                 self._car.handle_velocity_packet(
                     0.0,
@@ -600,9 +549,6 @@ class MasterForwardRuntime:
             self._u6_ver = self._ts.get_udp_version(
                 UART6, TOPIC_LOCAL_VISION_VELOCITY
             )
-
-    def _is_transport_finish_task_ready(self) -> bool:
-        return self._act_ctx == int(self._sm._ctx)
 
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
@@ -683,17 +629,11 @@ class MasterForwardRuntime:
     def play_motion_done(self) -> bool:
         return not bool(getattr(self._car, "command_lock", False))
 
-    def play_yellow_line_ready(self) -> bool:
+    def play_line_ready(self) -> bool:
         return bool(self._line_ok)
 
-    def play_clear_yellow_line_ready(self) -> None:
+    def play_clear_line_ready(self) -> None:
         self._line_ok = False
-
-    def play_enable_yellow_line_ready_gate(self) -> None:
-        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON, False)
-
-    def play_disable_yellow_line_ready_gate(self) -> None:
-        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF, False)
 
     def _apply_latest_uart6_velocity(self) -> None:
         packet = self._u6v
@@ -742,7 +682,6 @@ class MasterForwardRuntime:
     def _queue_transport_outputs(self) -> None:
         """提交本拍要发送的 task 和状态同步."""
         self._queue_pending_task_sync()
-        self._queue_return_line_gate_action()
         self._queue_pending_sync()
 
     def _queue_pending_task_sync(self) -> None:
@@ -801,26 +740,12 @@ class MasterForwardRuntime:
                     True,
                 )
 
-    def _queue_return_line_gate_action(self) -> None:
-        pending = self._gate
-        if pending is None or pending[_G_QUEUED]:
-            return
-        body = encode_local_vision_control_body(pending[_G_ACTION])
-        status = self._ts.tcp_write(UART6, TOPIC_LOCAL_VISION_CONTROL, body)
-        if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            self._gate = (pending[_G_ACTION], True)
-
     def _queue_feedforward_velocity(self) -> None:
         """提交主车当前底盘速度前馈.
 
         @details 是否真正写出由 transport 的统一仲裁决定, 主车角色层不额外做发送互斥
         """
         if self._p_ast is not None or self._p_sync is not None:
-            return
-        if (
-            self._sm.state == STATE_TRANSPORT_OBJECT
-            and not self._is_transport_finish_task_ready()
-        ):
             return
         if not self._sm.allows_assistant_velocity_forward():
             return
@@ -1086,22 +1011,11 @@ class MasterForwardRuntime:
             return
         self._p_event = None
         context_id, event, value = pending_event
-        self._apply_transport_arrival_pose(event)
         self._sm.handle_event(
             context_id,
             event,
             value,
         )
-        if (
-            int(event) == int(EVENT_ARRIVED)
-            and self._sm.state != STATE_TRANSPORT_OBJECT
-        ):
-            self._act_ctx = None
-            self._u6v = None
-            self._u6_has_w = False
-            self._u6_ver = self._ts.get_udp_version(
-                UART6, TOPIC_LOCAL_VISION_VELOCITY
-            )
 
     def _apply_transport_arrival_pose(self, event) -> None:
         """在正式推动到边事件进入状态机前完成位置校准"""

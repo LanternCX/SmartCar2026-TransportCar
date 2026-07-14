@@ -13,8 +13,6 @@ from protocol.codec import (
     AS_ARG,
     AS_STATE,
     AS_TARGET,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     VEL_HAS_W,
     VEL_W,
     VEL_X,
@@ -24,7 +22,6 @@ from protocol.codec import (
     decode_velocity_body_into,
     encode_assistant_event_report_body,
     encode_assistant_vision_task_sync_body,
-    encode_local_vision_control_body,
 )
 from protocol.topic import (
     ROLE_ASSISTANT,
@@ -33,7 +30,6 @@ from protocol.topic import (
     TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
-    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_LOCAL_VISION_VELOCITY,
     UART6,
     UART8,
@@ -84,13 +80,9 @@ except ImportError:
 _TARGET_FOUND_EVENT = const(6)
 _ALIGNED_EVENT = const(7)
 _CLEARED_EVENT = const(9)
-_RETURN_LINE_ALIGNED_EVENT = const(10)
 _ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID
-ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID = (
-    vision_params.ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID
-)
 ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENABLED)
 _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
     vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
@@ -115,8 +107,6 @@ _R_EVENT = const(0)
 _R_VALUE = const(1)
 _R_QUEUED = const(2)
 
-_G_ACTION = const(0)
-_G_QUEUED = const(1)
 _SRC_U6 = const(6)
 _SRC_U8 = const(8)
 
@@ -185,9 +175,8 @@ class AssistantFollowRuntime:
         self._vel_body = bytearray(7)
         self._sync_body = bytearray(4)
         self._event_body = bytearray(3)
-        # 本地视觉门控与返回线状态，gate 保存待切换动作和是否已下发。
+        # 回库灰度线状态
         self._line_ok = False
-        self._gate = None
 
     def prepare_runtime(self) -> None:
         from play import sequence as play_sequence
@@ -252,7 +241,6 @@ class AssistantFollowRuntime:
         self._consume_master_sync()
         self._consume_local_vision_event()
         self._queue_pending_local_vision_sync()
-        self._queue_return_line_gate_action()
         self._queue_pending_report()
 
     def _check_transport_deliveries(self) -> None:
@@ -264,13 +252,6 @@ class AssistantFollowRuntime:
                 == DELIVERY_DELIVERED
             ):
                 self._p_local = None
-        pending_gate = self._gate
-        if pending_gate is not None and pending_gate[_G_QUEUED]:
-            if (
-                self._ts.tcp_delivery(UART6, TOPIC_LOCAL_VISION_CONTROL)
-                == DELIVERY_DELIVERED
-            ):
-                self._gate = None
         pending = self._p_report
         if pending is not None and pending[_R_QUEUED]:
             if (
@@ -310,7 +291,6 @@ class AssistantFollowRuntime:
 
             play_sequence.clear(self)
             self._line_ok = False
-            self._gate = None
         self._clear_motion_input_residue()
         if self._sm.is_idle():
             self._obj_id = 0
@@ -600,12 +580,7 @@ class AssistantFollowRuntime:
 
     def _enter_return_follow_state(self) -> None:
         self._write_zero_velocity()
-        self._p_local = (
-            ASSISTANT_STATE_RETURN_FOLLOW,
-            0,
-            int(ASSISTANT_RETURN_GARAGE_LINE_CONFIG_ID),
-            False,
-        )
+        self._p_local = None
 
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
@@ -687,17 +662,11 @@ class AssistantFollowRuntime:
     def play_motion_done(self) -> bool:
         return not bool(getattr(self._car, "command_lock", False))
 
-    def play_yellow_line_ready(self) -> bool:
+    def play_line_ready(self) -> bool:
         return bool(self._line_ok)
 
-    def play_clear_yellow_line_ready(self) -> None:
+    def play_clear_line_ready(self) -> None:
         self._line_ok = False
-
-    def play_enable_yellow_line_ready_gate(self) -> None:
-        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON, False)
-
-    def play_disable_yellow_line_ready_gate(self) -> None:
-        self._gate = (LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF, False)
 
     def _write_zero_velocity(self) -> None:
         self._car.handle_velocity_packet(
@@ -885,15 +854,6 @@ class AssistantFollowRuntime:
                 pending[_L_ARG],
                 True,
             )
-
-    def _queue_return_line_gate_action(self) -> None:
-        pending = self._gate
-        if pending is None or pending[_G_QUEUED]:
-            return
-        body = encode_local_vision_control_body(pending[_G_ACTION])
-        status = self._ts.tcp_write(UART6, TOPIC_LOCAL_VISION_CONTROL, body)
-        if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:
-            self._gate = (pending[_G_ACTION], True)
 
     def _queue_pending_report(self) -> None:
         pending = self._p_report

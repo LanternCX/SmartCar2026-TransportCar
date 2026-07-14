@@ -20,7 +20,6 @@ from protocol.topic import (  # noqa: E402
     TOPIC_ASSISTANT_VISION_EVENT_REPORT,
     TOPIC_ASSISTANT_VISION_TASK_SYNC,
     TOPIC_LOCAL_VISION_VELOCITY,
-    TOPIC_LOCAL_VISION_CONTROL,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
     TOPIC_VISION_OBSERVATION,
@@ -41,7 +40,6 @@ def test_all_formal_topics_are_registered_with_expected_metadata() -> None:
         (TOPIC_LOCAL_VISION_VELOCITY, MODE_UDP, UART6, 7),
         (TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, MODE_UDP, UART8, 7),
         (TOPIC_VISION_OBSERVATION, MODE_UDP, UART6, 7),
-        (TOPIC_LOCAL_VISION_CONTROL, MODE_TCP, UART6, 1),
         (TOPIC_MASTER_VISION_TASK_SYNC, MODE_TCP, UART6, 5),
         (TOPIC_ASSISTANT_VISION_TASK_SYNC, MODE_TCP, UART6, 4),
         (TOPIC_MASTER_VISION_EVENT_REPORT, MODE_TCP, UART6, 4),
@@ -62,10 +60,6 @@ def test_topic_registry_rejects_unregistered_mode_port_and_role_direction() -> N
     assert validate_port_for_topic(TOPIC_LOCAL_VISION_VELOCITY, UART8) is False
     assert can_role_write(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is False
     assert can_role_read(TOPIC_LOCAL_VISION_VELOCITY, ROLE_MASTER) is True
-    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is True
-    assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_MASTER) is True
-    assert can_role_write(TOPIC_LOCAL_VISION_CONTROL, ROLE_ASSISTANT) is True
-    assert can_role_read(TOPIC_LOCAL_VISION_CONTROL, ROLE_ASSISTANT) is True
     assert can_role_write(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is True
     assert can_role_read(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_MASTER) is False
     assert can_role_write(TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, ROLE_ASSISTANT) is False

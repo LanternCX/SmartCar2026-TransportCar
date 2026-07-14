@@ -3,12 +3,14 @@
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src"
 if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
+
+import protocol.codec as codec  # noqa: E402
+import protocol.topic as topic  # noqa: E402
 
 from protocol.codec import (  # noqa: E402
     AE_EVENT,
@@ -16,9 +18,6 @@ from protocol.codec import (  # noqa: E402
     AS_ARG,
     AS_STATE,
     AS_TARGET,
-    CTL_ACTION,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
     ME_CTX,
     ME_EVENT,
     ME_VALUE,
@@ -38,7 +37,6 @@ from protocol.codec import (  # noqa: E402
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
     decode_assistant_vision_task_sync_body,
-    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_master_vision_task_sync_body,
     decode_velocity_body_into,
@@ -48,12 +46,19 @@ from protocol.codec import (  # noqa: E402
     encode_assistant_state_sync_body,
     encode_assistant_vision_event_report_body,
     encode_assistant_vision_task_sync_body,
-    encode_local_vision_control_body,
     encode_master_vision_event_report_body,
     encode_master_vision_task_sync_body,
     encode_velocity_body,
     encode_vision_observation_body,
 )
+
+
+def test_visual_yellow_line_protocol_is_removed() -> None:
+    assert not hasattr(codec, "LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON")
+    assert not hasattr(codec, "LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF")
+    assert not hasattr(codec, "encode_local_vision_control_body")
+    assert not hasattr(codec, "decode_local_vision_control_body")
+    assert not hasattr(topic, "TOPIC_LOCAL_VISION_CONTROL")
 
 
 def test_velocity_body_roundtrip_uses_little_endian_fixed_point() -> None:
@@ -97,22 +102,6 @@ def test_vision_observation_body_roundtrip() -> None:
     assert packet[VO_X] == 1.0
     assert packet[VO_Y] == -0.5
     assert packet[VO_VALUE] == 3.0
-
-
-def test_local_vision_control_body_roundtrip() -> None:
-    gate_on_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON)
-    gate_off_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF)
-
-    assert gate_on_body == bytes([1])
-    assert gate_off_body == bytes([2])
-    assert (
-        decode_local_vision_control_body(gate_on_body)[CTL_ACTION]
-        == LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON
-    )
-    assert (
-        decode_local_vision_control_body(gate_off_body)[CTL_ACTION]
-        == LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF
-    )
 
 
 def test_master_task_sync_body_roundtrip() -> None:

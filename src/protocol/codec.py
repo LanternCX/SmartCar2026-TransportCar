@@ -26,8 +26,6 @@ VO_X = const(1)
 VO_Y = const(2)
 VO_VALUE = const(3)
 
-CTL_ACTION = const(0)
-
 MT_CTX = const(0)
 MT_STATE = const(1)
 MT_TARGET = const(2)
@@ -43,10 +41,6 @@ ME_VALUE = const(2)
 
 AE_EVENT = const(0)
 AE_VALUE = const(1)
-
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = const(1)
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = const(2)
-
 
 def _require_u8(value):
     value = int(value)
@@ -117,14 +111,6 @@ def encode_vision_observation_body(context_id, x, y, value):
 
 def decode_vision_observation_body(body):
     return (int(body[0]), _unpack_scaled(body, 1), _unpack_scaled(body, 3), _unpack_scaled(body, 5))
-
-
-def encode_local_vision_control_body(action):
-    return bytes([_require_u8(action)])
-
-
-def decode_local_vision_control_body(body):
-    return (int(body[0]),)
 
 
 def encode_master_vision_task_sync_body(context_id, state, target, arg):

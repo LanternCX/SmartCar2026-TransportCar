@@ -30,19 +30,13 @@ class _Runtime:
     def play_motion_done(self) -> bool:
         return self.motion_done
 
-    def play_clear_yellow_line_ready(self) -> None:
-        return None
-
-    def play_enable_yellow_line_ready_gate(self) -> None:
-        return None
-
-    def play_disable_yellow_line_ready_gate(self) -> None:
+    def play_clear_line_ready(self) -> None:
         return None
 
     def play_write_velocity_y(self, value) -> None:
         self.events.append(("velocity_y", float(value)))
 
-    def play_yellow_line_ready(self) -> bool:
+    def play_line_ready(self) -> bool:
         return False
 
 

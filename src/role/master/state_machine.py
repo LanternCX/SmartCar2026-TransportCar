@@ -51,10 +51,9 @@ STATE_STOP = const(3)
 STATE_TRANSPORT_OBJECT = const(4)
 STATE_CLEAR_OBJECT = const(5)
 STATE_RETURN_GARAGE_RETREAT = const(6)
-STATE_RETURN_GARAGE_LINE = const(7)
-STATE_FINISHED = const(8)
-STATE_STARTUP_MOVE = const(9)
-STATE_STARTUP_SYNC = const(10)
+STATE_FINISHED = const(7)
+STATE_STARTUP_MOVE = const(8)
+STATE_STARTUP_SYNC = const(9)
 _STATE_NAMES = (
     "IDLE",
     "SEARCH_OBJECT",
@@ -63,7 +62,6 @@ _STATE_NAMES = (
     "TRANSPORT_OBJECT",
     "CLEAR_OBJECT",
     "RETURN_GARAGE_RETREAT",
-    "RETURN_GARAGE_LINE",
     "FINISHED",
     "STARTUP_MOVE",
     "STARTUP_SYNC",
@@ -72,14 +70,12 @@ _STATE_NAMES = (
 # 主车目标编号
 TARGET_NONE = const(0)
 TARGET_OBJECT = const(1)
-TARGET_EDGE_LINE = const(3)
 
 # 主车视觉事件编号
 EVENT_TARGET_FOUND = const(6)
 EVENT_ALIGNED = const(7)
 EVENT_ARRIVED = const(8)
 EVENT_CLEARED = const(9)
-EVENT_RETURN_LINE_ALIGNED = const(10)
 
 _CLEAR_STAGE_TURN_BACK = const(3)
 
@@ -97,10 +93,8 @@ RK_A_TRANSPORT = const(5)
 RK_A_CLEAR = const(6)
 RK_A_RETURN = const(7)
 RK_T_TRANSPORT = const(8)
-RK_T_FINISH = const(9)
-RK_T_ORBIT = const(10)
-RK_T_RETURN = const(11)
-RK_A_FINISHED = const(12)
+RK_T_ORBIT = const(9)
+RK_A_FINISHED = const(10)
 
 RQ_KIND = const(0)
 RQ_CONTEXT = const(1)
@@ -123,8 +117,6 @@ class MasterStateMachine:
         assistant_object_arg=1,
         assistant_transport_arg=1,
         transport_task_arg=2,
-        finish_task_arg=3,
-        return_line_task_arg=5,
         total_object_count=999,
         initial_context_id=0,
     ):
@@ -136,8 +128,6 @@ class MasterStateMachine:
         self._a_obj_arg = int(assistant_object_arg)
         self._a_tr_arg = int(assistant_transport_arg)
         self._tr_task_arg = int(transport_task_arg)
-        self._fin_task_arg = int(finish_task_arg)
-        self._ret_task_arg = int(return_line_task_arg)
         self._obj_need = int(total_object_count)
         self._obstacles = tuple(obstacle_slots)
         self._path_margin = float(obstacle_margin_m)
@@ -418,13 +408,6 @@ class MasterStateMachine:
         self._tr_ready = True
         self._enter_state(STATE_TRANSPORT_OBJECT)
         self._ctx = (self._ctx + 1) % 256
-        self._p_task = (
-            RK_T_FINISH,
-            self._ctx,
-            STATE_TRANSPORT_OBJECT,
-            TARGET_EDGE_LINE,
-            self._fin_task_arg,
-        )
 
     def mark_master_cleared(self):
         """标记主车已完成搬运收尾当前段位置动作"""
@@ -553,31 +536,10 @@ class MasterStateMachine:
         self._orb_phase = _ORBIT_PHASE_NORMAL
 
     def _enter_return_retreat(self):
-        """进入主车回库后退找黄线段"""
+        """进入主车回库动作"""
 
         self._reset_round_flags()
         self._enter_state(STATE_RETURN_GARAGE_RETREAT)
-        self._ctx = (self._ctx + 1) % 256
-        self._p_task = (
-            RK_T_RETURN,
-            self._ctx,
-            STATE_RETURN_GARAGE_RETREAT,
-            TARGET_EDGE_LINE,
-            self._ret_task_arg,
-        )
-
-    def _enter_return_line(self):
-        """进入主车回库黄线平移段"""
-
-        self._enter_state(STATE_RETURN_GARAGE_LINE)
-        self._ctx = (self._ctx + 1) % 256
-        self._p_task = (
-            RK_T_RETURN,
-            self._ctx,
-            STATE_RETURN_GARAGE_LINE,
-            TARGET_EDGE_LINE,
-            self._ret_task_arg,
-        )
 
     def _enter_finished(self):
         """进入全部任务完成态"""
