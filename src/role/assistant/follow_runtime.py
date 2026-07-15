@@ -57,6 +57,7 @@ from role.assistant.state_machine import (
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_RETREAT
 from role.task_sync import (
     pack_task_arg,
+    unpack_assistant_orbit_direction,
     unpack_assistant_orbit_object_id,
     unpack_assistant_orbit_offset_deg,
     unpack_task_arg_object_id,
@@ -80,6 +81,7 @@ except ImportError:
 _TARGET_FOUND_EVENT = const(6)
 _ALIGNED_EVENT = const(7)
 _CLEARED_EVENT = const(9)
+_ORBIT_FINISHED_EVENT = const(10)
 _ASSISTANT_ORBIT_RADIUS_SCALE = motion_params.ASSISTANT_ORBIT_RADIUS_SCALE
 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
 _ASSISTANT_ORBIT_OBJECT_CONFIG_ID = vision_params.ASSISTANT_ORBIT_OBJECT_CONFIG_ID
@@ -167,6 +169,8 @@ class AssistantFollowRuntime:
         self._last_approach_arg = 0
         self._obj_id = 0
         self._realign = False
+        self._realign_ready = False
+        self._realign_reported = False
         self._orbit_offset = 0.0
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
@@ -252,6 +256,9 @@ class AssistantFollowRuntime:
                 self._ts.tcp_delivery(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC)
                 == DELIVERY_DELIVERED
             ):
+                if self._realign and not self._realign_reported:
+                    self._realign_reported = True
+                    self._p_report = (_ORBIT_FINISHED_EVENT, 0, False)
                 self._p_local = None
         pending = self._p_report
         if pending is not None and pending[_R_QUEUED]:
@@ -282,11 +289,16 @@ class AssistantFollowRuntime:
 
     def _apply_sync_context(self, packet) -> bool:
         state, target, arg = packet
+        restart_realign = bool(
+            self._realign and int(state) == ASSISTANT_STATE_APPROACH_OBJECT
+        )
         accepted = self._sm.apply_master_state(
             state, target, arg
         )
         if not accepted:
             return False
+        if not restart_realign:
+            self._realign_ready = False
         if self._sm.state != ASSISTANT_STATE_RETURN_FOLLOW:
             from play import sequence as play_sequence
 
@@ -321,10 +333,14 @@ class AssistantFollowRuntime:
             self._orbit_offset = 0.0
             self._clear_done = False
         elif self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT:
-            self._orbit_offset = 0.0
-            self._realign = False
             self._clear_done = False
             self._enter_approach_object_state(packet)
+            if restart_realign:
+                self._realign = True
+                self._realign_ready = True
+            else:
+                self._orbit_offset = 0.0
+                self._realign = False
         elif self._sm.state == ASSISTANT_STATE_ORBIT:
             self._realign = False
             self._clear_done = False
@@ -391,6 +407,7 @@ class AssistantFollowRuntime:
             self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and event == _ALIGNED_EVENT
             and self._realign
+            and self._realign_ready
             and not self._found_done
         ):
             self._handle_local_aligned(packet[AE_VALUE])
@@ -694,6 +711,8 @@ class AssistantFollowRuntime:
 
     def _enter_orbit_state(self) -> None:
         self._found_done = False
+        self._realign_ready = False
+        self._realign_reported = False
         self._p_report = None
         self._clear_motion_inputs()
         self._obj_id = unpack_assistant_orbit_object_id(self._sm.arg)
@@ -717,6 +736,7 @@ class AssistantFollowRuntime:
         self._car.set_orbit_target(
             orbit_target,
             float(_ASSISTANT_ORBIT_RADIUS_SCALE),
+            unpack_assistant_orbit_direction(self._sm.arg),
         )
 
     def _handle_local_target_found(self, value: int) -> None:
@@ -790,6 +810,7 @@ class AssistantFollowRuntime:
             return
         if self._last_approach_arg <= 0:
             return
+        realign_ready = unpack_assistant_orbit_direction(self._sm.arg) == 0
         self._sm.apply_master_state(
             ASSISTANT_STATE_APPROACH_OBJECT,
             ASSISTANT_TARGET_OBJECT,
@@ -809,6 +830,7 @@ class AssistantFollowRuntime:
             )
         )
         self._realign = True
+        self._realign_ready = realign_ready
 
     def _finish_clear_if_needed(self) -> None:
         if self._sm.state != ASSISTANT_STATE_CLEAR_OBJECT:

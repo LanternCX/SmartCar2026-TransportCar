@@ -349,6 +349,7 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self.orbit_direction = 0
         self._orbit_angle_confirm_ticks = 0
         self._orbit_pose_start = None
         self._orbit_restore_integration = True
@@ -622,16 +623,31 @@ class TransportCar:
         self._pending_lock = None
         self._refresh_control_mode()
 
-    def set_orbit_target(self, target_angle_deg, radius_scale):
+    def set_orbit_target(self, target_angle_deg, radius_scale, direction=0):
         """写入统一绕行目标
 
         @param target_angle_deg 绝对目标航向角, 单位度
         @param radius_scale 绕行半径倍率, 只允许正数
+        @param direction 绕行方向, -1 为负方向, 0 为最短路径, 1 为正方向
         """
 
         radius_scale = float(radius_scale)
         if radius_scale <= 0.0:
             raise ValueError("radius_scale must be positive")
+        direction = int(direction)
+        if direction not in (-1, 0, 1):
+            raise ValueError("direction must be -1, 0 or 1")
+
+        target_angle_deg = float(target_angle_deg)
+        if direction:
+            delta_deg = _normalize_heading_delta_deg(
+                target_angle_deg - float(self.heading_est)
+            )
+            if direction > 0 and delta_deg < 0.0:
+                delta_deg += 360.0
+            elif direction < 0 and delta_deg > 0.0:
+                delta_deg -= 360.0
+            target_angle_deg = float(self.heading_est) + delta_deg
 
         if not self.orbit_mode:
             self._orbit_pose_start = (
@@ -646,12 +662,13 @@ class TransportCar:
         self.control_vy = 0.0
         self.control_omega = 0.0
         self.control_omega_active = True
-        self.control_angle = float(target_angle_deg)
+        self.control_angle = target_angle_deg
         self.control_angle_active = True
         self.command_lock = True
         self.heading_transition_mode = False
         self.orbit_mode = True
         self.orbit_radius_scale = radius_scale
+        self.orbit_direction = direction
         self._orbit_angle_confirm_ticks = 0
         self.heading_target = float(target_angle_deg)
         self.yaw_pid.reset()
@@ -818,6 +835,7 @@ class TransportCar:
         self.heading_transition_mode = False
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self.orbit_direction = 0
         self._orbit_angle_confirm_ticks = 0
         self._orbit_pose_start = None
         self._orbit_restore_integration = True
@@ -910,6 +928,7 @@ class TransportCar:
         self._orbit_pose_start = None
         self.orbit_mode = False
         self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+        self.orbit_direction = 0
         self._orbit_angle_confirm_ticks = 0
 
     def _refresh_control_mode(self):
@@ -1321,9 +1340,12 @@ class TransportCar:
 
         if cmd_angle is not None:
             self.heading_target = float(cmd_angle)
-            pid_target = _resolve_heading_target_near_current(
-                self.heading_target, self.heading_est
-            )
+            if self.orbit_mode and self.orbit_direction:
+                pid_target = self.heading_target
+            else:
+                pid_target = _resolve_heading_target_near_current(
+                    self.heading_target, self.heading_est
+                )
             if bool(getattr(self, "heading_transition_mode", False)) and hasattr(
                 self.yaw_pid, "integral"
             ):
@@ -1514,9 +1536,14 @@ class TransportCar:
 
         angle_ok = True
         if self._has_active_rotation_target():
-            err_angle = abs(
-                _normalize_heading_delta_deg(self.heading_target - self.heading_est)
-            )
+            if self.orbit_mode and self.orbit_direction:
+                err_angle = abs(self.heading_target - self.heading_est)
+            else:
+                err_angle = abs(
+                    _normalize_heading_delta_deg(
+                        self.heading_target - self.heading_est
+                    )
+                )
             if err_angle > ANGLE_TOLERANCE:
                 angle_ok = False
 
@@ -1559,6 +1586,7 @@ class TransportCar:
                 self._integrate_position = self._orbit_restore_integration
                 self.orbit_mode = False
                 self.orbit_radius_scale = float(MASTER_ORBIT_RADIUS_SCALE)
+                self.orbit_direction = 0
                 self._reset_control_fields()
                 self._reset_wheel_pi_state()
                 self.yaw_pid.reset()

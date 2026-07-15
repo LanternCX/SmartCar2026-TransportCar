@@ -14,7 +14,10 @@ if str(SRC) in sys.path:
 sys.path.insert(0, str(SRC))
 
 from config import motion as motion_params
-from role.task_sync import pack_assistant_orbit_arg
+from role.task_sync import (
+    pack_assistant_orbit_arg,
+    unpack_assistant_orbit_direction,
+)
 
 
 MARGIN_M = float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M)
@@ -104,6 +107,10 @@ def _load_master_state_machine():
             "orbit_avoid_heading_deg",
             motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
         )
+        kwargs.setdefault(
+            "orbit_avoid_push_distance_m",
+            motion_params.MASTER_ORBIT_AVOID_PUSH_DISTANCE_M,
+        )
         machine = machine_type(*args, **kwargs)
         acknowledge = machine.mark_assistant_object_acknowledged
 
@@ -127,6 +134,7 @@ def _kind_name(module, kind):
         module.RK_A_CLEAR: "assistant_clear",
         module.RK_A_RETURN: "assistant_return",
         module.RK_A_FINISHED: "assistant_finished",
+        module.RK_A_REALIGN: "assistant_realign",
     }
     return names[int(kind)]
 
@@ -334,7 +342,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
 
 
 def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
-    """主车无需绕行的遮挡场景先让位, 辅车开始绕行后主车返回规划航向."""
+    """主车让位后等待辅车进入二次对正, 侧推完成后再返回规划航向."""
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -365,13 +373,37 @@ def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
-        "arg": pack_assistant_orbit_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(0, 2, -1),
     }
     assert machine.poll_task_request() is None
 
-    machine.mark_assistant_orbit_acknowledged()
+    assert machine.poll_orbit_command() is None
+
+    machine.handle_assistant_orbit_finished(0)
+
+    assert machine.poll_avoid_push_command() == pytest.approx(
+        motion_params.MASTER_ORBIT_AVOID_PUSH_DISTANCE_M
+    )
+    assert machine.poll_orbit_command() is None
+
+    machine.handle_assistant_aligned(0)
+    machine.mark_avoid_push_completed()
 
     assert machine.poll_orbit_command() == push_heading
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())[
+        "kind"
+    ] == "assistant_realign"
+
+    machine.step(orbit_finished=True)
+    machine.handle_event(machine._ctx, MasterStateMachine.EVENT_ALIGNED, 0)
+
+    assert machine.poll_assistant_request() is None
+
+    machine.handle_assistant_aligned(0)
+
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())[
+        "kind"
+    ] == "assistant_transport"
 
 
 def test_master_state_machine_skips_avoidance_when_actual_orbit_exceeds_trigger() -> None:
@@ -434,6 +466,12 @@ def test_master_state_machine_avoidance_follows_negative_orbit_direction() -> No
         push_heading,
         -motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
     )
+
+    machine.handle_assistant_target_found(value=300)
+    machine.step(orbit_finished=True)
+
+    request = machine.poll_assistant_request()
+    assert unpack_assistant_orbit_direction(request[MasterStateMachine.RQ_ARG]) == 1
 
 
 def test_master_state_machine_avoidance_excludes_trigger_boundary() -> None:

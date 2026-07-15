@@ -9,6 +9,7 @@ from protocol.codec import (
     AS_ARG,
     AS_STATE,
     AS_TARGET,
+    decode_assistant_event_report_body,
     decode_assistant_state_sync_body,
     decode_assistant_vision_task_sync_body,
     encode_assistant_vision_event_report_body,
@@ -1091,6 +1092,15 @@ def test_assistant_runtime_dynamic_orbit_enters_realign(monkeypatch) -> None:
     uart6.push(ack_last_frame(uart6))
     clock.advance(20)
     run_runtime_cycle(runtime)
+
+    frame = decode_frame(uart8.messages[-1])
+    assert frame is not None
+    assert frame["topic"] == TOPIC_ASSISTANT_EVENT_REPORT
+    assert decode_assistant_event_report_body(frame["body"]) == (
+        module._ORBIT_FINISHED_EVENT,
+        0,
+    )
+
     uart6.push(
         encode_frame(
             0x01,
@@ -1109,6 +1119,50 @@ def test_assistant_runtime_dynamic_orbit_enters_realign(monkeypatch) -> None:
             135.0,
         ),
     ) in car.events
+
+
+def test_assistant_runtime_normal_orbit_accepts_realign_completion(
+    monkeypatch,
+) -> None:
+    """普通绕行完成后允许二次对正事件直接结束当前任务."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.ASSISTANT_STATE_ORBIT
+    runtime._last_approach_arg = _pack_task_arg(
+        module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
+        2,
+    )
+    runtime._obj_id = 2
+    cars[0].command_lock = False
+
+    runtime.step_motion_input()
+    runtime._p_local = None
+    uart6.push(
+        encode_frame(
+            0x02,
+            TOPIC_ASSISTANT_VISION_EVENT_REPORT,
+            1,
+            encode_assistant_vision_event_report_body(
+                module._ALIGNED_EVENT,
+                0,
+            ),
+        )
+    )
+    run_runtime_cycle(runtime)
+
+    assert runtime._p_report is not None
+    assert runtime._p_report[0] == module._ALIGNED_EVENT
 
 
 def test_assistant_runtime_accepts_dynamic_orbit_offset(monkeypatch) -> None:

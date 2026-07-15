@@ -734,7 +734,12 @@ def test_transport_car_exposes_shared_orbit_entry_without_assistant_naming() -> 
 
     assert hasattr(car, "set_orbit_target")
     assert not hasattr(car, "set_assistant_orbit_target")
-    assert tuple(signature.parameters) == ("self", "target_angle_deg", "radius_scale")
+    assert tuple(signature.parameters) == (
+        "self",
+        "target_angle_deg",
+        "radius_scale",
+        "direction",
+    )
 
 
 @pytest.mark.parametrize("radius_scale", (0.0, -1.0))
@@ -749,7 +754,7 @@ def test_transport_car_orbit_entry_rejects_non_positive_radius_scale(
 
 
 def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> None:
-    """统一绕行入口只接收目标角度和半径倍率, 不暴露专用 x/y/omega 调参."""
+    """统一绕行入口只接收目标角度、半径倍率和方向."""
     _transport_car, car = _make_control_car(
         control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0, "x": 1.0, "y": 2.0}
     )
@@ -761,6 +766,35 @@ def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> Non
     assert car.command_lock is True
     assert car.command_mode == "locked"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+
+
+def test_transport_car_orbit_direction_can_force_non_shortest_path() -> None:
+    """绕行方向为负时沿负方向到达等价目标航向."""
+    _transport_car, car = _make_control_car(heading_est=0.0)
+
+    car.set_orbit_target(90.0, 1.0, -1)
+
+    assert car.control_state["angle"] == pytest.approx(-270.0)
+    car._compute_omega_cmd(0.01)
+    assert car.yaw_pid.update_calls == [(-270.0, 0.0, 0.01)]
+
+
+def test_transport_car_forced_orbit_waits_for_full_directed_path() -> None:
+    """显式绕行方向不能在等价短路径航向处提前完成."""
+    _transport_car, car = _make_control_car(heading_est=0.0)
+    car.set_orbit_target(90.0, 1.0, -1)
+
+    car.heading_est = 90.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS)):
+        car._check_unlock()
+
+    assert car.command_lock is True
+
+    car.heading_est = -270.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS)):
+        car._check_unlock()
+
+    assert car.command_lock is False
 
 
 def test_transport_car_set_heading_target_keeps_non_orbit_translation() -> None:

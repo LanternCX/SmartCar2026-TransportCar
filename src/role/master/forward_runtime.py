@@ -51,6 +51,7 @@ from role.master.state_machine import (
     EVENT_ALIGNED,
     EVENT_ARRIVED,
     EVENT_CLEARED,
+    EVENT_ORBIT_FINISHED,
     EVENT_TARGET_FOUND,
     RQ_ARG,
     RQ_CONTEXT,
@@ -112,6 +113,9 @@ ORBIT_VISION_CORRECTION_ENABLED = bool(vision_params.ORBIT_VISION_CORRECTION_ENA
 MASTER_ORBIT_RADIUS_SCALE = motion_params.MASTER_ORBIT_RADIUS_SCALE
 MASTER_ORBIT_AVOID_TRIGGER_DEG = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
 MASTER_ORBIT_AVOID_HEADING_DEG = motion_params.MASTER_ORBIT_AVOID_HEADING_DEG
+MASTER_ORBIT_AVOID_PUSH_DISTANCE_M = (
+    motion_params.MASTER_ORBIT_AVOID_PUSH_DISTANCE_M
+)
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
 RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
 MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
@@ -160,6 +164,7 @@ class MasterForwardRuntime:
             obstacle_margin_m=TRANSPORT_OBSTACLE_MARGIN_M,
             orbit_avoid_trigger_deg=MASTER_ORBIT_AVOID_TRIGGER_DEG,
             orbit_avoid_heading_deg=MASTER_ORBIT_AVOID_HEADING_DEG,
+            orbit_avoid_push_distance_m=MASTER_ORBIT_AVOID_PUSH_DISTANCE_M,
             assistant_object_arg=ASSISTANT_APPROACH_OBJECT_CONFIG_ID,
             assistant_transport_arg=ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
             transport_task_arg=MASTER_TRANSPORT_TASK_CONFIG_ID,
@@ -179,6 +184,7 @@ class MasterForwardRuntime:
         self._p_sync = None
         self._p_ast = None
         self._orb_act = False
+        self._push_act = False
         # play_* 是轻量动作脚本的运行游标，由 play.sequence 读写。
         self.play_kind = 0
         self.play_step = 0
@@ -378,6 +384,8 @@ class MasterForwardRuntime:
                 self._sm.handle_assistant_aligned(packet[AE_VALUE])
             elif int(packet[AE_EVENT]) == EVENT_CLEARED:
                 self._sm.handle_assistant_cleared(packet[AE_VALUE])
+            elif int(packet[AE_EVENT]) == EVENT_ORBIT_FINISHED:
+                self._sm.handle_assistant_orbit_finished(packet[AE_VALUE])
 
     def _handle_task_event(self, packet) -> None:
         context_id = int(packet[ME_CTX])
@@ -448,8 +456,6 @@ class MasterForwardRuntime:
                         self._car.odometry.y,
                         self._car.heading_est,
                     )
-                elif pending[_S_KIND] == RK_A_ORBIT:
-                    self._sm.mark_assistant_orbit_acknowledged()
                 elif pending[_S_KIND] == RK_A_START:
                     self._sm.mark_startup_sync_acknowledged()
                 elif pending[_S_KIND] == RK_A_FOLLOW:
@@ -780,9 +786,13 @@ class MasterForwardRuntime:
                     None,
                     True,
                 )
+        if self._push_act and not bool(getattr(self._car, "command_lock", False)):
+            self._push_act = False
+            self._sm.mark_avoid_push_completed()
         self._sm.step(orbit_finished)
         if self._sm.state != STATE_ORBITING:
             self._orb_act = False
+            self._push_act = False
 
     def _drain_state_machine_outputs(self) -> None:
         """消费状态机一次性输出并刷新本拍业务意图."""
@@ -894,6 +904,14 @@ class MasterForwardRuntime:
                 float(MASTER_ORBIT_RADIUS_SCALE),
             )
             self._orb_act = True
+
+        push_command = self._sm.poll_avoid_push_command()
+        if push_command is not None:
+            self._car.set_relative_translation_target(
+                0.0,
+                float(push_command),
+            )
+            self._push_act = True
 
     def _run_clear_phase(self) -> None:
         if self._sm.state != STATE_CLEAR_OBJECT:
