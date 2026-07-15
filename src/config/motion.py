@@ -32,8 +32,20 @@ MASTER_START_POSITION_M = (0.30, 0.0)
 ASSISTANT_START_POSITION_M = (0.10, 0.0)
 # 出库第一段世界系 Y 目标, 单位米
 STARTUP_TARGET_Y_M = 0.70
-# 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
+# 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
+IS_FINAL_ROUND = True
+# 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
+TRANSPORT_OBJECT_TARGET_EDGE = (
+    {
+        1: "left",
+        2: "left",
+        3: "right",
+        4: "right",
+        5: "top",
+    }
+    if IS_FINAL_ROUND
+    else {-1: "bottom"}
+)
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
@@ -65,9 +77,11 @@ HOLD_SPEED_EPS = 0.01
 # 主车绕行半径倍率, 1.0 表示共享底盘单位半径基准
 MASTER_ORBIT_RADIUS_SCALE = 2.5
 # 主车实际绕行角小于该值时进入辅车绕行避让流程, 单位度
-MASTER_ORBIT_AVOID_TRIGGER_DEG = 30
+MASTER_ORBIT_AVOID_TRIGGER_DEG = 60
 # 主车为辅车让出绕行视野时相对搬运方向的目标偏角, 单位度
 MASTER_ORBIT_AVOID_HEADING_DEG = 90
+# 主车在避让朝向下沿车体前方侧推物体的距离, 单位米
+MASTER_ORBIT_AVOID_PUSH_DISTANCE_M = 0.20
 # 绕行定位使用的车辆参考点到物体中心固定半径, 单位米
 ORBIT_POSITION_RADIUS_M = 0.13
 # 主动原地转向时车辆参考点绕旋转中心的半径, 单位米

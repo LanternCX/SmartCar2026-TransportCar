@@ -241,7 +241,6 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert not hasattr(comm_params, "RELIABLE_PACKET_SEND_DELAY_MS")
     assert 0 <= int(vision_params.MASTER_SEARCH_TASK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_TRANSPORT_TASK_CONFIG_ID) <= 255
-    assert 0 <= int(vision_params.MASTER_TRANSPORT_FINISH_TASK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.MASTER_ORBIT_TASK_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_APPROACH_OBJECT_CONFIG_ID) <= 255
     assert 0 <= int(vision_params.ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID) <= 255
@@ -278,13 +277,18 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0.0 <= float(motion_params.STARTUP_TARGET_Y_M) <= float(
         motion_params.FIELD_SIZE_M[1]
     )
+    assert isinstance(motion_params.IS_FINAL_ROUND, bool)
     assert isinstance(motion_params.TRANSPORT_OBJECT_TARGET_EDGE, dict)
-    assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1] in {
-        "bottom",
-        "top",
-        "left",
-        "right",
-    }
+    if motion_params.IS_FINAL_ROUND:
+        assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {
+            1: "left",
+            2: "left",
+            3: "right",
+            4: "right",
+            5: "top",
+        }
+    else:
+        assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {-1: "bottom"}
     assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
     assert float(safety_params.V_CMD_MAX) > 0.0
@@ -603,6 +607,18 @@ def test_transport_car_selects_odometry_axis_scales_by_role() -> None:
     )
 
 
+def test_transport_car_reports_grayscale_edges_once() -> None:
+    """灰度输入只在电平变化时报告对应边沿."""
+    transport_car = import_transport_car_module()
+    car = transport_car.TransportCar(diagnostic_mode=True)
+
+    car.grayscale._value = 1
+    assert car.read_grayscale_edge() == -1
+    assert car.read_grayscale_edge() == 0
+    car.grayscale._value = 0
+    assert car.read_grayscale_edge() == 1
+
+
 def test_transport_car_builds_encoder_snapshot() -> None:
     """编码器快照继续按轮输出原始值与滤波值."""
     _transport_car, car = make_minimal_transport_car(
@@ -718,7 +734,12 @@ def test_transport_car_exposes_shared_orbit_entry_without_assistant_naming() -> 
 
     assert hasattr(car, "set_orbit_target")
     assert not hasattr(car, "set_assistant_orbit_target")
-    assert tuple(signature.parameters) == ("self", "target_angle_deg", "radius_scale")
+    assert tuple(signature.parameters) == (
+        "self",
+        "target_angle_deg",
+        "radius_scale",
+        "direction",
+    )
 
 
 @pytest.mark.parametrize("radius_scale", (0.0, -1.0))
@@ -733,7 +754,7 @@ def test_transport_car_orbit_entry_rejects_non_positive_radius_scale(
 
 
 def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> None:
-    """统一绕行入口只接收目标角度和半径倍率, 不暴露专用 x/y/omega 调参."""
+    """统一绕行入口只接收目标角度、半径倍率和方向."""
     _transport_car, car = _make_control_car(
         control_state={"vx": 8.0, "vy": -3.0, "omega": 4.0, "x": 1.0, "y": 2.0}
     )
@@ -745,6 +766,35 @@ def test_transport_car_set_orbit_target_enters_locked_shared_orbit_mode() -> Non
     assert car.command_lock is True
     assert car.command_mode == "locked"
     assert car.control_state == {"vx": 0.0, "vy": 0.0, "omega": 0.0, "angle": 90.0}
+
+
+def test_transport_car_orbit_direction_can_force_non_shortest_path() -> None:
+    """绕行方向为负时沿负方向到达等价目标航向."""
+    _transport_car, car = _make_control_car(heading_est=0.0)
+
+    car.set_orbit_target(90.0, 1.0, -1)
+
+    assert car.control_state["angle"] == pytest.approx(-270.0)
+    car._compute_omega_cmd(0.01)
+    assert car.yaw_pid.update_calls == [(-270.0, 0.0, 0.01)]
+
+
+def test_transport_car_forced_orbit_waits_for_full_directed_path() -> None:
+    """显式绕行方向不能在等价短路径航向处提前完成."""
+    _transport_car, car = _make_control_car(heading_est=0.0)
+    car.set_orbit_target(90.0, 1.0, -1)
+
+    car.heading_est = 90.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS)):
+        car._check_unlock()
+
+    assert car.command_lock is True
+
+    car.heading_est = -270.0
+    for _ in range(int(motion_params.ORBIT_ANGLE_CONFIRM_TICKS)):
+        car._check_unlock()
+
+    assert car.command_lock is False
 
 
 def test_transport_car_set_heading_target_keeps_non_orbit_translation() -> None:

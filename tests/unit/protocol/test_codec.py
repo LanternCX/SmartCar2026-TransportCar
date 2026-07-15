@@ -3,12 +3,14 @@
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src"
 if str(SRC) in sys.path:
     sys.path.remove(str(SRC))
 sys.path.insert(0, str(SRC))
+
+import protocol.codec as codec  # noqa: E402
+import protocol.topic as topic  # noqa: E402
 
 from protocol.codec import (  # noqa: E402
     AE_EVENT,
@@ -16,15 +18,8 @@ from protocol.codec import (  # noqa: E402
     AS_ARG,
     AS_STATE,
     AS_TARGET,
-    AS_TH,
-    CTL_ACTION,
-    LOCAL_VISION_CONTROL_PAUSE,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF,
-    LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON,
-    LOCAL_VISION_CONTROL_RESUME,
     ME_CTX,
     ME_EVENT,
-    ME_TH,
     ME_VALUE,
     MT_ARG,
     MT_CTX,
@@ -42,7 +37,6 @@ from protocol.codec import (  # noqa: E402
     decode_assistant_state_sync_body,
     decode_assistant_vision_event_report_body,
     decode_assistant_vision_task_sync_body,
-    decode_local_vision_control_body,
     decode_master_vision_event_report_body,
     decode_master_vision_task_sync_body,
     decode_velocity_body_into,
@@ -52,12 +46,19 @@ from protocol.codec import (  # noqa: E402
     encode_assistant_state_sync_body,
     encode_assistant_vision_event_report_body,
     encode_assistant_vision_task_sync_body,
-    encode_local_vision_control_body,
     encode_master_vision_event_report_body,
     encode_master_vision_task_sync_body,
     encode_velocity_body,
     encode_vision_observation_body,
 )
+
+
+def test_visual_yellow_line_protocol_is_removed() -> None:
+    assert not hasattr(codec, "LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON")
+    assert not hasattr(codec, "LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF")
+    assert not hasattr(codec, "encode_local_vision_control_body")
+    assert not hasattr(codec, "decode_local_vision_control_body")
+    assert not hasattr(topic, "TOPIC_LOCAL_VISION_CONTROL")
 
 
 def test_velocity_body_roundtrip_uses_little_endian_fixed_point() -> None:
@@ -103,28 +104,6 @@ def test_vision_observation_body_roundtrip() -> None:
     assert packet[VO_VALUE] == 3.0
 
 
-def test_local_vision_control_body_roundtrip() -> None:
-    pause_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_PAUSE)
-    resume_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RESUME)
-    gate_on_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON)
-    gate_off_body = encode_local_vision_control_body(LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF)
-
-    assert pause_body == bytes([1])
-    assert resume_body == bytes([2])
-    assert gate_on_body == bytes([3])
-    assert gate_off_body == bytes([4])
-    assert decode_local_vision_control_body(pause_body)[CTL_ACTION] == LOCAL_VISION_CONTROL_PAUSE
-    assert decode_local_vision_control_body(resume_body)[CTL_ACTION] == LOCAL_VISION_CONTROL_RESUME
-    assert (
-        decode_local_vision_control_body(gate_on_body)[CTL_ACTION]
-        == LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON
-    )
-    assert (
-        decode_local_vision_control_body(gate_off_body)[CTL_ACTION]
-        == LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF
-    )
-
-
 def test_master_task_sync_body_roundtrip() -> None:
     body = encode_master_vision_task_sync_body(9, 1, 3, -2)
 
@@ -137,27 +116,25 @@ def test_master_task_sync_body_roundtrip() -> None:
 
 
 def test_assistant_vision_task_sync_body_roundtrip() -> None:
-    threshold = (12, 80, -30, 40, -20, 60)
-    body = encode_assistant_vision_task_sync_body(2, 1, 17, threshold)
+    body = encode_assistant_vision_task_sync_body(2, 1, 17)
 
-    assert body == bytes([2, 1, 17, 0, 12, 80, 226, 40, 236, 60])
+    assert body == bytes([2, 1, 17, 0])
     packet = decode_assistant_vision_task_sync_body(body)
     assert packet[AS_STATE] == 2
     assert packet[AS_TARGET] == 1
     assert packet[AS_ARG] == 17
-    assert packet[AS_TH] == threshold
+    assert len(packet) == 3
 
 
 def test_master_vision_event_report_body_roundtrip() -> None:
-    threshold = (10, 90, -15, 30, -25, 70)
-    body = encode_master_vision_event_report_body(5, 6, 200, threshold)
+    body = encode_master_vision_event_report_body(5, 6, 200)
 
-    assert body == bytes([5, 6, 200, 0, 10, 90, 241, 30, 231, 70])
+    assert body == bytes([5, 6, 200, 0])
     packet = decode_master_vision_event_report_body(body)
     assert packet[ME_CTX] == 5
     assert packet[ME_EVENT] == 6
     assert packet[ME_VALUE] == 200
-    assert packet[ME_TH] == threshold
+    assert len(packet) == 3
 
 
 def test_assistant_vision_event_report_body_roundtrip() -> None:
@@ -170,15 +147,14 @@ def test_assistant_vision_event_report_body_roundtrip() -> None:
 
 
 def test_assistant_state_sync_body_roundtrip() -> None:
-    threshold = (8, 88, -18, 38, -28, 78)
-    body = encode_assistant_state_sync_body(4, 1, 23, threshold)
+    body = encode_assistant_state_sync_body(4, 1, 23)
 
-    assert body == bytes([4, 1, 23, 0, 8, 88, 238, 38, 228, 78])
+    assert body == bytes([4, 1, 23, 0])
     packet = decode_assistant_state_sync_body(body)
     assert packet[AS_STATE] == 4
     assert packet[AS_TARGET] == 1
     assert packet[AS_ARG] == 23
-    assert packet[AS_TH] == threshold
+    assert len(packet) == 3
 
 
 def test_assistant_event_report_body_roundtrip() -> None:

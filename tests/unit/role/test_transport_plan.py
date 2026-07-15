@@ -70,18 +70,29 @@ def _lower_endpoint_diagonal_position(edge: str):
     return slots, FIELD_WIDTH_M - distance, coordinate
 
 
-def test_transport_object_target_edge_uses_global_override() -> None:
-    """-1 配置覆盖所有物体目标边."""
+def test_transport_object_target_edge_uses_final_mapping(monkeypatch) -> None:
+    """决赛按物体类别映射到三条目标边."""
+    monkeypatch.setattr(
+        motion_params,
+        "TRANSPORT_OBJECT_TARGET_EDGE",
+        {1: "left", 2: "left", 3: "right", 4: "right", 5: "top"},
+    )
 
-    edge = target_edge_for_object(1)
+    assert tuple(target_edge_for_object(index) for index in range(1, 6)) == (
+        "left",
+        "left",
+        "right",
+        "right",
+        "top",
+    )
 
-    assert edge in {
-        FIELD_EDGE_BOTTOM,
-        FIELD_EDGE_TOP,
-        FIELD_EDGE_LEFT,
-        FIELD_EDGE_RIGHT,
-    }
-    assert target_edge_for_object(255) == edge
+
+def test_transport_object_target_edge_uses_preliminary_override(monkeypatch) -> None:
+    """初赛统一把所有物体搬运到底边."""
+    monkeypatch.setattr(motion_params, "TRANSPORT_OBJECT_TARGET_EDGE", {-1: "bottom"})
+
+    assert target_edge_for_object(1) == "bottom"
+    assert target_edge_for_object(255) == "bottom"
 
 
 def test_push_heading_is_derived_from_field_axes() -> None:

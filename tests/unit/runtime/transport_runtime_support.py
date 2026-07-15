@@ -156,8 +156,14 @@ def install_fake_core(monkeypatch):
             }
             self.last_exception_text = "none"
             self.position_integration_enabled = True
+            self.grayscale_edges = []
             self.events = []
             cars.append(self)
+
+        def read_grayscale_edge(self) -> int:
+            if self.grayscale_edges:
+                return int(self.grayscale_edges.pop(0))
+            return 0
 
         def mark_tick(self, tick=None) -> None:
             self.events.append(("mark_tick", tick))
@@ -195,8 +201,11 @@ def install_fake_core(monkeypatch):
             }
             self.command_lock = False
 
-        def set_orbit_target(self, target_angle_deg, radius_scale) -> None:
-            self.events.append(("set_orbit_target", float(target_angle_deg), float(radius_scale)))
+        def set_orbit_target(self, target_angle_deg, radius_scale, direction=0) -> None:
+            event = ["set_orbit_target", float(target_angle_deg), float(radius_scale)]
+            if int(direction):
+                event.append(int(direction))
+            self.events.append(tuple(event))
             self.command_lock = True
             self.orbit_mode = True
             self.control_vx = 0.0

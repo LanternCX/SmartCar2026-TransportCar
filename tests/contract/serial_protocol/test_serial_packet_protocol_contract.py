@@ -31,6 +31,8 @@ from protocol.topic import (  # noqa: E402
     TOPIC_LOCAL_VISION_VELOCITY,
     TOPIC_MASTER_VISION_EVENT_REPORT,
     TOPIC_MASTER_VISION_TASK_SYNC,
+    TOPIC_VISION_BOOT_CONFIRM,
+    TOPIC_VISION_BOOT_READY,
     TOPIC_VISION_OBSERVATION,
     UART6,
     UART8,
@@ -72,11 +74,13 @@ def test_formal_topic_registry_matches_transport_contract() -> None:
         (TOPIC_ASSISTANT_FEEDFORWARD_VELOCITY, MODE_UDP, UART8, 7),
         (TOPIC_VISION_OBSERVATION, MODE_UDP, UART6, 7),
         (TOPIC_MASTER_VISION_TASK_SYNC, MODE_TCP, UART6, 5),
-        (TOPIC_ASSISTANT_VISION_TASK_SYNC, MODE_TCP, UART6, 10),
-        (TOPIC_MASTER_VISION_EVENT_REPORT, MODE_TCP, UART6, 10),
+        (TOPIC_ASSISTANT_VISION_TASK_SYNC, MODE_TCP, UART6, 4),
+        (TOPIC_MASTER_VISION_EVENT_REPORT, MODE_TCP, UART6, 4),
         (TOPIC_ASSISTANT_VISION_EVENT_REPORT, MODE_TCP, UART6, 3),
-        (TOPIC_ASSISTANT_STATE_SYNC, MODE_TCP, UART8, 10),
+        (TOPIC_ASSISTANT_STATE_SYNC, MODE_TCP, UART8, 4),
         (TOPIC_ASSISTANT_EVENT_REPORT, MODE_TCP, UART8, 3),
+        (TOPIC_VISION_BOOT_READY, MODE_TCP, UART6, 0),
+        (TOPIC_VISION_BOOT_CONFIRM, MODE_TCP, UART6, 0),
     )
     for topic, mode, port, body_size in cases:
         assert get_topic_entry(topic) is not None
@@ -100,3 +104,11 @@ def test_formal_transport_role_directions_are_fixed() -> None:
     assert can_role_read(TOPIC_ASSISTANT_VISION_TASK_SYNC, ROLE_ASSISTANT) is False
     assert can_role_write(TOPIC_ASSISTANT_EVENT_REPORT, ROLE_ASSISTANT) is True
     assert can_role_read(TOPIC_ASSISTANT_EVENT_REPORT, ROLE_MASTER) is True
+    assert can_role_read(TOPIC_VISION_BOOT_READY, ROLE_MASTER) is True
+    assert can_role_read(TOPIC_VISION_BOOT_READY, ROLE_ASSISTANT) is True
+    assert can_role_write(TOPIC_VISION_BOOT_READY, ROLE_MASTER) is False
+    assert can_role_write(TOPIC_VISION_BOOT_READY, ROLE_ASSISTANT) is False
+    assert can_role_write(TOPIC_VISION_BOOT_CONFIRM, ROLE_MASTER) is True
+    assert can_role_write(TOPIC_VISION_BOOT_CONFIRM, ROLE_ASSISTANT) is True
+    assert can_role_read(TOPIC_VISION_BOOT_CONFIRM, ROLE_MASTER) is False
+    assert can_role_read(TOPIC_VISION_BOOT_CONFIRM, ROLE_ASSISTANT) is False

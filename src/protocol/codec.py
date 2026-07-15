@@ -13,10 +13,7 @@ except ImportError:
 
 _I16_MIN = const(-32768)
 _I16_MAX = const(32767)
-_I8_MIN = const(-128)
-_I8_MAX = const(127)
 _SCALE = const(1000)
-_ZERO_THRESHOLD = (0, 0, 0, 0, 0, 0)
 
 # 解码结果统一使用 tuple + const 索引，避免固定字段名进入板端 qstr 池。
 VEL_X = const(0)
@@ -29,8 +26,6 @@ VO_X = const(1)
 VO_Y = const(2)
 VO_VALUE = const(3)
 
-CTL_ACTION = const(0)
-
 MT_CTX = const(0)
 MT_STATE = const(1)
 MT_TARGET = const(2)
@@ -39,21 +34,13 @@ MT_ARG = const(3)
 AS_STATE = const(0)
 AS_TARGET = const(1)
 AS_ARG = const(2)
-AS_TH = const(3)
 
 ME_CTX = const(0)
 ME_EVENT = const(1)
 ME_VALUE = const(2)
-ME_TH = const(3)
 
 AE_EVENT = const(0)
 AE_VALUE = const(1)
-
-LOCAL_VISION_CONTROL_PAUSE = const(1)
-LOCAL_VISION_CONTROL_RESUME = const(2)
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_ON = const(3)
-LOCAL_VISION_CONTROL_RETURN_LINE_GATE_OFF = const(4)
-
 
 def _require_u8(value):
     value = int(value)
@@ -82,39 +69,6 @@ def _unpack_i16(body, offset):
     if value >= 0x8000:
         value -= 0x10000
     return value
-
-
-def _require_i8(value):
-    value = int(value)
-    if value < _I8_MIN or value > _I8_MAX:
-        raise ValueError("i8 out of range")
-    return value
-
-
-def _pack_i8(value):
-    value = _require_i8(value)
-    if value < 0:
-        value += 0x100
-    return value
-
-
-def _unpack_i8(body, offset):
-    value = int(body[offset])
-    if value >= 0x80:
-        value -= 0x100
-    return value
-
-
-def _pack_threshold(threshold):
-    if threshold is None:
-        threshold = _ZERO_THRESHOLD
-    if len(threshold) != 6:
-        raise ValueError("threshold must have 6 values")
-    return bytes(_pack_i8(value) for value in threshold)
-
-
-def _unpack_threshold(body, offset):
-    return tuple(_unpack_i8(body, offset + index) for index in range(6))
 
 
 def _pack_scaled(value):
@@ -159,14 +113,6 @@ def decode_vision_observation_body(body):
     return (int(body[0]), _unpack_scaled(body, 1), _unpack_scaled(body, 3), _unpack_scaled(body, 5))
 
 
-def encode_local_vision_control_body(action):
-    return bytes([_require_u8(action)])
-
-
-def decode_local_vision_control_body(body):
-    return (int(body[0]),)
-
-
 def encode_master_vision_task_sync_body(context_id, state, target, arg):
     return bytes([_require_u8(context_id), _require_u8(state), _require_u8(target)]) + _pack_i16(arg)
 
@@ -175,20 +121,20 @@ def decode_master_vision_task_sync_body(body):
     return (int(body[0]), int(body[1]), int(body[2]), _unpack_i16(body, 3))
 
 
-def encode_assistant_vision_task_sync_body(state, target, arg, threshold=None):
-    return bytes([_require_u8(state), _require_u8(target)]) + _pack_i16(arg) + _pack_threshold(threshold)
+def encode_assistant_vision_task_sync_body(state, target, arg):
+    return bytes([_require_u8(state), _require_u8(target)]) + _pack_i16(arg)
 
 
 def decode_assistant_vision_task_sync_body(body):
-    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2))
 
 
-def encode_master_vision_event_report_body(context_id, event, value, threshold=None):
-    return bytes([_require_u8(context_id), _require_u8(event)]) + _pack_i16(value) + _pack_threshold(threshold)
+def encode_master_vision_event_report_body(context_id, event, value):
+    return bytes([_require_u8(context_id), _require_u8(event)]) + _pack_i16(value)
 
 
 def decode_master_vision_event_report_body(body):
-    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2))
 
 
 def encode_assistant_vision_event_report_body(event, value):
@@ -199,12 +145,12 @@ def decode_assistant_vision_event_report_body(body):
     return (int(body[0]), _unpack_i16(body, 1))
 
 
-def encode_assistant_state_sync_body(state, target, arg, threshold=None):
-    return bytes([_require_u8(state), _require_u8(target)]) + _pack_i16(arg) + _pack_threshold(threshold)
+def encode_assistant_state_sync_body(state, target, arg):
+    return bytes([_require_u8(state), _require_u8(target)]) + _pack_i16(arg)
 
 
 def decode_assistant_state_sync_body(body):
-    return (int(body[0]), int(body[1]), _unpack_i16(body, 2), _unpack_threshold(body, 4))
+    return (int(body[0]), int(body[1]), _unpack_i16(body, 2))
 
 
 def encode_assistant_event_report_body(event, value):
