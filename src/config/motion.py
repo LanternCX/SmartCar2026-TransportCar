@@ -7,7 +7,7 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 3.0
+TRANSPORT_FORWARD_SPEED = 5.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -33,7 +33,7 @@ ASSISTANT_START_POSITION_M = (0.10, 0.0)
 # 出库第一段世界系 Y 目标, 单位米
 STARTUP_TARGET_Y_M = 0.70
 # 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
-IS_FINAL_ROUND = True
+IS_FINAL_ROUND = False
 # 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
 TRANSPORT_OBJECT_TARGET_EDGE = (
     {
@@ -47,17 +47,17 @@ TRANSPORT_OBJECT_TARGET_EDGE = (
     else {-1: "bottom"}
 )
 # 位置控制最大命令速度, 单位脉冲/控制拍
-POS_MAX_SPEED = 3.0
+POS_MAX_SPEED = 5.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
 POS_KP = 2.0
 # 位置锁定容差, 单位米, 位置偏差小于此值时认为已到达目标
-POS_TOLERANCE = 0.03
+POS_TOLERANCE = 0.06
 # 角度锁定容差, 单位度, 角度偏差小于此值时认为已到达目标
 ANGLE_TOLERANCE = 5.0
 # 陀螺仪低通滤波系数, 范围 0 ~ 1
 GYRO_LPF_ALPHA = 0.2
 # 偏航角位置环 P 增益, 单位为 ω / rad
-YAW_KP = 0.20
+YAW_KP = 0.16
 # 偏航角位置环 I 增益, 用于消除稳态偏差
 YAW_KI = 0.5
 # 偏航角位置环 D 增益, 用于阻尼控制
@@ -67,7 +67,7 @@ YAW_I_MAX = 100.0
 # 朝向保持最大角速度, 对应轮速分量
 AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
-HEADING_TRANSITION_OMEGA_MAX = 5
+HEADING_TRANSITION_OMEGA_MAX = 4
 # 绕行阶段最大角速度, 对应轮速分量
 ORBIT_AUTO_OMEGA_MAX = 1
 # 绕行角度进入容差后需要连续保持的控制拍数
@@ -93,9 +93,9 @@ RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
 # 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米
 ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
 # 主车回库第一阶段至少后退的距离, 单位米
-MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
+MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.40
 # 辅车回库第一阶段至少后退的距离, 单位米
-ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.20
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

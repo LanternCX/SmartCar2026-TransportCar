@@ -16,8 +16,8 @@ except ImportError:
     def const(value):
         return value
 
-_RETURN_POSITION_SPEED = const(3)
-_RETURN_FORWARD_SPEED = const(3)
+_RETURN_POSITION_SPEED = const(5)
+_RETURN_FORWARD_SPEED = const(5)
 _FINAL_FORWARD_SPEED = const(8)
 _FINAL_TURN_DEG = const(180)
 
