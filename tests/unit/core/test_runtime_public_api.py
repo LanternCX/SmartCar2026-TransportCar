@@ -277,13 +277,18 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert 0.0 <= float(motion_params.STARTUP_TARGET_Y_M) <= float(
         motion_params.FIELD_SIZE_M[1]
     )
+    assert isinstance(motion_params.IS_FINAL_ROUND, bool)
     assert isinstance(motion_params.TRANSPORT_OBJECT_TARGET_EDGE, dict)
-    assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1] in {
-        "bottom",
-        "top",
-        "left",
-        "right",
-    }
+    if motion_params.IS_FINAL_ROUND:
+        assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {
+            1: "left",
+            2: "left",
+            3: "right",
+            4: "right",
+            5: "top",
+        }
+    else:
+        assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {-1: "bottom"}
     assert float(motion_params.MASTER_TURN_BACK_DELTA_DEG) >= 0.0
     assert 0 < float(safety_params.MAX_DUTY) <= 10000.0
     assert float(safety_params.V_CMD_MAX) > 0.0

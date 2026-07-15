@@ -20,7 +20,11 @@ from role.task_sync import pack_assistant_orbit_arg
 MARGIN_M = float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M)
 FIELD_WIDTH_M = float(motion_params.FIELD_SIZE_M[0])
 FIELD_HEIGHT_M = float(motion_params.FIELD_SIZE_M[1])
-TARGET_EDGE = motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1]
+TARGET_EDGE = (
+    motion_params.TRANSPORT_OBJECT_TARGET_EDGE[-1]
+    if -1 in motion_params.TRANSPORT_OBJECT_TARGET_EDGE
+    else motion_params.TRANSPORT_OBJECT_TARGET_EDGE[2]
+)
 
 
 def _target_obstacle_slots():

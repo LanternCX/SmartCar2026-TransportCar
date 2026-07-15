@@ -32,8 +32,20 @@ MASTER_START_POSITION_M = (0.30, 0.0)
 ASSISTANT_START_POSITION_M = (0.10, 0.0)
 # 出库第一段世界系 Y 目标, 单位米
 STARTUP_TARGET_Y_M = 0.70
-# 物体目标边配置, -1 表示覆盖所有物体
-TRANSPORT_OBJECT_TARGET_EDGE = {-1: "left"}
+# 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
+IS_FINAL_ROUND = True
+# 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
+TRANSPORT_OBJECT_TARGET_EDGE = (
+    {
+        1: "left",
+        2: "left",
+        3: "right",
+        4: "right",
+        5: "top",
+    }
+    if IS_FINAL_ROUND
+    else {-1: "bottom"}
+)
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 3.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
