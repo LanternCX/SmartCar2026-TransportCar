@@ -7,7 +7,7 @@
 """
 
 # 单场需要完成搬运的物体总数
-TRANSPORT_OBJECT_TOTAL_COUNT = 5
+TRANSPORT_OBJECT_TOTAL_COUNT = 3
 
 # 是否应用绕行阶段本车视觉速度修正
 ORBIT_VISION_CORRECTION_ENABLED = True
