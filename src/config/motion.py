@@ -7,7 +7,11 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 5.0
+TRANSPORT_FORWARD_SPEED = 8.0
+# 主车推行速度从零爬升到基础速度的时间, 单位秒
+MASTER_TRANSPORT_ACCEL_TIME_S = 1
+# 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
+ASSISTANT_TRANSPORT_ACCEL_TIME_S = 1.5
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -53,7 +57,7 @@ POS_KP = 2.0
 # 位置锁定容差, 单位米, 位置偏差小于此值时认为已到达目标
 POS_TOLERANCE = 0.06
 # 角度锁定容差, 单位度, 角度偏差小于此值时认为已到达目标
-ANGLE_TOLERANCE = 5.0
+ANGLE_TOLERANCE = 8.0
 # 陀螺仪低通滤波系数, 范围 0 ~ 1
 GYRO_LPF_ALPHA = 0.2
 # 偏航角位置环 P 增益, 单位为 ω / rad

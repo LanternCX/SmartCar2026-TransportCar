@@ -66,6 +66,7 @@ from role.task_sync import (
 )
 from role.transport_plan import (
     heading_with_offset,
+    limit_planar_velocity_step,
     plan_return_garage,
     plan_startup_target_y,
     push_heading_for_edge,
@@ -92,6 +93,10 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
     vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
 )
 _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
+_ASSISTANT_TRANSPORT_ACCEL_TIME_S = (
+    motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S
+)
+_MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
 RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
@@ -178,6 +183,15 @@ class AssistantFollowRuntime:
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
+        self._tr_delta = (
+            float(_TRANSPORT_FORWARD_SPEED)
+            * float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+            * float(_MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(_ASSISTANT_TRANSPORT_ACCEL_TIME_S)
+        )
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
         self._vel_body = bytearray(7)
         self._sync_body = bytearray(4)
@@ -519,6 +533,15 @@ class AssistantFollowRuntime:
         vy = -float(_TRANSPORT_FORWARD_SPEED) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity[VEL_X])
+        vx, vy = limit_planar_velocity_step(
+            self._tr_vx,
+            self._tr_vy,
+            vx,
+            vy,
+            self._tr_delta,
+        )
+        self._tr_vx = vx
+        self._tr_vy = vy
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
     def _write_orbit_velocity_correction(self) -> None:
@@ -708,6 +731,8 @@ class AssistantFollowRuntime:
         self._line_ok = False
 
     def _write_zero_velocity(self) -> None:
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         self._car.handle_velocity_packet(
             0.0,
             0.0,

@@ -53,6 +53,17 @@ def _vel(vx, vy, omega=0.0, has_omega=False):
     return [float(vx), float(vy), float(omega), bool(has_omega)]
 
 
+def _transport_ramp_steps(vx, vy, base_speed, accel_time_s, step_ms):
+    target_speed = (float(vx) ** 2 + float(vy) ** 2) ** 0.5
+    return int(
+        target_speed
+        / float(base_speed)
+        * float(accel_time_s)
+        * 1000.0
+        / float(step_ms)
+    ) + 2
+
+
 def _master_event(context_id, event, value):
     return (int(context_id), int(event), int(value))
 
@@ -437,7 +448,16 @@ def test_master_transport_uses_local_vision_x_with_fixed_forward_speed(monkeypat
     runtime._sm.state = module.STATE_TRANSPORT_OBJECT
     runtime._u6v = _vel(1.5, -0.5)
 
-    runtime._apply_transport_velocity()
+    for _ in range(
+        _transport_ramp_steps(
+            1.5,
+            module.TRANSPORT_FORWARD_SPEED,
+            module.TRANSPORT_FORWARD_SPEED,
+            module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S,
+            module.motion_params.MOTION_INPUT_STEP_MS,
+        )
+    ):
+        runtime._apply_transport_velocity()
 
     assert cars[0].last_chassis_target == {
         "source": None,
@@ -446,6 +466,39 @@ def test_master_transport_uses_local_vision_x_with_fixed_forward_speed(monkeypat
         "omega": 0.0,
         "has_omega": False,
     }
+
+
+def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.STATE_TRANSPORT_OBJECT
+    runtime._last_state = module.STATE_TRANSPORT_OBJECT
+    runtime._tr_unlock = True
+    runtime._u6v = _vel(8.0, 0.0)
+
+    runtime.step_motion_input()
+
+    target = cars[0].last_chassis_target
+    max_delta = (
+        float(module.TRANSPORT_FORWARD_SPEED)
+        * float(module.motion_params.MOTION_INPUT_STEP_MS)
+        / 1000.0
+        / float(module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S)
+    )
+    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
+        max_delta
+    )
+    assert target["vx"] / target["vy"] == pytest.approx(8.0 / 6.0)
 
 
 def test_master_runtime_blocks_transport_feedforward(
@@ -690,10 +743,16 @@ def test_master_runtime_transport_transition_clears_local_vision_velocity(monkey
     assert cars[0].last_chassis_target["source"] is None
     for _ in range(int(module.MOTION_STOP_CONFIRM_TICKS) - 1):
         runtime._apply_motion_outputs()
+    first_delta = (
+        float(module.TRANSPORT_FORWARD_SPEED)
+        * float(module.motion_params.MOTION_INPUT_STEP_MS)
+        / 1000.0
+        / float(module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S)
+    )
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "vy": pytest.approx(first_delta),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -735,10 +794,16 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
 
     runtime._apply_motion_outputs()
 
+    first_delta = (
+        float(module.TRANSPORT_FORWARD_SPEED)
+        * float(module.motion_params.MOTION_INPUT_STEP_MS)
+        / 1000.0
+        / float(module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S)
+    )
     assert car.last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "vy": pytest.approx(first_delta),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -749,7 +814,7 @@ def test_master_runtime_waits_for_lateral_stop_before_transport_push(monkeypatch
     assert car.last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": module.TRANSPORT_FORWARD_SPEED,
+        "vy": pytest.approx(first_delta * 2.0),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2364,10 +2429,19 @@ def test_assistant_transport_uses_fixed_base_speed_with_local_vision_x(
     runtime._u6v = _vel(1.0, 2.0)
     runtime._u8v = _vel(3.0, 4.0)
 
-    runtime._write_effective_velocity()
-
     feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
     expected_vy = -float(module.motion_params.TRANSPORT_FORWARD_SPEED) * feedforward_scale
+    for _ in range(
+        _transport_ramp_steps(
+            1.0,
+            expected_vy,
+            abs(expected_vy),
+            module.motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S,
+            module.motion_params.MOTION_INPUT_STEP_MS,
+        )
+    ):
+        runtime._write_effective_velocity()
+
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 1.0,
@@ -2375,6 +2449,42 @@ def test_assistant_transport_uses_fixed_base_speed_with_local_vision_x(
         "omega": 0.0,
         "has_omega": False,
     }
+
+
+def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.ASSISTANT_STATE_TRANSPORT_OBJECT
+    runtime._p_local = None
+    runtime._u6v = _vel(4.8, 0.0)
+
+    runtime.step_motion_input()
+
+    target = cars[0].last_chassis_target
+    base_speed = (
+        float(module.motion_params.TRANSPORT_FORWARD_SPEED)
+        * float(module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+    )
+    max_delta = (
+        base_speed
+        * float(module.motion_params.MOTION_INPUT_STEP_MS)
+        / 1000.0
+        / float(module.motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S)
+    )
+    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
+        max_delta
+    )
+    assert target["vx"] / target["vy"] == pytest.approx(4.8 / -3.6)
 
 
 def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(
@@ -2397,13 +2507,23 @@ def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(
     runtime._u6v = _vel(1.0, 2.0)
     runtime._u8v = None
 
-    runtime._write_effective_velocity()
-
     feedforward_scale = module._ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
+    expected_vy = -float(module.motion_params.TRANSPORT_FORWARD_SPEED) * feedforward_scale
+    for _ in range(
+        _transport_ramp_steps(
+            1.0,
+            expected_vy,
+            abs(expected_vy),
+            module.motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S,
+            module.motion_params.MOTION_INPUT_STEP_MS,
+        )
+    ):
+        runtime._write_effective_velocity()
+
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 1.0,
-        "vy": -float(module.motion_params.TRANSPORT_FORWARD_SPEED) * feedforward_scale,
+        "vy": expected_vy,
         "omega": 0.0,
         "has_omega": False,
     }
