@@ -41,3 +41,15 @@ SEQUENCE = (
     0,
     0,
 )
+
+FAST_SEQUENCE = (
+    OP_ANGLE,
+    _FINAL_TURN_DEG,
+    0,
+    OP_HOLD_Y,
+    _FINAL_FORWARD_SPEED,
+    0,
+    OP_END,
+    0,
+    0,
+)

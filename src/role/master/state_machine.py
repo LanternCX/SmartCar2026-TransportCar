@@ -3,6 +3,7 @@
 @file src/role/master/state_machine.py
 """
 
+from config import motion as motion_params
 from role.clear_phase import CLEAR_PHASE_FORWARD, CLEAR_PHASE_NONE, CLEAR_PHASE_RETREAT
 from role.task_sync import (
     pack_assistant_orbit_arg,
@@ -167,6 +168,7 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._prelim_final = False
 
     def _enter_state(self, state):
         """进入主车全局状态并输出一次跳转日志"""
@@ -244,7 +246,14 @@ class MasterStateMachine:
                 if self._orbit_done:
                     return
                 self._obj_id = int(value) & 0xFF
-                self._edge = target_edge_for_object(self._obj_id)
+                final_object = self.obj_done + 1 >= self._obj_need
+                self._prelim_final = bool(
+                    not motion_params.IS_FINAL_ROUND and final_object
+                )
+                self._edge = target_edge_for_object(
+                    self._obj_id,
+                    final_object=final_object,
+                )
                 self._wait_obj_ack = True
                 self._obj_req = True
                 self._p_ast = (
@@ -255,6 +264,7 @@ class MasterStateMachine:
                     pack_task_arg(
                         self._a_obj_arg,
                         self._obj_id,
+                        self._prelim_final,
                     ),
                 )
                 return
@@ -299,6 +309,7 @@ class MasterStateMachine:
             self._orbit_arg = pack_assistant_orbit_arg(
                 offset_deg,
                 self._obj_id,
+                preliminary_final=self._prelim_final,
             )
             offset_deg = unpack_assistant_orbit_offset_deg(self._orbit_arg)
             self._push_heading = heading_with_offset(push_heading, offset_deg)
@@ -323,6 +334,7 @@ class MasterStateMachine:
                 offset_deg,
                 self._obj_id,
                 assistant_orbit_direction,
+                self._prelim_final,
             )
 
     def handle_assistant_target_found(self, value):
@@ -387,6 +399,7 @@ class MasterStateMachine:
             pack_task_arg(
                 self._a_tr_arg,
                 self._obj_id,
+                self._prelim_final,
             ),
         )
 
@@ -427,6 +440,7 @@ class MasterStateMachine:
             pack_task_arg(
                 self._a_tr_arg,
                 self._obj_id,
+                self._prelim_final,
             ),
         )
 
@@ -481,7 +495,7 @@ class MasterStateMachine:
                     0,
                     ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
                     ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
-                    0,
+                    int(self._prelim_final),
                 )
                 self._enter_return_retreat()
                 return
@@ -533,6 +547,7 @@ class MasterStateMachine:
         self._a_clear = False
         self._obj_id = 0
         self._edge = None
+        self._prelim_final = False
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
@@ -615,6 +630,11 @@ class MasterStateMachine:
         if self._edge is None:
             raise ValueError
         return self._edge
+
+    def uses_preliminary_fast_return(self):
+        """当前回库是否使用预赛最后一轮快速路径"""
+
+        return bool(self._prelim_final)
 
     def _enter_clear_phase(self, clear_phase):
         """进入指定的搬运收尾阶段并按需同步辅车"""

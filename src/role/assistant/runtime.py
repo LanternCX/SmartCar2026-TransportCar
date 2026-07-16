@@ -13,11 +13,15 @@ def create_transport_car():
     """
 
     # log_memory("ai0")
-    from config.motion import FIELD_SIZE_M
-    from config.storage import OBSTACLE_CONFIG_FILE
-    from storage.param_manager import load_obstacle_slots
+    from config.motion import IS_FINAL_ROUND
     from role.assistant.follow_runtime import AssistantFollowRuntime
 
     # log_memory("ai1")
-    obstacle_slots = load_obstacle_slots(OBSTACLE_CONFIG_FILE, FIELD_SIZE_M)
+    obstacle_slots = ()
+    if IS_FINAL_ROUND:
+        from config.motion import FIELD_SIZE_M
+        from config.storage import OBSTACLE_CONFIG_FILE
+        from storage.param_manager import load_obstacle_slots
+
+        obstacle_slots = load_obstacle_slots(OBSTACLE_CONFIG_FILE, FIELD_SIZE_M)
     return AssistantFollowRuntime(obstacle_slots=obstacle_slots)

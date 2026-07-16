@@ -17,9 +17,11 @@ FIELD_EDGE_RIGHT = "right"
 _ALL_OBJECTS = const(-1)
 
 
-def target_edge_for_object(object_id):
-    """按物体编号读取目标边, -1 配置覆盖所有物体."""
+def target_edge_for_object(object_id, final_object=False):
+    """按比赛模式、搬运进度和物体编号读取目标边."""
 
+    if not bool(motion_params.IS_FINAL_ROUND) and final_object:
+        return FIELD_EDGE_LEFT
     table = getattr(motion_params, "TRANSPORT_OBJECT_TARGET_EDGE")
     if _ALL_OBJECTS in table:
         return table[_ALL_OBJECTS]

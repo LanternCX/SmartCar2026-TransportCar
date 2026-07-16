@@ -330,6 +330,7 @@ def install_transport_car_stubs() -> None:
         "FIELD_SIZE_M": (3.2, 2.4),
         "MASTER_START_POSITION_M": (0.10, 0.0),
         "ASSISTANT_START_POSITION_M": (0.10, -0.50),
+        "IS_FINAL_ROUND": False,
         "TRANSPORT_OBJECT_TARGET_EDGE": {-1: "bottom"},
         "POS_TOLERANCE": 0.01,
         "ANGLE_TOLERANCE": 1.0,

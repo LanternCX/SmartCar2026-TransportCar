@@ -17,6 +17,7 @@ from config import motion as motion_params
 from role.task_sync import (
     pack_assistant_orbit_arg,
     unpack_assistant_orbit_direction,
+    unpack_task_arg_preliminary_final,
 )
 
 
@@ -275,6 +276,61 @@ def test_master_state_machine_matching_target_found_enters_orbiting() -> None:
         "arg": _pack_task_arg(1, 2),
     }
     assert orbit_command is None
+
+
+def test_master_state_machine_marks_preliminary_final_object_for_left_transport(
+    monkeypatch,
+) -> None:
+    """主车把预赛最后一轮的左边决策同步给辅车."""
+    MasterStateMachine = _load_master_state_machine()
+    monkeypatch.setattr(MasterStateMachine.motion_params, "IS_FINAL_ROUND", False)
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        total_object_count=1,
+    )
+    _enter_initial_search(machine)
+
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    request = machine.poll_assistant_request()
+
+    assert machine.get_target_edge() == "left"
+    assert request is not None
+    assert unpack_task_arg_preliminary_final(
+        request[MasterStateMachine.RQ_ARG]
+    ) is True
+
+
+def test_master_state_machine_does_not_mark_final_round_left_transport_as_fast_return(
+    monkeypatch,
+) -> None:
+    """决赛物体即使推向左边，也不携带预赛快速回库标记."""
+    MasterStateMachine = _load_master_state_machine()
+    monkeypatch.setattr(MasterStateMachine.motion_params, "IS_FINAL_ROUND", True)
+    monkeypatch.setattr(
+        MasterStateMachine.motion_params,
+        "TRANSPORT_OBJECT_TARGET_EDGE",
+        {1: "left", 2: "left", 3: "right", 4: "right", 5: "top"},
+    )
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        total_object_count=1,
+    )
+    _enter_initial_search(machine)
+
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    request = machine.poll_assistant_request()
+
+    assert machine.get_target_edge() == "left"
+    assert request is not None
+    assert unpack_task_arg_preliminary_final(
+        request[MasterStateMachine.RQ_ARG]
+    ) is False
 
 
 def test_master_state_machine_marks_assistant_object_request_kind_before_orbit() -> None:
@@ -1250,6 +1306,27 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
     assert machine.poll_assistant_request() is None
     assert machine.allows_search_velocity() is False
     assert machine.allows_assistant_velocity_forward() is False
+
+
+def test_master_state_machine_syncs_preliminary_fast_return_to_assistant() -> None:
+    """进入回库时把预赛快速路径决策可靠同步给辅车."""
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        total_object_count=1,
+    )
+    machine.state = MasterStateMachine.STATE_CLEAR_OBJECT
+    machine._clr_phase = MasterStateMachine.CLEAR_PHASE_RETREAT
+    machine._prelim_final = True
+
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(MasterStateMachine.CLEAR_PHASE_RETREAT)
+    request = machine.poll_assistant_request()
+
+    assert machine.uses_preliminary_fast_return() is True
+    assert request is not None
+    assert request[MasterStateMachine.RQ_ARG] == 1
 
 
 def test_master_state_machine_return_garage_does_not_create_visual_task() -> None:

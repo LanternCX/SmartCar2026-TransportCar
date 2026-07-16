@@ -38,7 +38,7 @@ from protocol.topic import (
 )
 from protocol.transport import create_transport
 from play.routines import assistant_return_garage, master_return_garage, startup_move
-from role.task_sync import pack_assistant_orbit_arg
+from role.task_sync import pack_assistant_orbit_arg, pack_task_arg
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -68,6 +68,7 @@ MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
 MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
 ASSISTANT_LEAD_DISTANCE = assistant_return_garage.SEQUENCE[1] / 100.0
 ASSISTANT_RETURN_POSITION_SPEED = assistant_return_garage.SEQUENCE[2]
+ASSISTANT_FINAL_FORWARD_SPEED = assistant_return_garage.SEQUENCE[13]
 
 
 def _pack_task_arg(config_id, object_id):
@@ -1203,6 +1204,40 @@ def test_assistant_runtime_accepts_dynamic_orbit_offset(monkeypatch) -> None:
     ) in cars[0].events
 
 
+def test_assistant_preliminary_final_orbit_uses_left_edge(monkeypatch) -> None:
+    """辅车按主车同步标记使用预赛最后一轮的左边推动朝向."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+
+    runtime._apply_sync_context(
+        _assistant_sync(
+            module.ASSISTANT_STATE_ORBIT,
+            module.ASSISTANT_TARGET_OBJECT,
+            pack_assistant_orbit_arg(
+                0,
+                2,
+                preliminary_final=True,
+            ),
+        )
+    )
+
+    assert (
+        "set_orbit_target",
+        90.0,
+        float(module._ASSISTANT_ORBIT_RADIUS_SCALE),
+    ) in cars[0].events
+
+
 def test_assistant_runtime_zero_offset_uses_opposite_push_heading(
     monkeypatch,
 ) -> None:
@@ -1322,6 +1357,38 @@ def test_assistant_runtime_pads_local_vision_sync_to_fixed_frame(monkeypatch) ->
     assert packet[AS_ARG] == _pack_task_arg(1, 2)
     assert len(packet) == 3
     assert frame["body"][4:10] == bytes(6)
+
+
+def test_assistant_local_vision_sync_strips_preliminary_final_flag(monkeypatch) -> None:
+    """辅车转发给 OpenART 的物体编号不携带路径决策标志."""
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    uart6 = BufferedUart()
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=uart6,
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._apply_sync_context(
+        _assistant_sync(
+            module.ASSISTANT_STATE_APPROACH_OBJECT,
+            module.ASSISTANT_TARGET_OBJECT,
+            pack_task_arg(1, 2, preliminary_final=True),
+        )
+    )
+
+    runtime._queue_pending_local_vision_sync()
+    runtime.poll_transport_tx()
+
+    frame = decode_frame(uart6.messages[-1])
+    assert frame is not None
+    packet = decode_assistant_vision_task_sync_body(frame["body"][:4])
+    assert packet[AS_ARG] == _pack_task_arg(1, 2)
 
 
 def test_assistant_runtime_treats_master_sync_as_zero_velocity(monkeypatch) -> None:
@@ -1842,6 +1909,40 @@ def test_master_runtime_starts_return_play_after_assistant_return_sync(monkeypat
     assert frame["topic"] == TOPIC_ASSISTANT_STATE_SYNC
 
 
+def test_master_preliminary_final_return_skips_planning_and_left_line(monkeypatch) -> None:
+    """预赛最后一轮主车直接转向底边并持续回库."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.master.forward_runtime", monkeypatch)
+    runtime = module.MasterForwardRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_MASTER,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.STATE_RETURN_GARAGE_RETREAT
+    runtime._sm._prelim_final = True
+
+    runtime._apply_motion_outputs()
+
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
+    assert not any(event[0] == "set_relative_translation_target" for event in cars[0].events)
+
+    cars[0].command_lock = False
+    runtime._apply_motion_outputs()
+
+    assert cars[0].last_chassis_target == {
+        "source": None,
+        "vx": 0.0,
+        "vy": float(MASTER_FINAL_FORWARD_SPEED),
+        "omega": 0.0,
+        "has_omega": False,
+    }
+
+
 def test_master_runtime_turn_back_completes_immediately_after_lock_release(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
@@ -2196,6 +2297,51 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     runtime._write_effective_velocity()
     runtime._write_effective_velocity()
     assert ("set_heading_transition_target", 180.0) in cars[0].events
+
+
+def test_assistant_preliminary_final_return_moves_inside_before_bottom_return(
+    monkeypatch,
+) -> None:
+    """预赛最后一轮辅车先向场内前进三十厘米，再转向底边回库."""
+    clock = ManualClock(0)
+    cars = install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._sm.state = module.ASSISTANT_STATE_RETURN_FOLLOW
+    runtime._prelim_final = True
+
+    runtime._write_effective_velocity()
+
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        pytest.approx(float(module.ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M)),
+        float(ASSISTANT_RETURN_POSITION_SPEED),
+    ) in cars[0].events
+
+    cars[0].command_lock = False
+    runtime._write_effective_velocity()
+
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
+
+    cars[0].command_lock = False
+    runtime._write_effective_velocity()
+
+    assert cars[0].last_chassis_target == {
+        "source": None,
+        "vx": 0.0,
+        "vy": float(ASSISTANT_FINAL_FORWARD_SPEED),
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_assistant_transport_uses_fixed_base_speed_with_local_vision_x(

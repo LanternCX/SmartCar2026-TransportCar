@@ -560,6 +560,11 @@ class MasterForwardRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
+        if self._sm.uses_preliminary_fast_return():
+            if int(self.play_kind) != int(play_sequence.PLAY_MASTER_FAST_RETURN):
+                play_sequence.start(self, play_sequence.PLAY_MASTER_FAST_RETURN)
+            play_sequence.tick(self)
+            return
         if int(self.play_kind) != int(play_sequence.PLAY_MASTER_RETURN):
             relative_y_m, heading_deg = plan_return_garage(
                 self._car.odometry.x,

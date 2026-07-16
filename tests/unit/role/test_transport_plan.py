@@ -72,6 +72,7 @@ def _lower_endpoint_diagonal_position(edge: str):
 
 def test_transport_object_target_edge_uses_final_mapping(monkeypatch) -> None:
     """决赛按物体类别映射到三条目标边."""
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
     monkeypatch.setattr(
         motion_params,
         "TRANSPORT_OBJECT_TARGET_EDGE",
@@ -89,10 +90,31 @@ def test_transport_object_target_edge_uses_final_mapping(monkeypatch) -> None:
 
 def test_transport_object_target_edge_uses_preliminary_override(monkeypatch) -> None:
     """初赛统一把所有物体搬运到底边."""
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", False)
     monkeypatch.setattr(motion_params, "TRANSPORT_OBJECT_TARGET_EDGE", {-1: "bottom"})
 
     assert target_edge_for_object(1) == "bottom"
     assert target_edge_for_object(255) == "bottom"
+
+
+def test_preliminary_final_object_targets_left_edge(monkeypatch) -> None:
+    """预赛最后一个物体改推到左边，为快速回库建立位置条件."""
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", False)
+    monkeypatch.setattr(motion_params, "TRANSPORT_OBJECT_TARGET_EDGE", {-1: "bottom"})
+
+    assert target_edge_for_object(3, final_object=True) == FIELD_EDGE_LEFT
+
+
+def test_final_round_last_object_keeps_category_target(monkeypatch) -> None:
+    """决赛最后一个物体仍按类别选边，不启用预赛策略."""
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
+    monkeypatch.setattr(
+        motion_params,
+        "TRANSPORT_OBJECT_TARGET_EDGE",
+        {1: "left", 2: "left", 3: "right", 4: "right", 5: "top"},
+    )
+
+    assert target_edge_for_object(5, final_object=True) == FIELD_EDGE_TOP
 
 
 def test_push_heading_is_derived_from_field_axes() -> None:
