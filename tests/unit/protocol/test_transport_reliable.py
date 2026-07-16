@@ -77,6 +77,31 @@ def test_tcp_resends_same_seq_until_ack() -> None:
     assert uart6.messages == [first, first]
 
 
+def test_assistant_state_sync_uses_longer_resend_interval() -> None:
+    clock = _ManualClock(0)
+    uart8 = _FakeUart()
+    transport = create_transport(ROLE_MASTER, uart8=uart8, now_ms=clock)
+
+    assert (
+        transport.tcp_write(
+            UART8,
+            TOPIC_ASSISTANT_STATE_SYNC,
+            encode_assistant_state_sync_body(2, 1, 0),
+        )
+        == "accepted"
+    )
+    transport.poll_tx()
+    first = uart8.messages[-1]
+
+    clock.advance(499)
+    transport.poll_tx()
+    assert uart8.messages == [first]
+
+    clock.advance(1)
+    transport.poll_tx()
+    assert uart8.messages == [first, first]
+
+
 def test_duplicate_tcp_frame_is_acked_but_not_redelivered() -> None:
     body = bytes([6, 0, 9])
     frame = encode_frame(0x02, TOPIC_ASSISTANT_EVENT_REPORT, 0x22, body)

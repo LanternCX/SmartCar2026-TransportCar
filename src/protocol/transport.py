@@ -17,6 +17,7 @@ from protocol.frame import (
 from protocol.topic import (
     ROLE_ASSISTANT,
     ROLE_MASTER,
+    TOPIC_ASSISTANT_STATE_SYNC,
     TOPIC_VISION_BOOT_CONFIRM,
     TOPIC_VISION_BOOT_READY,
     UART6,
@@ -41,6 +42,9 @@ except ImportError:
 RX_READ_LIMIT = comm_params.TRANSPORT_RX_READ_LIMIT
 UDP_SEND_INTERVAL_MS = comm_params.UDP_SEND_INTERVAL_MS
 TCP_SEND_INTERVAL_MS = comm_params.TCP_SEND_INTERVAL_MS
+ASSISTANT_STATE_SYNC_RESEND_INTERVAL_MS = (
+    comm_params.ASSISTANT_STATE_SYNC_RESEND_INTERVAL_MS
+)
 SEQ_RING_SIZE = comm_params.SEQ_RING_SIZE
 
 WRITE_ACCEPTED = "accepted"
@@ -452,8 +456,11 @@ class TransportService:
     def _is_tcp_due(self, state, now_ms):
         if state[_ST_TCP_TX_BODY] is None:
             return False
+        interval_ms = TCP_SEND_INTERVAL_MS
+        if state[_ST_TCP_TX_TOPIC] == TOPIC_ASSISTANT_STATE_SYNC:
+            interval_ms = ASSISTANT_STATE_SYNC_RESEND_INTERVAL_MS
         last_sent_ms = state[_ST_TCP_TX_LAST_SENT_MS]
-        return last_sent_ms is None or now_ms - int(last_sent_ms) >= int(TCP_SEND_INTERVAL_MS)
+        return last_sent_ms is None or now_ms - int(last_sent_ms) >= int(interval_ms)
 
     def _send_udp_if_due(self):
         """发送最新值 UDP 候选.

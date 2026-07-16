@@ -710,7 +710,7 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
     first_uart6_count = len(assistant_uart6.messages)
     assert assistant._sync_apply_count == 1
 
-    clock.advance(150)
+    clock.advance(500)
     sender.poll_tx()
     run_runtime_cycle(assistant)
 
