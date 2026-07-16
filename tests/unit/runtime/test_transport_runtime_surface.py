@@ -421,7 +421,7 @@ def test_master_runtime_keeps_transport_and_feedforward_flow_quiet(
     assert "master_feedforward:" not in captured
 
 
-def test_master_runtime_transport_ignores_local_vision_velocity_correction(monkeypatch) -> None:
+def test_master_transport_uses_local_vision_x_with_fixed_forward_speed(monkeypatch) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -441,7 +441,7 @@ def test_master_runtime_transport_ignores_local_vision_velocity_correction(monke
 
     assert cars[0].last_chassis_target == {
         "source": None,
-        "vx": 0.0,
+        "vx": 1.5,
         "vy": module.TRANSPORT_FORWARD_SPEED,
         "omega": 0.0,
         "has_omega": False,

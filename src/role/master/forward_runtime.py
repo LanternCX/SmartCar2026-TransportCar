@@ -680,6 +680,8 @@ class MasterForwardRuntime:
     def _apply_transport_velocity(self) -> None:
         vx = 0.0
         vy = float(TRANSPORT_FORWARD_SPEED)
+        if self._u6v is not None:
+            vx = float(self._u6v[VEL_X])
         self._car.handle_velocity_packet(
             vx,
             vy,
