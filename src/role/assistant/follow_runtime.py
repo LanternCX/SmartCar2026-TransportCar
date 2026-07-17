@@ -307,7 +307,9 @@ class AssistantFollowRuntime:
     def _apply_sync_context(self, packet) -> bool:
         state, target, arg = packet
         restart_realign = bool(
-            self._realign and int(state) == ASSISTANT_STATE_APPROACH_OBJECT
+            int(state) == ASSISTANT_STATE_APPROACH_OBJECT
+            and unpack_task_arg_config(arg)
+            == _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
         )
         accepted = self._sm.apply_master_state(
             state, target, arg

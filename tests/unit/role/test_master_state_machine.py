@@ -397,8 +397,58 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     assert orbit_command == _push_heading_for_object(MasterStateMachine, 2)
 
 
-def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
-    """主车让位后等待辅车进入二次对正, 侧推完成后再返回规划航向."""
+def test_master_state_machine_skips_orbit_within_angle_tolerance() -> None:
+    """目标朝向已在容差内时直接让主辅车执行二次对正."""
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        orbit_avoid_trigger_deg=motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG,
+        orbit_avoid_heading_deg=motion_params.MASTER_ORBIT_AVOID_HEADING_DEG,
+        assistant_transport_arg=9,
+    )
+    _enter_initial_search(machine)
+    machine.poll_task_request()
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+
+    push_heading = _push_heading_for_object(MasterStateMachine, 2)
+    heading = MasterStateMachine.heading_with_offset(
+        push_heading,
+        -MasterStateMachine.motion_params.ANGLE_TOLERANCE,
+    )
+    machine.mark_assistant_object_acknowledged(0.0, 0.0, heading)
+
+    assert machine.state == MasterStateMachine.STATE_SEARCH_OBJECT
+    assert machine.poll_orbit_command() is None
+    assert _task_request(MasterStateMachine, machine.poll_task_request()) == {
+        "context_id": 3,
+        "state": MasterStateMachine.STATE_SEARCH_OBJECT,
+        "target": MasterStateMachine.TARGET_OBJECT,
+        "arg": 2,
+    }
+
+    machine.handle_assistant_target_found(value=300)
+
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_realign",
+        "state": MasterStateMachine.ASSISTANT_OBJECT_SYNC_STATE,
+        "target": MasterStateMachine.ASSISTANT_OBJECT_SYNC_TARGET,
+        "arg": _pack_task_arg(9, 2),
+    }
+
+    machine.handle_assistant_aligned(0)
+    machine.handle_event(machine._ctx, MasterStateMachine.EVENT_ALIGNED, 0)
+
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())[
+        "kind"
+    ] == "assistant_transport"
+
+
+def test_master_state_machine_avoids_when_actual_master_orbit_exceeds_tolerance() -> None:
+    """初赛两车并行绕行, 主车让位完成后再侧推并返回规划航向."""
     MasterStateMachine = _load_master_state_machine()
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -414,7 +464,11 @@ def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
     machine.poll_assistant_request()
 
     push_heading = _push_heading_for_object(MasterStateMachine, 2)
-    machine.mark_assistant_object_acknowledged(0.0, 0.0, push_heading)
+    heading = MasterStateMachine.heading_with_offset(
+        push_heading,
+        -(MasterStateMachine.motion_params.ANGLE_TOLERANCE + 1.0),
+    )
+    machine.mark_assistant_object_acknowledged(0.0, 0.0, heading)
 
     assert machine.poll_orbit_command() == MasterStateMachine.heading_with_offset(
         push_heading,
@@ -422,21 +476,22 @@ def test_master_state_machine_avoids_when_actual_master_orbit_is_zero() -> None:
     )
 
     machine.handle_assistant_target_found(value=300)
-    machine.step(orbit_finished=True)
-
-    assert machine.state == MasterStateMachine.STATE_ORBITING
     assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
         "arg": pack_assistant_orbit_arg(0, 2, -1),
     }
-    assert machine.poll_task_request() is None
-
-    assert machine.poll_orbit_command() is None
 
     machine.handle_assistant_orbit_finished(0)
+    assert machine.poll_avoid_push_command() is None
 
+    machine.step(orbit_finished=True)
+
+    assert machine.state == MasterStateMachine.STATE_ORBITING
+    assert machine.poll_assistant_request() is None
+    assert machine.poll_task_request() is None
+    assert machine.poll_orbit_command() is None
     assert machine.poll_avoid_push_command() == pytest.approx(
         motion_params.MASTER_ORBIT_AVOID_PUSH_DISTANCE_M
     )
@@ -990,8 +1045,49 @@ def test_master_state_machine_ignores_assistant_aligned_before_assistant_orbit_r
     assert machine.poll_assistant_request() is None
 
 
-def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishes() -> None:
+def test_master_state_machine_preliminary_starts_assistant_orbit_during_master_orbit() -> None:
     MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+    )
+    _enter_initial_search(machine)
+    machine.handle_event(
+        context_id=1, event=MasterStateMachine.EVENT_TARGET_FOUND, value=2
+    )
+    machine.poll_assistant_request()
+    machine.mark_assistant_object_acknowledged()
+    machine.poll_orbit_command()
+
+    machine.handle_assistant_target_found(value=300)
+
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_orbit",
+        "state": 3,
+        "target": 1,
+        "arg": pack_assistant_orbit_arg(0, 2),
+    }
+
+    machine.handle_assistant_aligned(value=0)
+
+    machine.step(orbit_finished=True)
+    machine.handle_event(
+        context_id=3, event=MasterStateMachine.EVENT_ALIGNED, value=0
+    )
+
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
+        "kind": "assistant_transport",
+        "state": MasterStateMachine.ASSISTANT_TRANSPORT_SYNC_STATE,
+        "target": 1,
+        "arg": _pack_task_arg(1, 2),
+    }
+
+
+def test_master_state_machine_final_round_waits_for_master_orbit(
+    monkeypatch,
+) -> None:
+    MasterStateMachine = _load_master_state_machine()
+    monkeypatch.setattr(MasterStateMachine.motion_params, "IS_FINAL_ROUND", True)
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
         boot_heading_deg=15.0,
@@ -1010,12 +1106,9 @@ def test_master_state_machine_buffers_assistant_target_found_until_orbit_finishe
 
     machine.step(orbit_finished=True)
 
-    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request()) == {
-        "kind": "assistant_orbit",
-        "state": 3,
-        "target": 1,
-        "arg": pack_assistant_orbit_arg(0, 2),
-    }
+    assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())[
+        "kind"
+    ] == "assistant_orbit"
 
 
 def test_master_state_machine_does_not_enter_transport_until_both_sides_aligned() -> None:

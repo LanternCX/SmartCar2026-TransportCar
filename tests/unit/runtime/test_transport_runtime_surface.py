@@ -1233,6 +1233,42 @@ def test_assistant_runtime_normal_orbit_accepts_realign_completion(
     assert runtime._p_report[0] == module._ALIGNED_EVENT
 
 
+def test_assistant_runtime_repeated_approach_sync_starts_direct_realign(
+    monkeypatch,
+) -> None:
+    """接近物体状态内的新同步直接切换到二次对正任务."""
+    clock = ManualClock(0)
+    install_fake_core(monkeypatch)
+    module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
+    runtime = module.AssistantFollowRuntime(
+        now_ms=clock,
+        transport=create_transport(
+            ROLE_ASSISTANT,
+            uart6=BufferedUart(),
+            uart8=BufferedUart(),
+            now_ms=clock,
+        ),
+    )
+    runtime._apply_sync_context(
+        _assistant_sync(
+            module.ASSISTANT_STATE_APPROACH_OBJECT,
+            module.ASSISTANT_TARGET_OBJECT,
+            pack_task_arg(1, 2),
+        )
+    )
+
+    runtime._apply_sync_context(
+        _assistant_sync(
+            module.ASSISTANT_STATE_APPROACH_OBJECT,
+            module.ASSISTANT_TARGET_OBJECT,
+            pack_task_arg(module._ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID, 2),
+        )
+    )
+
+    assert runtime._realign is True
+    assert runtime._realign_ready is True
+
+
 def test_assistant_runtime_accepts_dynamic_orbit_offset(monkeypatch) -> None:
     """辅车按状态参数执行动态斜向绕行."""
     clock = ManualClock(0)

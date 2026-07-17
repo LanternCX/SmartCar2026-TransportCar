@@ -142,6 +142,8 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
+        # 主车目标朝向已在控制容差内时直接进入二次对正
+        self._orb_skip = False
         self.obj_done = 0
         self._ctx = int(initial_context_id) % 256
         # _p_task: 本车视觉 task；_p_ast: 辅车同步；_p_orbit: 本车绕行动作。
@@ -162,6 +164,8 @@ class MasterStateMachine:
         # 对齐和清障标记按主车 m 与辅车 a 拆分，避免用字符串键保存角色状态。
         self._m_aligned = False
         self._a_aligned = False
+        # 初赛并行绕行时保留辅车提前完成结果, 等主车让位完成后继续
+        self._a_orbit_done = False
         self._tr_ready = False
         self._clr_phase = CLEAR_PHASE_NONE
         self._m_clear = False
@@ -199,20 +203,31 @@ class MasterStateMachine:
                 self._orb_phase = _ORBIT_PHASE_WAIT_RETURN
                 if self._obj_pending:
                     self._queue_assistant_orbit()
+                if self._a_orbit_done:
+                    self._orb_phase = _ORBIT_PHASE_PUSH
+                    self._p_push = self._av_push
                 return
-            self._enter_state(STATE_SEARCH_OBJECT)
-            self._orbit_done = True
-            self._m_aligned = False
-            self._orb_phase = _ORBIT_PHASE_NORMAL
-            self._ctx = (self._ctx + 1) % 256
-            self._p_task = (
-                RK_NONE,
-                self._ctx,
-                STATE_SEARCH_OBJECT,
-                TARGET_OBJECT,
-                self._tr_task_arg,
-            )
-            if self._obj_pending and not self._orbit_req:
+            self._enter_realign()
+
+    def _enter_realign(self):
+        """进入主辅车二次对正阶段"""
+
+        self._enter_state(STATE_SEARCH_OBJECT)
+        self._orbit_done = True
+        self._m_aligned = False
+        self._orb_phase = _ORBIT_PHASE_NORMAL
+        self._ctx = (self._ctx + 1) % 256
+        self._p_task = (
+            RK_NONE,
+            self._ctx,
+            STATE_SEARCH_OBJECT,
+            TARGET_OBJECT,
+            self._tr_task_arg,
+        )
+        if self._obj_pending and not self._orbit_req:
+            if self._orb_skip:
+                self._queue_assistant_realign()
+            else:
                 self._queue_assistant_orbit()
 
     def mark_startup_move_completed(self):
@@ -291,12 +306,11 @@ class MasterStateMachine:
         position_y,
         heading_deg,
     ):
-        """按主车当前世界位姿开始主车绕行"""
+        """按主车当前世界位姿确定绕行或直接对正"""
 
         if self._wait_obj_ack:
             self._wait_obj_ack = False
             self._ctx = (self._ctx + 1) % 256
-            self._enter_state(STATE_ORBITING)
             push_heading = push_heading_for_edge(self._edge)
             planned_heading = plan_transport_heading(
                 self._edge,
@@ -319,6 +333,13 @@ class MasterStateMachine:
             )
             self._m_aligned = False
             self._a_aligned = False
+            self._orb_skip = abs(orbit_delta_deg) <= float(
+                motion_params.ANGLE_TOLERANCE
+            )
+            if self._orb_skip:
+                self._enter_realign()
+                return
+            self._enter_state(STATE_ORBITING)
             assistant_orbit_direction = 0
             if abs(orbit_delta_deg) < self._av_tr:
                 self._orb_phase = _ORBIT_PHASE_AVOID
@@ -343,7 +364,10 @@ class MasterStateMachine:
         _ = value
         if self.state == STATE_ORBITING:
             if self._obj_req and not self._orbit_req:
-                if self._orb_phase == _ORBIT_PHASE_WAIT_RETURN:
+                if (
+                    not motion_params.IS_FINAL_ROUND
+                    or self._orb_phase == _ORBIT_PHASE_WAIT_RETURN
+                ):
                     self._queue_assistant_orbit()
                 else:
                     self._obj_pending = True
@@ -354,7 +378,10 @@ class MasterStateMachine:
             return
         if self._orbit_req:
             return
-        self._queue_assistant_orbit()
+        if self._orb_skip:
+            self._queue_assistant_realign()
+        else:
+            self._queue_assistant_orbit()
 
     def _queue_assistant_orbit(self):
         """下发一次辅车绕行同步请求"""
@@ -369,11 +396,31 @@ class MasterStateMachine:
             self._orbit_arg,
         )
 
+    def _queue_assistant_realign(self):
+        """下发一次辅车二次对正同步请求"""
+
+        self._obj_pending = False
+        self._orbit_req = True
+        self._p_ast = (
+            RK_A_REALIGN,
+            0,
+            ASSISTANT_OBJECT_SYNC_STATE,
+            ASSISTANT_OBJECT_SYNC_TARGET,
+            pack_task_arg(
+                self._a_tr_arg,
+                self._obj_id,
+                self._prelim_final,
+            ),
+        )
+
     def handle_assistant_orbit_finished(self, value):
-        """辅车进入二次对正后启动主车侧推"""
+        """记录辅车进入二次对正, 并在主车让位完成后启动侧推"""
 
         _ = value
         if self.state != STATE_ORBITING:
+            return
+        if self._orb_phase == _ORBIT_PHASE_AVOID and self._orbit_req:
+            self._a_orbit_done = True
             return
         if self._orb_phase != _ORBIT_PHASE_WAIT_RETURN:
             return
@@ -391,17 +438,7 @@ class MasterStateMachine:
             return
         self._orb_phase = _ORBIT_PHASE_RETURN
         self._p_orbit = self._push_heading
-        self._p_ast = (
-            RK_A_REALIGN,
-            0,
-            ASSISTANT_OBJECT_SYNC_STATE,
-            ASSISTANT_OBJECT_SYNC_TARGET,
-            pack_task_arg(
-                self._a_tr_arg,
-                self._obj_id,
-                self._prelim_final,
-            ),
-        )
+        self._queue_assistant_realign()
 
     def handle_assistant_aligned(self, value):
         """消费辅车二次对正完成回报"""
@@ -409,6 +446,12 @@ class MasterStateMachine:
         _ = value
         if self.state == STATE_ORBITING:
             if self._orb_phase == _ORBIT_PHASE_RETURN and self._orbit_req:
+                self._a_aligned = True
+            elif (
+                not motion_params.IS_FINAL_ROUND
+                and self._orb_phase == _ORBIT_PHASE_NORMAL
+                and self._orbit_req
+            ):
                 self._a_aligned = True
             return
         if self.state != STATE_SEARCH_OBJECT:
@@ -541,6 +584,7 @@ class MasterStateMachine:
         self._tr_req = False
         self._m_aligned = False
         self._a_aligned = False
+        self._a_orbit_done = False
         self._tr_ready = False
         self._clr_phase = CLEAR_PHASE_NONE
         self._m_clear = False
@@ -551,6 +595,7 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
+        self._orb_skip = False
         self._p_push = None
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
@@ -575,6 +620,7 @@ class MasterStateMachine:
         self._tr_req = False
         self._m_aligned = False
         self._a_aligned = False
+        self._a_orbit_done = False
         self._tr_ready = False
         self._clr_phase = CLEAR_PHASE_NONE
         self._m_clear = False
@@ -584,6 +630,7 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
+        self._orb_skip = False
         self._p_push = None
 
     def _enter_return_retreat(self):
