@@ -498,7 +498,9 @@ def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
     assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
         max_delta
     )
-    assert target["vx"] / target["vy"] == pytest.approx(8.0 / 6.0)
+    assert target["vx"] / target["vy"] == pytest.approx(
+        float(runtime._u6v[0]) / float(module.TRANSPORT_FORWARD_SPEED)
+    )
 
 
 def test_master_runtime_blocks_transport_feedforward(
@@ -2484,7 +2486,9 @@ def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
     assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
         max_delta
     )
-    assert target["vx"] / target["vy"] == pytest.approx(4.8 / -3.6)
+    assert target["vx"] / target["vy"] == pytest.approx(
+        float(runtime._u6v[0]) / -base_speed
+    )
 
 
 def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(

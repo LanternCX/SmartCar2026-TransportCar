@@ -7,21 +7,21 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 8.0
+TRANSPORT_FORWARD_SPEED = 9.0
 # 主车推行速度从零爬升到基础速度的时间, 单位秒
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
 # 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
-ASSISTANT_TRANSPORT_ACCEL_TIME_S = 1.5
+ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = 0.10
 # 搬运收尾阶段主车后退最大速度
-TRANSPORT_CLEAR_RETREAT_MAX_SPEED = 3.0
+TRANSPORT_CLEAR_RETREAT_MAX_SPEED = 6.0
 # 状态收尾判定时三轮接近静止的默认轮速阈值, 单位脉冲/控制拍
-MOTION_STOP_SPEED_THRESHOLD = 0.5
+MOTION_STOP_SPEED_THRESHOLD = 1
 # 状态收尾判定时三轮接近静止需要连续满足的默认拍数
-MOTION_STOP_CONFIRM_TICKS = 3
+MOTION_STOP_CONFIRM_TICKS = 1
 # 全向轮轮径, 单位米, 用于编码器脉冲与物理距离换算
 WHEEL_DIAMETER_M = 0.038
 # 主车里程计距离补偿系数, 格式为 (x, y), 对应车体系右移与前进
@@ -53,7 +53,7 @@ TRANSPORT_OBJECT_TARGET_EDGE = (
 # 位置控制最大命令速度, 单位脉冲/控制拍
 POS_MAX_SPEED = 5.0
 # 位置控制比例系数, 单位 Speed (m/s) / Error (m), 决定偏差如何转换为速度指令
-POS_KP = 2.0
+POS_KP = 5.0
 # 位置锁定容差, 单位米, 位置偏差小于此值时认为已到达目标
 POS_TOLERANCE = 0.06
 # 角度锁定容差, 单位度, 角度偏差小于此值时认为已到达目标

@@ -12,7 +12,7 @@ except ImportError:
 # 启动右转后第二段前进距离，单位 cm；用于进入取物搜索起点。
 _SECOND_FORWARD_DISTANCE_CM = const(90)
 _FIRST_MOVE_SPEED = const(5)
-_SECOND_MOVE_SPEED = const(8)
+_SECOND_MOVE_SPEED = const(10)
 _STARTUP_HEADING_DEG = const(70)
 
 SEQUENCE = (
