@@ -173,18 +173,16 @@ def _read_startup_vehicle_role():
 def _run_low_voltage_alarm(voltage):
     """低电压时循环蜂鸣告警."""
 
-    from machine import Pin
+    from machine import PWM
 
     on_ms = 100
-    beep = Pin("D24", Pin.OUT, value=False)
+    beep = PWM("C28", safety_params.BUZZER_FREQUENCY_HZ, duty_u16=0)
     off_ms = 1000 - on_ms
-    if off_ms < 0:
-        off_ms = 0
 
     while True:
-        beep.high()
+        beep.duty_u16(32768)
         _sleep_ms(on_ms)
-        beep.low()
+        beep.duty_u16(0)
         _sleep_ms(off_ms)
 
 
