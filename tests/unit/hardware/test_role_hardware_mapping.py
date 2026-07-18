@@ -57,13 +57,13 @@ def test_master_role_uses_configured_hardware_mapping(monkeypatch) -> None:
 
     assert motors["m"].channel == _RecordingMotorController.PWM_D4_DIR_D5
     assert motors["m"].invert is True
-    assert motors["l"].channel == _RecordingMotorController.PWM_D6_DIR_D7
+    assert motors["l"].channel == _RecordingMotorController.PWM_C30_DIR_C31
     assert motors["l"].invert is True
-    assert motors["r"].channel == _RecordingMotorController.PWM_C28_DIR_C29
+    assert motors["r"].channel == _RecordingMotorController.PWM_D6_DIR_D7
     assert motors["r"].invert is True
     assert (encoders["m"].pin_a, encoders["m"].pin_b) == ("D13", "D14")
-    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("D15", "D16")
-    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("C0", "C1")
+    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("C2", "C3")
+    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("D15", "D16")
 
 
 def test_assistant_role_uses_configured_hardware_mapping(monkeypatch) -> None:
@@ -74,10 +74,10 @@ def test_assistant_role_uses_configured_hardware_mapping(monkeypatch) -> None:
 
     assert motors["m"].channel == _RecordingMotorController.PWM_D4_DIR_D5
     assert motors["m"].invert is True
-    assert motors["l"].channel == _RecordingMotorController.PWM_D6_DIR_D7
+    assert motors["l"].channel == _RecordingMotorController.PWM_C30_DIR_C31
     assert motors["l"].invert is True
-    assert motors["r"].channel == _RecordingMotorController.PWM_C30_DIR_C31
+    assert motors["r"].channel == _RecordingMotorController.PWM_D6_DIR_D7
     assert motors["r"].invert is True
     assert (encoders["m"].pin_a, encoders["m"].pin_b) == ("D13", "D14")
-    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("D15", "D16")
-    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("C2", "C3")
+    assert (encoders["l"].pin_a, encoders["l"].pin_b) == ("C2", "C3")
+    assert (encoders["r"].pin_a, encoders["r"].pin_b) == ("D15", "D16")

@@ -11,8 +11,8 @@ def _resolve_motor_mapping(vehicle_role):
     if vehicle_role == "master":
         return {
             "m": (MOTOR_CONTROLLER.PWM_D4_DIR_D5, True),
-            "l": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, True),
-            "r": (MOTOR_CONTROLLER.PWM_C28_DIR_C29, True),
+            "l": (MOTOR_CONTROLLER.PWM_C30_DIR_C31, True),
+            "r": (MOTOR_CONTROLLER.PWM_D6_DIR_D7, True),
         }
     if vehicle_role == "assistant":
         return {
@@ -29,7 +29,7 @@ def create_motors(vehicle_role="assistant"):
     分别创建中间(m)、左(l)、右(r)三个电机, 配置对应的 PWM 与方向控制引脚
     不同车辆角色使用不同接线映射, 底层控制语义保持一致
 
-    @param vehicle_role 车辆角色, master 使用旧硬件接线, assistant 使用新硬件接线
+    @param vehicle_role 车辆角色, 主车和辅车使用统一接线映射
     @return 字典 {轮子名称 -> 电机对象}, 键为 "m", "l", "r"
     """
     mapping = _resolve_motor_mapping(vehicle_role)

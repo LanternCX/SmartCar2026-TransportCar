@@ -212,7 +212,7 @@ class TransportCar:
         self.led = Pin("C4", Pin.OUT, value=True)
         self.switch2 = Pin("D9", Pin.IN, pull=Pin.PULL_UP_47K)
         self.switch2_init = self.switch2.value()
-        self.grayscale = Pin("C23", Pin.IN)
+        self.grayscale = Pin("D19", Pin.IN)
         self._grayscale_on = not bool(self.grayscale.value())
 
         # IMU 传感器(陀螺仪+加速度计), 用于姿态估计与航向角反馈

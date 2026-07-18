@@ -10,7 +10,7 @@ print("REAL TYPE : " + BOARD_TYPE)
 print("BOARD VERSION : " + BOARD_VERSION)
 
 LED_PIN = 'C4'
-GRAY_PIN = 'C23'
+GRAY_PIN = 'D19'
 
 led = Pin(LED_PIN, Pin.OUT, value = True)
 gray = Pin(GRAY_PIN, Pin.IN)
