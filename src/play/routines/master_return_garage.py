@@ -16,9 +16,9 @@ except ImportError:
     def const(value):
         return value
 
-_RETURN_POSITION_SPEED = const(3)
-_RETURN_FORWARD_SPEED = const(3)
-_FINAL_FORWARD_SPEED = const(8)
+_RETURN_POSITION_SPEED = const(5)
+_RETURN_FORWARD_SPEED = const(5)
+_FINAL_FORWARD_SPEED = const(10)
 _FINAL_TURN_DEG = const(180)
 
 SEQUENCE = (
@@ -31,6 +31,18 @@ SEQUENCE = (
     OP_LINE_Y,
     _RETURN_FORWARD_SPEED,
     0,
+    OP_ANGLE,
+    _FINAL_TURN_DEG,
+    0,
+    OP_HOLD_Y,
+    _FINAL_FORWARD_SPEED,
+    0,
+    OP_END,
+    0,
+    0,
+)
+
+FAST_SEQUENCE = (
     OP_ANGLE,
     _FINAL_TURN_DEG,
     0,

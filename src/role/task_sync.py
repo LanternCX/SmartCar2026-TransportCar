@@ -7,15 +7,24 @@ from micropython import const  # pyright: ignore[reportMissingImports]
 
 
 _ASSISTANT_ORBIT_OFFSET_BIAS = const(90)
+_OBJECT_ID_MASK = const(0x1F)
+_PRELIMINARY_FINAL_MASK = const(0x20)
 
 
-def pack_task_arg(config_id, object_id):
-    """把视觉配置号与物体编号打包进单个 i16 参数槽位"""
-
-    packed = (int(config_id) & 0xFF) | ((int(object_id) & 0xFF) << 8)
+def _pack_arg(config_id, metadata):
+    packed = (int(config_id) & 0xFF) | ((int(metadata) & 0xFF) << 8)
     if packed >= 0x8000:
         packed -= 0x10000
     return packed
+
+
+def pack_task_arg(config_id, object_id, preliminary_final=False):
+    """把视觉配置号与物体编号打包进单个 i16 参数槽位"""
+
+    metadata = _validate_object_id(object_id)
+    if preliminary_final:
+        metadata |= _PRELIMINARY_FINAL_MASK
+    return _pack_arg(config_id, metadata)
 
 
 def unpack_task_arg_config(arg):
@@ -27,17 +36,28 @@ def unpack_task_arg_config(arg):
 def unpack_task_arg_object_id(arg):
     """读取任务参数中的物体编号"""
 
-    return (int(arg) >> 8) & 0xFF
+    return ((int(arg) >> 8) & 0xFF) & _OBJECT_ID_MASK
+
+
+def unpack_task_arg_preliminary_final(arg):
+    """读取预赛最后一轮搬运标记"""
+
+    return bool(((int(arg) >> 8) & 0xFF) & _PRELIMINARY_FINAL_MASK)
 
 
 def _validate_object_id(object_id):
     object_id = int(object_id)
-    if not 0 <= object_id <= 63:
+    if not 0 <= object_id <= _OBJECT_ID_MASK:
         raise ValueError
     return object_id
 
 
-def pack_assistant_orbit_arg(offset_deg, object_id, direction=0):
+def pack_assistant_orbit_arg(
+    offset_deg,
+    object_id,
+    direction=0,
+    preliminary_final=False,
+):
     """按辅车绕行状态打包相对推动角度、物体编号和绕行方向"""
 
     offset_deg = float(offset_deg)
@@ -57,7 +77,9 @@ def pack_assistant_orbit_arg(offset_deg, object_id, direction=0):
     else:
         direction_code = 0
     metadata = _validate_object_id(object_id) | (direction_code << 6)
-    return pack_task_arg(offset_deg + _ASSISTANT_ORBIT_OFFSET_BIAS, metadata)
+    if preliminary_final:
+        metadata |= _PRELIMINARY_FINAL_MASK
+    return _pack_arg(offset_deg + _ASSISTANT_ORBIT_OFFSET_BIAS, metadata)
 
 
 def unpack_assistant_orbit_offset_deg(arg):
@@ -72,13 +94,13 @@ def unpack_assistant_orbit_offset_deg(arg):
 def unpack_assistant_orbit_object_id(arg):
     """按辅车绕行状态读取物体编号"""
 
-    return unpack_task_arg_object_id(arg) & 0x3F
+    return unpack_task_arg_object_id(arg)
 
 
 def unpack_assistant_orbit_direction(arg):
     """按辅车绕行状态读取绕行方向"""
 
-    direction_code = (unpack_task_arg_object_id(arg) >> 6) & 0x03
+    direction_code = (int(arg) >> 14) & 0x03
     if direction_code == 0:
         return 0
     if direction_code == 1:

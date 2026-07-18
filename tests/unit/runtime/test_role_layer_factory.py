@@ -164,8 +164,10 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
 
 
 def test_master_runtime_loads_obstacles_once_before_forward_runtime(monkeypatch) -> None:
-    """主车正式装配只加载一次障碍配置并显式传给运行流程."""
+    """决赛主车装配只加载一次障碍配置并显式传给运行流程."""
     runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
     slots = (("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0))
     load_calls = []
     received = []
@@ -192,8 +194,10 @@ def test_master_runtime_loads_obstacles_once_before_forward_runtime(monkeypatch)
 
 
 def test_master_runtime_stops_when_obstacle_loading_fails(monkeypatch) -> None:
-    """障碍文件读取失败时不创建主车运行流程."""
+    """决赛障碍文件读取失败时不创建主车运行流程."""
     runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
     param_manager = import_module("storage.param_manager")
     monkeypatch.setattr(
         param_manager,
@@ -213,6 +217,32 @@ def test_master_runtime_stops_when_obstacle_loading_fails(monkeypatch) -> None:
 
     with pytest.raises(ValueError):
         runtime_module.create_transport_car()
+
+
+def test_master_preliminary_runtime_ignores_configured_obstacles(monkeypatch) -> None:
+    """预赛主车不读取障碍文件，并向运行流程传入空障碍集合."""
+    runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", False)
+    param_manager = import_module("storage.param_manager")
+    monkeypatch.setattr(
+        param_manager,
+        "load_obstacle_slots",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("不应读取障碍配置")),
+        raising=False,
+    )
+    received = []
+    forward_module = ModuleType("role.master.forward_runtime")
+    setattr(
+        forward_module,
+        "MasterForwardRuntime",
+        lambda obstacle_slots: received.append(obstacle_slots) or object(),
+    )
+    monkeypatch.setitem(sys.modules, "role.master.forward_runtime", forward_module)
+
+    runtime_module.create_transport_car()
+
+    assert received == [()]
 
 
 def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
@@ -259,8 +289,10 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
 
 
 def test_assistant_runtime_loads_obstacles_once_before_follow_runtime(monkeypatch) -> None:
-    """辅车正式装配只加载一次障碍配置并显式传给运行流程."""
+    """决赛辅车装配只加载一次障碍配置并显式传给运行流程."""
     runtime_module = import_runtime_module("role.assistant.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
     slots = (("right", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0))
     load_calls = []
     received = []
@@ -287,8 +319,10 @@ def test_assistant_runtime_loads_obstacles_once_before_follow_runtime(monkeypatc
 
 
 def test_assistant_runtime_stops_when_obstacle_loading_fails(monkeypatch) -> None:
-    """辅车障碍文件读取失败时不创建运行流程."""
+    """决赛辅车障碍文件读取失败时不创建运行流程."""
     runtime_module = import_runtime_module("role.assistant.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
     param_manager = import_module("storage.param_manager")
     monkeypatch.setattr(
         param_manager,
@@ -308,3 +342,29 @@ def test_assistant_runtime_stops_when_obstacle_loading_fails(monkeypatch) -> Non
 
     with pytest.raises(ValueError):
         runtime_module.create_transport_car()
+
+
+def test_assistant_preliminary_runtime_ignores_configured_obstacles(monkeypatch) -> None:
+    """预赛辅车不读取障碍文件，并向运行流程传入空障碍集合."""
+    runtime_module = import_runtime_module("role.assistant.runtime", monkeypatch)
+    motion_params = import_module("config.motion")
+    monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", False)
+    param_manager = import_module("storage.param_manager")
+    monkeypatch.setattr(
+        param_manager,
+        "load_obstacle_slots",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("不应读取障碍配置")),
+        raising=False,
+    )
+    received = []
+    follow_module = ModuleType("role.assistant.follow_runtime")
+    setattr(
+        follow_module,
+        "AssistantFollowRuntime",
+        lambda obstacle_slots: received.append(obstacle_slots) or object(),
+    )
+    monkeypatch.setitem(sys.modules, "role.assistant.follow_runtime", follow_module)
+
+    runtime_module.create_transport_car()
+
+    assert received == [()]

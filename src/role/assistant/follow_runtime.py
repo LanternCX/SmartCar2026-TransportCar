@@ -60,10 +60,13 @@ from role.task_sync import (
     unpack_assistant_orbit_direction,
     unpack_assistant_orbit_object_id,
     unpack_assistant_orbit_offset_deg,
+    unpack_task_arg_config,
     unpack_task_arg_object_id,
+    unpack_task_arg_preliminary_final,
 )
 from role.transport_plan import (
     heading_with_offset,
+    limit_planar_velocity_step,
     plan_return_garage,
     plan_startup_target_y,
     push_heading_for_edge,
@@ -90,6 +93,10 @@ _ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE = (
     vision_params.ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE
 )
 _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
+_ASSISTANT_TRANSPORT_ACCEL_TIME_S = (
+    motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S
+)
+_MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
 RETURN_GARAGE_OBSTACLE_DEPTH_M = motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M
@@ -168,6 +175,7 @@ class AssistantFollowRuntime:
         self._found_done = False
         self._last_approach_arg = 0
         self._obj_id = 0
+        self._prelim_final = False
         self._realign = False
         self._realign_ready = False
         self._realign_reported = False
@@ -175,6 +183,15 @@ class AssistantFollowRuntime:
         # clear/tick 状态只用于当前清障阶段，不暴露给诊断输出。
         self._clear_done = False
         self._clear_ticks = 0
+        self._tr_delta = (
+            float(_TRANSPORT_FORWARD_SPEED)
+            * float(_ASSISTANT_TRANSPORT_FEEDFORWARD_SCALE)
+            * float(_MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(_ASSISTANT_TRANSPORT_ACCEL_TIME_S)
+        )
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
         self._vel_body = bytearray(7)
         self._sync_body = bytearray(4)
@@ -290,7 +307,9 @@ class AssistantFollowRuntime:
     def _apply_sync_context(self, packet) -> bool:
         state, target, arg = packet
         restart_realign = bool(
-            self._realign and int(state) == ASSISTANT_STATE_APPROACH_OBJECT
+            int(state) == ASSISTANT_STATE_APPROACH_OBJECT
+            and unpack_task_arg_config(arg)
+            == _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID
         )
         accepted = self._sm.apply_master_state(
             state, target, arg
@@ -307,6 +326,7 @@ class AssistantFollowRuntime:
         self._clear_motion_input_residue()
         if self._sm.is_idle():
             self._obj_id = 0
+            self._prelim_final = False
             self._clear_motion_inputs()
             self._p_local = None
             self._p_report = None
@@ -317,6 +337,7 @@ class AssistantFollowRuntime:
             self._write_zero_velocity()
         elif self._sm.state == ASSISTANT_STATE_FOLLOW:
             self._obj_id = 0
+            self._prelim_final = False
             self._clear_motion_inputs()
             self._p_report = None
             self._found_done = False
@@ -354,6 +375,7 @@ class AssistantFollowRuntime:
             self._enter_clear_object_state()
         elif self._sm.state == ASSISTANT_STATE_RETURN_FOLLOW:
             self._obj_id = 0
+            self._prelim_final = bool(self._sm.arg)
             self._clear_motion_inputs()
             self._p_report = None
             self._found_done = False
@@ -364,6 +386,7 @@ class AssistantFollowRuntime:
             self._enter_return_follow_state()
         elif self._sm.state == ASSISTANT_STATE_FINISHED:
             self._obj_id = 0
+            self._prelim_final = False
             self._clear_motion_inputs()
             self._p_local = None
             self._p_report = None
@@ -512,6 +535,15 @@ class AssistantFollowRuntime:
         vy = -float(_TRANSPORT_FORWARD_SPEED) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity[VEL_X])
+        vx, vy = limit_planar_velocity_step(
+            self._tr_vx,
+            self._tr_vy,
+            vx,
+            vy,
+            self._tr_delta,
+        )
+        self._tr_vx = vx
+        self._tr_vy = vy
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
     def _write_orbit_velocity_correction(self) -> None:
@@ -541,7 +573,12 @@ class AssistantFollowRuntime:
             self._sm.state == ASSISTANT_STATE_APPROACH_OBJECT
             and self._realign
         ):
-            push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
+            push_heading = push_heading_for_edge(
+                target_edge_for_object(
+                    self._obj_id,
+                    final_object=self._prelim_final,
+                )
+            )
             self._car.set_heading_target(
                 heading_with_offset(
                     push_heading,
@@ -603,6 +640,15 @@ class AssistantFollowRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
+        if self._prelim_final:
+            if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_FAST_RETURN):
+                play_sequence.start(
+                    self,
+                    play_sequence.PLAY_ASSISTANT_FAST_RETURN,
+                    (float(ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M) * 100.0,),
+                )
+            play_sequence.tick(self)
+            return
         if int(self.play_kind) != int(play_sequence.PLAY_ASSISTANT_RETURN):
             relative_y_m, heading_deg = plan_return_garage(
                 self._car.odometry.x,
@@ -687,6 +733,8 @@ class AssistantFollowRuntime:
         self._line_ok = False
 
     def _write_zero_velocity(self) -> None:
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         self._car.handle_velocity_packet(
             0.0,
             0.0,
@@ -698,6 +746,7 @@ class AssistantFollowRuntime:
     def _enter_approach_object_state(self, packet) -> None:
         self._last_approach_arg = int(packet[AS_ARG])
         self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+        self._prelim_final = unpack_task_arg_preliminary_final(packet[AS_ARG])
         self._found_done = False
         self._p_report = None
         self._clear_motion_inputs()
@@ -716,6 +765,7 @@ class AssistantFollowRuntime:
         self._p_report = None
         self._clear_motion_inputs()
         self._obj_id = unpack_assistant_orbit_object_id(self._sm.arg)
+        self._prelim_final = unpack_task_arg_preliminary_final(self._sm.arg)
         self._p_local = (
             ASSISTANT_STATE_ORBIT,
             ASSISTANT_TARGET_OBJECT,
@@ -725,7 +775,12 @@ class AssistantFollowRuntime:
             ),
             False,
         )
-        push_heading = push_heading_for_edge(target_edge_for_object(self._obj_id))
+        push_heading = push_heading_for_edge(
+            target_edge_for_object(
+                self._obj_id,
+                final_object=self._prelim_final,
+            )
+        )
         self._orbit_offset = float(
             unpack_assistant_orbit_offset_deg(self._sm.arg)
         )
@@ -753,6 +808,7 @@ class AssistantFollowRuntime:
 
     def _enter_transport_state(self, packet) -> None:
         self._obj_id = unpack_task_arg_object_id(packet[AS_ARG])
+        self._prelim_final = unpack_task_arg_preliminary_final(packet[AS_ARG])
         self._found_done = False
         self._p_report = None
         self._realign = False
@@ -766,6 +822,7 @@ class AssistantFollowRuntime:
             pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
                 self._obj_id,
+                self._prelim_final,
             ),
             False,
         )
@@ -778,7 +835,10 @@ class AssistantFollowRuntime:
         self._clear_done = False
         self._clear_ticks = 0
         self._clear_motion_inputs()
-        target_edge = target_edge_for_object(self._obj_id)
+        target_edge = target_edge_for_object(
+            self._obj_id,
+            final_object=self._prelim_final,
+        )
         self._car.calibrate_pose_to_field_edge(
             target_edge,
             heading_with_offset(
@@ -817,6 +877,7 @@ class AssistantFollowRuntime:
             pack_task_arg(
                 _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
                 self._obj_id,
+                self._prelim_final,
             ),
         )
         self._enter_approach_object_state(
@@ -826,6 +887,7 @@ class AssistantFollowRuntime:
                 pack_task_arg(
                     _ASSISTANT_TRANSPORT_OBJECT_CONFIG_ID,
                     self._obj_id,
+                    self._prelim_final,
                 ),
             )
         )
@@ -864,10 +926,16 @@ class AssistantFollowRuntime:
         pending = self._p_local
         if pending is None or pending[_L_QUEUED]:
             return
+        arg = pending[_L_ARG]
+        if int(pending[_L_TARGET]) == int(ASSISTANT_TARGET_OBJECT):
+            arg = pack_task_arg(
+                unpack_task_arg_config(arg),
+                unpack_task_arg_object_id(arg),
+            )
         body = encode_assistant_vision_task_sync_body(
             pending[_L_STATE],
             pending[_L_TARGET],
-            pending[_L_ARG],
+            arg,
         )
         status = self._ts.tcp_write(UART6, TOPIC_ASSISTANT_VISION_TASK_SYNC, body)
         if status == WRITE_ACCEPTED or status == WRITE_OVERWRITTEN:

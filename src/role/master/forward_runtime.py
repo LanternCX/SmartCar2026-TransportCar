@@ -80,7 +80,11 @@ from role.master.state_machine import (
     TARGET_OBJECT,
     MasterStateMachine,
 )
-from role.transport_plan import plan_return_garage, plan_startup_target_y
+from role.transport_plan import (
+    limit_planar_velocity_step,
+    plan_return_garage,
+    plan_startup_target_y,
+)
 
 try:
     from micropython import const  # pyright: ignore[reportMissingImports]
@@ -122,6 +126,8 @@ MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
     motion_params.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M
 )
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
+MASTER_TRANSPORT_ACCEL_TIME_S = motion_params.MASTER_TRANSPORT_ACCEL_TIME_S
+MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_MAX_SPEED = motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED
@@ -195,6 +201,14 @@ class MasterForwardRuntime:
         self._tr_task_ack = False
         self._tr_ticks = 0
         self._tr_unlock = False
+        self._tr_delta = (
+            float(TRANSPORT_FORWARD_SPEED)
+            * float(MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(MASTER_TRANSPORT_ACCEL_TIME_S)
+        )
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         self._clr_sync_ack = False
         self._clr_move = False
         self._clr_done_phase = None
@@ -310,6 +324,8 @@ class MasterForwardRuntime:
         ):
             self._car.set_position_integration_enabled(True)
         self._clear_local_vision_velocity_residue()
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         self._line_ok = False
         if current_state != STATE_RETURN_GARAGE_RETREAT and current_state != STATE_STARTUP_MOVE:
             from play import sequence as play_sequence
@@ -414,6 +430,8 @@ class MasterForwardRuntime:
 
         self._u6v = None
         self._u6_has_w = False
+        self._tr_vx = 0.0
+        self._tr_vy = 0.0
         self._u6_ver = self._ts.get_udp_version(
             UART6, TOPIC_LOCAL_VISION_VELOCITY
         )
@@ -481,6 +499,8 @@ class MasterForwardRuntime:
     def _apply_motion_outputs(self) -> None:
         if self._sm.state == STATE_TRANSPORT_OBJECT:
             if not self._is_transport_push_unlocked():
+                self._tr_vx = 0.0
+                self._tr_vy = 0.0
                 self._car.handle_velocity_packet(
                     0.0,
                     0.0,
@@ -560,6 +580,11 @@ class MasterForwardRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
+        if self._sm.uses_preliminary_fast_return():
+            if int(self.play_kind) != int(play_sequence.PLAY_MASTER_FAST_RETURN):
+                play_sequence.start(self, play_sequence.PLAY_MASTER_FAST_RETURN)
+            play_sequence.tick(self)
+            return
         if int(self.play_kind) != int(play_sequence.PLAY_MASTER_RETURN):
             relative_y_m, heading_deg = plan_return_garage(
                 self._car.odometry.x,
@@ -675,6 +700,17 @@ class MasterForwardRuntime:
     def _apply_transport_velocity(self) -> None:
         vx = 0.0
         vy = float(TRANSPORT_FORWARD_SPEED)
+        if self._u6v is not None:
+            vx = float(self._u6v[VEL_X])
+        vx, vy = limit_planar_velocity_step(
+            self._tr_vx,
+            self._tr_vy,
+            vx,
+            vy,
+            self._tr_delta,
+        )
+        self._tr_vx = vx
+        self._tr_vy = vy
         self._car.handle_velocity_packet(
             vx,
             vy,

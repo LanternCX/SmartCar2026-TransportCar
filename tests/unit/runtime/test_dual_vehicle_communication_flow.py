@@ -22,7 +22,11 @@ from protocol.topic import (
 )
 from protocol.transport import create_transport
 from role.task_sync import pack_assistant_orbit_arg
-from role.transport_plan import push_heading_for_edge, target_edge_for_object
+from role.transport_plan import (
+    heading_with_offset,
+    push_heading_for_edge,
+    target_edge_for_object,
+)
 from tests.unit.runtime.transport_runtime_support import (
     BufferedUart,
     ManualClock,
@@ -201,7 +205,11 @@ def test_master_and_assistant_complete_full_state_loop(monkeypatch) -> None:
         assistant_uart6,
         lambda: master._act_ctx is not None,
     )
-    master_car.heading_est = push_heading_for_edge(target_edge_for_object(2))
+    push_heading = push_heading_for_edge(target_edge_for_object(2))
+    master_car.heading_est = heading_with_offset(
+        push_heading,
+        -(float(master_module.MASTER_ORBIT_AVOID_TRIGGER_DEG) - 1.0),
+    )
 
     master_uart6.push(
         encode_frame(
@@ -710,7 +718,7 @@ def test_resent_assistant_state_sync_does_not_reapply_local_task(monkeypatch) ->
     first_uart6_count = len(assistant_uart6.messages)
     assert assistant._sync_apply_count == 1
 
-    clock.advance(150)
+    clock.advance(500)
     sender.poll_tx()
     run_runtime_cycle(assistant)
 

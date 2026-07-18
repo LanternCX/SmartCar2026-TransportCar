@@ -9,6 +9,8 @@ PLAY_STARTUP = 1
 PLAY_MASTER_RETURN = 2
 PLAY_ASSISTANT_RETURN = 3
 PLAY_ASSISTANT_STARTUP = 4
+PLAY_MASTER_FAST_RETURN = 5
+PLAY_ASSISTANT_FAST_RETURN = 6
 
 _OP_END = 0
 _OP_POS_Y = 1
@@ -74,6 +76,10 @@ def _table(kind):
         return _master_return_garage.SEQUENCE
     if kind == PLAY_ASSISTANT_RETURN:
         return _assistant_return_garage.SEQUENCE
+    if kind == PLAY_MASTER_FAST_RETURN:
+        return _master_return_garage.FAST_SEQUENCE
+    if kind == PLAY_ASSISTANT_FAST_RETURN:
+        return _assistant_return_garage.FAST_SEQUENCE
     return None
 
 

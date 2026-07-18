@@ -17,9 +17,28 @@ FIELD_EDGE_RIGHT = "right"
 _ALL_OBJECTS = const(-1)
 
 
-def target_edge_for_object(object_id):
-    """按物体编号读取目标边, -1 配置覆盖所有物体."""
+def limit_planar_velocity_step(prev_x, prev_y, target_x, target_y, max_delta):
+    """限制二维速度向量的单拍变化量
 
+    @brief 保持速度变化方向不变, 将相邻目标的距离限制在 max_delta 内
+    @return 限幅后的 (x, y) 元组
+    """
+    delta_x = float(target_x) - float(prev_x)
+    delta_y = float(target_y) - float(prev_y)
+    delta_sq = delta_x * delta_x + delta_y * delta_y
+    max_delta_sq = float(max_delta) * float(max_delta)
+    if delta_sq > max_delta_sq:
+        scale = float(max_delta) / math.sqrt(delta_sq)
+        target_x = float(prev_x) + delta_x * scale
+        target_y = float(prev_y) + delta_y * scale
+    return float(target_x), float(target_y)
+
+
+def target_edge_for_object(object_id, final_object=False):
+    """按比赛模式、搬运进度和物体编号读取目标边."""
+
+    if not bool(motion_params.IS_FINAL_ROUND) and final_object:
+        return FIELD_EDGE_LEFT
     table = getattr(motion_params, "TRANSPORT_OBJECT_TARGET_EDGE")
     if _ALL_OBJECTS in table:
         return table[_ALL_OBJECTS]
