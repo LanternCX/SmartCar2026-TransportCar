@@ -468,7 +468,9 @@ def test_master_transport_uses_local_vision_x_with_fixed_forward_speed(monkeypat
     }
 
 
-def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
+def test_master_transport_limits_forward_acceleration_without_delaying_vision_x(
+    monkeypatch,
+) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -495,12 +497,13 @@ def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
         / 1000.0
         / float(module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S)
     )
-    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
-        max_delta
-    )
-    assert target["vx"] / target["vy"] == pytest.approx(
-        float(runtime._u6v[0]) / float(module.TRANSPORT_FORWARD_SPEED)
-    )
+    assert target == {
+        "source": None,
+        "vx": 8.0,
+        "vy": pytest.approx(max_delta),
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_master_runtime_blocks_transport_feedforward(
@@ -2484,7 +2487,9 @@ def test_assistant_transport_uses_fixed_base_speed_with_local_vision_x(
     }
 
 
-def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
+def test_assistant_transport_limits_forward_acceleration_without_delaying_vision_x(
+    monkeypatch,
+) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
@@ -2514,12 +2519,13 @@ def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
         / 1000.0
         / float(module.motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S)
     )
-    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
-        max_delta
-    )
-    assert target["vx"] / target["vy"] == pytest.approx(
-        float(runtime._u6v[0]) / -base_speed
-    )
+    assert target == {
+        "source": None,
+        "vx": 4.8,
+        "vy": pytest.approx(-max_delta),
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(

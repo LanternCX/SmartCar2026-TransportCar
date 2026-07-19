@@ -190,7 +190,6 @@ class AssistantFollowRuntime:
             / 1000.0
             / float(_ASSISTANT_TRANSPORT_ACCEL_TIME_S)
         )
-        self._tr_vx = 0.0
         self._tr_vy = 0.0
         # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
         self._vel_body = bytearray(7)
@@ -535,14 +534,13 @@ class AssistantFollowRuntime:
         vy = -float(_TRANSPORT_FORWARD_SPEED) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity[VEL_X])
-        vx, vy = limit_planar_velocity_step(
-            self._tr_vx,
+        _, vy = limit_planar_velocity_step(
+            0.0,
             self._tr_vy,
-            vx,
+            0.0,
             vy,
             self._tr_delta,
         )
-        self._tr_vx = vx
         self._tr_vy = vy
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
@@ -733,7 +731,6 @@ class AssistantFollowRuntime:
         self._line_ok = False
 
     def _write_zero_velocity(self) -> None:
-        self._tr_vx = 0.0
         self._tr_vy = 0.0
         self._car.handle_velocity_packet(
             0.0,
