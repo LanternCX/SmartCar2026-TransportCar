@@ -7,7 +7,7 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 9.0
+TRANSPORT_FORWARD_SPEED = 5.0
 # 主车推行速度从零爬升到基础速度的时间, 单位秒
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
 # 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
@@ -37,7 +37,7 @@ ASSISTANT_START_POSITION_M = (0.10, 0.0)
 # 出库第一段世界系 Y 目标, 单位米
 STARTUP_TARGET_Y_M = 0.70
 # 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
-IS_FINAL_ROUND = False
+IS_FINAL_ROUND = True
 # 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
 TRANSPORT_OBJECT_TARGET_EDGE = (
     {

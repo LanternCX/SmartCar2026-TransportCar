@@ -278,6 +278,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
         motion_params.FIELD_SIZE_M[1]
     )
     assert isinstance(motion_params.IS_FINAL_ROUND, bool)
+    assert motion_params.IS_FINAL_ROUND is True
     assert isinstance(motion_params.TRANSPORT_OBJECT_TARGET_EDGE, dict)
     if motion_params.IS_FINAL_ROUND:
         assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {
