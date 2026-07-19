@@ -11,7 +11,7 @@ TRANSPORT_FORWARD_SPEED = 5.0
 # 主车推行速度从零爬升到基础速度的时间, 单位秒
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
 # 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
-ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2
+ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2.5
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -31,11 +31,11 @@ ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
-MASTER_START_POSITION_M = (0.30, 0.0)
+MASTER_START_POSITION_M = (0.30, -0.25)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, 0.0)
+ASSISTANT_START_POSITION_M = (0.10, -0.25)
 # 出库第一段世界系 Y 目标, 单位米
-STARTUP_TARGET_Y_M = 0.70
+STARTUP_TARGET_Y_M = 0.85
 # 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
 IS_FINAL_ROUND = True
 # 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
@@ -73,7 +73,7 @@ AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
 HEADING_TRANSITION_OMEGA_MAX = 4
 # 绕行阶段最大角速度, 对应轮速分量
-ORBIT_AUTO_OMEGA_MAX = 1.5
+ORBIT_AUTO_OMEGA_MAX = 1.2
 # 绕行角度进入容差后需要连续保持的控制拍数
 ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
@@ -96,7 +96,7 @@ TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
     "top": 30.0,
     "bottom": 0.0,
-    "left": 30.0,
+    "left": 20.0,
     "right": 0.0,
 }
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
