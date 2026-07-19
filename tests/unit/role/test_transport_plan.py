@@ -208,14 +208,16 @@ def test_transport_heading_keeps_perpendicular_path_without_matching_obstacle() 
     ) == 0.0
 
 
-def test_transport_heading_avoids_bump() -> None:
+def test_transport_heading_avoids_bump_with_configured_minimum_angle() -> None:
     slots = (
         ("bump", FIELD_EDGE_TOP, 1.4, 1.8),
     )
 
     assert plan_transport_heading(
         FIELD_EDGE_TOP, 1.5, 0.0, slots, 0.0
-    ) == pytest.approx(-2.3859440)
+    ) == pytest.approx(
+        -float(motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG[FIELD_EDGE_TOP])
+    )
 
 
 @pytest.mark.parametrize(

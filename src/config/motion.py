@@ -73,7 +73,7 @@ AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
 HEADING_TRANSITION_OMEGA_MAX = 4
 # 绕行阶段最大角速度, 对应轮速分量
-ORBIT_AUTO_OMEGA_MAX = 1
+ORBIT_AUTO_OMEGA_MAX = 1.5
 # 绕行角度进入容差后需要连续保持的控制拍数
 ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
@@ -94,9 +94,9 @@ IN_PLACE_ROTATION_RADIUS_M = 0.08
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 # 各目标边避障推动方向相对垂直方向的最小偏角, 单位度
 TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
-    "top": 0.0,
+    "top": 30.0,
     "bottom": 0.0,
-    "left": 0.0,
+    "left": 30.0,
     "right": 0.0,
 }
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
