@@ -1,5 +1,7 @@
 """搬运路径规划行为测试."""
 
+import tracemalloc
+
 import pytest
 import role.transport_plan as transport_plan
 
@@ -382,6 +384,46 @@ def test_return_plan_retreats_past_right_obstacle_before_turning() -> None:
 
     assert relative_y_m == pytest.approx(-0.5)
     assert heading_deg == pytest.approx(-90.0)
+
+
+def test_right_edge_return_plan_avoids_large_temporary_candidate_lists() -> None:
+    """right 边回库规划不应随障碍数量保留大批临时候选."""
+    empty_slots = ((None, -1.0, -1.0),) * 3
+    obstacle_slots = (
+        (FIELD_EDGE_TOP, 1.8, 2.1),
+        (FIELD_EDGE_BOTTOM, 1.8, 2.1),
+        (FIELD_EDGE_LEFT, 1.05, 1.35),
+    )
+
+    def peak_bytes(slots) -> int:
+        plan_return_garage(
+            3.1,
+            0.614,
+            90.0,
+            -1,
+            slots,
+            MARGIN_M,
+            motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+            motion_params.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+        )
+        tracemalloc.start()
+        try:
+            baseline = tracemalloc.get_traced_memory()[0]
+            plan_return_garage(
+                3.1,
+                0.614,
+                90.0,
+                -1,
+                slots,
+                MARGIN_M,
+                motion_params.RETURN_GARAGE_OBSTACLE_DEPTH_M,
+                motion_params.MASTER_RETURN_GARAGE_EXTRA_RETREAT_M,
+            )
+            return tracemalloc.get_traced_memory()[1] - baseline
+        finally:
+            tracemalloc.stop()
+
+    assert peak_bytes(obstacle_slots) <= peak_bytes(empty_slots) + 512
 
 
 def test_return_plan_uses_current_position_when_safe_edge_is_directly_reachable() -> None:
