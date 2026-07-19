@@ -14,6 +14,8 @@ FIELD_EDGE_BOTTOM = "bottom"
 FIELD_EDGE_TOP = "top"
 FIELD_EDGE_LEFT = "left"
 FIELD_EDGE_RIGHT = "right"
+OBSTACLE_TYPE_BRICK = "brick"
+OBSTACLE_TYPE_BUMP = "bump"
 _ALL_OBJECTS = const(-1)
 
 
@@ -67,7 +69,7 @@ def plan_transport_heading(
     obstacle_slots,
     margin_m,
 ):
-    """按目标边、当前位置和障碍槽位生成直线推动朝向"""
+    """按目标边、当前位置和障碍配置生成直线推动朝向"""
     target_edge = str(target_edge)
     log("path", "%s x=%.3f y=%.3f" % (target_edge, position_x, position_y))
     margin_m = float(margin_m)
@@ -84,7 +86,9 @@ def plan_transport_heading(
         raise ValueError
 
     intervals = []
-    for edge, left, right in obstacle_slots:
+    for obstacle_type, edge, left, right in obstacle_slots:
+        if obstacle_type not in (OBSTACLE_TYPE_BRICK, OBSTACLE_TYPE_BUMP):
+            continue
         if edge != target_edge:
             continue
         intervals.append(
@@ -117,10 +121,21 @@ def plan_transport_heading(
             target_x, target_y = 0.0, endpoint
         else:
             target_x, target_y = float(motion_params.FIELD_SIZE_M[0]), endpoint
-        return math.atan2(
+        planned_heading = math.atan2(
             target_x - float(position_x),
             target_y - float(position_y),
         ) * 180.0 / math.pi
+        push_heading = push_heading_for_edge(target_edge)
+        offset = heading_with_offset(planned_heading, -push_heading)
+        minimum = float(
+            motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG[target_edge]
+        )
+        if not 0.0 <= minimum < 90.0:
+            raise ValueError
+        if 0.0 < abs(offset) < minimum:
+            offset = minimum if offset > 0.0 else -minimum
+            planned_heading = heading_with_offset(push_heading, offset)
+        return planned_heading
     return push_heading_for_edge(target_edge)
 
 
@@ -140,7 +155,9 @@ def _left_safe_end_y(obstacle_slots, margin_m):
     height = float(motion_params.FIELD_SIZE_M[1])
     safe_end_y = height
     has_left_obstacle = False
-    for edge, left, _right in obstacle_slots:
+    for obstacle_type, edge, left, _right in obstacle_slots:
+        if obstacle_type != OBSTACLE_TYPE_BRICK:
+            continue
         if edge != FIELD_EDGE_LEFT:
             continue
         has_left_obstacle = True
@@ -155,8 +172,8 @@ def _return_rectangles(obstacle_slots, margin_m, depth_m):
     width = float(motion_params.FIELD_SIZE_M[0])
     height = float(motion_params.FIELD_SIZE_M[1])
     rectangles = []
-    for edge, left, right in obstacle_slots:
-        if edge is None:
+    for obstacle_type, edge, left, right in obstacle_slots:
+        if obstacle_type != OBSTACLE_TYPE_BRICK:
             continue
         left = float(left)
         right = float(right)

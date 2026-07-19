@@ -1801,9 +1801,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.MasterForwardRuntime(
         obstacle_slots=(
-            ("left", obstacle_start_y, obstacle_start_y + 0.2),
-            (None, -1.0, -1.0),
-            (None, -1.0, -1.0),
+            ("brick", "left", obstacle_start_y, obstacle_start_y + 0.2),
         ),
         now_ms=clock,
         transport=create_transport(
@@ -1896,9 +1894,8 @@ def test_both_runtimes_limit_startup_move_to_left_obstacle(monkeypatch) -> None:
     master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
     assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     obstacles = (
-        ("left", 0.45, 0.8),
-        ("bottom", 0.2, 0.4),
-        (None, -1.0, -1.0),
+        ("brick", "left", 0.45, 0.8),
+        ("brick", "bottom", 0.2, 0.4),
     )
     master = master_module.MasterForwardRuntime(
         obstacle_slots=obstacles,
@@ -2347,9 +2344,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.AssistantFollowRuntime(
         obstacle_slots=(
-            ("left", obstacle_start_y, obstacle_start_y + 0.2),
-            (None, -1.0, -1.0),
-            (None, -1.0, -1.0),
+            ("brick", "left", obstacle_start_y, obstacle_start_y + 0.2),
         ),
         now_ms=clock,
         transport=create_transport(

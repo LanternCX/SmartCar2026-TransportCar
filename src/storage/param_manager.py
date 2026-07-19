@@ -10,18 +10,16 @@ from control.pid_store import load_ident_params
 
 def _parse_obstacle_slot(line, field_size_m):
     parts = line.split(",")
-    if len(parts) != 3:
+    if len(parts) != 4:
         raise ValueError
 
-    edge = parts[0].strip()
-    left = float(parts[1].strip())
-    right = float(parts[2].strip())
+    obstacle_type = parts[0].strip()
+    edge = parts[1].strip()
+    left = float(parts[2].strip())
+    right = float(parts[3].strip())
 
-    if edge == "none":
-        if left != -1.0 or right != -1.0:
-            raise ValueError
-        return (None, -1.0, -1.0)
-
+    if obstacle_type not in ("brick", "bump"):
+        raise ValueError
     if edge not in ("top", "bottom", "left", "right"):
         raise ValueError
 
@@ -31,34 +29,40 @@ def _parse_obstacle_slot(line, field_size_m):
         axis_size = float(field_size_m[1])
     if not (0.0 <= left < right <= axis_size):
         raise ValueError
-    return (edge, left, right)
+    return (obstacle_type, edge, left, right)
 
 
 def load_obstacle_slots(path, field_size_m):
-    """读取并严格校验固定三个障碍槽位
+    """读取并严格校验障碍配置
 
-    @brief 将障碍配置转换为固定长度 tuple
+    @brief 将障碍配置转换为 tuple
     @param path 障碍配置文件路径
     @param field_size_m 场地尺寸, 按宽度和高度排列, 单位米
-    @return 三个障碍槽位组成的 tuple
+    @return 障碍记录组成的 tuple
     @exception OSError 文件无法读取
-    @exception ValueError 配置行数、字段或数值不符合约束
+    @exception ValueError 字段、数值或类型数量不符合约束
     """
 
     with open(path, "r") as obstacle_file:
         content = obstacle_file.read()
 
-    if content.endswith("\n"):
-        content = content[:-1]
-    lines = content.split("\n")
-    if len(lines) != 3:
-        raise ValueError
+    content = content.strip()
+    if not content:
+        return ()
 
-    return (
-        _parse_obstacle_slot(lines[0], field_size_m),
-        _parse_obstacle_slot(lines[1], field_size_m),
-        _parse_obstacle_slot(lines[2], field_size_m),
-    )
+    slots = []
+    brick_count = 0
+    bump_count = 0
+    for line in content.split("\n"):
+        slot = _parse_obstacle_slot(line, field_size_m)
+        if slot[0] == "brick":
+            brick_count += 1
+        else:
+            bump_count += 1
+        if brick_count > 3 or bump_count > 5:
+            raise ValueError
+        slots.append(slot)
+    return tuple(slots)
 
 
 def load_ident_lookup(path, logger=None):

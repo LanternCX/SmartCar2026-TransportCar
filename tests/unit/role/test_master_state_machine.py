@@ -38,15 +38,13 @@ def _target_obstacle_slots():
         else FIELD_HEIGHT_M
     )
     return (
-        (TARGET_EDGE, axis_size * 0.45, axis_size * 0.55),
-        (None, -1.0, -1.0),
-        (None, -1.0, -1.0),
+        ("brick", TARGET_EDGE, axis_size * 0.45, axis_size * 0.55),
     )
 
 
 def _target_diagonal_position(use_lower_endpoint=True):
     slots = _target_obstacle_slots()
-    left, right = slots[0][1], slots[0][2]
+    left, right = slots[0][2], slots[0][3]
     lower = left - MARGIN_M
     upper = right + MARGIN_M
     if use_lower_endpoint:
@@ -100,7 +98,7 @@ def _load_master_state_machine():
     def _machine_factory(*args, **kwargs):
         kwargs.setdefault(
             "obstacle_slots",
-            ((None, -1.0, -1.0),) * 3,
+            (),
         )
         kwargs.setdefault("obstacle_margin_m", MARGIN_M)
         kwargs.setdefault("orbit_avoid_trigger_deg", 0.0)

@@ -92,6 +92,13 @@ ORBIT_POSITION_RADIUS_M = 0.13
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
+# 各目标边避障推动方向相对垂直方向的最小偏角, 单位度
+TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
+    "top": 0.0,
+    "bottom": 0.0,
+    "left": 0.0,
+    "right": 0.0,
+}
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
 RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
 # 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米

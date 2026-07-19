@@ -8,5 +8,5 @@
 IDENT_RESULTS_FILE = "/flash/storage/ident_params.txt"
 # 陀螺仪零飘偏移的保存路径, 用于存储静止时的陀螺仪平均值
 GYRO_OFFSET_FILE = "/flash/storage/gyro_offset.txt"
-# 三槽位障碍配置路径
+# 场地障碍配置路径
 OBSTACLE_CONFIG_FILE = "/flash/storage/obstacles.txt"
