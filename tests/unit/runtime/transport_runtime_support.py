@@ -98,7 +98,7 @@ def import_module_clean(module_name: str, monkeypatch):
         def _master_runtime_factory(*args, **kwargs):
             kwargs.setdefault(
                 "obstacle_slots",
-                ((None, -1.0, -1.0),) * 3,
+                (),
             )
             return runtime_type(*args, **kwargs)
 
@@ -109,7 +109,7 @@ def import_module_clean(module_name: str, monkeypatch):
         def _assistant_runtime_factory(*args, **kwargs):
             kwargs.setdefault(
                 "obstacle_slots",
-                ((None, -1.0, -1.0),) * 3,
+                (),
             )
             return runtime_type(*args, **kwargs)
 

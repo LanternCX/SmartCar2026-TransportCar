@@ -112,6 +112,6 @@ def _tick_op(runtime, op, value, arg):
             return False
         return True
     if op == _OP_HOLD_Y:
-        runtime.play_write_velocity_y(value)
+        runtime.play_write_velocity_y_limited(value)
         return False
     return True

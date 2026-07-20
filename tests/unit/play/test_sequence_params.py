@@ -11,6 +11,7 @@ class _Runtime:
         self.play_entered = False
         self.play_params = None
         self.motion_done = False
+        self.line_ready = False
         self.events = []
 
     def play_set_position_y(self, value, max_speed_cmd=None) -> None:
@@ -37,7 +38,7 @@ class _Runtime:
         self.events.append(("velocity_y", float(value)))
 
     def play_line_ready(self) -> bool:
-        return False
+        return self.line_ready
 
 
 def test_return_play_uses_startup_distance_and_angle_parameters() -> None:
@@ -59,6 +60,26 @@ def test_return_play_uses_startup_distance_and_angle_parameters() -> None:
     sequence.tick(runtime)
 
     assert runtime.events[-1] == ("angle", -153.4349488)
+
+
+def test_return_plays_retreat_after_reaching_left_line() -> None:
+    """主辅车寻到 left 边后先后退八厘米再转向."""
+    for kind in (sequence.PLAY_MASTER_RETURN, sequence.PLAY_ASSISTANT_RETURN):
+        runtime = _Runtime()
+        sequence.start(runtime, kind, (-25.5, -90.0))
+        sequence.tick(runtime)
+        runtime.motion_done = True
+        sequence.tick(runtime)
+        runtime.motion_done = True
+        sequence.tick(runtime)
+        runtime.line_ready = True
+        sequence.tick(runtime)
+
+        assert runtime.events[-1] == (
+            "position_y",
+            -0.08,
+            int(master_return_garage._RETURN_POSITION_SPEED),
+        )
 
 
 def test_startup_play_uses_planned_absolute_position() -> None:

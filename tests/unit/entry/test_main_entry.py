@@ -45,7 +45,7 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
 
     assert main.resolve_startup_script([1, 0, 0, 0]) == "script/run.py"
     assert main.resolve_startup_script([0, 1, 0, 0]) == "script/run.py"
-    assert main.resolve_startup_script([0, 0, 2, 0]) == "script/pid_identify.py"
+    assert main.resolve_startup_script([0, 2, 0, 0]) == "script/pid_identify.py"
     assert main.resolve_startup_script([0, 0, 0, 2]) == "script/calibrate_gyro.py"
 
 
@@ -116,7 +116,7 @@ def test_resolve_startup_script_rejects_dual_long_press() -> None:
     main = load_main_module()
 
     with pytest.raises(ValueError):
-        main.resolve_startup_script([0, 0, 2, 2])
+        main.resolve_startup_script([0, 2, 0, 2])
 
 
 def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
@@ -367,6 +367,46 @@ def test_convert_power_adc_to_voltage_uses_board_divider() -> None:
     expected = half_scale / 65535 * 3.3 * 11.0
 
     assert voltage == pytest.approx(expected)
+
+
+def test_low_voltage_alarm_drives_passive_buzzer_with_pwm(monkeypatch) -> None:
+    """低电压告警通过 C28 PWM 驱动无源蜂鸣器。"""
+
+    main = load_main_module()
+    pwm_calls = []
+
+    class StopAlarm(Exception):
+        pass
+
+    class PWM:
+        def __init__(self, pin, freq, duty_u16=0) -> None:
+            pwm_calls.append(("init", pin, freq, duty_u16))
+
+        def duty_u16(self, duty) -> None:
+            pwm_calls.append(("duty", duty))
+
+    machine = ModuleType("machine")
+    setattr(machine, "PWM", PWM)
+    monkeypatch.setitem(sys.modules, "machine", machine)
+
+    sleep_calls = []
+
+    def stop_after_one_period(delay_ms) -> None:
+        sleep_calls.append(delay_ms)
+        if len(sleep_calls) == 2:
+            raise StopAlarm
+
+    monkeypatch.setattr(main, "_sleep_ms", stop_after_one_period)
+
+    with pytest.raises(StopAlarm):
+        main._run_low_voltage_alarm(3.6)
+
+    assert pwm_calls == [
+        ("init", "C28", main.safety_params.BUZZER_FREQUENCY_HZ, 0),
+        ("duty", 32768),
+        ("duty", 0),
+    ]
+    assert sleep_calls == [100, 900]
 
 
 def test_resolve_existing_startup_script_prefers_compiled_file(monkeypatch) -> None:

@@ -251,6 +251,9 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M) > 0.0
     assert float(motion_params.TRANSPORT_CLEAR_RETREAT_MAX_SPEED) > 0.0
     assert float(motion_params.TRANSPORT_OBSTACLE_MARGIN_M) >= 0.0
+    minimum_angles = motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG
+    assert set(minimum_angles) == {"top", "bottom", "left", "right"}
+    assert all(0.0 <= float(value) < 90.0 for value in minimum_angles.values())
     assert float(motion_params.MOTION_STOP_SPEED_THRESHOLD) >= 0.0
     assert int(motion_params.MOTION_STOP_CONFIRM_TICKS) > 0
     assert float(motion_params.WHEEL_DIAMETER_M) > 0.0
@@ -278,6 +281,7 @@ def test_runtime_config_params_stay_in_explicit_ranges() -> None:
         motion_params.FIELD_SIZE_M[1]
     )
     assert isinstance(motion_params.IS_FINAL_ROUND, bool)
+    assert motion_params.IS_FINAL_ROUND is True
     assert isinstance(motion_params.TRANSPORT_OBJECT_TARGET_EDGE, dict)
     if motion_params.IS_FINAL_ROUND:
         assert motion_params.TRANSPORT_OBJECT_TARGET_EDGE == {

@@ -96,6 +96,9 @@ _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 _ASSISTANT_TRANSPORT_ACCEL_TIME_S = (
     motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S
 )
+_RETURN_GARAGE_FINAL_ACCEL_TIME_S = (
+    motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S
+)
 _MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
@@ -190,7 +193,6 @@ class AssistantFollowRuntime:
             / 1000.0
             / float(_ASSISTANT_TRANSPORT_ACCEL_TIME_S)
         )
-        self._tr_vx = 0.0
         self._tr_vy = 0.0
         # 复用发送缓冲，避免每次组包都创建新的 bytes 对象。
         self._vel_body = bytearray(7)
@@ -535,14 +537,13 @@ class AssistantFollowRuntime:
         vy = -float(_TRANSPORT_FORWARD_SPEED) * scale
         if uart6_velocity is not None:
             vx += float(uart6_velocity[VEL_X])
-        vx, vy = limit_planar_velocity_step(
-            self._tr_vx,
+        _, vy = limit_planar_velocity_step(
+            0.0,
             self._tr_vy,
-            vx,
+            0.0,
             vy,
             self._tr_delta,
         )
-        self._tr_vx = vx
         self._tr_vy = vy
         self._apply_effective_velocity(vx, vy, 0.0, False)
 
@@ -723,6 +724,21 @@ class AssistantFollowRuntime:
             False,
         )
 
+    def play_write_velocity_y_limited(self, value) -> None:
+        target = float(value)
+        _, vy = limit_planar_velocity_step(
+            0.0,
+            self._tr_vy,
+            0.0,
+            target,
+            abs(target)
+            * float(_MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(_RETURN_GARAGE_FINAL_ACCEL_TIME_S),
+        )
+        self._tr_vy = vy
+        self.play_write_velocity_y(vy)
+
     def play_motion_done(self) -> bool:
         return not bool(getattr(self._car, "command_lock", False))
 
@@ -733,7 +749,6 @@ class AssistantFollowRuntime:
         self._line_ok = False
 
     def _write_zero_velocity(self) -> None:
-        self._tr_vx = 0.0
         self._tr_vy = 0.0
         self._car.handle_velocity_packet(
             0.0,

@@ -11,14 +11,14 @@ def _resolve_encoder_mapping(vehicle_role):
     if vehicle_role == "master":
         return {
             "m": ("D13", "D14", False),
-            "l": ("D15", "D16", False),
-            "r": ("C0", "C1", False),
+            "l": ("C2", "C3", False),
+            "r": ("D15", "D16", False),
         }
     if vehicle_role == "assistant":
         return {
             "m": ("D13", "D14", False),
-            "l": ("D15", "D16", False),
-            "r": ("C2", "C3", False),
+            "l": ("C2", "C3", False),
+            "r": ("D15", "D16", False),
         }
     raise ValueError("unknown vehicle role for encoders: %s" % vehicle_role)
 
@@ -28,7 +28,7 @@ def create_encoders(vehicle_role="assistant"):
 
     分别对应中间(m)、左(l)、右(r)轮, 按车辆角色选择接线映射
 
-    @param vehicle_role 车辆角色, master 使用旧硬件接线, assistant 使用新硬件接线
+    @param vehicle_role 车辆角色, 主车和辅车使用统一接线映射
     @return 字典 {轮子名称 -> 编码器对象}, 键为 "m", "l", "r"
     """
     mapping = _resolve_encoder_mapping(vehicle_role)

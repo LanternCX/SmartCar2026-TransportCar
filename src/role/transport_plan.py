@@ -14,6 +14,8 @@ FIELD_EDGE_BOTTOM = "bottom"
 FIELD_EDGE_TOP = "top"
 FIELD_EDGE_LEFT = "left"
 FIELD_EDGE_RIGHT = "right"
+OBSTACLE_TYPE_BRICK = "brick"
+OBSTACLE_TYPE_BUMP = "bump"
 _ALL_OBJECTS = const(-1)
 
 
@@ -67,7 +69,7 @@ def plan_transport_heading(
     obstacle_slots,
     margin_m,
 ):
-    """按目标边、当前位置和障碍槽位生成直线推动朝向"""
+    """按目标边、当前位置和障碍配置生成直线推动朝向"""
     target_edge = str(target_edge)
     log("path", "%s x=%.3f y=%.3f" % (target_edge, position_x, position_y))
     margin_m = float(margin_m)
@@ -82,9 +84,14 @@ def plan_transport_heading(
         axis_size = float(motion_params.FIELD_SIZE_M[1])
     else:
         raise ValueError
+    minimum = float(motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG[target_edge])
+    if not 0.0 <= minimum < 90.0:
+        raise ValueError
 
     intervals = []
-    for edge, left, right in obstacle_slots:
+    for obstacle_type, edge, left, right in obstacle_slots:
+        if obstacle_type not in (OBSTACLE_TYPE_BRICK, OBSTACLE_TYPE_BUMP):
+            continue
         if edge != target_edge:
             continue
         intervals.append(
@@ -117,11 +124,32 @@ def plan_transport_heading(
             target_x, target_y = 0.0, endpoint
         else:
             target_x, target_y = float(motion_params.FIELD_SIZE_M[0]), endpoint
-        return math.atan2(
+        planned_heading = math.atan2(
             target_x - float(position_x),
             target_y - float(position_y),
         ) * 180.0 / math.pi
-    return push_heading_for_edge(target_edge)
+        push_heading = push_heading_for_edge(target_edge)
+        offset = heading_with_offset(planned_heading, -push_heading)
+        if abs(offset) < minimum:
+            if offset == 0.0:
+                toward_upper = endpoint == right
+                positive_offset = toward_upper == (
+                    target_edge in (FIELD_EDGE_TOP, FIELD_EDGE_LEFT)
+                )
+                offset = minimum if positive_offset else -minimum
+            else:
+                offset = minimum if offset > 0.0 else -minimum
+            planned_heading = heading_with_offset(push_heading, offset)
+        return planned_heading
+    push_heading = push_heading_for_edge(target_edge)
+    upper_half = coordinate >= axis_size / 2.0
+    positive_offset = upper_half == (
+        target_edge in (FIELD_EDGE_TOP, FIELD_EDGE_LEFT)
+    )
+    return heading_with_offset(
+        push_heading,
+        minimum if positive_offset else -minimum,
+    )
 
 
 def heading_with_offset(heading_deg, offset_deg):
@@ -140,7 +168,9 @@ def _left_safe_end_y(obstacle_slots, margin_m):
     height = float(motion_params.FIELD_SIZE_M[1])
     safe_end_y = height
     has_left_obstacle = False
-    for edge, left, _right in obstacle_slots:
+    for obstacle_type, edge, left, _right in obstacle_slots:
+        if obstacle_type != OBSTACLE_TYPE_BRICK:
+            continue
         if edge != FIELD_EDGE_LEFT:
             continue
         has_left_obstacle = True
@@ -155,8 +185,8 @@ def _return_rectangles(obstacle_slots, margin_m, depth_m):
     width = float(motion_params.FIELD_SIZE_M[0])
     height = float(motion_params.FIELD_SIZE_M[1])
     rectangles = []
-    for edge, left, right in obstacle_slots:
-        if edge is None:
+    for obstacle_type, edge, left, right in obstacle_slots:
+        if obstacle_type != OBSTACLE_TYPE_BRICK:
             continue
         left = float(left)
         right = float(right)
@@ -219,60 +249,117 @@ def _target_is_reachable(position_x, position_y, target_y, rectangles):
     return True
 
 
+def _return_target_candidate(
+    position_x,
+    position_y,
+    safe_end_y,
+    rectangles,
+    index,
+):
+    """按索引计算左侧安全边候选纵坐标."""
+
+    if index == 0:
+        return 0.0
+    if index == 1:
+        return safe_end_y
+    corner_index = index - 2
+    rectangle = rectangles[corner_index // 4]
+    corner_index %= 4
+    corner_x = rectangle[0] if corner_index < 2 else rectangle[1]
+    if corner_x >= position_x - 1e-9:
+        return None
+    corner_y = rectangle[2] if corner_index % 2 == 0 else rectangle[3]
+    scale = position_x / (position_x - corner_x)
+    target_y = position_y + (corner_y - position_y) * scale
+    if 0.0 <= target_y <= safe_end_y:
+        return target_y
+    return None
+
+
 def _nearest_return_target_y(position_x, position_y, safe_end_y, rectangles):
     """选择左侧安全边上距离当前位置最近的可达纵坐标."""
-    candidates = [0.0, safe_end_y]
-    for x_low, x_high, y_low, y_high in rectangles:
-        for corner_x in (x_low, x_high):
-            if corner_x >= position_x - 1e-9:
-                continue
-            scale = position_x / (position_x - corner_x)
-            for corner_y in (y_low, y_high):
-                target_y = position_y + (corner_y - position_y) * scale
-                if 0.0 <= target_y <= safe_end_y:
-                    candidates.append(target_y)
-    candidates.sort()
 
-    unique = []
-    for target_y in candidates:
-        if not unique or abs(target_y - unique[-1]) > 1e-9:
-            unique.append(target_y)
-
+    candidate_count = 2 + len(rectangles) * 4
     best_y = None
     best_distance = None
-    for target_y in unique:
+    current = None
+    for index in range(candidate_count):
+        candidate = _return_target_candidate(
+            position_x,
+            position_y,
+            safe_end_y,
+            rectangles,
+            index,
+        )
+        if candidate is not None and (current is None or candidate < current):
+            current = candidate
+
+    while current is not None:
         if not _target_is_reachable(
             position_x,
             position_y,
-            target_y,
+            current,
             rectangles,
         ):
-            continue
-        distance = abs(target_y - position_y)
-        if best_distance is None or distance < best_distance:
-            best_y = target_y
+            distance = None
+        else:
+            distance = abs(current - position_y)
+        if distance is not None and (
+            best_distance is None or distance < best_distance
+        ):
+            best_y = current
             best_distance = distance
 
-    for index in range(len(unique) - 1):
-        lower = unique[index]
-        upper = unique[index + 1]
-        middle = (lower + upper) * 0.5
+        next_candidate = None
+        for index in range(candidate_count):
+            candidate = _return_target_candidate(
+                position_x,
+                position_y,
+                safe_end_y,
+                rectangles,
+                index,
+            )
+            if candidate is None or candidate <= current + 1e-9:
+                continue
+            if next_candidate is None or candidate < next_candidate:
+                next_candidate = candidate
+        if next_candidate is None:
+            break
+
+        middle = (current + next_candidate) * 0.5
         if not _target_is_reachable(
             position_x,
             position_y,
             middle,
             rectangles,
         ):
+            current = next_candidate
             continue
-        target_y = min(max(position_y, lower), upper)
-        distance = abs(target_y - position_y)
-        if best_distance is None or distance < best_distance:
+        target_y = min(max(position_y, current), next_candidate)
+        interval_distance = abs(target_y - position_y)
+        if best_distance is None or interval_distance < best_distance:
             best_y = target_y
-            best_distance = distance
+            best_distance = interval_distance
+        current = next_candidate
     return best_y
 
 
-def _return_retreat_candidates(
+def _return_point_axis(rectangles, safe_end_y, index, axis):
+    """读取回库边界点的单轴坐标."""
+
+    if index < 2:
+        if axis == 0 or index == 0:
+            return 0.0
+        return safe_end_y
+    corner_index = index - 2
+    rectangle = rectangles[corner_index // 4]
+    corner_index %= 4
+    if axis == 0:
+        return rectangle[0] if corner_index < 2 else rectangle[1]
+    return rectangle[2] if corner_index % 2 == 0 else rectangle[3]
+
+
+def _nearest_return_retreat(
     position_x,
     position_y,
     ray_x,
@@ -281,41 +368,47 @@ def _return_retreat_candidates(
     safe_end_y,
     rectangles,
 ):
-    """生成后退射线经过可达性变化边界时的距离候选."""
-    points = [(0.0, 0.0), (0.0, safe_end_y)]
-    for x_low, x_high, y_low, y_high in rectangles:
-        points.extend(
-            (
-                (x_low, y_low),
-                (x_low, y_high),
-                (x_high, y_low),
-                (x_high, y_high),
-            )
+    """流式选择最短的可达后退距离和安全边目标."""
+
+    point_count = 2 + len(rectangles) * 4
+    current = minimum_distance
+    while current is not None:
+        candidate_x = position_x + current * ray_x
+        candidate_y = position_y + current * ray_y
+        target_y = _nearest_return_target_y(
+            candidate_x,
+            candidate_y,
+            safe_end_y,
+            rectangles,
         )
+        if target_y is not None:
+            return current, target_y
 
-    candidates = [minimum_distance]
-    for first_index in range(len(points)):
-        first_x, first_y = points[first_index]
-        for second_index in range(first_index + 1, len(points)):
-            second_x, second_y = points[second_index]
-            line_x = second_x - first_x
-            line_y = second_y - first_y
-            denominator = ray_x * line_y - ray_y * line_x
-            if abs(denominator) <= 1e-9:
-                continue
-            distance = (
-                (first_x - position_x) * line_y
-                - (first_y - position_y) * line_x
-            ) / denominator
-            if distance >= minimum_distance - 1e-9:
-                candidates.append(max(minimum_distance, distance))
-    candidates.sort()
-
-    unique = []
-    for distance in candidates:
-        if not unique or abs(distance - unique[-1]) > 1e-9:
-            unique.append(distance)
-    return unique
+        next_candidate = None
+        for first_index in range(point_count):
+            first_x = _return_point_axis(rectangles, safe_end_y, first_index, 0)
+            first_y = _return_point_axis(rectangles, safe_end_y, first_index, 1)
+            for second_index in range(first_index + 1, point_count):
+                second_x = _return_point_axis(rectangles, safe_end_y, second_index, 0)
+                second_y = _return_point_axis(rectangles, safe_end_y, second_index, 1)
+                line_x = second_x - first_x
+                line_y = second_y - first_y
+                denominator = ray_x * line_y - ray_y * line_x
+                if abs(denominator) <= 1e-9:
+                    continue
+                distance = (
+                    (first_x - position_x) * line_y
+                    - (first_y - position_y) * line_x
+                ) / denominator
+                if distance < minimum_distance - 1e-9:
+                    continue
+                distance = max(minimum_distance, distance)
+                if distance <= current + 1e-9:
+                    continue
+                if next_candidate is None or distance < next_candidate:
+                    next_candidate = distance
+        current = next_candidate
+    return None, None
 
 
 def plan_startup_target_y(obstacle_slots, target_y):
@@ -355,9 +448,7 @@ def plan_return_garage(
     heading_rad = math.radians(float(heading_deg))
     ray_x = float(sign) * math.sin(heading_rad)
     ray_y = float(sign) * math.cos(heading_rad)
-    distance_m = None
-    target_y = None
-    for candidate in _return_retreat_candidates(
+    distance_m, target_y = _nearest_return_retreat(
         x,
         y,
         ray_x,
@@ -365,24 +456,11 @@ def plan_return_garage(
         minimum_m,
         safe_end_y,
         rectangles,
-    ):
-        candidate_x = x + candidate * ray_x
-        candidate_y = y + candidate * ray_y
-        candidate_target_y = _nearest_return_target_y(
-            candidate_x,
-            candidate_y,
-            safe_end_y,
-            rectangles,
-        )
-        if candidate_target_y is None:
-            continue
-        distance_m = candidate
-        target_y = candidate_target_y
-        x = candidate_x
-        y = candidate_y
-        break
+    )
     if distance_m is None or target_y is None:
         raise ValueError
+    x += distance_m * ray_x
+    y += distance_m * ray_y
 
     if abs(x) <= 1e-9 and abs(target_y - y) <= 1e-9:
         target_heading = push_heading_for_edge(FIELD_EDGE_LEFT)

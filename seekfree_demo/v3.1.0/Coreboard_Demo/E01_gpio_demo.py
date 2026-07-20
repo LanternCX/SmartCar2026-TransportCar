@@ -118,6 +118,7 @@ while True:
     led.toggle()
     # 读取并输出拨码开关的状态
     print("Switch {:>s} is {:>1d}.".format(SWITCH1_PIN, switch1.value()))
+    print("Switch {:>s} is {:>1d}.".format(SWITCH2_PIN, switch2.value()))
     
     # 如果拨码开关打开 对应引脚拉低 就退出循环
     # 这么做是为了防止写错代码导致异常 有一个退出的手段

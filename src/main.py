@@ -28,7 +28,7 @@ from config import startup as startup_params
 from utils.startup_log import log, log_exception, write_exception_trace
 
 # 启动后等待时间, 等待外设稳定
-STARTUP_SETTLE_MS = 100
+STARTUP_SETTLE_MS = 1000
 # 按键扫描周期
 KEY_SCAN_PERIOD_MS = 10
 # 按键扫描超时时间
@@ -92,12 +92,12 @@ def resolve_startup_script(key_states):
 
     @param key_states 按键状态列表
     @return 启动脚本路径
-    @throws ValueError C14 与 C15 同时长按时抛出
+    @throws ValueError C9 与 C15 同时长按时抛出
     """
-    key1_held = _read_key_state(key_states, 2) == LONG_PRESS_VALUE
+    key1_held = _read_key_state(key_states, 1) == LONG_PRESS_VALUE
     key2_held = _read_key_state(key_states, 3) == LONG_PRESS_VALUE
     if key1_held and key2_held:
-        raise ValueError("C14 与 C15 同时长按，拒绝进入正常脚本")
+        raise ValueError("C9 与 C15 同时长按，拒绝进入正常脚本")
     if key1_held:
         return SCRIPT_PID_IDENTIFY
     if key2_held:
@@ -173,18 +173,16 @@ def _read_startup_vehicle_role():
 def _run_low_voltage_alarm(voltage):
     """低电压时循环蜂鸣告警."""
 
-    from machine import Pin
+    from machine import PWM
 
     on_ms = 100
-    beep = Pin("D24", Pin.OUT, value=False)
+    beep = PWM("C28", safety_params.BUZZER_FREQUENCY_HZ, duty_u16=0)
     off_ms = 1000 - on_ms
-    if off_ms < 0:
-        off_ms = 0
 
     while True:
-        beep.high()
+        beep.duty_u16(32768)
         _sleep_ms(on_ms)
-        beep.low()
+        beep.duty_u16(0)
         _sleep_ms(off_ms)
 
 
@@ -377,4 +375,5 @@ def main():
 
 
 if __name__ == "__main__" and globals().get("__spec__") is None:
+    _sleep_ms(STARTUP_SETTLE_MS)
     main()

@@ -7,11 +7,13 @@
 """
 
 # 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 9.0
+TRANSPORT_FORWARD_SPEED = 5.0
 # 主车推行速度从零爬升到基础速度的时间, 单位秒
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
 # 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
-ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2
+ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2.5
+# 回库最后一段从零爬升到目标速度的时间, 单位秒
+RETURN_GARAGE_FINAL_ACCEL_TIME_S = 2.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -31,13 +33,13 @@ ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
-MASTER_START_POSITION_M = (0.30, 0.0)
+MASTER_START_POSITION_M = (0.30, -0.25)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, 0.0)
+ASSISTANT_START_POSITION_M = (0.10, -0.25)
 # 出库第一段世界系 Y 目标, 单位米
-STARTUP_TARGET_Y_M = 0.70
+STARTUP_TARGET_Y_M = 0.85
 # 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
-IS_FINAL_ROUND = False
+IS_FINAL_ROUND = True
 # 物体目标边配置, 编号依次为红色、蓝色、棕色、白色、网球
 TRANSPORT_OBJECT_TARGET_EDGE = (
     {
@@ -73,7 +75,7 @@ AUTO_OMEGA_MAX = 15.0
 # 朝向跳转最大角速度, 对应轮速分量
 HEADING_TRANSITION_OMEGA_MAX = 4
 # 绕行阶段最大角速度, 对应轮速分量
-ORBIT_AUTO_OMEGA_MAX = 1
+ORBIT_AUTO_OMEGA_MAX = 1.2
 # 绕行角度进入容差后需要连续保持的控制拍数
 ORBIT_ANGLE_CONFIRM_TICKS = 3
 # 保持模式速度阈值, 当目标轮速小于此值时判定为保持模式
@@ -92,6 +94,13 @@ ORBIT_POSITION_RADIUS_M = 0.13
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
+# 各目标边推动方向相对垂直方向的最小偏角, 单位度
+TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
+    "top": 30.0,
+    "bottom": 0.0,
+    "left": 30.0,
+    "right": 0.0,
+}
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
 RETURN_GARAGE_OBSTACLE_DEPTH_M = 0.50
 # 辅车搬运到边时车辆参考点相对场地边界的内缩距离, 单位米
@@ -99,7 +108,7 @@ ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
 # 主车回库第一阶段至少后退的距离, 单位米
 MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.40
 # 辅车回库第一阶段至少后退的距离, 单位米
-ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.40
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

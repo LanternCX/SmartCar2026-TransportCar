@@ -76,10 +76,10 @@ MASTER_STATE_STARTUP_MOVE = 8
 ASSISTANT_STATE_STARTUP_MOVE = 8
 MASTER_RETURN_POSITION_SPEED = master_return_garage.SEQUENCE[2]
 MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
-MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
+MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[16]
 ASSISTANT_LEAD_DISTANCE = assistant_return_garage.SEQUENCE[1] / 100.0
 ASSISTANT_RETURN_POSITION_SPEED = assistant_return_garage.SEQUENCE[2]
-ASSISTANT_FINAL_FORWARD_SPEED = assistant_return_garage.SEQUENCE[13]
+ASSISTANT_FINAL_FORWARD_SPEED = assistant_return_garage.SEQUENCE[16]
 
 
 def _pack_task_arg(config_id, object_id):
@@ -468,7 +468,9 @@ def test_master_transport_uses_local_vision_x_with_fixed_forward_speed(monkeypat
     }
 
 
-def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
+def test_master_transport_limits_forward_acceleration_without_delaying_vision_x(
+    monkeypatch,
+) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.master.forward_runtime", monkeypatch)
@@ -495,12 +497,13 @@ def test_master_transport_limits_planar_acceleration(monkeypatch) -> None:
         / 1000.0
         / float(module.motion_params.MASTER_TRANSPORT_ACCEL_TIME_S)
     )
-    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
-        max_delta
-    )
-    assert target["vx"] / target["vy"] == pytest.approx(
-        float(runtime._u6v[0]) / float(module.TRANSPORT_FORWARD_SPEED)
-    )
+    assert target == {
+        "source": None,
+        "vx": 8.0,
+        "vy": pytest.approx(max_delta),
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_master_runtime_blocks_transport_feedforward(
@@ -1801,9 +1804,7 @@ def test_master_runtime_return_retreat_starts_play_with_lead_translation(monkeyp
     obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.MasterForwardRuntime(
         obstacle_slots=(
-            ("left", obstacle_start_y, obstacle_start_y + 0.2),
-            (None, -1.0, -1.0),
-            (None, -1.0, -1.0),
+            ("brick", "left", obstacle_start_y, obstacle_start_y + 0.2),
         ),
         now_ms=clock,
         transport=create_transport(
@@ -1896,9 +1897,8 @@ def test_both_runtimes_limit_startup_move_to_left_obstacle(monkeypatch) -> None:
     master_module = import_module_clean("role.master.forward_runtime", monkeypatch)
     assistant_module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
     obstacles = (
-        ("left", 0.45, 0.8),
-        ("bottom", 0.2, 0.4),
-        (None, -1.0, -1.0),
+        ("brick", "left", 0.45, 0.8),
+        ("brick", "bottom", 0.2, 0.4),
     )
     master = master_module.MasterForwardRuntime(
         obstacle_slots=obstacles,
@@ -2040,7 +2040,12 @@ def test_master_preliminary_final_return_skips_planning_and_left_line(monkeypatc
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(MASTER_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(MASTER_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2179,17 +2184,28 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_line_ready(monke
     }
     runtime._line_ok = True
     runtime._apply_motion_outputs()
-    cars[0].heading_est = 0.0
-    runtime._apply_motion_outputs()
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        -0.08,
+        float(MASTER_RETURN_POSITION_SPEED),
+    ) in cars[0].events
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
+    cars[0].heading_est = 180.0
+    cars[0].command_lock = False
     runtime._apply_motion_outputs()
 
-    assert ("set_heading_transition_target", 180.0) in cars[0].events
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(MASTER_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(MASTER_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2347,9 +2363,7 @@ def test_assistant_runtime_return_follow_starts_play_with_left_turn(
     obstacle_start_y = 1.0 + float(module.TRANSPORT_OBSTACLE_MARGIN_M)
     runtime = module.AssistantFollowRuntime(
         obstacle_slots=(
-            ("left", obstacle_start_y, obstacle_start_y + 0.2),
-            (None, -1.0, -1.0),
-            (None, -1.0, -1.0),
+            ("brick", "left", obstacle_start_y, obstacle_start_y + 0.2),
         ),
         now_ms=clock,
         transport=create_transport(
@@ -2441,7 +2455,12 @@ def test_assistant_preliminary_final_return_moves_inside_before_bottom_return(
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(ASSISTANT_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(ASSISTANT_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2489,7 +2508,9 @@ def test_assistant_transport_uses_fixed_base_speed_with_local_vision_x(
     }
 
 
-def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
+def test_assistant_transport_limits_forward_acceleration_without_delaying_vision_x(
+    monkeypatch,
+) -> None:
     clock = ManualClock(0)
     cars = install_fake_core(monkeypatch)
     module = import_module_clean("role.assistant.follow_runtime", monkeypatch)
@@ -2519,12 +2540,13 @@ def test_assistant_transport_limits_planar_acceleration(monkeypatch) -> None:
         / 1000.0
         / float(module.motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S)
     )
-    assert (target["vx"] ** 2 + target["vy"] ** 2) ** 0.5 == pytest.approx(
-        max_delta
-    )
-    assert target["vx"] / target["vy"] == pytest.approx(
-        float(runtime._u6v[0]) / -base_speed
-    )
+    assert target == {
+        "source": None,
+        "vx": 4.8,
+        "vy": pytest.approx(-max_delta),
+        "omega": 0.0,
+        "has_omega": False,
+    }
 
 
 def test_assistant_transport_uses_fixed_base_speed_without_uart8_feedforward(

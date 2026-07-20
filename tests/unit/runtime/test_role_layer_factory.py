@@ -150,7 +150,7 @@ def test_master_runtime_builds_master_forward_runtime(monkeypatch) -> None:
     monkeypatch.setattr(
         param_manager,
         "load_obstacle_slots",
-        lambda _path, _field_size: ((None, -1.0, -1.0),) * 3,
+        lambda _path, _field_size: (),
         raising=False,
     )
 
@@ -168,7 +168,7 @@ def test_master_runtime_loads_obstacles_once_before_forward_runtime(monkeypatch)
     runtime_module = import_runtime_module("role.master.runtime", monkeypatch)
     motion_params = import_module("config.motion")
     monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
-    slots = (("top", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0))
+    slots = (("brick", "top", 1.45, 1.75),)
     load_calls = []
     received = []
 
@@ -275,7 +275,7 @@ def test_assistant_runtime_builds_assistant_follow_runtime(monkeypatch) -> None:
     monkeypatch.setattr(
         param_manager,
         "load_obstacle_slots",
-        lambda _path, _field_size: ((None, -1.0, -1.0),) * 3,
+        lambda _path, _field_size: (),
         raising=False,
     )
 
@@ -293,7 +293,7 @@ def test_assistant_runtime_loads_obstacles_once_before_follow_runtime(monkeypatc
     runtime_module = import_runtime_module("role.assistant.runtime", monkeypatch)
     motion_params = import_module("config.motion")
     monkeypatch.setattr(motion_params, "IS_FINAL_ROUND", True)
-    slots = (("right", 1.45, 1.75), (None, -1.0, -1.0), (None, -1.0, -1.0))
+    slots = (("brick", "right", 1.45, 1.75),)
     load_calls = []
     received = []
 

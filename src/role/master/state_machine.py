@@ -11,6 +11,7 @@ from role.task_sync import (
     unpack_assistant_orbit_offset_deg,
 )
 from role.transport_plan import (
+    FIELD_EDGE_LEFT,
     heading_with_offset,
     plan_transport_heading,
     push_heading_for_edge,
@@ -106,6 +107,11 @@ RQ_STATE = const(2)
 RQ_TARGET = const(3)
 RQ_ARG = const(4)
 
+# 主车视觉搜索 task 的最后一次搬运标记位
+_VISION_TASK_FINAL_OBJECT_FLAG = const(0x100)
+# 主车视觉搜索 task 的第一次搬运标记位
+_VISION_TASK_FIRST_OBJECT_FLAG = const(0x200)
+
 
 class MasterStateMachine:
     """维护主车单车寻找、搬运与回身状态"""
@@ -142,8 +148,6 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
-        # 主车目标朝向已在控制容差内时直接进入二次对正
-        self._orb_skip = False
         self.obj_done = 0
         self._ctx = int(initial_context_id) % 256
         # _p_task: 本车视觉 task；_p_ast: 辅车同步；_p_orbit: 本车绕行动作。
@@ -225,10 +229,7 @@ class MasterStateMachine:
             self._tr_task_arg,
         )
         if self._obj_pending and not self._orbit_req:
-            if self._orb_skip:
-                self._queue_assistant_realign()
-            else:
-                self._queue_assistant_orbit()
+            self._queue_assistant_orbit()
 
     def mark_startup_move_completed(self):
         """标记启动动作完成并进入找物体状态"""
@@ -333,12 +334,6 @@ class MasterStateMachine:
             )
             self._m_aligned = False
             self._a_aligned = False
-            self._orb_skip = abs(orbit_delta_deg) <= float(
-                motion_params.ANGLE_TOLERANCE
-            )
-            if self._orb_skip:
-                self._enter_realign()
-                return
             self._enter_state(STATE_ORBITING)
             assistant_orbit_direction = 0
             if abs(orbit_delta_deg) < self._av_tr:
@@ -378,10 +373,7 @@ class MasterStateMachine:
             return
         if self._orbit_req:
             return
-        if self._orb_skip:
-            self._queue_assistant_realign()
-        else:
-            self._queue_assistant_orbit()
+        self._queue_assistant_orbit()
 
     def _queue_assistant_orbit(self):
         """下发一次辅车绕行同步请求"""
@@ -533,6 +525,7 @@ class MasterStateMachine:
         if self._clr_phase == CLEAR_PHASE_RETREAT:
             if self.obj_done + 1 >= self._obj_need:
                 self.obj_done += 1
+                self._enter_return_retreat()
                 self._p_ast = (
                     RK_A_RETURN,
                     0,
@@ -540,7 +533,6 @@ class MasterStateMachine:
                     ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
                     int(self._prelim_final),
                 )
-                self._enter_return_retreat()
                 return
             self._clr_phase = _CLEAR_STAGE_TURN_BACK
             self._m_clear = False
@@ -595,7 +587,6 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
-        self._orb_skip = False
         self._p_push = None
         self._enter_state(STATE_SEARCH_OBJECT)
         self._enter_search_with_task(self._s_arg)
@@ -630,12 +621,14 @@ class MasterStateMachine:
         self._push_heading = None
         self._orbit_arg = 0
         self._orb_phase = _ORBIT_PHASE_NORMAL
-        self._orb_skip = False
         self._p_push = None
 
     def _enter_return_retreat(self):
         """进入主车回库动作"""
 
+        self._prelim_final = bool(
+            self._prelim_final or self._edge == FIELD_EDGE_LEFT
+        )
         self._reset_round_flags()
         self._enter_state(STATE_RETURN_GARAGE_RETREAT)
 
@@ -678,8 +671,8 @@ class MasterStateMachine:
             raise ValueError
         return self._edge
 
-    def uses_preliminary_fast_return(self):
-        """当前回库是否使用预赛最后一轮快速路径"""
+    def uses_fast_return(self):
+        """当前是否使用直接转向底边的快速回库路径"""
 
         return bool(self._prelim_final)
 
@@ -702,12 +695,17 @@ class MasterStateMachine:
 
         self._enter_state(STATE_SEARCH_OBJECT)
         self._ctx = (self._ctx + 1) % 256
+        task_arg = int(task_arg)
+        if self.obj_done == 0:
+            task_arg |= _VISION_TASK_FIRST_OBJECT_FLAG
+        if self.obj_done + 1 >= self._obj_need:
+            task_arg |= _VISION_TASK_FINAL_OBJECT_FLAG
         self._p_task = (
             RK_NONE,
             self._ctx,
             STATE_SEARCH_OBJECT,
             TARGET_OBJECT,
-            int(task_arg),
+            task_arg,
         )
 
     def poll_task_request(self):
