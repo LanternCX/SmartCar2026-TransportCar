@@ -45,7 +45,7 @@ def test_resolve_startup_script_uses_long_press_only() -> None:
 
     assert main.resolve_startup_script([1, 0, 0, 0]) == "script/run.py"
     assert main.resolve_startup_script([0, 1, 0, 0]) == "script/run.py"
-    assert main.resolve_startup_script([0, 0, 2, 0]) == "script/pid_identify.py"
+    assert main.resolve_startup_script([0, 2, 0, 0]) == "script/pid_identify.py"
     assert main.resolve_startup_script([0, 0, 0, 2]) == "script/calibrate_gyro.py"
 
 
@@ -116,7 +116,7 @@ def test_resolve_startup_script_rejects_dual_long_press() -> None:
     main = load_main_module()
 
     with pytest.raises(ValueError):
-        main.resolve_startup_script([0, 0, 2, 2])
+        main.resolve_startup_script([0, 2, 0, 2])
 
 
 def test_main_entry_logs_startup_stages(capsys, monkeypatch) -> None:
