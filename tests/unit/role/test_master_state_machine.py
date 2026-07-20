@@ -1401,7 +1401,7 @@ def test_master_state_machine_forward_completion_enters_return_garage_when_all_o
         "kind": "assistant_return",
         "state": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
-        "arg": 0,
+        "arg": 1,
     }
     assert machine.poll_task_request() is None
     assert machine.poll_assistant_request() is None
@@ -1425,9 +1425,36 @@ def test_master_state_machine_syncs_preliminary_fast_return_to_assistant() -> No
     machine.handle_assistant_cleared(MasterStateMachine.CLEAR_PHASE_RETREAT)
     request = machine.poll_assistant_request()
 
-    assert machine.uses_preliminary_fast_return() is True
+    assert machine.uses_fast_return() is True
     assert request is not None
     assert request[MasterStateMachine.RQ_ARG] == 1
+
+
+@pytest.mark.parametrize(
+    ("target_edge", "expected_fast_return"),
+    (("left", 1), ("top", 0), ("right", 0)),
+)
+def test_master_state_machine_selects_fast_return_by_final_target_edge(
+    target_edge: str,
+    expected_fast_return: int,
+) -> None:
+    """仅从 left 边结束时复用初赛快速回库路径."""
+    MasterStateMachine = _load_master_state_machine()
+    machine = MasterStateMachine.MasterStateMachine(
+        search_task_arg=1,
+        boot_heading_deg=15.0,
+        total_object_count=1,
+    )
+    machine.state = MasterStateMachine.STATE_CLEAR_OBJECT
+    machine._clr_phase = MasterStateMachine.CLEAR_PHASE_RETREAT
+    machine._edge = target_edge
+
+    machine.mark_master_cleared()
+    machine.handle_assistant_cleared(MasterStateMachine.CLEAR_PHASE_RETREAT)
+    request = machine.poll_assistant_request()
+
+    assert request is not None
+    assert request[MasterStateMachine.RQ_ARG] == expected_fast_return
 
 
 def test_master_state_machine_return_garage_does_not_create_visual_task() -> None:

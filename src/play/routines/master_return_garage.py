@@ -6,6 +6,7 @@ from play.routines import (
     OP_END,
     OP_HOLD_Y,
     OP_LINE_Y,
+    OP_POS_Y,
     OP_POS_Y_PARAM,
 )
 
@@ -31,6 +32,9 @@ SEQUENCE = (
     OP_LINE_Y,
     _RETURN_FORWARD_SPEED,
     0,
+    OP_POS_Y,
+    -8,
+    _RETURN_POSITION_SPEED,
     OP_ANGLE,
     _FINAL_TURN_DEG,
     0,

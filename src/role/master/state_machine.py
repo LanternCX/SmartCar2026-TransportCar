@@ -11,6 +11,7 @@ from role.task_sync import (
     unpack_assistant_orbit_offset_deg,
 )
 from role.transport_plan import (
+    FIELD_EDGE_LEFT,
     heading_with_offset,
     plan_transport_heading,
     push_heading_for_edge,
@@ -524,6 +525,7 @@ class MasterStateMachine:
         if self._clr_phase == CLEAR_PHASE_RETREAT:
             if self.obj_done + 1 >= self._obj_need:
                 self.obj_done += 1
+                self._enter_return_retreat()
                 self._p_ast = (
                     RK_A_RETURN,
                     0,
@@ -531,7 +533,6 @@ class MasterStateMachine:
                     ASSISTANT_RETURN_FOLLOW_SYNC_TARGET,
                     int(self._prelim_final),
                 )
-                self._enter_return_retreat()
                 return
             self._clr_phase = _CLEAR_STAGE_TURN_BACK
             self._m_clear = False
@@ -625,6 +626,9 @@ class MasterStateMachine:
     def _enter_return_retreat(self):
         """进入主车回库动作"""
 
+        self._prelim_final = bool(
+            self._prelim_final or self._edge == FIELD_EDGE_LEFT
+        )
         self._reset_round_flags()
         self._enter_state(STATE_RETURN_GARAGE_RETREAT)
 
@@ -667,8 +671,8 @@ class MasterStateMachine:
             raise ValueError
         return self._edge
 
-    def uses_preliminary_fast_return(self):
-        """当前回库是否使用预赛最后一轮快速路径"""
+    def uses_fast_return(self):
+        """当前是否使用直接转向底边的快速回库路径"""
 
         return bool(self._prelim_final)
 

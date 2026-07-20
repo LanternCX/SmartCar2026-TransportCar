@@ -76,10 +76,10 @@ MASTER_STATE_STARTUP_MOVE = 8
 ASSISTANT_STATE_STARTUP_MOVE = 8
 MASTER_RETURN_POSITION_SPEED = master_return_garage.SEQUENCE[2]
 MASTER_RETURN_FORWARD_SPEED = master_return_garage.SEQUENCE[7]
-MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[13]
+MASTER_FINAL_FORWARD_SPEED = master_return_garage.SEQUENCE[16]
 ASSISTANT_LEAD_DISTANCE = assistant_return_garage.SEQUENCE[1] / 100.0
 ASSISTANT_RETURN_POSITION_SPEED = assistant_return_garage.SEQUENCE[2]
-ASSISTANT_FINAL_FORWARD_SPEED = assistant_return_garage.SEQUENCE[13]
+ASSISTANT_FINAL_FORWARD_SPEED = assistant_return_garage.SEQUENCE[16]
 
 
 def _pack_task_arg(config_id, object_id):
@@ -2040,7 +2040,12 @@ def test_master_preliminary_final_return_skips_planning_and_left_line(monkeypatc
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(MASTER_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(MASTER_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2179,17 +2184,28 @@ def test_master_runtime_return_play_reaches_hold_velocity_after_line_ready(monke
     }
     runtime._line_ok = True
     runtime._apply_motion_outputs()
-    cars[0].heading_est = 0.0
-    runtime._apply_motion_outputs()
+    assert (
+        "set_relative_translation_target",
+        0.0,
+        -0.08,
+        float(MASTER_RETURN_POSITION_SPEED),
+    ) in cars[0].events
     cars[0].command_lock = False
     runtime._apply_motion_outputs()
+    assert ("set_heading_transition_target", 180.0) in cars[0].events
+    cars[0].heading_est = 180.0
+    cars[0].command_lock = False
     runtime._apply_motion_outputs()
 
-    assert ("set_heading_transition_target", 180.0) in cars[0].events
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(MASTER_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(MASTER_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }
@@ -2439,7 +2455,12 @@ def test_assistant_preliminary_final_return_moves_inside_before_bottom_return(
     assert cars[0].last_chassis_target == {
         "source": None,
         "vx": 0.0,
-        "vy": float(ASSISTANT_FINAL_FORWARD_SPEED),
+        "vy": pytest.approx(
+            float(ASSISTANT_FINAL_FORWARD_SPEED)
+            * float(module.motion_params.MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(module.motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S)
+        ),
         "omega": 0.0,
         "has_omega": False,
     }

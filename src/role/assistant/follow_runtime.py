@@ -96,6 +96,9 @@ _TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 _ASSISTANT_TRANSPORT_ACCEL_TIME_S = (
     motion_params.ASSISTANT_TRANSPORT_ACCEL_TIME_S
 )
+_RETURN_GARAGE_FINAL_ACCEL_TIME_S = (
+    motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S
+)
 _MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 _TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_OBSTACLE_MARGIN_M = motion_params.TRANSPORT_OBSTACLE_MARGIN_M
@@ -720,6 +723,21 @@ class AssistantFollowRuntime:
             None,
             False,
         )
+
+    def play_write_velocity_y_limited(self, value) -> None:
+        target = float(value)
+        _, vy = limit_planar_velocity_step(
+            0.0,
+            self._tr_vy,
+            0.0,
+            target,
+            abs(target)
+            * float(_MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(_RETURN_GARAGE_FINAL_ACCEL_TIME_S),
+        )
+        self._tr_vy = vy
+        self.play_write_velocity_y(vy)
 
     def play_motion_done(self) -> bool:
         return not bool(getattr(self._car, "command_lock", False))

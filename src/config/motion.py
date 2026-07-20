@@ -12,6 +12,8 @@ TRANSPORT_FORWARD_SPEED = 5.0
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
 # 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
 ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2.5
+# 回库最后一段从零爬升到目标速度的时间, 单位秒
+RETURN_GARAGE_FINAL_ACCEL_TIME_S = 2.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
 # 搬运收尾阶段主车后退距离, 单位米
@@ -96,7 +98,7 @@ TRANSPORT_OBSTACLE_MARGIN_M = 0.45
 TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
     "top": 30.0,
     "bottom": 0.0,
-    "left": 20.0,
+    "left": 30.0,
     "right": 0.0,
 }
 # 回库规划中边线障碍向场内延伸的物理深度, 单位米
@@ -106,7 +108,7 @@ ASSISTANT_TRANSPORT_EDGE_INSET_M = 0.08
 # 主车回库第一阶段至少后退的距离, 单位米
 MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = 0.40
 # 辅车回库第一阶段至少后退的距离, 单位米
-ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.30
+ASSISTANT_RETURN_GARAGE_EXTRA_RETREAT_M = 0.40
 # 主车回到寻找构型前的原地回身角度, 单位度
 MASTER_TURN_BACK_DELTA_DEG = 180
 # 主车搬运收尾回身阶段放行角度容差, 单位度

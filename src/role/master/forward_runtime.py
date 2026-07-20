@@ -127,6 +127,9 @@ MASTER_RETURN_GARAGE_EXTRA_RETREAT_M = (
 )
 TRANSPORT_FORWARD_SPEED = motion_params.TRANSPORT_FORWARD_SPEED
 MASTER_TRANSPORT_ACCEL_TIME_S = motion_params.MASTER_TRANSPORT_ACCEL_TIME_S
+RETURN_GARAGE_FINAL_ACCEL_TIME_S = (
+    motion_params.RETURN_GARAGE_FINAL_ACCEL_TIME_S
+)
 MOTION_INPUT_STEP_MS = motion_params.MOTION_INPUT_STEP_MS
 TRANSPORT_CLEAR_STEP_DISTANCE_M = motion_params.TRANSPORT_CLEAR_STEP_DISTANCE_M
 TRANSPORT_CLEAR_RETREAT_DISTANCE_M = motion_params.TRANSPORT_CLEAR_RETREAT_DISTANCE_M
@@ -576,7 +579,7 @@ class MasterForwardRuntime:
     def _run_return_play(self) -> None:
         from play import sequence as play_sequence
 
-        if self._sm.uses_preliminary_fast_return():
+        if self._sm.uses_fast_return():
             if int(self.play_kind) != int(play_sequence.PLAY_MASTER_FAST_RETURN):
                 play_sequence.start(self, play_sequence.PLAY_MASTER_FAST_RETURN)
             play_sequence.tick(self)
@@ -653,6 +656,21 @@ class MasterForwardRuntime:
             None,
             False,
         )
+
+    def play_write_velocity_y_limited(self, value) -> None:
+        target = float(value)
+        _, vy = limit_planar_velocity_step(
+            0.0,
+            self._tr_vy,
+            0.0,
+            target,
+            abs(target)
+            * float(MOTION_INPUT_STEP_MS)
+            / 1000.0
+            / float(RETURN_GARAGE_FINAL_ACCEL_TIME_S),
+        )
+        self._tr_vy = vy
+        self.play_write_velocity_y(vy)
 
     def play_motion_done(self) -> bool:
         return not bool(getattr(self._car, "command_lock", False))
