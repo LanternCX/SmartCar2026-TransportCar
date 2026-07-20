@@ -185,27 +185,58 @@ def test_transport_heading_merges_touching_expanded_intervals() -> None:
     assert heading == pytest.approx(-45.0)
 
 
-@pytest.mark.parametrize("use_lower_endpoint", (True, False))
-def test_transport_heading_treats_margin_boundaries_as_safe_endpoints(
-    use_lower_endpoint: bool,
+@pytest.mark.parametrize(
+    ("use_lower_endpoint", "expected_heading"),
+    ((True, -30.0), (False, 30.0)),
+)
+def test_transport_heading_applies_minimum_angle_at_safe_endpoints(
+    use_lower_endpoint: bool, expected_heading: float
 ) -> None:
-    """位于安全余量端点时可以直接垂直推动."""
+    """位于障碍安全端点时仍按端点方向施加最小偏角."""
     slots = _centered_obstacle(FIELD_EDGE_TOP)
     left, right = slots[0][2], slots[0][3]
     x = left - MARGIN_M if use_lower_endpoint else right + MARGIN_M
 
     assert plan_transport_heading(
         FIELD_EDGE_TOP, x, 0.0, slots, MARGIN_M
-    ) == 0.0
+    ) == pytest.approx(expected_heading)
 
 
-def test_transport_heading_keeps_perpendicular_path_without_matching_obstacle() -> None:
-    """未命中目标边障碍时保持既有垂直推动方向."""
-    slots = _centered_obstacle(FIELD_EDGE_BOTTOM)
+@pytest.mark.parametrize(
+    ("edge", "position_x", "position_y", "expected_heading"),
+    (
+        (FIELD_EDGE_TOP, FIELD_WIDTH_M * 0.25, 0.0, -20.0),
+        (FIELD_EDGE_TOP, FIELD_WIDTH_M * 0.75, 0.0, 20.0),
+        (FIELD_EDGE_BOTTOM, FIELD_WIDTH_M * 0.25, FIELD_HEIGHT_M, -160.0),
+        (FIELD_EDGE_BOTTOM, FIELD_WIDTH_M * 0.75, FIELD_HEIGHT_M, 160.0),
+        (FIELD_EDGE_LEFT, FIELD_WIDTH_M, FIELD_HEIGHT_M * 0.25, -110.0),
+        (FIELD_EDGE_LEFT, FIELD_WIDTH_M, FIELD_HEIGHT_M * 0.75, -70.0),
+        (FIELD_EDGE_RIGHT, 0.0, FIELD_HEIGHT_M * 0.25, 110.0),
+        (FIELD_EDGE_RIGHT, 0.0, FIELD_HEIGHT_M * 0.75, 70.0),
+    ),
+)
+def test_transport_heading_applies_minimum_angle_without_matching_obstacle(
+    monkeypatch,
+    edge: str,
+    position_x: float,
+    position_y: float,
+    expected_heading: float,
+) -> None:
+    """未触发避障时也向所在半边施加最小推行偏角."""
+    monkeypatch.setattr(
+        motion_params,
+        "TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG",
+        {
+            FIELD_EDGE_TOP: 20.0,
+            FIELD_EDGE_BOTTOM: 20.0,
+            FIELD_EDGE_LEFT: 20.0,
+            FIELD_EDGE_RIGHT: 20.0,
+        },
+    )
 
-    assert plan_transport_heading(
-        FIELD_EDGE_TOP, FIELD_WIDTH_M * 0.5, 0.0, slots, MARGIN_M
-    ) == 0.0
+    assert plan_transport_heading(edge, position_x, position_y, (), MARGIN_M) == pytest.approx(
+        expected_heading
+    )
 
 
 def test_transport_heading_avoids_bump_with_configured_minimum_angle() -> None:

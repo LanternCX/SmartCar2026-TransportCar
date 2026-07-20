@@ -84,6 +84,9 @@ def plan_transport_heading(
         axis_size = float(motion_params.FIELD_SIZE_M[1])
     else:
         raise ValueError
+    minimum = float(motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG[target_edge])
+    if not 0.0 <= minimum < 90.0:
+        raise ValueError
 
     intervals = []
     for obstacle_type, edge, left, right in obstacle_slots:
@@ -127,16 +130,26 @@ def plan_transport_heading(
         ) * 180.0 / math.pi
         push_heading = push_heading_for_edge(target_edge)
         offset = heading_with_offset(planned_heading, -push_heading)
-        minimum = float(
-            motion_params.TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG[target_edge]
-        )
-        if not 0.0 <= minimum < 90.0:
-            raise ValueError
-        if 0.0 < abs(offset) < minimum:
-            offset = minimum if offset > 0.0 else -minimum
+        if abs(offset) < minimum:
+            if offset == 0.0:
+                toward_upper = endpoint == right
+                positive_offset = toward_upper == (
+                    target_edge in (FIELD_EDGE_TOP, FIELD_EDGE_LEFT)
+                )
+                offset = minimum if positive_offset else -minimum
+            else:
+                offset = minimum if offset > 0.0 else -minimum
             planned_heading = heading_with_offset(push_heading, offset)
         return planned_heading
-    return push_heading_for_edge(target_edge)
+    push_heading = push_heading_for_edge(target_edge)
+    upper_half = coordinate >= axis_size / 2.0
+    positive_offset = upper_half == (
+        target_edge in (FIELD_EDGE_TOP, FIELD_EDGE_LEFT)
+    )
+    return heading_with_offset(
+        push_heading,
+        minimum if positive_offset else -minimum,
+    )
 
 
 def heading_with_offset(heading_deg, offset_deg):

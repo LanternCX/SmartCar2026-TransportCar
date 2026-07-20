@@ -642,10 +642,15 @@ def test_duplicate_assistant_event_report_does_not_requeue_master_transition(mon
     )
     master_uart8.push(report)
     run_runtime_cycle(master)
+    push_heading = push_heading_for_edge(target_edge_for_object(2))
+    orbit_offset = heading_with_offset(
+        master._sm.get_push_heading_deg(),
+        -push_heading,
+    )
     orbit_sync_body = encode_assistant_state_sync_body(
         3,
         1,
-        pack_assistant_orbit_arg(0, 2),
+        pack_assistant_orbit_arg(orbit_offset, 2),
     )
     for _ in range(10):
         orbit_sync_count = 0

@@ -94,7 +94,7 @@ ORBIT_POSITION_RADIUS_M = 0.13
 IN_PLACE_ROTATION_RADIUS_M = 0.08
 # 障碍区间两端用于生成避障触发范围的余量, 单位米
 TRANSPORT_OBSTACLE_MARGIN_M = 0.45
-# 各目标边避障推动方向相对垂直方向的最小偏角, 单位度
+# 各目标边推动方向相对垂直方向的最小偏角, 单位度
 TRANSPORT_MIN_AVOIDANCE_ANGLE_DEG = {
     "top": 30.0,
     "bottom": 0.0,

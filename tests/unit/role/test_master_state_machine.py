@@ -170,6 +170,18 @@ def _push_heading_for_object(module, object_id):
     return module.push_heading_for_edge(module.target_edge_for_object(object_id))
 
 
+def _planned_heading_for_object(module, object_id):
+    edge = module.target_edge_for_object(object_id)
+    return module.plan_transport_heading(edge, 0.0, 0.0, (), MARGIN_M)
+
+
+def _planned_offset_for_object(module, object_id):
+    return module.heading_with_offset(
+        _planned_heading_for_object(module, object_id),
+        -_push_heading_for_object(module, object_id),
+    )
+
+
 def _drive_machine_to_post_assistant_orbit_request(module, total_object_count=999):
     machine = module.MasterStateMachine(
         search_task_arg=1,
@@ -397,7 +409,9 @@ def test_master_state_machine_marks_assistant_orbit_request_kind() -> None:
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": pack_assistant_orbit_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(
+            _planned_offset_for_object(MasterStateMachine, 2), 2
+        ),
     }
 
 def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> None:
@@ -416,7 +430,7 @@ def test_master_state_machine_enters_orbiting_after_assistant_object_ack() -> No
     orbit_command = machine.poll_orbit_command()
 
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert orbit_command == _push_heading_for_object(MasterStateMachine, 2)
+    assert orbit_command == _planned_heading_for_object(MasterStateMachine, 2)
 
 
 def test_master_state_machine_avoids_when_orbit_delta_is_zero() -> None:
@@ -466,8 +480,9 @@ def test_master_state_machine_avoids_when_actual_master_orbit_exceeds_tolerance(
     machine.poll_assistant_request()
 
     push_heading = _push_heading_for_object(MasterStateMachine, 2)
+    planned_heading = _planned_heading_for_object(MasterStateMachine, 2)
     heading = MasterStateMachine.heading_with_offset(
-        push_heading,
+        planned_heading,
         -(MasterStateMachine.motion_params.ANGLE_TOLERANCE + 1.0),
     )
     machine.mark_assistant_object_acknowledged(0.0, 0.0, heading)
@@ -482,7 +497,9 @@ def test_master_state_machine_avoids_when_actual_master_orbit_exceeds_tolerance(
         "kind": "assistant_orbit",
         "state": MasterStateMachine.ASSISTANT_ORBIT_SYNC_STATE,
         "target": MasterStateMachine.ASSISTANT_ORBIT_SYNC_TARGET,
-        "arg": pack_assistant_orbit_arg(0, 2, -1),
+        "arg": pack_assistant_orbit_arg(
+            _planned_offset_for_object(MasterStateMachine, 2), 2, -1
+        ),
     }
 
     machine.handle_assistant_orbit_finished(0)
@@ -502,7 +519,7 @@ def test_master_state_machine_avoids_when_actual_master_orbit_exceeds_tolerance(
     machine.handle_assistant_aligned(0)
     machine.mark_avoid_push_completed()
 
-    assert machine.poll_orbit_command() == push_heading
+    assert machine.poll_orbit_command() == planned_heading
     assert _assistant_request(MasterStateMachine, machine.poll_assistant_request())[
         "kind"
     ] == "assistant_realign"
@@ -522,7 +539,7 @@ def test_master_state_machine_avoids_when_actual_master_orbit_exceeds_tolerance(
 def test_master_state_machine_skips_avoidance_when_actual_orbit_exceeds_trigger() -> None:
     """最终推动偏角为零但主车仍需明显绕行时直接执行普通绕行."""
     MasterStateMachine = _load_master_state_machine()
-    push_heading = _push_heading_for_object(MasterStateMachine, 2)
+    planned_heading = _planned_heading_for_object(MasterStateMachine, 2)
     trigger_deg = motion_params.MASTER_ORBIT_AVOID_TRIGGER_DEG
     machine = MasterStateMachine.MasterStateMachine(
         search_task_arg=1,
@@ -537,12 +554,12 @@ def test_master_state_machine_skips_avoidance_when_actual_orbit_exceeds_trigger(
     machine.poll_assistant_request()
 
     current_heading = MasterStateMachine.heading_with_offset(
-        push_heading,
+        planned_heading,
         -(trigger_deg + 1.0),
     )
     machine.mark_assistant_object_acknowledged(0.0, 0.0, current_heading)
 
-    assert machine.poll_orbit_command() == push_heading
+    assert machine.poll_orbit_command() == planned_heading
 
 
 def test_master_state_machine_avoidance_follows_negative_orbit_direction() -> None:
@@ -930,7 +947,7 @@ def test_master_state_machine_keeps_search_object_orbit_order() -> None:
 
     machine.mark_assistant_object_acknowledged()
     assert machine.state == MasterStateMachine.STATE_ORBITING
-    assert machine.poll_orbit_command() == _push_heading_for_object(
+    assert machine.poll_orbit_command() == _planned_heading_for_object(
         MasterStateMachine, 2
     )
 
@@ -963,7 +980,9 @@ def test_master_state_machine_assistant_target_found_emits_assistant_orbit_once(
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": pack_assistant_orbit_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(
+            _planned_offset_for_object(MasterStateMachine, 2), 2
+        ),
     }
     assert machine.poll_orbit_command() is None
 
@@ -1070,7 +1089,9 @@ def test_master_state_machine_preliminary_starts_assistant_orbit_during_master_o
         "kind": "assistant_orbit",
         "state": 3,
         "target": 1,
-        "arg": pack_assistant_orbit_arg(0, 2),
+        "arg": pack_assistant_orbit_arg(
+            _planned_offset_for_object(MasterStateMachine, 2), 2
+        ),
     }
 
     machine.handle_assistant_aligned(value=0)
@@ -1265,7 +1286,7 @@ def test_master_state_machine_uses_object_target_edge_for_push_heading() -> None
 
     machine.mark_assistant_object_acknowledged()
 
-    assert machine.poll_orbit_command() == _push_heading_for_object(
+    assert machine.poll_orbit_command() == _planned_heading_for_object(
         MasterStateMachine, 2
     )
 
