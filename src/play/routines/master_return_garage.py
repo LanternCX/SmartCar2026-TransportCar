@@ -17,8 +17,12 @@ except ImportError:
     def const(value):
         return value
 
-_RETURN_POSITION_SPEED = const(5)
-_RETURN_FORWARD_SPEED = const(5)
+# 决赛快速配置在此统一调整主车回库各段速度
+# 回库位置控制段最大速度
+_RETURN_POSITION_SPEED = const(8)
+# 回库边线直行段速度
+_RETURN_FORWARD_SPEED = const(8)
+# 回库转向后的最后直行段速度
 _FINAL_FORWARD_SPEED = const(10)
 _FINAL_TURN_DEG = const(180)
 
