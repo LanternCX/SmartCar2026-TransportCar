@@ -6,13 +6,13 @@
 @details 配置项按使用频率排序, 便于优先查看常调的运动参数
 """
 
-# 最小直行搬运基础速度
-TRANSPORT_FORWARD_SPEED = 5.0
-# 主车推行速度从零爬升到基础速度的时间, 单位秒
+# 最小直行搬运基础速度, 决赛快速配置使用 9.0
+TRANSPORT_FORWARD_SPEED = 7.0
+# 主车推行速度从零爬升到基础速度的时间, 单位秒, 决赛快速配置使用 1
 MASTER_TRANSPORT_ACCEL_TIME_S = 1
-# 辅车推行速度从零爬升到本车基础速度的时间, 单位秒
+# 辅车推行速度从零爬升到本车基础速度的时间, 单位秒, 决赛快速配置使用 2
 ASSISTANT_TRANSPORT_ACCEL_TIME_S = 2.5
-# 回库最后一段从零爬升到目标速度的时间, 单位秒
+# 主辅车回库最后直行段从零爬升到目标速度的时间, 单位秒, 决赛快速配置可减小该值
 RETURN_GARAGE_FINAL_ACCEL_TIME_S = 2.0
 # 搬运收尾阶段主辅车第二段保留位置同步时的默认位移, 单位米
 TRANSPORT_CLEAR_STEP_DISTANCE_M = 0.0
@@ -33,9 +33,9 @@ ASSISTANT_ODOMETRY_DISTANCE_SCALE = (0.66205803, 0.73290557)
 # 蚂蚁搬家场地尺寸, 单位米, 格式为 (x, y)
 FIELD_SIZE_M = (3.2, 2.4)
 # 主车发车坐标, 单位米, 格式为 (x, y)
-MASTER_START_POSITION_M = (0.30, -0.25)
+MASTER_START_POSITION_M = (0.30, -0.16)
 # 辅车发车坐标, 单位米, 格式为 (x, y)
-ASSISTANT_START_POSITION_M = (0.10, -0.25)
+ASSISTANT_START_POSITION_M = (0.10, -0.16)
 # 出库第一段世界系 Y 目标, 单位米
 STARTUP_TARGET_Y_M = 0.85
 # 是否使用决赛搬运目标边配置, False 时初赛统一搬运到底边
