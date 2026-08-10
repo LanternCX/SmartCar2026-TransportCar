@@ -14,6 +14,8 @@
 
 ## 硬件与存储约定
 
+- 支持的板端环境为 RT1021 MicroPython v1.20.0, 固件标识为 `RT1021 MicroPython by NXP & SeekFree with CoreBoard-144Pin-BTB V3.1.0`。
+- 板端平台为 `mimxrt`, `.mpy` 版本为 `6.1`。
 - 主车和辅车使用各自硬件接线映射, 底盘控制内核保持统一。
 - 上电低压保护按车辆身份选择阈值: 主车 `3.7V`, 辅车 `3.7V`。
 - `UART3` 用作 REPL 与现场调试链路。
