@@ -37,3 +37,32 @@
 - 物体任务每张图像都根据当前识别结果输出控制量。
 - 视觉控制根据实际图像周期相对参考帧率缩放输出, 参考帧率不参与检测器选择。
 - 物体识别不通过可靠控制暂停或恢复底盘。
+
+## 角色部署
+
+在视觉仓库中运行对应角色的构建脚本, 将 `main.py` 与 `run.py` 上传到 OpenART:
+
+```bash
+./assistant/build.sh
+./master/build.sh
+```
+
+脚本默认使用 `/Volumes/NO NAME` 作为板端目录。通过 `TARGET_DIR` 指定其他目录, 通过 `yolo` 参数同步模型:
+
+```bash
+TARGET_DIR=/path/to/device ./assistant/build.sh yolo
+TARGET_DIR=/path/to/device ./master/build.sh yolo
+```
+
+## 色彩标定转换
+
+`calibration/chromaforge_export_adapter.py` 将同目录的 `chromaforge-rules.json` 转换为 OpenART 入口使用的识别配置。生成单个入口:
+
+```bash
+uv run python calibration/chromaforge_export_adapter.py \
+  --source master/run.py \
+  --output /tmp/master-run.py \
+  --task-constant-name OBJECT_TASKS
+```
+
+只生成配置片段时省略 `--source` 和 `--output`。
